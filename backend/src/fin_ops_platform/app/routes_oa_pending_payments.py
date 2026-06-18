@@ -75,6 +75,16 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment command service is not configured.")
         return self._command_service.confirm_paid(payload, actor_id=actor_id)
 
+    def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        if self._command_service is None:
+            raise RuntimeError("OA pending payment command service is not configured.")
+        return self._command_service.link_bank_transactions(payload, actor_id=actor_id)
+
+    def bank_transaction_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        if self._command_service is None:
+            raise RuntimeError("OA pending payment command service is not configured.")
+        return self._command_service.bank_transaction_candidates(query)
+
 
 def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
     return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK

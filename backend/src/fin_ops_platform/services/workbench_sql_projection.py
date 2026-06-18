@@ -874,6 +874,11 @@ class WorkbenchSqlProjectionBuilder:
 
     @staticmethod
     def _active_relation_payload(relation: dict[str, Any]) -> dict[str, str]:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            special_metadata = {}
+        if str(special_metadata.get("origin") or "").strip() == "oa_pending_payment_in_progress":
+            return {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"}
         relation_mode = str(relation.get("relation_mode") or "").strip()
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             return {"code": NO_OA_BANK_BATCH_RELATION_MODE, "label": "免OA批量处理", "tone": "success"}

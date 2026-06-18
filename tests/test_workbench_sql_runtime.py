@@ -48,6 +48,18 @@ def fresh_workbench_sql_source_versions(app: Application, scope_key: str = "2026
     }
 
 
+class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
+    def test_oa_pending_in_progress_relation_uses_dedicated_bank_chip(self) -> None:
+        payload = WorkbenchSqlProjectionBuilder._active_relation_payload(
+            {
+                "relation_mode": "manual_confirmed",
+                "special_metadata": {"origin": "oa_pending_payment_in_progress"},
+            }
+        )
+
+        self.assertEqual(payload, {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"})
+
+
 class WorkbenchSqlReadConnection:
     def __init__(
         self,

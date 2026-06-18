@@ -209,6 +209,7 @@ export type OaPendingPaymentQuery = {
 export type ConfirmOaPendingPaymentPaidRequest = {
   oaRowId: string;
   bankTransactionId?: string;
+  bankTransactionIds?: string[];
   idempotencyKey?: string;
 };
 
@@ -219,6 +220,55 @@ export type ConfirmOaPendingPaymentPaidResponse = {
   bankTransactionIds?: string[];
   paymentStatus?: OaPendingPaymentStatus;
   oaPaymentWriteback?: OaPendingPaymentWritebackStatus;
+  readModelRefresh?: {
+    scopeKeys?: string[];
+    enqueued?: boolean;
+    targetSeconds?: number;
+  };
+};
+
+export type OaPendingPaymentBankCandidateRelationStatus = "all" | "unmatched" | "matched" | "linked_in_progress";
+
+export type OaPendingPaymentBankCandidate = {
+  id: string;
+  counterpartyName: string;
+  tradeTime: string;
+  amount: string;
+  bankName?: string;
+  accountNo?: string;
+  accountLast4?: string;
+  bankAccount?: string;
+  direction?: string;
+  directionLabel?: string;
+  summary?: string;
+  remark?: string;
+  relationStatus: Exclude<OaPendingPaymentBankCandidateRelationStatus, "all"> | string;
+  relationStatusLabel: string;
+  relationCaseId?: string;
+  linkedOaRowIds?: string[];
+};
+
+export type OaPendingPaymentBankCandidatesResponse = {
+  rows: OaPendingPaymentBankCandidate[];
+  pagination: { page: number; pageSize: number; total: number };
+  filters?: {
+    relationStatus?: string;
+    keyword?: string;
+  };
+};
+
+export type LinkOaPendingPaymentBankTransactionsRequest = {
+  oaRowIds: string[];
+  bankTransactionIds: string[];
+  idempotencyKey?: string;
+};
+
+export type LinkOaPendingPaymentBankTransactionsResponse = {
+  success: boolean;
+  action?: string;
+  oaRowIds?: string[];
+  bankTransactionIds?: string[];
+  relation?: Record<string, unknown>;
   readModelRefresh?: {
     scopeKeys?: string[];
     enqueued?: boolean;

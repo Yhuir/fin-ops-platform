@@ -95,6 +95,7 @@ class FakeRelationFacade:
 class FakeCommandService:
     def __init__(self) -> None:
         self.calls: list[tuple[dict[str, Any], str]] = []
+        self.link_calls: list[tuple[dict[str, Any], str]] = []
 
     def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         self.calls.append((dict(payload), actor_id))
@@ -106,6 +107,32 @@ class FakeCommandService:
             "paymentStatus": {"code": "paid", "label": "已支付", "reason": "支出流水合计等于OA金额"},
             "oaPaymentWriteback": {"code": "written", "label": "已写回", "flowId": "proc-api"},
             "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
+        }
+
+    def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        self.link_calls.append((dict(payload), actor_id))
+        return {
+            "success": True,
+            "action": "oa_pending_payment_link_bank_transactions",
+            "oaRowIds": payload.get("oa_row_ids") or payload.get("oaRowIds") or [],
+            "bankTransactionIds": payload.get("bank_transaction_ids") or payload.get("bankTransactionIds") or [],
+            "relation": {"status": "confirmed"},
+            "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
+        }
+
+    def bank_transaction_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        return {
+            "rows": [
+                {
+                    "id": "bank-api",
+                    "counterpartyName": "API供应商",
+                    "tradeTime": "2026-05-21 10:00:00",
+                    "amount": "100.00",
+                    "relationStatus": query.get("relation_status", ["all"])[0],
+                    "relationStatusLabel": "未配对",
+                }
+            ],
+            "pagination": {"page": 1, "pageSize": 100, "total": 1},
         }
 
 
@@ -196,6 +223,55 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["paymentStatus"]["code"], "paid")
         self.assertEqual(payload["oaPaymentWriteback"]["label"], "已写回")
         self.assertEqual(command_service.calls, [({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}, "tester")])
+
+    def test_link_bank_transactions_route_delegates_to_command_service_with_write_actor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            service = OaPendingPaymentQueryService(
+                import_service=ImportNormalizationService(),
+                oa_projection=StaticOAProjection([]),
+            )
+            command_service = FakeCommandService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(
+                service,
+                command_service=command_service,
+            )
+            app._workbench_write_auth_context = lambda _headers: ("tester", "default")  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/oa-pending-payments/link-bank-transactions",
+                body=json.dumps({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["action"], "oa_pending_payment_link_bank_transactions")
+        self.assertEqual(command_service.link_calls, [({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}, "tester")])
+
+    def test_bank_transaction_candidates_route_delegates_to_command_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            service = OaPendingPaymentQueryService(
+                import_service=ImportNormalizationService(),
+                oa_projection=StaticOAProjection([]),
+            )
+            command_service = FakeCommandService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(
+                service,
+                command_service=command_service,
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/oa-pending-payments/bank-transaction-candidates?relation_status=unmatched",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["rows"][0]["id"], "bank-api")
+        self.assertEqual(payload["rows"][0]["relationStatus"], "unmatched")
 
     def test_candidate_bank_relation_is_visible_without_marking_oa_paid(self) -> None:
         bank = BankTransaction(

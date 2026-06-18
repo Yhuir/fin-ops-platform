@@ -488,6 +488,51 @@ function installOaPendingPaymentsFetch(overrides?: {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
+      return new Response(JSON.stringify({
+        rows: [
+          {
+            id: "bank-drawer-001",
+            counterpartyName: "抽屉供应商",
+            tradeTime: "2026-05-25 09:30:00",
+            amount: "977.00",
+            bankAccount: "建设银行 8106",
+            directionLabel: "支出",
+            summary: "抽屉支出流水",
+            relationStatus: "unmatched",
+            relationStatusLabel: "未配对",
+          },
+          {
+            id: "bank-drawer-progress",
+            counterpartyName: "已关联供应商",
+            tradeTime: "2026-05-26 09:30:00",
+            amount: "100.00",
+            bankAccount: "光大银行 8826",
+            directionLabel: "支出",
+            summary: "已关联进行中OA流水",
+            relationStatus: "linked_in_progress",
+            relationStatusLabel: "已关联进行中OA",
+          },
+        ],
+        pagination: { page: 1, pageSize: 100, total: 2 },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/oa-pending-payments/link-bank-transactions") {
+      return new Response(JSON.stringify({
+        success: true,
+        action: "oa_pending_payment_link_bank_transactions",
+        oaRowIds: ["oa-candidate"],
+        bankTransactionIds: ["bank-drawer-001"],
+        relation: { status: "confirmed" },
+        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+      }), {
+        status: init?.method === "POST" ? 200 : 405,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/api/oa-pending-payments/filter-options") {
       return new Response(JSON.stringify({
         fields: [

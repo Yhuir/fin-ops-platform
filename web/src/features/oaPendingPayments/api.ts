@@ -9,6 +9,10 @@ import type {
   OaPendingPaymentSortDirection,
   ConfirmOaPendingPaymentPaidRequest,
   ConfirmOaPendingPaymentPaidResponse,
+  LinkOaPendingPaymentBankTransactionsRequest,
+  LinkOaPendingPaymentBankTransactionsResponse,
+  OaPendingPaymentBankCandidateRelationStatus,
+  OaPendingPaymentBankCandidatesResponse,
 } from "./types";
 
 type FetchRowsRequest = Pick<
@@ -83,6 +87,47 @@ export async function confirmOaPendingPaymentPaid(
     body: JSON.stringify({
       oa_row_id: request.oaRowId,
       bank_transaction_id: request.bankTransactionId,
+      bank_transaction_ids: request.bankTransactionIds,
+      idempotency_key: request.idempotencyKey,
+    }),
+  });
+}
+
+export async function fetchOaPendingPaymentBankCandidates({
+  relationStatus = "all",
+  keyword = "",
+  page = 1,
+  pageSize = 100,
+  signal,
+}: {
+  relationStatus?: OaPendingPaymentBankCandidateRelationStatus;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+  signal?: AbortSignal;
+} = {}): Promise<OaPendingPaymentBankCandidatesResponse> {
+  const params = new URLSearchParams();
+  params.set("relation_status", relationStatus);
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  if (keyword.trim()) {
+    params.set("keyword", keyword.trim());
+  }
+  return apiRequestJson<OaPendingPaymentBankCandidatesResponse>(`/api/oa-pending-payments/bank-transaction-candidates?${params.toString()}`, {
+    method: "GET",
+    signal,
+  });
+}
+
+export async function linkOaPendingPaymentBankTransactions(
+  request: LinkOaPendingPaymentBankTransactionsRequest,
+): Promise<LinkOaPendingPaymentBankTransactionsResponse> {
+  return apiRequestJson<LinkOaPendingPaymentBankTransactionsResponse>("/api/oa-pending-payments/link-bank-transactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      oa_row_ids: request.oaRowIds,
+      bank_transaction_ids: request.bankTransactionIds,
       idempotency_key: request.idempotencyKey,
     }),
   });

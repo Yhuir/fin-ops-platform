@@ -28,6 +28,23 @@
 
 ## 历史记录
 
+## 2026-06-18 - 成本统计 explorer payload contract 修复
+
+- 目标：修复 App Health 显示 `成本统计 已同步`，但进入成本统计页仍出现“成本统计数据加载失败”的问题，避免旧 read model/cache payload 被当作当前 explorer API 的 fresh 数据。
+- 影响范围：`CostStatisticsQueryService.get_explorer_from_sql_read_model(...)`、`ReadModelQueryGateway`、成本统计 SQL runtime 测试、read-models 共享测试与文档。
+- 关键决策：
+  - 成本统计 explorer 的 fresh payload 必须包含 `summary`、`time_rows`、`project_rows`、`expense_type_rows`；只看 schema/source/readiness 不足以证明页面 mapper 可消费。
+  - 业务 shape 校验放在后端 read boundary：旧 Redis payload 校验失败时 miss 并改读 SQL view；旧 SQL payload 校验失败时返回 canonical empty refreshing payload，入队 `api_payload_shape_invalid`，不写 fresh cache。
+  - 前端不新增旧 shape 兼容分支，避免让页面继续承接过期 API contract。
+- 文档影响：更新成本统计状态机、测试矩阵、实施记录，并同步 read-models 状态机/测试矩阵/实施记录。
+- 测试覆盖：
+  - 新增 `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_api_rejects_malformed_fresh_sql_payload_and_requeues`。
+  - 新增 `tests/test_read_model_query_gateway.py::ReadModelQueryGatewayTests::test_invalid_fresh_cache_payload_contract_misses_and_uses_sql_view`、`test_invalid_sql_payload_contract_enqueues_refresh_without_populating_cache`。
+  - 更新 `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_api_reads_sql_and_populates_short_redis_cache` 的 valid explorer fixture，锁定当前 shape。
+- 验证命令：见本轮交付说明。
+- 未测风险：未连接真实 OA iframe、真实生产 Redis/PostgreSQL 或 worker drain；发布后若生产已有旧缓存，需等待 TTL 或按运维流程清理，但新后端不再把 invalid cache 当 fresh 返回。
+- 后续事项：后续 explorer API shape 改动必须同步 payload validator、schema/source version、SQL projection 和前端 API mapper 测试。
+
 ## 2026-06-18 - 成本统计 explorer 认证错误呈现修复
 
 - 目标：修复进入成本统计页时后端返回 `401 invalid_oa_session` 却被页面统一显示为“成本统计数据加载失败”的问题，避免把 OA 登录态缺失误判为成本统计/read model 故障。

@@ -104,6 +104,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(confirm_call["row_types"], ["oa", "bank"])
         self.assertEqual(confirm_call["relation_mode"], "manual_confirmed")
         self.assertEqual(confirm_call["history_operation_type"], "oa_pending_payment_confirm_paid")
+        self.assertEqual(confirm_call["special_metadata"]["origin"], "oa_pending_payment_in_progress")
         self.assertEqual(confirm_call["idempotency_key"], "idem-1")
         self.assertEqual(confirm_call["amount_check"]["matched"], True)
         self.assertEqual(
@@ -143,6 +144,112 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["bankTransactionIds"], ["bank-active"])
         self.assertEqual(relation_command.confirm_calls, [])
         self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439012"])
+
+    def test_confirm_paid_with_bank_reuses_existing_active_relation(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012")
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-active",
+                    "row_ids": ["oa-active", "bank-active"],
+                    "row_types": ["oa", "bank"],
+                    "relation_mode": "manual_confirmed",
+                    "amount_check": {"matched": True},
+                    "month_scope": "2026-06",
+                }
+            ]
+        )
+        service = _service(
+            oa_records=[_oa("oa-active", "100.00", workflow_status="in_progress")],
+            transactions=[_bank("bank-active", "100.00")],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        payload = service.confirm_paid({"oa_row_id": "oa-active", "bank_transaction_id": "bank-active"}, actor_id="tester")
+
+        self.assertEqual(payload["relation"]["status"], "already_confirmed")
+        self.assertEqual(relation_command.confirm_calls, [])
+        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439012"])
+
+    def test_link_bank_transactions_creates_relation_without_writing_mysql(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439015")
+        relation_command = FakeRelationCommandService()
+        refresh_calls: list[tuple[str, str, str]] = []
+        service = _service(
+            oa_records=[_oa("oa-link", "100.00", workflow_status="in_progress")],
+            transactions=[_bank("bank-link", "100.00")],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+            refresh_calls=refresh_calls,
+        )
+
+        payload = service.link_bank_transactions(
+            {"oa_row_ids": ["oa-link"], "bank_transaction_ids": ["bank-link"], "idempotency_key": "link-1"},
+            actor_id="tester",
+        )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["action"], "oa_pending_payment_link_bank_transactions")
+        self.assertEqual(payment_repository.marked_flow_ids, [])
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        confirm_call = relation_command.confirm_calls[0]
+        self.assertEqual(confirm_call["row_ids"], ["oa-link", "bank-link"])
+        self.assertEqual(confirm_call["row_types"], ["oa", "bank"])
+        self.assertEqual(confirm_call["history_operation_type"], "oa_pending_payment_link_bank")
+        self.assertEqual(confirm_call["special_metadata"]["source_action"], "link_bank_transactions")
+        self.assertEqual(
+            refresh_calls,
+            [
+                ("workbench", "2026-06", "oa_pending_payment_link_bank_transactions"),
+                ("oa_pending_payment", "2026-06", "oa_pending_payment_link_bank_transactions"),
+                ("workbench", "all", "oa_pending_payment_link_bank_transactions"),
+                ("oa_pending_payment", "all", "oa_pending_payment_link_bank_transactions"),
+            ],
+        )
+
+    def test_link_bank_transactions_rejects_income_bank(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439016")
+        relation_command = FakeRelationCommandService()
+        service = _service(
+            oa_records=[_oa("oa-link", "100.00", workflow_status="in_progress")],
+            transactions=[_bank("bank-income", "100.00", direction=TransactionDirection.INFLOW)],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        with self.assertRaises(OaPendingPaymentError) as context:
+            service.link_bank_transactions({"oa_row_ids": ["oa-link"], "bank_transaction_ids": ["bank-income"]}, actor_id="tester")
+
+        self.assertEqual(context.exception.error_code, "bank_transaction_not_outflow")
+        self.assertEqual(relation_command.confirm_calls, [])
+        self.assertEqual(payment_repository.marked_flow_ids, [])
+
+    def test_bank_transaction_candidates_marks_in_progress_linked_rows(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439017")
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-progress",
+                    "row_ids": ["oa-progress", "bank-linked"],
+                    "row_types": ["oa", "bank"],
+                    "relation_mode": "manual_confirmed",
+                    "amount_check": {"matched": True},
+                    "month_scope": "2026-06",
+                }
+            ]
+        )
+        service = _service(
+            oa_records=[_oa("oa-progress", "100.00", workflow_status="in_progress")],
+            transactions=[_bank("bank-linked", "100.00"), _bank("bank-free", "80.00")],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        payload = service.bank_transaction_candidates({"relation_status": ["linked_in_progress"]})
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-linked"])
+        self.assertEqual(payload["rows"][0]["relationStatusLabel"], "已关联进行中OA")
 
     def test_amount_mismatch_does_not_confirm_relation_or_write_mysql(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439013")
@@ -260,6 +367,8 @@ def _bank(
         signed_amount=signed_amount,
         txn_date="2026-06-17",
         trade_time="2026-06-17 10:00:00",
+        imported_bank_name="测试银行",
+        imported_bank_last4="1234",
     )
 
 

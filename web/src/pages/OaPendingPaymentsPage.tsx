@@ -1,4 +1,4 @@
-import { SlidersHorizontal } from "lucide-react";
+import { PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -9,12 +9,16 @@ import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPay
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import {
   confirmOaPendingPaymentPaid,
+  fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentFilterOptions,
   fetchOaPendingPaymentRows,
+  linkOaPendingPaymentBankTransactions,
   nextOaPendingPaymentSortDirection,
 } from "../features/oaPendingPayments/api";
 import type {
+  OaPendingPaymentBankCandidate,
+  OaPendingPaymentBankCandidateRelationStatus,
   OaPendingPaymentDetailTarget,
   OaPendingPaymentFieldConfig,
   OaPendingPaymentFilter,
@@ -64,8 +68,10 @@ export default function OaPendingPaymentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [confirmingRowIds, setConfirmingRowIds] = useState<Set<string>>(() => new Set());
+  const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const requestIdRef = useRef(0);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
@@ -154,11 +160,12 @@ export default function OaPendingPaymentsPage() {
 
   const handleViewModeChange = useCallback((viewMode: OaPendingPaymentViewMode) => {
     setQuery((current) => ({ ...current, page: 1, viewMode }));
+    setSelectedOaRowIds(new Set());
   }, []);
 
   const handleConfirmPaid = useCallback((row: OaPendingPaymentRow) => {
     const oaRowId = row.oa.primaryOaId || row.oa.id;
-    const bankTransactionId = confirmBankTransactionId(row);
+    const bankTransactionIds = confirmBankTransactionIds(row);
     if (!oaRowId) {
       setError("OA 行缺少可确认的 OA ID。");
       return;
@@ -168,8 +175,8 @@ export default function OaPendingPaymentsPage() {
     setError(null);
     confirmOaPendingPaymentPaid({
       oaRowId,
-      bankTransactionId: bankTransactionId || undefined,
-      idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionId || "active"}-${Date.now()}`,
+      bankTransactionIds: bankTransactionIds.length > 0 ? bankTransactionIds : undefined,
+      idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionIds.join("-") || "active"}-${Date.now()}`,
     })
       .then((payload) => {
         setFeedback(payload.oaPaymentWriteback?.label === "已写回" ? "已确认支付并写回 OA。" : "已确认支付，等待 OA 写回状态刷新。");
@@ -187,6 +194,32 @@ export default function OaPendingPaymentsPage() {
       });
   }, [loadRows]);
 
+  const handleToggleOaSelection = useCallback((row: OaPendingPaymentRow) => {
+    const ids = selectableOaRowIds(row);
+    if (ids.length === 0) {
+      return;
+    }
+    setSelectedOaRowIds((current) => {
+      const next = new Set(current);
+      const selected = ids.every((id) => next.has(id));
+      ids.forEach((id) => {
+        if (selected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const handleBankLinkSuccess = useCallback((message: string) => {
+    setFeedback(message);
+    setSelectedOaRowIds(new Set());
+    setBankLinkDrawerOpen(false);
+    loadRows("refresh");
+  }, [loadRows]);
+
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
   const saveExpensePendingInvoiceRules = useCallback(
@@ -196,6 +229,19 @@ export default function OaPendingPaymentsPage() {
 
   const actions = useMemo(() => (
     <div className="oa-pending-payments-actions">
+      {query.viewMode === "in_progress" ? (
+        <button
+          aria-label="关联支出流水"
+          onClick={() => setBankLinkDrawerOpen(true)}
+          className="oa-pending-payments-button oa-pending-payments-button--primary"
+          disabled={selectedOaRowIds.size === 0}
+          type="button"
+        >
+          <PanelRightOpen aria-hidden="true" size={16} />
+          关联支出流水
+          {selectedOaRowIds.size > 0 ? <span>{selectedOaRowIds.size}</span> : null}
+        </button>
+      ) : null}
       <button
         aria-label="支出流水无需开票规则设置"
         onClick={() => setRulesOpen(true)}
@@ -206,7 +252,7 @@ export default function OaPendingPaymentsPage() {
         支出流水无需开票规则设置
       </button>
     </div>
-  ), []);
+  ), [query.viewMode, selectedOaRowIds.size]);
   const isEmpty = !loading && !error && rows.length === 0;
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
@@ -286,6 +332,8 @@ export default function OaPendingPaymentsPage() {
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
                   onConfirmPaid={handleConfirmPaid}
+                  selectedOaRowIds={selectedOaRowIds}
+                  onToggleOaSelection={query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
                   confirmingRowIds={confirmingRowIds}
                 />
               </>
@@ -308,6 +356,13 @@ export default function OaPendingPaymentsPage() {
         onSaved={() => loadRows("refresh")}
         onClose={() => setRulesOpen(false)}
       />
+      <OaBankLinkDrawer
+        open={bankLinkDrawerOpen}
+        selectedOaRowIds={[...selectedOaRowIds]}
+        onLinked={handleBankLinkSuccess}
+        onError={setError}
+        onClose={() => setBankLinkDrawerOpen(false)}
+      />
     </>
   );
 }
@@ -316,12 +371,34 @@ function formatViewCount(count: number | null | undefined): string {
   return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
-function confirmBankTransactionId(row: OaPendingPaymentRow): string {
+function confirmBankTransactionIds(row: OaPendingPaymentRow): string[] {
+  const ids: string[] = [];
   if (row.bankTransaction.primaryBankTransactionId) {
-    return row.bankTransaction.primaryBankTransactionId;
+    ids.push(row.bankTransaction.primaryBankTransactionId);
   }
-  const firstSummary = row.bankTransaction.summaries?.find((summary) => summary.bankTransactionId);
-  return firstSummary?.bankTransactionId ?? "";
+  row.bankTransaction.summaries?.forEach((summary) => {
+    if (summary.bankTransactionId && !ids.includes(summary.bankTransactionId)) {
+      ids.push(summary.bankTransactionId);
+    }
+  });
+  return ids;
+}
+
+function selectableOaRowIds(row: OaPendingPaymentRow): string[] {
+  if (row.oaPaymentWriteback?.code === "written") {
+    return [];
+  }
+  const ids: string[] = [];
+  const primary = row.oa.primaryOaId || row.oa.id;
+  if (primary) {
+    ids.push(primary);
+  }
+  row.oa.summaries?.forEach((summary) => {
+    if (summary.oaId && !ids.includes(summary.oaId)) {
+      ids.push(summary.oaId);
+    }
+  });
+  return ids;
 }
 
 function normalizeFilterValue(filter: {
@@ -342,4 +419,190 @@ function normalizeFilterValue(filter: {
     return { field: filter.field, operator: "between", value: filter.value ?? null };
   }
   return null;
+}
+
+function OaBankLinkDrawer({
+  open,
+  selectedOaRowIds,
+  onLinked,
+  onError,
+  onClose,
+}: {
+  open: boolean;
+  selectedOaRowIds: string[];
+  onLinked: (message: string) => void;
+  onError: (message: string) => void;
+  onClose: () => void;
+}) {
+  const [relationStatus, setRelationStatus] = useState<OaPendingPaymentBankCandidateRelationStatus>("unmatched");
+  const [keyword, setKeyword] = useState("");
+  const [rows, setRows] = useState<OaPendingPaymentBankCandidate[]>([]);
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [total, setTotal] = useState(0);
+
+  const loadCandidates = useCallback((signal?: AbortSignal) => {
+    if (!open) {
+      return;
+    }
+    setLoading(true);
+    fetchOaPendingPaymentBankCandidates({
+      relationStatus,
+      keyword,
+      page: 1,
+      pageSize: 100,
+      signal,
+    })
+      .then((payload) => {
+        setRows(payload.rows ?? []);
+        setTotal(payload.pagination?.total ?? payload.rows?.length ?? 0);
+      })
+      .catch((caught: unknown) => {
+        if (signal?.aborted) {
+          return;
+        }
+        setRows([]);
+        setTotal(0);
+        onError(caught instanceof Error ? caught.message : "支出流水加载失败。");
+      })
+      .finally(() => {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
+      });
+  }, [keyword, onError, open, relationStatus]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    setSelectedBankIds(new Set());
+    loadCandidates(controller.signal);
+    return () => controller.abort();
+  }, [loadCandidates, open]);
+
+  const toggleBank = (bankId: string) => {
+    setSelectedBankIds((current) => {
+      const next = new Set(current);
+      if (next.has(bankId)) {
+        next.delete(bankId);
+      } else {
+        next.add(bankId);
+      }
+      return next;
+    });
+  };
+
+  const submit = () => {
+    if (selectedOaRowIds.length === 0 || selectedBankIds.size === 0) {
+      return;
+    }
+    setSubmitting(true);
+    linkOaPendingPaymentBankTransactions({
+      oaRowIds: selectedOaRowIds,
+      bankTransactionIds: [...selectedBankIds],
+      idempotencyKey: `oa-pending-link-${selectedOaRowIds.join("-")}-${[...selectedBankIds].join("-")}-${Date.now()}`,
+    })
+      .then(() => onLinked("已关联支出流水，等待核对表刷新。"))
+      .catch((caught: unknown) => {
+        onError(caught instanceof Error ? caught.message : "关联支出流水失败。");
+      })
+      .finally(() => setSubmitting(false));
+  };
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="oa-pending-payments-drawer-backdrop" role="presentation">
+      <aside aria-label="关联支出流水抽屉" className="oa-pending-payments-bank-drawer">
+        <div className="oa-pending-payments-bank-drawer__header">
+          <div>
+            <h2>关联支出流水</h2>
+            <p>已选 OA {selectedOaRowIds.length} 条</p>
+          </div>
+          <button aria-label="关闭关联支出流水抽屉" onClick={onClose} type="button">×</button>
+        </div>
+        <div className="oa-pending-payments-bank-drawer__filters">
+          {(["all", "unmatched", "matched", "linked_in_progress"] as OaPendingPaymentBankCandidateRelationStatus[]).map((status) => (
+            <button
+              className={relationStatus === status ? "oa-pending-payments-bank-drawer__filter oa-pending-payments-bank-drawer__filter--active" : "oa-pending-payments-bank-drawer__filter"}
+              key={status}
+              onClick={() => setRelationStatus(status)}
+              type="button"
+            >
+              {bankCandidateFilterLabel(status)}
+            </button>
+          ))}
+        </div>
+        <label className="oa-pending-payments-bank-drawer__search">
+          <span>搜索</span>
+          <input
+            placeholder="对方户名 / 摘要 / 金额"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                loadCandidates();
+              }
+            }}
+          />
+          <button onClick={() => loadCandidates()} type="button">查询</button>
+        </label>
+        <div className="oa-pending-payments-bank-drawer__meta">
+          {loading ? "加载中" : `显示 ${rows.length} / ${total} 条`}
+        </div>
+        <div className="oa-pending-payments-bank-drawer__list">
+          {rows.length === 0 && !loading ? <div className="oa-pending-payments-bank-drawer__empty">暂无支出流水</div> : null}
+          {rows.map((row) => (
+            <label className="oa-pending-payments-bank-drawer__row" key={row.id}>
+              <input
+                checked={selectedBankIds.has(row.id)}
+                disabled={row.relationStatus === "matched"}
+                onChange={() => toggleBank(row.id)}
+                type="checkbox"
+              />
+              <span className="oa-pending-payments-bank-drawer__row-main">
+                <span className="oa-pending-payments-bank-drawer__counterparty">{row.counterpartyName || "-"}</span>
+                <span className="oa-pending-payments-bank-drawer__tags">
+                  {row.tradeTime ? <span>{row.tradeTime}</span> : null}
+                  {row.bankAccount ? <span>{row.bankAccount}</span> : null}
+                  <span>{row.relationStatusLabel}</span>
+                </span>
+                <span className="oa-pending-payments-bank-drawer__summary">{[row.summary, row.remark].filter(Boolean).join(" / ") || "-"}</span>
+              </span>
+              <span className="oa-pending-payments-bank-drawer__amount">{row.amount}</span>
+            </label>
+          ))}
+        </div>
+        <div className="oa-pending-payments-bank-drawer__footer">
+          <button onClick={onClose} type="button">取消</button>
+          <button
+            className="oa-pending-payments-button oa-pending-payments-button--primary"
+            disabled={submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
+            onClick={submit}
+            type="button"
+          >
+            {submitting ? "关联中" : `确认关联 ${selectedBankIds.size} 条流水`}
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function bankCandidateFilterLabel(status: OaPendingPaymentBankCandidateRelationStatus): string {
+  if (status === "unmatched") {
+    return "未配对";
+  }
+  if (status === "matched") {
+    return "已配对";
+  }
+  if (status === "linked_in_progress") {
+    return "已关联进行中OA";
+  }
+  return "全部";
 }

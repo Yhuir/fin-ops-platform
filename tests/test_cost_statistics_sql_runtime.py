@@ -415,7 +415,13 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "queue_repository": QueueRecorder(),
                 "redis_helper": RedisRecorder(
                     redis_fresh_payload(
-                        {"month": "2026-05", "time_rows": []},
+                        {
+                            "month": "2026-05",
+                            "summary": {"total_amount": "0.00", "transaction_count": 0},
+                            "time_rows": [],
+                            "project_rows": [],
+                            "expense_type_rows": [],
+                        },
                         scope_key="active:2026-05",
                         source_versions=source_versions,
                     )
@@ -592,7 +598,40 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             (),
             {
                 "get_cost_statistics_view": lambda *_args, **_kwargs: {
-                    "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "txn-1"}]},
+                    "payload": {
+                        "month": "2026-05",
+                        "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "100.00"},
+                        "time_rows": [
+                            {
+                                "transaction_id": "txn-1",
+                                "trade_time": "2026-05-21 09:00:00",
+                                "direction": "支出",
+                                "project_name": "云南溯源科技",
+                                "expense_type": "设备货款及材料费",
+                                "expense_content": "PLC 模块采购",
+                                "amount": "100.00",
+                                "counterparty_name": "供应商",
+                                "payment_account_label": "工行",
+                                "remark": "",
+                            }
+                        ],
+                        "project_rows": [
+                            {
+                                "project_name": "云南溯源科技",
+                                "total_amount": "100.00",
+                                "transaction_count": 1,
+                                "expense_type_count": 1,
+                            }
+                        ],
+                        "expense_type_rows": [
+                            {
+                                "expense_type": "设备货款及材料费",
+                                "total_amount": "100.00",
+                                "transaction_count": 1,
+                                "project_count": 1,
+                            }
+                        ],
+                    },
                     "refresh_status": "fresh",
                     "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                     "generated_at": "2026-05-21T09:00:00+00:00",
@@ -610,13 +649,58 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["time_rows"], [{"transaction_id": "txn-1"}])
+        self.assertEqual(payload["time_rows"][0]["transaction_id"], "txn-1")
         self.assertTrue(
             redis.sets[0][0].startswith(
                 "cost_statistics:explorer:active:2026-05:schema:2026-05-cost-statistics-explorer-v1:sources:"
             )
         )
         self.assertLessEqual(redis.sets[0][2], 120)
+
+    def test_cost_statistics_api_rejects_malformed_fresh_sql_payload_and_requeues(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": redis},
+        )()
+        app._cost_statistics_sql_read_repository = type(
+            "SqlCostStats",
+            (),
+            {
+                "get_cost_statistics_view": lambda *_args, **_kwargs: {
+                    "payload": {
+                        "month": "2026-05",
+                        "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                        "rows": [],
+                    },
+                    "refresh_status": "fresh",
+                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "source_versions": app._cost_statistics_expected_source_versions("active:2026-05"),
+                }
+            },
+        )()
+        app._cost_statistics_service = type(
+            "CostStats",
+            (),
+            {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("malformed SQL payload must not sync rebuild"))},
+        )()
+
+        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "active:2026-05")
+        self.assertEqual(payload["read_model_stale_reasons"], ["api_payload_shape_invalid"])
+        self.assertEqual(payload["time_rows"], [])
+        self.assertEqual(payload["project_rows"], [])
+        self.assertEqual(payload["expense_type_rows"], [])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-05", "api_payload_shape_invalid")])
+        self.assertEqual(redis.sets, [])
 
     def test_cost_statistics_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done(self) -> None:
         class FakeBuilder:

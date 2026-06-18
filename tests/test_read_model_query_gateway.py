@@ -116,6 +116,49 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(len(redis.sets), 1)
 
+    def test_invalid_fresh_cache_payload_contract_misses_and_uses_sql_view(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder(
+            {
+                "payload": {
+                    "rows": [{"id": "legacy"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                    "schema_version": "schema-v2",
+                },
+                "fresh_gate": {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                    "schema_version": "schema-v2",
+                },
+            }
+        )
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_source_versions={"source_version": 3},
+            expected_schema_version="schema-v2",
+            load_view=lambda: {
+                "payload": {"items": [{"id": "sql"}]},
+                "refresh_status": "fresh",
+                "source_versions": {"source_version": 3},
+                "schema_version": "schema-v2",
+            },
+            empty_payload_factory=lambda: {"items": []},
+            payload_validator=lambda payload: isinstance(payload.get("items"), list),
+            cache_key="example:all:v3:schema-v2",
+            cache_ttl_seconds=60,
+        )
+
+        self.assertEqual(result.payload["items"], [{"id": "sql"}])
+        self.assertFalse(result.cache_hit)
+        self.assertFalse(result.refresh_enqueued)
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(len(redis.sets), 1)
+
     def test_legacy_cache_without_fresh_gate_or_source_versions_misses_and_repopulates(self) -> None:
         queue = QueueRecorder()
         redis = RedisRecorder({"payload": {"rows": [{"id": "legacy"}], "read_model_status": "fresh"}})
@@ -229,6 +272,42 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
             queue.refreshes,
             [{"scope_type": "example", "scope_key": "all", "reason": "api_miss"}],
         )
+
+    def test_invalid_sql_payload_contract_enqueues_refresh_without_populating_cache(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder()
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_source_versions={"source_version": 3},
+            load_view=lambda: {
+                "payload": {"rows": [{"id": "legacy"}]},
+                "refresh_status": "fresh",
+                "source_versions": {"source_version": 3},
+                "schema_version": "schema-v2",
+                "generated_at": "2026-05-21T09:00:00+00:00",
+            },
+            empty_payload_factory=lambda: {"rows": [], "summary": {"row_count": 0}},
+            payload_validator=lambda payload: isinstance(payload.get("items"), list),
+            payload_invalid_reason="api_payload_shape_invalid",
+            expected_schema_version="schema-v2",
+            cache_key="example:all:v3:schema-v2",
+            cache_ttl_seconds=60,
+        )
+
+        self.assertEqual(result.payload["rows"], [])
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["read_model_stale_reasons"], ["api_payload_shape_invalid"])
+        self.assertEqual(result.payload["refresh_reason"], "api_payload_shape_invalid")
+        self.assertTrue(result.refresh_enqueued)
+        self.assertFalse(result.cache_hit)
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "example", "scope_key": "all", "reason": "api_payload_shape_invalid"}],
+        )
+        self.assertEqual(redis.sets, [])
 
     def test_cost_statistics_refresh_uses_registered_scope_policy_before_enqueue(self) -> None:
         queue = QueueRecorder()

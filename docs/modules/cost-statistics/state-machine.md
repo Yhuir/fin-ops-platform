@@ -52,7 +52,7 @@
 
 | 状态 | 判定 | 后续动作 |
 | --- | --- | --- |
-| `fresh` | scope schema/source/readiness 与当前事实一致，且没有 active dirty scope | 页面可展示；Redis/hot cache 可缓存该 scope payload。 |
+| `fresh` | scope schema/source/readiness 与当前事实一致，且没有 active dirty scope；explorer payload 满足 `summary`、`time_rows`、`project_rows`、`expense_type_rows` shape | 页面可展示；Redis/hot cache 可缓存该 scope payload。 |
 | `missing` | 没有对应 scope readiness 或 read model payload | 入队对应 scope refresh；页面/API 返回 refreshing 或 busy。 |
 | `refreshing` | dirty scope pending/processing，或父 scope 正等待 shard | worker 继续处理；父 scope 不能 complete 为 fresh。 |
 | `stale` / `source_mismatch` / `schema_mismatch` | source/schema/version 落后 | 入队重建；不得同步 rebuild 伪装 fresh。 |
@@ -66,6 +66,7 @@ Refresh 触发来源：
 - 待找发票规则、银行标签、税金认证、发票生命周期变化。
 - 项目范围或项目状态设置变化。
 - scope contract repair、App Health/backfill 运维任务。
+- explorer payload shape invalid，例如旧 SQL read model 或旧 Redis cache 缺少 `summary`、`time_rows`、`project_rows`、`expense_type_rows`。
 - `startup_stale_scan` 默认关闭，且不直接刷新成本统计 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才影响成本。
 
 父 scope 流程：
@@ -89,6 +90,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-18 | 成本统计 explorer 接入 read model payload contract validator | App Health 显示成本统计 fresh 时，API 仍会校验 explorer payload 必须包含当前前端 mapper 需要的 summary/time/project/expense type rows；旧 Redis cache 不直接返回，旧 SQL payload 返回 refreshing 并入队 `api_payload_shape_invalid`，避免页面泛化加载失败 | `PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime tests.test_read_model_query_gateway -v`；`cd web && npm test -- --run src/test/CostStatisticsApi.test.ts src/test/CostStatisticsPage.test.tsx` |
 | 2026-06-18 | Browser e2e 补齐 Workbench 成本关系 fan-out | 真实 Chromium 证明 open/proposed candidate 不进入成本项目、金额或明细；确认 OA+bank+invoice 成本关系后，成本页重新读取并展示对应项目、金额、流水和详情；不改变业务/read model 状态机 | `cd web && npx playwright test e2e/cost-statistics-relation-fanout.spec.ts` |
 | 2026-06-17 | Browser e2e 补齐项目下钻与导出错误反馈闭环 | 真实 Chromium 保护按时间首屏、按项目视图、`project_scope=all`、项目/费用类型/流水详情下钻、导出 preview 和 row-limit 错误反馈；不改变业务/read model 状态机 | `cd web && npx playwright test e2e/cost-statistics-flow.spec.ts` |
 | 2026-06-12 | Workbench candidate 关系不再计入成本统计 | live 成本查询、cost statistics SQL projection、月份 shard rows | `tests.test_cost_statistics_service`、`tests.test_cost_statistics_sql_runtime` |

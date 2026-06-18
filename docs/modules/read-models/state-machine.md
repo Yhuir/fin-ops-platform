@@ -13,6 +13,7 @@
   - business write -> lifecycle/dirty scope -> outbox event -> worker processing -> projection publish -> readiness fresh
   - API miss/stale -> `ReadModelQueryGateway` 返回 refreshing payload -> `ReadModelRefreshGateway` enqueue refresh
   - expected schema/source contract 与 actual projection metadata 不匹配或缺失 -> refreshing/stale reason -> enqueue refresh
+  - fresh gate 通过但业务 payload contract 不满足当前 API shape -> 忽略 Redis cache 或返回 refreshing/stale reason -> enqueue refresh
   - worker failure -> readiness failed/unavailable -> App Status busy/blocked
 - 禁止流转：
   - query service 没有 expected schema/source contract，却把 projection 判为 fresh
@@ -34,7 +35,7 @@
 
 ## Read Model / Worker 状态
 
-- `fresh`：query service 已声明 expected schema/source contract，projection/readiness 的实际 schema/source version 与之匹配，可以对外展示 payload，也可以写 fresh-gated Redis cache。
+- `fresh`：query service 已声明 expected schema/source contract，projection/readiness 的实际 schema/source version 与之匹配，并且 payload 满足业务 query service 声明的 API shape contract；通过后才可以对外展示 payload，也可以写 fresh-gated Redis cache。
 - `missing`：没有可用 projection/readiness；API 应返回 refreshing 语义并入队 refresh。
 - `refreshing`：dirty scope pending/processing、worker 等待 shard、source/schema stale 后已入队；页面显示刷新中或后台刷新提示。
 - `stale`：内部 freshness 判定不匹配；公开 API 通常映射为 refreshing 语义并带 stale reasons。
@@ -52,6 +53,7 @@
 - missing schema/source metadata proof
 - schema version mismatch
 - source version missing/mismatch
+- 业务 payload shape invalid，例如旧 projection 或旧 Redis payload 不满足当前 API mapper 的必需字段
 - 业务写入后的 `DerivedDataLifecycleService` dirty cascade
 - 高影响写操作可把 `metadata.action_name` 随 dirty/outbox 一起传递，用于 write operation SLO 审计区分具体动作；metadata 不替代权限、审计或业务状态事实源
 - `startup_stale_scan` 之后的 workbench matching dirty worker 间接更新；startup scan 本身默认不运行，且不得直接刷新用户可见 read model
@@ -72,6 +74,7 @@
 - `read_model_status=fresh` 但 query service 没有声明 expected schema/source contract。
 - `read_model_status=fresh` 由未分类 direct path 写出，或 direct source version mismatch 比较没有先调用 `require_expected_source_versions(...)`。
 - `read_model_status=fresh` 但已声明 expected schema，actual projection 或 Redis fresh gate 缺少 schema proof。
+- `read_model_status=fresh` 但业务 query service 已声明 payload contract，Redis 或 SQL payload 不满足该 contract。
 - `read_model_status=fresh` 但 dirty scope 仍 pending/processing 且覆盖同一 scope。
 - API 返回空 rows 且不带 refreshing/stale/missing 语义，却实际没有 fresh projection。
 - Redis cache 命中绕过 fresh gate。
@@ -83,6 +86,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-18 | `ReadModelQueryGateway` 支持业务 payload validator；旧 Redis/SQL payload 即使通过 freshness gate，也不能绕过当前 API payload contract | 避免 App Health 显示 fresh/已同步，但业务页面因旧 payload 缺少必需字段而报泛化加载失败；invalid Redis cache 改走 SQL view，invalid SQL view 返回 refreshing 并入队 refresh，不写 fresh cache | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime -v` |
 | 2026-06-18 | Workbench `all` aggregate-only refresh 在 parent month scope 仍 active 或 not fresh 时走 dependency-not-fresh defer；同 scope 旧 failed 被重新 pending/processing 覆盖时展示 refreshing | 避免 relation 写入后的暂态“旧 month generation + 新 canonical relation”被误写为 failed all generation；避免旧 `workbench_all_scope_parent_inconsistent` / deadlock last_error 在重试中继续污染 Workbench refresh status 和 App Health | `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime tests.test_runtime_queue tests.test_runtime_worker tests.test_app_status_overview_service -v` |
 | 2026-06-17 | read model 查询 freshness contract fail-closed，并纳管 legacy direct fresh/direct mismatch 路径 | `ReadModelQueryGateway` 必须传 expected schema/source；actual schema/source metadata 缺失时不能 fresh；自管 read model service 禁止空 source version provider；所有直接写 fresh 或直接比较 source version 的 legacy 入口必须通过静态架构 guard 分类 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v` |
 | 2026-06-14 | 依赖未 fresh 的 readiness 记录从 failed 收敛为 refreshing | 下游 read model 等待 Bankdetail/Workbench relation 等依赖时不污染 App Status blocker；仍保留 last_error 诊断和真实 retry/defer | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_readiness_reporter tests.test_runtime_worker tests.test_runtime_queue tests.test_read_model_refresh_gateway -v` |

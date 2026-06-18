@@ -42,11 +42,13 @@ class ReadModelQueryGateway:
         expected_source_versions: dict[str, Any] | None = None,
         expected_schema_version: Any | None = None,
         payload_from_view: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        payload_validator: Callable[[dict[str, Any]], bool] | None = None,
         cache_key: str | None = None,
         cache_ttl_seconds: int | None = None,
         missing_reason: str = "api_miss",
         stale_reason: str = "api_stale",
         source_mismatch_reason: str = "api_source_versions_stale",
+        payload_invalid_reason: str = "api_payload_invalid",
     ) -> ReadModelQueryResult:
         expected_versions = normalize_source_versions(expected_source_versions)
         if not expected_versions and expected_schema_version in (None, ""):
@@ -59,15 +61,16 @@ class ReadModelQueryGateway:
         )
         if cached_payload is not None:
             payload = dict(cached_payload)
-            self._attach_payload_metadata(
-                payload,
-                scope_key=scope_key,
-                status="fresh",
-                source_versions=expected_versions,
-                schema_version=expected_schema_version,
-            )
-            payload["refresh_enqueued"] = False
-            return ReadModelQueryResult(payload=payload, cache_hit=True)
+            if payload_validator is None or payload_validator(payload):
+                self._attach_payload_metadata(
+                    payload,
+                    scope_key=scope_key,
+                    status="fresh",
+                    source_versions=expected_versions,
+                    schema_version=expected_schema_version,
+                )
+                payload["refresh_enqueued"] = False
+                return ReadModelQueryResult(payload=payload, cache_hit=True)
 
         view = load_view()
         if not isinstance(view, dict):
@@ -94,6 +97,30 @@ class ReadModelQueryGateway:
         raw_payload = payload_from_view(view) if payload_from_view is not None else _default_payload_from_view(view)
         payload = dict(raw_payload)
         actual_source_versions = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        if payload_validator is not None and not payload_validator(payload):
+            refresh_enqueued = self._enqueue_refresh(
+                scope_type=scope_type,
+                scope_key=scope_key,
+                reason=payload_invalid_reason,
+            )
+            replacement_payload = dict(empty_payload_factory())
+            self._attach_payload_metadata(
+                replacement_payload,
+                scope_key=scope_key,
+                status="refreshing",
+                source_versions=normalize_source_versions(actual_source_versions),
+                stale_reasons=(payload_invalid_reason,),
+                generated_at=view.get("generated_at"),
+                schema_version=view.get("schema_version"),
+            )
+            replacement_payload["refresh_enqueued"] = refresh_enqueued
+            replacement_payload["refresh_reason"] = payload_invalid_reason
+            return ReadModelQueryResult(
+                payload=replacement_payload,
+                refresh_enqueued=refresh_enqueued,
+                freshness_status="stale",
+                stale_reasons=(payload_invalid_reason,),
+            )
         freshness = resolve_read_model_freshness(
             expected_schema_version=expected_schema_version,
             actual_schema_version=view.get("schema_version"),

@@ -28,6 +28,20 @@
 
 ## 历史记录
 
+## 2026-06-18 - Read model payload contract validator
+
+- 目标：修复 App Health 显示 read model fresh/已同步，但业务页面因旧 Redis 或 SQL payload 缺少当前 API 必需字段而加载失败的问题。
+- 影响范围：`ReadModelQueryGateway`、成本统计 explorer 查询服务、read-models 状态机与测试矩阵。
+- 关键决策：
+  - freshness gate 仍负责 schema/source/readiness；业务 API shape 由 query service 显式传入 `payload_validator`，避免共享网关猜测各业务字段。
+  - Redis 命中也必须经过 payload validator；invalid cache 不能直接返回 fresh，应继续读取 SQL view，若 SQL view 合法则回填新缓存。
+  - SQL view payload invalid 时返回 canonical empty refreshing payload，带 `read_model_stale_reasons=["api_payload_shape_invalid"]` 和 `refresh_reason`，并通过统一 refresh gateway 入队；不写 fresh Redis cache。
+- 文档影响：更新 read-models 状态机、测试矩阵和本实施记录；成本统计模块同步记录 explorer payload contract。
+- 测试覆盖：新增 `tests/test_read_model_query_gateway.py::ReadModelQueryGatewayTests::test_invalid_fresh_cache_payload_contract_misses_and_uses_sql_view`、`test_invalid_sql_payload_contract_enqueues_refresh_without_populating_cache`；成本统计 SQL runtime 覆盖 malformed explorer payload。
+- 验证命令：见本轮交付说明。
+- 未测风险：本地不连接真实 Redis/RabbitMQ/PostgreSQL worker drain；生产已有旧缓存可能需要发布后等待 TTL 或运维清理，但新代码不会继续把 invalid cache 当 fresh 返回。
+- 后续事项：新增或改变业务 read model API shape 时，优先在 query service 声明 payload validator，并同步 schema/source version 或重建策略。
+
 ## 2026-06-17 - Direct fresh / direct mismatch architecture guard
 
 - 目标：把仍保留在 legacy route、service、repository 中的 direct `read_model_status=fresh` 和 direct `source_version_mismatch_reasons(...)` 路径纳入架构层静态保护，避免未来新增页面绕过 `ReadModelQueryGateway` 或等价 freshness boundary。

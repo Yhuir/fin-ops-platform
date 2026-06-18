@@ -120,11 +120,13 @@ class CostStatisticsQueryService:
             expected_source_versions=expected_source_versions,
             load_view=lambda: get_view(scope_key=scope_key),
             empty_payload_factory=lambda: self.empty_explorer_payload(month),
+            payload_validator=self._is_explorer_payload,
             cache_key=cache_key,
             cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
             missing_reason="api_miss",
             stale_reason="api_stale",
             source_mismatch_reason="api_source_versions_stale",
+            payload_invalid_reason="api_payload_shape_invalid",
         )
         return result.payload, result.cache_hit
 
@@ -234,6 +236,13 @@ class CostStatisticsQueryService:
             "project_rows": [],
             "expense_type_rows": [],
         }
+
+    @staticmethod
+    def _is_explorer_payload(payload: dict[str, Any]) -> bool:
+        summary = payload.get("summary")
+        if not isinstance(summary, dict):
+            return False
+        return all(isinstance(payload.get(key), list) for key in ("time_rows", "project_rows", "expense_type_rows"))
 
     @staticmethod
     def empty_month_payload(month: str) -> dict[str, Any]:
