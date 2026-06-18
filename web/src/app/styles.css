@@ -2058,6 +2058,44 @@ textarea {
   background: color-mix(in srgb, var(--fp-success-soft) 42%, var(--fp-surface));
 }
 
+.oa-pending-payments-subheader-grid {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.oa-pending-payments-subheader-grid--oa {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr) minmax(58px, 0.7fr);
+}
+
+.oa-pending-payments-subheader-grid--bank {
+  grid-template-columns: minmax(0, 1.2fr) minmax(78px, 0.85fr) minmax(0, 1fr);
+}
+
+.oa-pending-payments-subheader-grid--status {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 3px;
+  text-align: left;
+}
+
+.oa-pending-payments-subheader-grid--invoice {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  row-gap: 4px;
+}
+
+.oa-pending-payments-subheader-grid > span {
+  min-width: 0;
+}
+
+.oa-pending-payments-subheader-grid__amount {
+  justify-self: end;
+  text-align: right;
+}
+
 .oa-pending-payments-table-cell {
   padding: 6px 5px;
   border-bottom: 1px solid var(--fp-border);

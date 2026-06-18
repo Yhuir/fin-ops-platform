@@ -175,7 +175,7 @@ export default function OaPendingPaymentsTable({
                   key={column.id}
                   scope="col"
                 >
-                  <HeaderCell
+                  <GroupedSubHeader
                     column={column}
                     configsByField={configsByField}
                     filterOptions={filterOptions}
@@ -381,7 +381,7 @@ function InvoiceCell({
   );
 }
 
-function HeaderCell({
+function GroupedSubHeader({
   column,
   configsByField,
   filterOptions,
@@ -398,9 +398,80 @@ function HeaderCell({
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
 }) {
+  const control = (label: string) => (
+    <HeaderCell
+      column={column}
+      configsByField={configsByField}
+      displayLabel={label}
+      filterOptions={filterOptions}
+      filters={filters}
+      onFilterApply={onFilterApply}
+      onFilterClear={onFilterClear}
+      onSortChange={onSortChange}
+    />
+  );
+
+  if (column.group === "oa") {
+    return (
+      <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--oa">
+        <span>{control("申请人")}</span>
+        <span>项目</span>
+        <span className="oa-pending-payments-subheader-grid__amount">金额</span>
+      </span>
+    );
+  }
+
+  if (column.group === "status") {
+    return (
+      <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--status">
+        <span>{control("状态")}</span>
+        <span>写回</span>
+      </span>
+    );
+  }
+
+  if (column.group === "bank") {
+    return (
+      <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--bank">
+        <span>{control("对方户名")}</span>
+        <span>金额</span>
+        <span>流水摘要</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--invoice">
+      <span>{control("发票号")}</span>
+      <span>发票方</span>
+      <span>日期</span>
+      <span className="oa-pending-payments-subheader-grid__amount">金额</span>
+    </span>
+  );
+}
+
+function HeaderCell({
+  column,
+  displayLabel,
+  configsByField,
+  filterOptions,
+  filters,
+  onFilterApply,
+  onFilterClear,
+  onSortChange,
+}: {
+  column: OaPendingPaymentColumn;
+  displayLabel?: ReactNode;
+  configsByField: Map<string, OaPendingPaymentFieldConfig>;
+  filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
+  filters: OaPendingPaymentFilter[];
+  onFilterApply: (filter: OaColumnFilterValue) => void;
+  onFilterClear: (field: string) => void;
+  onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
+}) {
   return (
     <span className="oa-pending-payments-header-control">
-      <span className="oa-pending-payments-header-control__label">{column.label}</span>
+      <span className="oa-pending-payments-header-control__label">{displayLabel ?? column.label}</span>
       {column.sortField ? (
         <SortButton
           label={column.sortLabel ?? column.label}

@@ -835,12 +835,16 @@ describe("OA pending payments page", () => {
       expect(within(groupHeader).getByRole("columnheader", { name: label })).toBeInTheDocument();
     }
     expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
-    for (const label of ["OA", "支付状态", "流水", "发票"]) {
-      expect(within(page).getAllByText(label).length).toBeGreaterThan(0);
+    const subHeader = within(page).getAllByRole("row")[1];
+    for (const label of ["申请人", "项目", "金额", "状态", "写回", "对方户名", "流水摘要", "发票号", "发票方", "日期"]) {
+      expect(within(subHeader).getAllByText(label).length).toBeGreaterThan(0);
     }
+    expect(within(subHeader).queryByText("OA")).not.toBeInTheDocument();
+    expect(within(subHeader).queryByText("支付状态")).not.toBeInTheDocument();
+    expect(within(subHeader).queryByText("流水")).not.toBeInTheDocument();
+    expect(within(subHeader).queryByText("发票")).not.toBeInTheDocument();
     expect(within(page).queryByText("发票号码/发票方")).not.toBeInTheDocument();
     expect(within(page).queryByText("价税合计")).not.toBeInTheDocument();
-    expect(within(page).queryByRole("columnheader", { name: "日期" })).not.toBeInTheDocument();
     expect(within(page).queryByText("交易开始")).not.toBeInTheDocument();
     expect(within(page).queryByText("交易结束")).not.toBeInTheDocument();
     expect(within(page).queryByText("全页面检索")).not.toBeInTheDocument();
