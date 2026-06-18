@@ -84,6 +84,19 @@ describe("MonthPicker", () => {
     expect(onChange).toHaveBeenCalledWith("2026-05");
   });
 
+  test("can expose an all-period option from the same trigger", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderMonthPicker({ allOptionLabel: "全部发票", onChange, value: "" });
+
+    expect(screen.getByRole("button", { name: "年月选择" })).toHaveTextContent("全部发票");
+
+    await user.click(screen.getByRole("button", { name: "年月选择" }));
+    await user.click(await screen.findByRole("radio", { name: "全部发票" }));
+
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
   test("formats month labels and invalid values predictably", () => {
     expect(formatMonthLabel("2026-12")).toBe("2026年12月");
     expect(formatMonthLabel("bad-value")).toBe("2026年1月");

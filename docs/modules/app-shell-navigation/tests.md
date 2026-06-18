@@ -30,6 +30,7 @@
 | 侧栏 hover/focus preload | 已覆盖 | `AppSidebar.test.tsx` |
 | nested path active、import shortcut inactive | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
 | compact drawer 点击导航后关闭 | 已覆盖，2026-06-11 新增 | `AppSidebar.test.tsx` |
+| 指定发票页入口位于财务业务分组末尾且仍在系统操作上方 | 已覆盖，2026-06-18 更新 | `App.test.tsx` |
 | SessionGate loading/forbidden/expired/error/retry | 已覆盖 | `SessionGate.test.tsx` |
 | 全局写操作 overlay 成功/失败状态 | 已覆盖，2026-06-14 新增 | `GlobalOperationOverlayContext.test.tsx` |
 | page session 按 page/state/user 隔离 | 已覆盖 | `PageSessionStateContext.test.tsx` |

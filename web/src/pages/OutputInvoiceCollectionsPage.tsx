@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageScaffold from "../components/common/PageScaffold";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
+import MonthPicker from "../components/MonthPicker";
 import CollectionStatusReminderDrawer from "../components/outputInvoiceCollections/CollectionStatusReminderDrawer";
 import CollectionStatusRulesDrawer from "../components/outputInvoiceCollections/CollectionStatusRulesDrawer";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
@@ -462,14 +463,16 @@ export default function OutputInvoiceCollectionsPage() {
         <div className="output-invoice-collections-content">
           <PageToolbar className="output-invoice-collections-query">
             <div className="output-invoice-collections-query__grid">
-              <label className="output-invoice-collections-field">
+              <div className="output-invoice-collections-field">
                 <span>月份</span>
-                <input
-                  type="month"
+                <MonthPicker
+                  allOptionLabel="全部发票"
+                  ariaLabel="销项发票月份"
+                  caption={null}
                   value={query.month}
-                  onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+                  onChange={(month) => setQuery((current) => ({ ...current, page: 1, month }))}
                 />
-              </label>
+              </div>
               <div className="output-invoice-collections-search-cluster">
                 <input
                   aria-label="搜索销项发票收款情况"

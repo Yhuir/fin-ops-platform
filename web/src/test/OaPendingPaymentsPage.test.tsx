@@ -385,7 +385,7 @@ const rowsPayload = {
     },
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
-  summary: { rowCount: 51 },
+  summary: { rowCount: 51, viewCounts: { completed: 51, in_progress: 23 } },
   filterConfig: [
     {
       field: "oa_applicant",
@@ -991,7 +991,10 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
 
-    await user.click(within(page).getByRole("button", { name: "进行中 OA" }));
+    expect(within(page).getByRole("button", { name: /已完成 OA 51条/ })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: /进行中 OA 23条/ })).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
@@ -1107,7 +1110,7 @@ describe("OA pending payments page", () => {
         ...rowsPayload,
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
-        summary: { rowCount: 0 },
+        summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
         readModelStatus: "refreshing",
         read_model_status: "refreshing",
         read_model_stale_reasons: ["oa_pending_payment_source_version_missing"],

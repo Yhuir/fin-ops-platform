@@ -8,6 +8,22 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OaProjectionSyncServiceTests(unittest.TestCase):
+    def test_month_sync_with_no_source_records_clears_existing_projection_scope(self) -> None:
+        source_adapter = FakeSourceAdapter(months=[], records_by_month={"2026-06": []})
+        projection_repository = FakeProjectionRepository()
+        queue_repository = FakeQueueRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source_adapter,
+            projection_repository=projection_repository,
+            queue_repository=queue_repository,
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(result["scanned_count"], 0)
+        self.assertEqual(projection_repository.stale_completed_scopes, ["2026-06"])
+        self.assertEqual(projection_repository.non_completed_scopes, ["2026-06"])
+
     def test_oa_sync_marks_oa_pending_payment_read_model_dirty_for_progress_rows(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
@@ -26,7 +42,10 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         result = service.handle_runtime_event(_event("all"))
 
         self.assertEqual(result["scanned_count"], 2)
-        self.assertEqual([record.workflow_status for record in projection_repository.saved_records], ["completed", "in_progress"])
+        self.assertEqual(result["upserted_count"], 1)
+        self.assertEqual(result["removed_non_completed_count"], 1)
+        self.assertEqual([record.workflow_status for record in projection_repository.saved_records], ["completed"])
+        self.assertEqual([record.workflow_status for record in projection_repository.deleted_non_completed_records], ["completed", "in_progress"])
         self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
 
@@ -46,6 +65,9 @@ class FakeSourceAdapter:
 class FakeProjectionRepository:
     def __init__(self) -> None:
         self.saved_records: list[OAApplicationRecord] = []
+        self.deleted_non_completed_records: list[OAApplicationRecord] = []
+        self.stale_completed_scopes: list[str] = []
+        self.non_completed_scopes: list[str] = []
         self.sync_runs: list[dict[str, object]] = []
 
     def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
@@ -54,6 +76,26 @@ class FakeProjectionRepository:
 
     def prune_records_before(self, cutoff_month: str) -> list[str]:
         return []
+
+    def delete_stale_completed_application_records(
+        self,
+        *,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+        scanned_records: list[OAApplicationRecord],
+    ) -> list[str]:
+        self.stale_completed_scopes.append(scope_key)
+        return []
+
+    def delete_non_completed_application_records(
+        self,
+        *,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+    ) -> list[str]:
+        self.non_completed_scopes.append(scope_key)
+        self.deleted_non_completed_records = list(records)
+        return [record.id for record in records if record.workflow_status == "in_progress"]
 
     def record_sync_run(self, payload: dict[str, object]) -> None:
         self.sync_runs.append(dict(payload))

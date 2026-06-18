@@ -208,6 +208,8 @@ export default function OaPendingPaymentsPage() {
     </div>
   ), []);
   const isEmpty = !loading && !error && rows.length === 0;
+  const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
+  const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
 
   return (
     <>
@@ -225,6 +227,7 @@ export default function OaPendingPaymentsPage() {
                       type="button"
                     >
                       已完成 OA
+                      {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
                     </button>
                     <button
                       className={query.viewMode === "in_progress" ? "oa-pending-payments-view-toggle__button oa-pending-payments-view-toggle__button--active" : "oa-pending-payments-view-toggle__button"}
@@ -232,6 +235,7 @@ export default function OaPendingPaymentsPage() {
                       type="button"
                     >
                       进行中 OA
+                      {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
                     </button>
                   </div>
                   <label className="oa-pending-payments-field">
@@ -306,6 +310,10 @@ export default function OaPendingPaymentsPage() {
       />
     </>
   );
+}
+
+function formatViewCount(count: number | null | undefined): string {
+  return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
 function confirmBankTransactionId(row: OaPendingPaymentRow): string {

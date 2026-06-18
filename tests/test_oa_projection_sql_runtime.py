@@ -176,6 +176,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-001"])
         self.assertEqual(records[0].project_name, "玉烟维护项目")
         self.assertEqual(records[0].workflow_status, "completed")
+        self.assertIn("workflow_status = 'completed'", connection.executed[0][0])
 
     def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

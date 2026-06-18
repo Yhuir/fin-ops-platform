@@ -26,7 +26,7 @@ import {
   savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { OperationBarrierTimeoutError, operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
@@ -51,52 +51,74 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
 type RelationTarget = { transactionId: string } | null;
 type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
-type ExpenseStatusShortcut = "paid_pending_invoice" | "paid_invoiced";
-type StatusFilterSelection = PendingInvoiceFilter | ExpenseStatusShortcut;
+type StatusFilterSelection =
+  | "paid_pending_invoice"
+  | "paid_invoiced"
+  | "bank_statement_as_invoice"
+  | "no_invoice_required"
+  | "income_pending_invoice"
+  | "income_no_invoice_required"
+  | "cash_income";
 
-const EXPENSE_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
-  all: "全部",
-  requires_invoice: "需要开票",
-  bank_statement_as_invoice: "流水代替发票",
-  no_invoice_required: "无需开票",
-  cash_income: "现金收入",
+type StatusFilterOption = {
+  value: StatusFilterSelection;
+  label: string;
+  backendFilter: PendingInvoiceFilter;
 };
 
-const INCOME_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
-  all: "全部",
-  requires_invoice: "待开发票",
-  bank_statement_as_invoice: "流水代替发票",
-  no_invoice_required: "无需开票",
-  cash_income: "现金收入",
-};
+const EXPENSE_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { value: "paid_pending_invoice", label: "已支付待开票", backendFilter: "requires_invoice" },
+  { value: "paid_invoiced", label: "已支付已开票", backendFilter: "requires_invoice" },
+  { value: "bank_statement_as_invoice", label: "流水代替发票", backendFilter: "bank_statement_as_invoice" },
+  { value: "no_invoice_required", label: "无需开票", backendFilter: "no_invoice_required" },
+];
 
-const EXPENSE_STATUS_SHORTCUT_LABELS: Record<ExpenseStatusShortcut, string> = {
-  paid_pending_invoice: "已支付待开票",
-  paid_invoiced: "已支付已开票",
-};
+const INCOME_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { value: "income_pending_invoice", label: "待开发票", backendFilter: "requires_invoice" },
+  { value: "income_no_invoice_required", label: "无需开票", backendFilter: "no_invoice_required" },
+  { value: "cash_income", label: "现金收入", backendFilter: "cash_income" },
+];
 
-function isExpenseStatusShortcut(filter: StatusFilterSelection): filter is ExpenseStatusShortcut {
-  return filter === "paid_pending_invoice" || filter === "paid_invoiced";
+const DEFAULT_STATUS_FILTERS: StatusFilterSelection[] = ["paid_pending_invoice"];
+
+function statusFilterOptionsForDirection(direction: PendingInvoiceDirection) {
+  if (direction === "expense") {
+    return EXPENSE_STATUS_FILTER_OPTIONS;
+  }
+  if (direction === "income") {
+    return INCOME_STATUS_FILTER_OPTIONS;
+  }
+  return [];
 }
 
-function effectiveBackendFilter(filter: StatusFilterSelection): PendingInvoiceFilter {
-  return isExpenseStatusShortcut(filter) ? "requires_invoice" : filter;
+function statusFilterLabel(direction: PendingInvoiceDirection, selectedFilters: StatusFilterSelection[]) {
+  const options = statusFilterOptionsForDirection(direction);
+  if (selectedFilters.length === 0 || options.length === 0) {
+    return "全部";
+  }
+  if (selectedFilters.length === 1) {
+    return options.find((option) => option.value === selectedFilters[0])?.label ?? "全部";
+  }
+  return `已选 ${selectedFilters.length} 项`;
+}
+
+function effectiveBackendFilter(direction: PendingInvoiceDirection, selectedFilters: StatusFilterSelection[]): PendingInvoiceFilter {
+  const selected = new Set(selectedFilters);
+  const backendFilters = new Set(
+    statusFilterOptionsForDirection(direction)
+      .filter((option) => selected.has(option.value))
+      .map((option) => option.backendFilter),
+  );
+  return backendFilters.size === 1 ? [...backendFilters][0] : "all";
 }
 
 function pendingInvoiceRuleRefreshScopes(
   rulesDirection: RulesDirection,
   currentDirection: PendingInvoiceDirection,
-  currentFilter: StatusFilterSelection,
+  currentFilters: StatusFilterSelection[],
 ) {
-  const refreshFilter = currentDirection === rulesDirection ? effectiveBackendFilter(currentFilter) : "all";
+  const refreshFilter = currentDirection === rulesDirection ? effectiveBackendFilter(currentDirection, currentFilters) : "all";
   return [`${rulesDirection}:${refreshFilter}`];
-}
-
-function filterLabel(direction: PendingInvoiceDirection, filter: StatusFilterSelection) {
-  if (direction === "expense" && isExpenseStatusShortcut(filter)) {
-    return EXPENSE_STATUS_SHORTCUT_LABELS[filter];
-  }
-  return (direction === "income" ? INCOME_FILTER_LABELS : EXPENSE_FILTER_LABELS)[filter as PendingInvoiceFilter];
 }
 
 function transactionIdForRow(row: PendingInvoiceRow) {
@@ -177,7 +199,7 @@ export default function PendingInvoicesPage() {
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
-  const [filter, setFilter] = useState<StatusFilterSelection>("all");
+  const [statusFilters, setStatusFilters] = useState<StatusFilterSelection[]>(DEFAULT_STATUS_FILTERS);
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
   const [sourceSummary, setSourceSummary] = useState<PendingInvoiceSourceSummary | null>(null);
@@ -206,24 +228,22 @@ export default function PendingInvoicesPage() {
   const filterOpen = filterMenuOpen;
 
   const queryFilters = useMemo<PendingInvoiceColumnFilter[]>(() => {
-    const baseFilters = isExpenseStatusShortcut(filter)
-      ? columnFilters.filter((item) => item.field !== "status_code")
-      : columnFilters;
-    return isExpenseStatusShortcut(filter)
-      ? [...baseFilters, { field: "status_code", operator: "in" as const, values: [filter] }]
+    const baseFilters = columnFilters.filter((item) => item.field !== "status_code");
+    return statusFilters.length > 0
+      ? [...baseFilters, { field: "status_code", operator: "in" as const, values: statusFilters }]
       : baseFilters;
-  }, [columnFilters, filter]);
+  }, [columnFilters, statusFilters]);
 
   const query = useMemo<FetchPendingInvoiceRowsRequest>(() => ({
     direction,
-    filter: effectiveBackendFilter(filter),
+    filter: effectiveBackendFilter(direction, statusFilters),
     keyword,
     page,
     pageSize,
     filters: queryFilters,
     sortField,
     sortDirection,
-  }), [direction, filter, keyword, page, pageSize, queryFilters, sortDirection, sortField]);
+  }), [direction, keyword, page, pageSize, queryFilters, sortDirection, sortField, statusFilters]);
 
   const applyRowsPayload = useCallback((payload: PendingInvoiceRowsResponse) => {
     setRows(payload.rows);
@@ -338,21 +358,7 @@ export default function PendingInvoicesPage() {
     };
   }, []);
 
-  const filterOptions = useMemo<StatusFilterSelection[]>(() => (
-    direction === "expense" ? [
-    "all",
-    "requires_invoice",
-    "paid_pending_invoice",
-    "paid_invoiced",
-    "bank_statement_as_invoice",
-    "no_invoice_required",
-  ] : direction === "income" ? [
-    "all",
-    "requires_invoice",
-    "no_invoice_required",
-    "cash_income",
-  ] : ["all"]
-  ), [direction]);
+  const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
 
   const tableConfig = useMemo(() => ({
     sortField,
@@ -473,9 +479,15 @@ export default function PendingInvoicesPage() {
       action: async ({ setMessage }) => {
         const savedPayload = await savePendingInvoiceRules(payload, rulesDirection);
         setMessage("正在等待待找发票读模型同步...");
-        await waitForOperationFreshness(
-          operationBarrierTargets("pending_invoice", pendingInvoiceRuleRefreshScopes(rulesDirection, direction, filter)),
-        );
+        try {
+          await waitForOperationFreshness(
+            operationBarrierTargets("pending_invoice", pendingInvoiceRuleRefreshScopes(rulesDirection, direction, statusFilters)),
+          );
+        } catch (caught) {
+          if (!(caught instanceof OperationBarrierTimeoutError)) {
+            throw caught;
+          }
+        }
         setMessage("正在刷新待找发票...");
         const rowsPayload = await fetchPendingInvoiceRows(query);
         applyRowsPayload(rowsPayload);
@@ -487,16 +499,38 @@ export default function PendingInvoicesPage() {
       return result.value;
     }
     throw result.error;
-  }, [applyRowsPayload, direction, filter, query, rulesDirection, runOperation]);
+  }, [applyRowsPayload, direction, query, rulesDirection, runOperation, statusFilters]);
   const loadCandidates = useCallback(fetchPendingInvoiceCandidatesBatch, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
 
   const handleDirectionChange = useCallback((nextDirection: PendingInvoiceDirection) => {
     setDirection(nextDirection);
-    setFilter("all");
+    setStatusFilters([]);
     setColumnFilters([]);
     clearSelectedTransactions();
+    setPage(1);
+  }, [clearSelectedTransactions]);
+
+  const handleToggleStatusFilter = useCallback((value: StatusFilterSelection) => {
+    clearSelectedTransactions();
+    setStatusFilters((current) => (
+      current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value]
+    ));
+    setPage(1);
+  }, [clearSelectedTransactions]);
+
+  const handleSelectAllStatusFilters = useCallback(() => {
+    clearSelectedTransactions();
+    setStatusFilters(filterOptions.map((option) => option.value));
+    setPage(1);
+  }, [clearSelectedTransactions, filterOptions]);
+
+  const handleClearStatusFilters = useCallback(() => {
+    clearSelectedTransactions();
+    setStatusFilters([]);
     setPage(1);
   }, [clearSelectedTransactions]);
 
@@ -574,6 +608,7 @@ export default function PendingInvoicesPage() {
   };
   const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
   const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const statusFilterSummary = statusFilterLabel(direction, statusFilters);
 
   const statusFilterControl = (
     <div
@@ -587,31 +622,47 @@ export default function PendingInvoicesPage() {
       <button
         aria-expanded={filterOpen ? "true" : undefined}
         aria-haspopup="menu"
-        aria-label={`筛选发票获取状态：${filterLabel(direction, filter)}`}
+        aria-label={`筛选发票获取状态：${statusFilterSummary}`}
         className="pending-invoice-status-filter-button"
         onClick={() => setFilterMenuOpen((current) => !current)}
         type="button"
       >
-        <span>{filterLabel(direction, filter)}</span>
+        <span>{statusFilterSummary}</span>
         <ChevronDown aria-hidden="true" size={12} strokeWidth={2.4} />
       </button>
       {filterOpen ? (
         <div className="pending-invoice-status-filter-menu" role="menu">
-          {filterOptions.map((option) => (
+          <div className="pending-invoice-status-filter-menu-actions">
             <button
-              aria-current={option === filter ? "true" : undefined}
-              className="pending-invoice-status-filter-menu-item"
-              key={option}
-              onClick={() => {
-                setFilter(option);
-                clearSelectedTransactions();
-                setPage(1);
-                setFilterMenuOpen(false);
-              }}
+              className="pending-invoice-status-filter-menu-item pending-invoice-status-filter-menu-action"
+              onClick={handleSelectAllStatusFilters}
               role="menuitem"
               type="button"
             >
-              {filterLabel(direction, option)}
+              全选
+            </button>
+            <button
+              className="pending-invoice-status-filter-menu-item pending-invoice-status-filter-menu-action"
+              onClick={handleClearStatusFilters}
+              role="menuitem"
+              type="button"
+            >
+              清空
+            </button>
+          </div>
+          {filterOptions.map((option) => (
+            <button
+              aria-checked={statusFilters.includes(option.value)}
+              className="pending-invoice-status-filter-menu-item"
+              key={option.value}
+              onClick={() => handleToggleStatusFilter(option.value)}
+              role="menuitemcheckbox"
+              type="button"
+            >
+              <span className="pending-invoice-status-filter-menu-check" aria-hidden="true">
+                {statusFilters.includes(option.value) ? "✓" : ""}
+              </span>
+              <span>{option.label}</span>
             </button>
           ))}
         </div>

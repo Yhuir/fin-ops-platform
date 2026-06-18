@@ -682,8 +682,10 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 契约要求：
 
 - rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
-- rows 和 filter-options 接受 `view_mode=completed|in_progress`，默认 `completed`。`completed` 只返回已完成或历史未知 workflow status 的 OA；`in_progress` 只返回 `oa.workflowStatus=in_progress` 的 OA。
+- rows 和 filter-options 接受 `view_mode=completed|in_progress`，默认 `completed`。OA 范围由 OA 待付款专用 payment-admitted projection 提供：先由 OA MySQL `t_payment_simple.flow_id` 准入，再匹配 OA Mongo `form_data._id`；未匹配到准入 flow_id 的 OA 不进入正常列表。普通 `app.oa_applications` projection 只承载已完成/历史未知 OA，不作为进行中 OA 的扫描来源。
+- `completed` 只返回已准入且已完成或历史未知 workflow status 的 OA；`in_progress` 只返回已准入且 `oa.workflowStatus=in_progress` 的 OA。`t_payment_simple.id` 不是 OA ID，不能作为 OA 匹配 key。
 - 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
+- rows `summary` 必须包含 `viewCounts.completed/in_progress`，用于页面展示切换按钮数量；该统计使用同一搜索、月份、交易日期和 column filters，但不受当前 `view_mode` 限制。
 - rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
 - `paymentStatus` 不返回 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计时返回 `pending_review`，多 OA 合并付款按 relation group 合计后判定。
 - rows 可返回 `oaPaymentWriteback`，用于表达 OA MySQL `t_payment_simple` 写回状态。`oaPaymentWriteback.code` 至少支持 `written` / `not_written`，`syncStatus` 表达 `ready`、`unavailable`、`flow_id_missing` 或 `not_required` 等同步语义。

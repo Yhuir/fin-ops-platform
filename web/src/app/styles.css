@@ -1844,6 +1844,9 @@ textarea {
 }
 
 .oa-pending-payments-view-toggle__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-1);
   min-height: 34px;
   border: 0;
   border-right: 1px solid var(--fp-border);
@@ -1871,6 +1874,13 @@ textarea {
 .oa-pending-payments-view-toggle__button--active {
   background: var(--fp-primary);
   color: var(--fp-surface);
+}
+
+.oa-pending-payments-view-toggle__count {
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+  opacity: 0.82;
+  white-space: nowrap;
 }
 
 .oa-pending-payments-field {
@@ -2807,6 +2817,18 @@ textarea {
     background-color var(--motion-fast) var(--ease-out-quart);
 }
 
+.output-invoice-collections-field .month-picker {
+  width: 100%;
+}
+
+.output-invoice-collections-field .month-picker-trigger {
+  width: 100%;
+  min-height: 34px;
+  justify-content: center;
+  border-radius: var(--fp-radius-sm);
+  font-size: var(--fp-text-body);
+}
+
 .output-invoice-collections-field select {
   appearance: auto;
 }
@@ -3222,8 +3244,8 @@ textarea {
 }
 
 .output-invoice-collections-table-shell {
-  min-height: 320px;
-  max-height: calc(100vh - 214px);
+  min-height: 640px;
+  max-height: calc(200vh - 428px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -7235,7 +7257,7 @@ textarea {
   position: fixed;
   z-index: 60;
   display: grid;
-  min-width: 128px;
+  min-width: 156px;
   margin-top: 28px;
   padding: 4px;
   border: 1px solid var(--fp-border);
@@ -7244,7 +7266,19 @@ textarea {
   box-shadow: var(--fp-shadow-popover);
 }
 
+.pending-invoice-status-filter-menu-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--fp-border-subtle);
+}
+
 .pending-invoice-status-filter-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-height: 30px;
   padding: 0 var(--fp-space-3);
   border: 0;
@@ -7260,9 +7294,24 @@ textarea {
     color var(--motion-fast) var(--ease-standard);
 }
 
+.pending-invoice-status-filter-menu-action {
+  justify-content: center;
+  color: var(--fp-text-secondary);
+}
+
+.pending-invoice-status-filter-menu-check {
+  display: inline-grid;
+  width: 14px;
+  min-width: 14px;
+  place-items: center;
+  color: var(--fp-accent);
+  font-size: 12px;
+}
+
 .pending-invoice-status-filter-menu-item:hover,
 .pending-invoice-status-filter-menu-item:focus-visible,
-.pending-invoice-status-filter-menu-item[aria-current="true"] {
+.pending-invoice-status-filter-menu-item[aria-current="true"],
+.pending-invoice-status-filter-menu-item[aria-checked="true"] {
   background: var(--fp-accent-soft);
   color: var(--fp-accent);
   outline: none;
@@ -10864,6 +10913,10 @@ body.workbench-focus-mode .global-header {
 
 .month-picker-chip-grid.months {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.month-picker-chip-grid.all {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .month-picker-chip {

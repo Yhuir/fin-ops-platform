@@ -14,6 +14,8 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     oa_pending_payment_source_versions,
     output_invoice_collection_source_versions,
 )
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
+from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
@@ -31,11 +33,20 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 class InvoiceUsageCollectionSqlProjectionBuilder:
     """Build SQL read models for invoice relation pages outside the API hot path."""
 
-    def __init__(self, *, connection: Any, workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        connection: Any,
+        workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
+        payment_status_repository: OAPaymentStatusRepository | None = None,
+        oa_source_adapter: Any | None = None,
+    ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = PostgresReadModelRepository(connection)
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
+        self._payment_status_repository = payment_status_repository
+        self._oa_source_adapter = oa_source_adapter
         self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
             read_model_repository=self._read_repository,
         )
@@ -53,19 +64,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         normalized_scope_key = str(scope_key or "").strip()
         if MONTH_SCOPE_RE.match(normalized_scope_key):
             return [normalized_scope_key]
-        rows = self._connection.fetch_all(
-            """
-            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-            from app.oa_applications
-            where scope_month is not null
-            order by scope_key desc
-            """
-        )
-        return [
-            str(row.get("scope_key"))
-            for row in rows
-            if isinstance(row, dict) and MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))
-        ]
+        return [month for month in self._oa_pending_payment_projection().list_available_months() if MONTH_SCOPE_RE.match(month)]
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
@@ -199,8 +198,15 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
-            oa_projection=self._oa_projection_repository,
+            oa_projection=self._oa_pending_payment_projection(),
+            payment_status_repository=self._payment_status_repository,
             require_fresh_relations=True,
+        )
+
+    def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
+        return PaymentAdmittedOAProjectionAdapter(
+            source_adapter=self._oa_source_adapter,
+            payment_status_repository=self._payment_status_repository,
         )
 
     def _import_service(self) -> ImportNormalizationService:

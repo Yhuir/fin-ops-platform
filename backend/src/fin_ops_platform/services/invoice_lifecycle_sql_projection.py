@@ -15,6 +15,8 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     oa_pending_payment_source_versions,
     output_invoice_collection_source_versions,
 )
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
+from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
@@ -39,11 +41,15 @@ class InvoiceLifecycleSqlProjectionBuilder:
         connection: Any,
         read_model_repository: PostgresReadModelRepository | None = None,
         workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
+        payment_status_repository: OAPaymentStatusRepository | None = None,
+        oa_source_adapter: Any | None = None,
     ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
+        self._payment_status_repository = payment_status_repository
+        self._oa_source_adapter = oa_source_adapter
         self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
             read_model_repository=self._read_repository,
         )
@@ -199,7 +205,8 @@ class InvoiceLifecycleSqlProjectionBuilder:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
-            oa_projection=self._oa_projection_repository,
+            oa_projection=self._oa_pending_payment_projection(),
+            payment_status_repository=self._payment_status_repository,
             lifecycle_policy=self._policy,
             require_fresh_relations=True,
         )
@@ -267,15 +274,13 @@ class InvoiceLifecycleSqlProjectionBuilder:
         return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
 
     def _oa_month_shards(self) -> list[str]:
-        rows = self._connection.fetch_all(
-            """
-            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-            from app.oa_applications
-            where scope_month is not null
-            order by scope_key desc
-            """
+        return [month for month in self._oa_pending_payment_projection().list_available_months() if MONTH_SCOPE_RE.match(month)]
+
+    def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
+        return PaymentAdmittedOAProjectionAdapter(
+            source_adapter=self._oa_source_adapter,
+            payment_status_repository=self._payment_status_repository,
         )
-        return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
 
     def _bank_transaction_month_shards(self) -> list[str]:
         rows = self._connection.fetch_all(

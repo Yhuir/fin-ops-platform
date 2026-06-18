@@ -1369,27 +1369,30 @@ class PostgresReadModelRepository:
         scope_key = _invoice_relation_scope_key(month)
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
-        where: list[str] = []
-        params: list[Any] = []
+        base_where: list[str] = []
+        base_params: list[Any] = []
         view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
+        if scope_key != "all":
+            base_where.append("scope_key = %s")
+            base_params.append(scope_key)
+        if trade_date_from:
+            base_where.append("bank_trade_time >= %s::date")
+            base_params.append(trade_date_from)
+        if trade_date_to:
+            base_where.append("bank_trade_time < (%s::date + interval '1 day')")
+            base_params.append(trade_date_to)
+        if keyword:
+            base_where.append("searchable_text ilike %s")
+            base_params.append(f"%{keyword}%")
+        for clause, clause_params in _invoice_relation_filter_clauses(filters, OA_PENDING_PAYMENT_FILTER_FIELDS):
+            base_where.append(clause)
+            base_params.extend(clause_params)
+        where = list(base_where)
+        params = list(base_params)
         if view_mode_clause:
             where.append(view_mode_clause)
-        if scope_key != "all":
-            where.append("scope_key = %s")
-            params.append(scope_key)
-        if trade_date_from:
-            where.append("bank_trade_time >= %s::date")
-            params.append(trade_date_from)
-        if trade_date_to:
-            where.append("bank_trade_time < (%s::date + interval '1 day')")
-            params.append(trade_date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _invoice_relation_filter_clauses(filters, OA_PENDING_PAYMENT_FILTER_FIELDS):
-            where.append(clause)
-            params.extend(clause_params)
         where_sql = " and ".join(where) if where else "true"
+        base_where_sql = " and ".join(base_where) if base_where else "true"
         summary_row = self._connection.fetch_one(
             f"""
             select
@@ -1401,17 +1404,31 @@ class PostgresReadModelRepository:
             """,
             tuple(params),
         )
+        view_counts_row = self._connection.fetch_one(
+            f"""
+            select
+                coalesce(sum(case when oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed' then 1 else 0 end), 0) as completed_count,
+                coalesce(sum(case when oa_workflow_status = 'in_progress' then 1 else 0 end), 0) as in_progress_count
+            from read_model.oa_pending_payment_rows
+            where {base_where_sql}
+            """,
+            tuple(base_params),
+        )
+        view_counts = {
+            "completed": int_value(view_counts_row.get("completed_count") if isinstance(view_counts_row, dict) else 0, 0),
+            "in_progress": int_value(view_counts_row.get("in_progress_count") if isinstance(view_counts_row, dict) else 0, 0),
+        }
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
         refresh_status = self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key)
         scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key=scope_key)
         source_versions = self._oa_pending_payment_scope_source_versions(scope_key=scope_key, scope_row=scope_row)
         if total == 0:
-            if scope_row is None:
+            if scope_row is None and sum(view_counts.values()) == 0:
                 return None
             return {
                 "rows": [],
                 "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
-                "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00"},
+                "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00", "viewCounts": view_counts},
                 "refresh_status": refresh_status,
                 "source_versions": source_versions,
                 "read_model_scope_key": scope_key,
@@ -1439,6 +1456,7 @@ class PostgresReadModelRepository:
                 "rowCount": total,
                 "oaAmountTotal": decimal_text(summary_row.get("oa_amount_total") if isinstance(summary_row, dict) else None) or "0.00",
                 "bankPaidTotal": decimal_text(summary_row.get("bank_paid_total") if isinstance(summary_row, dict) else None) or "0.00",
+                "viewCounts": view_counts,
             },
             "refresh_status": refresh_status,
             "source_versions": source_versions,

@@ -14,6 +14,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text,
     text_list,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
 
 
@@ -474,6 +475,7 @@ def _workbench_relation_oa_scope_keys(connection: Any, relation: dict[str, Any])
         from app.oa_applications
         where application_date is not null
           and row_id = any(%s)
+          and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
         order by scope_key
         """,
         (row_ids,),

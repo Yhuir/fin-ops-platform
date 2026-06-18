@@ -28,6 +28,20 @@
 
 ## 历史记录
 
+## 2026-06-18 - 发票页侧栏顺序调整
+
+- 目标：将侧栏红框标注的 `税金抵扣`、`待找发票`、`进项发票使用情况`、`销项发票收款情况` 移到 `财务业务` 分组底部，并保持在 `系统操作` 分组上方。
+- 影响范围：`web/src/app/pageRegistry.tsx` 的 app page definition 顺序，以及 `web/src/test/App.test.tsx` 中对应侧栏顺序回归断言。
+- 关键决策：继续以 `pageRegistry.tsx` 作为 route/sidebar/preload/pageKey 唯一事实源；不修改 `AppSidebar` 渲染、route path、pageKey、权限、API、read model 或页面组件。
+- 文档影响：更新本实施记录和 `tests.md` 场景覆盖；长期产品、API、运行时、运维事实未变化。
+- 测试覆盖：`App.test.tsx` 保护四个指定发票页位于财务分组末尾，并确认系统操作分组仍紧随其后。
+- 验证命令：
+  - `cd web && npx vitest run src/test/App.test.tsx src/test/AppSidebar.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check -- web/src/app/pageRegistry.tsx web/src/test/App.test.tsx`
+- 未测风险：未跑真实浏览器截图；此次为 registry 顺序调整，视觉像素和移动端 drawer 行为仍由既有 shell e2e 覆盖。
+- 后续事项：无。
+
 ## 2026-06-11 - App Shell 与导航首轮测试闭环
 
 - 目标：完成 app shell/navigation 模块 CodeGraph 审计、测试矩阵、状态机、实施记录和回归测试补强。

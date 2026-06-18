@@ -12,6 +12,7 @@ from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
     PostgresOAProjectionRepository,
@@ -77,6 +78,7 @@ class WorkbenchSqlProjectionBuilder:
                 select distinct to_char(scope_month, 'YYYY-MM') as scope_key
                 from app.oa_applications
                 where scope_month is not null
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
                 union
                 select distinct to_char(txn_month, 'YYYY-MM') as scope_key
                 from app.bank_transactions
@@ -268,6 +270,7 @@ class WorkbenchSqlProjectionBuilder:
             select row_id, applicant, application_date, project_name, amount, status, normalized_payload, raw_payload
             from app.oa_applications
             where scope_month = %s::date
+              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             order by row_id
             """,
             (month_start(month),),

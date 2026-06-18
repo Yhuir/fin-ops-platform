@@ -47,6 +47,27 @@ class FakePaymentStatusRepository:
         return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
 
 
+class FakeAdmissionPaymentStatusRepository:
+    def __init__(self, *, flow_ids: dict[str, str], admitted_flow_ids: set[str]) -> None:
+        self.flow_ids = dict(flow_ids)
+        self.admitted_flow_ids = set(admitted_flow_ids)
+
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        return {
+            flow_id: OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
+            for flow_id in self.admitted_flow_ids
+        }
+
+    def resolve_flow_id(self, record: OAApplicationRecord) -> str | None:
+        return self.flow_ids.get(record.id)
+
+    def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
+        return self.list_payment_statuses().get(flow_id)
+
+    def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
+
+
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
     def test_active_relation_group_returns_one_row_with_aggregated_totals(self) -> None:
         bank_group = self._bank("bank-group", "4450.00")
@@ -112,7 +133,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oaPaymentWriteback"]["code"], "written")
         self.assertEqual(row["oaPaymentWriteback"]["label"], "已写回")
         self.assertEqual(row["oaPaymentWriteback"]["flowIds"], ["proc-paid"])
-        self.assertEqual(payment_repository.resolved_records, ["oa-paid"])
+        self.assertEqual(payment_repository.resolved_records, ["oa-paid", "oa-paid"])
 
     def test_grouped_multiple_oa_and_multiple_banks_are_not_marked_overpaid(self) -> None:
         bank_first = self._bank("bank-group-first", "21966.70")
@@ -247,6 +268,32 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         with self.assertRaises(OaPendingPaymentError) as context:
             service.list_rows(view_mode="bad")
         self.assertEqual(context.exception.error_code, "invalid_view_mode")
+
+    def test_payment_status_table_admits_oa_rows_before_view_mode_filtering(self) -> None:
+        payment_repository = FakeAdmissionPaymentStatusRepository(
+            flow_ids={
+                "oa-completed-admitted": "mongo-completed",
+                "oa-progress-admitted": "mongo-progress",
+                "oa-progress-duplicate": "mongo-duplicate",
+            },
+            admitted_flow_ids={"mongo-completed", "mongo-progress"},
+        )
+        service = self._service(
+            oa_records=[
+                self._oa("oa-completed-admitted", "张三", "30.00", workflow_status="completed"),
+                self._oa("oa-progress-admitted", "李四", "40.00", workflow_status="in_progress"),
+                self._oa("oa-progress-duplicate", "李四", "40.00", workflow_status="in_progress"),
+            ],
+            payment_repository=payment_repository,
+        )
+
+        completed_payload = service.list_rows(page_size=20)
+        progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
+
+        self.assertEqual([row["oa"]["id"] for row in completed_payload["rows"]], ["oa-completed-admitted"])
+        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-admitted"])
+        self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
+        self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
 
     def test_page_size_limit_protects_first_screen_slo(self) -> None:
         service = self._service(

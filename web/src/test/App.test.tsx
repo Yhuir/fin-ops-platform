@@ -37,18 +37,13 @@ describe("Finance operations shell", () => {
     expect(sidebarGroups.map((group) => group.title)).toEqual(["财务业务", "系统操作"]);
   });
 
-  test("places invoice read models, no OA bank batches, and batch accounting before turnover ledger", () => {
+  test("places selected invoice pages at the bottom of finance before system operations", () => {
     const financeLabels = sidebarGroups.find((group) => group.title === "财务业务")?.items.map((item) => item.label);
+    const systemLabels = sidebarGroups.find((group) => group.title === "系统操作")?.items.map((item) => item.label);
     expect(financeLabels).toBeDefined();
-    const bankDetailsIndex = financeLabels?.indexOf("银行明细") ?? -1;
-    expect(bankDetailsIndex).toBeGreaterThanOrEqual(0);
-    expect(financeLabels?.[bankDetailsIndex + 1]).toBe("待找发票");
-    expect(financeLabels?.[bankDetailsIndex + 2]).toBe("进项发票使用情况");
-    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("OA待付款核对");
-    expect(financeLabels?.[bankDetailsIndex + 4]).toBe("销项发票收款情况");
-    expect(financeLabels?.[bankDetailsIndex + 5]).toBe("免OA流水批量处理");
-    expect(financeLabels?.[bankDetailsIndex + 6]).toBe("批量账务");
-    expect(financeLabels?.[bankDetailsIndex + 7]).toBe("外部往来款管理");
+    expect(systemLabels).toBeDefined();
+    expect(financeLabels?.slice(-4)).toEqual(["税金抵扣", "待找发票", "进项发票使用情况", "销项发票收款情况"]);
+    expect(systemLabels?.[0]).toBe("设置");
   });
 
   test("assigns sidebar icons from each page's business facts", () => {

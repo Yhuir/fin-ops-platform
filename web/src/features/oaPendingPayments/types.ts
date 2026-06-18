@@ -163,6 +163,7 @@ export type OaPendingPaymentSummary = {
   oaAmountTotal?: string;
   bankPaidTotal?: string;
   statusCounts?: Record<string, number>;
+  viewCounts?: Partial<Record<OaPendingPaymentViewMode, number>>;
 };
 
 export type OaPendingPaymentRowsResponse = {

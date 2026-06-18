@@ -7,7 +7,7 @@ from typing import Any
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 from fin_ops_platform.services.postgres_repositories.common import month_start, text, text_list
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL, OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
 
@@ -41,7 +41,10 @@ class WorkbenchRelationSqlProjectionBuilder:
                 union
                 select invoice_month as scope_month from app.invoices where invoice_month is not null and status <> 'deleted'
                 union
-                select date_trunc('month', application_date)::date as scope_month from app.oa_applications where application_date is not null
+                select date_trunc('month', application_date)::date as scope_month
+                from app.oa_applications
+                where application_date is not null
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             ) months
             order by scope_key desc
             """
@@ -134,6 +137,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             select row_id, form_id, form_type, status, applicant, application_date, project_name, amount, raw_payload
             from app.oa_applications
             where (date_trunc('month', application_date)::date = %s::date or row_id = any(%s))
+              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             """,
             (month_start(month), row_ids),
         )

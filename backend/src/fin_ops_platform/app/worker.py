@@ -51,6 +51,7 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NoOaBankBatchReadModelRefreshService,
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
+from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION, PostgresOAProjectionRepository
@@ -203,6 +204,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _read_model_handler(handler: Any) -> Any:
         return readiness_reporter.wrap_handler(handler) if readiness_reporter is not None else handler
 
+    oa_payment_source_adapter: MongoOAAdapter | None = None
+
+    def _oa_payment_source_adapter() -> MongoOAAdapter | None:
+        nonlocal oa_payment_source_adapter
+        if oa_payment_source_adapter is not None:
+            return oa_payment_source_adapter
+        if connection is None:
+            return None
+        oa_settings = load_mongo_oa_settings(default_data_dir())
+        if oa_settings is None:
+            return None
+        ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
+        adapter = _build_oa_sync_source_adapter(
+            settings=oa_settings,
+            attachment_invoice_cache=ops_tax_etc_repository,
+        )
+        oa_runtime_settings = _load_oa_runtime_settings(connection)
+        adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
+        oa_payment_source_adapter = adapter
+        return adapter
+
     handlers = {}
     if args.enable_file_object_migration:
         object_storage_settings = ObjectStorageSettings.from_env()
@@ -229,6 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             settings=oa_settings,
             attachment_invoice_cache=ops_tax_etc_repository,
         )
+        oa_payment_source_adapter = source_adapter
         oa_runtime_settings = _load_oa_runtime_settings(connection)
         source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
@@ -387,10 +410,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "bank_account_balance.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_account_balance.read_model.refresh")
     if args.enable_invoice_lifecycle_read_model_refresh:
+        oa_payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
         projection_builder = InvoiceLifecycleSqlProjectionBuilder(
             connection=connection,
             read_model_repository=read_model_repository,
             workbench_relation_read_facade=workbench_relation_read_facade,
+            payment_status_repository=oa_payment_status_repository,
+            oa_source_adapter=_oa_payment_source_adapter(),
         )
         refresh_service = InvoiceLifecycleReadModelRefreshService(
             projection_builder=projection_builder,
@@ -404,9 +430,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         or args.enable_output_invoice_collection_read_model_refresh
         or args.enable_oa_pending_payment_read_model_refresh
     ):
+        oa_payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
         projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=connection,
             workbench_relation_read_facade=workbench_relation_read_facade,
+            payment_status_repository=oa_payment_status_repository,
+            oa_source_adapter=_oa_payment_source_adapter(),
         )
         refresh_service = InvoiceUsageCollectionReadModelRefreshService(
             projection_builder=projection_builder,

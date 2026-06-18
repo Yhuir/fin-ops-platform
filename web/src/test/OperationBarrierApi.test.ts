@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   OperationBarrierBlockedError,
+  OperationBarrierTimeoutError,
   fetchOperationBarrierStatus,
   waitForOperationFreshness,
 } from "../features/operationBarrier/api";
@@ -79,5 +80,37 @@ describe("operation barrier API", () => {
       expect((caught as Error).message).toBe("操作同步被阻断，往来款台账仍在同步，请稍后刷新后重试。");
       expect((caught as Error).message).not.toMatch(/refresh outbox blocked|worker failed/);
     }
+  });
+
+  test("throws timeout error when targets keep refreshing", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      status: "refreshing",
+      fresh: false,
+      targets: [],
+      blocked_targets: [],
+      refreshing_targets: [
+        {
+          read_model_key: "pending_invoice",
+          scope_type: "pending_invoice",
+          scope_key: "expense:all",
+          status: "refreshing",
+          fresh: false,
+          blocking: false,
+          raw_status: "dirty",
+        },
+      ],
+    })));
+
+    const result = waitForOperationFreshness(
+      [{ readModelKey: "pending_invoice", scopeKey: "expense:all" }],
+      { timeoutMs: 600, intervalMs: 300 },
+    ).catch((caught: unknown) => caught);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const caught = await result;
+    expect(caught).toBeInstanceOf(OperationBarrierTimeoutError);
+    expect(caught).toBeInstanceOf(OperationBarrierBlockedError);
+    expect((caught as Error).message).toBe("操作同步等待超时，待处理发票（expense:all）仍在同步，请稍后刷新后重试。");
   });
 });

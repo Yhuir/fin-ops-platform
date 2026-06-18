@@ -25,6 +25,7 @@
 - `backend/src/fin_ops_platform/services/oa_pending_payment_command_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_details.py`
+- `backend/src/fin_ops_platform/services/oa_payment_admitted_projection.py`
 - `backend/src/fin_ops_platform/services/oa_payment_status_service.py`
 - `backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
@@ -37,9 +38,12 @@
 
 页面支持 `view_mode=completed|in_progress`：
 
-- `completed` 是原 OA 待付款视图，只展示已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
-- `in_progress` 只展示 OA 系统仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
-- OA 投影/read model 的统一事实源必须同时保留 `completed` 和 `in_progress`，再由 `view_mode` 过滤；设置页的手工搜索/导入状态筛选不能把进行中 OA 从本页面事实源中过滤掉。
+- OA 待付款核对的准入事实源是 OA MySQL `t_payment_simple.flow_id`，不是 OA Mongo 全量。页面/read model 先读取该表的有效 `flow_id`，再用 `flow_id` 匹配 OA Mongo `form_data._id`；只有匹配成功的 OA 才进入正常表格。
+- `t_payment_simple.id` 只是支付状态记录 ID，可作为诊断/内部记录 ID，不是 OA ID；OA 匹配和写回必须使用 `flow_id`。
+- `completed` 是原 OA 待付款视图，只展示已进入 `t_payment_simple` 且当前已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
+- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
+- `summary.viewCounts.completed/in_progress` 按同一批 `t_payment_simple.flow_id` 准入后的 OA 当前 workflow status 计算，用于页面切换按钮数量；筛选和搜索条件会同步作用于该数量。
+- 普通 `app.oa_applications` 投影只服务已完成/历史未知 OA；本页面不再依赖普通 projection 扫进行中 OA，而是通过 `PaymentAdmittedOAProjectionAdapter` 以 `t_payment_simple.flow_id` 为准入表，精确读取 OA Mongo 当前记录后再按 `view_mode` 过滤。OA 系统里未进入 `t_payment_simple` 的重复/异常流程不展示。
 - 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。
 - 应用正常运行时通过 MySQL 连接配置写回 OA 支付状态，不要求应用进程登录服务器 SSH；SSH 只属于人工运维/排障通道。
 

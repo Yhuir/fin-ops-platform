@@ -18,6 +18,7 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     output_invoice_collection_source_versions,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PENDING
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -245,6 +246,21 @@ class InvoiceReadModelConnection:
                 row.setdefault("scope_key", "2026-05")
                 row.setdefault("source_versions", oa_pending_payment_source_versions())
                 return row
+            if "completed_count" in normalized or "in_progress_count" in normalized:
+                completed_count = 0
+                in_progress_count = 0
+                for row in self.oa_rows:
+                    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+                    oa_payload = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+                    workflow_status = str(oa_payload.get("workflowStatus") or row.get("oa_workflow_status") or "")
+                    if workflow_status == "in_progress":
+                        in_progress_count += 1
+                    else:
+                        completed_count += 1
+                return {
+                    "completed_count": completed_count,
+                    "in_progress_count": in_progress_count,
+                }
             return {
                 "count": len(self.oa_rows),
                 "oa_amount_total": "100.00",
@@ -314,6 +330,30 @@ class StaticOAProjectionRepository:
 
     def list_all_application_records(self) -> list[object]:
         return list(self.records)
+
+    def list_available_months(self) -> list[str]:
+        return sorted({record.month for record in self.records}, reverse=True)
+
+
+class StaticOAPaymentStatusRepository:
+    def __init__(self, *, flow_ids: dict[str, str], admitted_flow_ids: set[str]) -> None:
+        self.flow_ids = dict(flow_ids)
+        self.admitted_flow_ids = set(admitted_flow_ids)
+
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        return {
+            flow_id: OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
+            for flow_id in self.admitted_flow_ids
+        }
+
+    def resolve_flow_id(self, record: OAApplicationRecord) -> str | None:
+        return self.flow_ids.get(record.id)
+
+    def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
+        return self.list_payment_statuses().get(flow_id)
+
+    def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
 
 
 class RecordingInvoiceRelationReadRepository:
@@ -580,6 +620,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["summary"]["bankPaidTotal"], "100.00")
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 0, "in_progress": 1})
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("payment_status", executed_sql)
         self.assertIn("oa_workflow_status = 'in_progress'", executed_sql)
@@ -930,9 +971,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             {
                 "case_id": "case-grouped-projection",
                 "row_ids": [
-                    "oa-projection-a",
-                    "oa-projection-b",
-                    "oa-projection-c",
+                    "oa-pay-projection-a",
+                    "oa-pay-projection-b",
+                    "oa-pay-projection-c",
                     bank.id,
                     invoice.id,
                 ],
@@ -940,17 +981,27 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 "amount_check": {"matched": True},
             }
         ])
+        oa_source_adapter = StaticOAProjectionRepository([
+            self._oa("oa-pay-projection-a", "刘际涛", "1690.00"),
+            self._oa("oa-pay-projection-b", "刘际涛", "1980.00"),
+            self._oa("oa-pay-projection-c", "刘际涛", "780.00"),
+        ])
+        payment_repository = StaticOAPaymentStatusRepository(
+            flow_ids={
+                "oa-pay-projection-a": "projection-a",
+                "oa-pay-projection-b": "projection-b",
+                "oa-pay-projection-c": "projection-c",
+            },
+            admitted_flow_ids={"projection-a", "projection-b", "projection-c"},
+        )
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=EmptyTransactionConnection(),
             workbench_relation_read_facade=relation_facade,
+            payment_status_repository=payment_repository,
+            oa_source_adapter=oa_source_adapter,
         )
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
-        builder._oa_projection_repository = StaticOAProjectionRepository([
-            self._oa("oa-projection-a", "刘际涛", "1690.00"),
-            self._oa("oa-projection-b", "刘际涛", "1980.00"),
-            self._oa("oa-projection-c", "刘际涛", "780.00"),
-        ])
         builder._read_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -964,13 +1015,42 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["oa"]["amount"], "4450.00")
         self.assertEqual(row["oa"]["relationCount"], 3)
         self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], [
-            "oa-projection-a",
-            "oa-projection-b",
-            "oa-projection-c",
+            "oa-pay-projection-a",
+            "oa-pay-projection-b",
+            "oa-pay-projection-c",
         ])
         self.assertEqual(row["bankTransaction"]["paidTotal"], "4450.00")
         self.assertEqual(row["invoice"]["totalWithTax"], "4450.00")
         self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
+
+    def test_projection_builder_uses_payment_status_table_as_oa_admission_source(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        payment_repository = StaticOAPaymentStatusRepository(
+            flow_ids={
+                "oa-pay-mongo-admitted": "mongo-admitted",
+                "oa-pay-mongo-duplicate": "mongo-duplicate",
+            },
+            admitted_flow_ids={"mongo-admitted"},
+        )
+        oa_source_adapter = StaticOAProjectionRepository([
+            self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
+            self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
+        ])
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+            payment_status_repository=payment_repository,
+            oa_source_adapter=oa_source_adapter,
+        )
+        builder._core_repository = ProjectionCoreRepository()
+        builder._read_repository = read_repository
+
+        result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
+
+        self.assertIsNotNone(read_repository.saved_oa)
+        rows = read_repository.saved_oa["rows"]
+        self.assertEqual(result["row_count"], 1)
+        self.assertEqual([row["oa"]["id"] for row in rows], ["oa-pay-mongo-admitted"])
 
     def test_projection_builder_marks_empty_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
@@ -1131,7 +1211,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("oa_pending_payment.read_model.refresh", DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
 
     @staticmethod
-    def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:
+    def _oa(oa_id: str, applicant: str, amount: str, *, workflow_status: str | None = "completed") -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
             month="2026-05",
@@ -1146,6 +1226,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             relation_code="",
             relation_label="",
             relation_tone="",
+            workflow_status=workflow_status,
             detail_fields={"申请日期": "2026-05-20"},
             project_name_display="投影测试项目",
         )

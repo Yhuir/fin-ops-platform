@@ -31,7 +31,14 @@ class OAProjectionSyncService:
         scope_key = self._event_scope_key(event)
         cutoff_month = self._retention_cutoff_month()
         records = self._sanitized_records(self._load_records(scope_key))
-        upserted_count = self._projection_repository.upsert_application_records(records, scope_key=scope_key)
+        completed_records = [record for record in records if _is_completed_workflow(record)]
+        upserted_count = self._projection_repository.upsert_application_records(completed_records, scope_key=scope_key)
+        removed_stale_completed_count = self._delete_stale_completed_projection_records(
+            scope_key=scope_key,
+            completed_records=completed_records,
+            scanned_records=records,
+        )
+        removed_non_completed_count = self._delete_non_completed_projection_records(scope_key=scope_key, records=records)
         pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
         result = {
             "sync_type": "oa_projection",
@@ -40,6 +47,8 @@ class OAProjectionSyncService:
             "scanned_count": len(records),
             "upserted_count": upserted_count,
             "skipped_count": max(0, len(records) - upserted_count),
+            "removed_stale_completed_count": removed_stale_completed_count,
+            "removed_non_completed_count": removed_non_completed_count,
             "pruned_count": len(pruned_months),
             "error_count": 0,
         }
@@ -169,6 +178,33 @@ class OAProjectionSyncService:
             if self._is_month_scope(month)
         ]
 
+    def _delete_stale_completed_projection_records(
+        self,
+        *,
+        scope_key: str,
+        completed_records: list[OAApplicationRecord],
+        scanned_records: list[OAApplicationRecord],
+    ) -> int:
+        delete_stale_completed = getattr(self._projection_repository, "delete_stale_completed_application_records", None)
+        if not callable(delete_stale_completed) or (scope_key == "all" and not scanned_records):
+            return 0
+        return len(
+            list(
+                delete_stale_completed(
+                    scope_key=scope_key,
+                    records=completed_records,
+                    scanned_records=scanned_records,
+                )
+                or []
+            )
+        )
+
+    def _delete_non_completed_projection_records(self, *, scope_key: str, records: list[OAApplicationRecord]) -> int:
+        delete_non_completed = getattr(self._projection_repository, "delete_non_completed_application_records", None)
+        if not callable(delete_non_completed) or (scope_key == "all" and not records):
+            return 0
+        return len(list(delete_non_completed(scope_key=scope_key, records=records) or []))
+
     def _mark_downstream_dirty(
         self,
         scope_key: str,
@@ -228,3 +264,8 @@ def _is_invoice_attachment_payload(value: Any) -> bool:
         for field in ("source_attachment_name", "attachment_name", "filename", "name")
     )
     return any(token in name_text for token in ("发票", "invoice", "付款", "支付", "payment", "receipt"))
+
+
+def _is_completed_workflow(record: OAApplicationRecord) -> bool:
+    workflow_status = str(getattr(record, "workflow_status", "") or "").strip()
+    return workflow_status in {"", "completed"}

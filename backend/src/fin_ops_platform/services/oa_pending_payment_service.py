@@ -145,12 +145,22 @@ class OaPendingPaymentQueryService:
             sort_direction=normalized_sort_direction,
             view_mode=normalized_view_mode,
         )
+        view_counts = self._view_counts(
+            context=context,
+            keyword=keyword,
+            month=month,
+            trade_date_from=trade_date_from,
+            trade_date_to=trade_date_to,
+            filters=parsed_filters,
+        )
         total = len(rows)
         paged_rows = rows[(page_number - 1) * page_limit : page_number * page_limit]
+        summary = self._summary(rows)
+        summary["viewCounts"] = view_counts
         return {
             "rows": paged_rows,
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
-            "summary": self._summary(rows),
+            "summary": summary,
             "appliedFilters": {"filters": parsed_filters},
             "sort": {"field": normalized_sort_field, "direction": normalized_sort_direction},
             "viewMode": normalized_view_mode,
@@ -411,6 +421,32 @@ class OaPendingPaymentQueryService:
         rows.sort(key=lambda row: self._sort_value(row, sort_field), reverse=sort_direction == "desc")
         return rows
 
+    def _view_counts(
+        self,
+        *,
+        context: DistributedInvoiceRelationContext,
+        keyword: str | None,
+        month: str | None,
+        trade_date_from: str | None,
+        trade_date_to: str | None,
+        filters: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for view_mode in (VIEW_MODE_COMPLETED, VIEW_MODE_IN_PROGRESS):
+            rows = self._filtered_sorted_rows(
+                context=context,
+                keyword=keyword,
+                month=month,
+                trade_date_from=trade_date_from,
+                trade_date_to=trade_date_to,
+                filters=filters,
+                sort_field="bank_trade_time",
+                sort_direction="desc",
+                view_mode=view_mode,
+            )
+            counts[view_mode] = len(rows)
+        return counts
+
     def _build_rows(
         self,
         *,
@@ -634,7 +670,42 @@ class OaPendingPaymentQueryService:
             records = list_all()
         else:
             records = []
+        records = self._filter_records_by_payment_status_admission(
+            [record for record in records if isinstance(record, OAApplicationRecord)]
+        )
         return {record.id: record for record in records if isinstance(record, OAApplicationRecord)}
+
+    def _filter_records_by_payment_status_admission(
+        self,
+        records: list[OAApplicationRecord],
+    ) -> list[OAApplicationRecord]:
+        if self._payment_status_repository is None:
+            return records
+        list_statuses = getattr(self._payment_status_repository, "list_payment_statuses", None)
+        if not callable(list_statuses):
+            return records
+        try:
+            payment_statuses = list_statuses()
+        except OAPaymentStatusError:
+            return []
+        if not isinstance(payment_statuses, dict):
+            return []
+        admitted_flow_ids = {
+            str(flow_id or "").strip()
+            for flow_id in payment_statuses
+            if str(flow_id or "").strip()
+        }
+        if not admitted_flow_ids:
+            return []
+        admitted_records: list[OAApplicationRecord] = []
+        for record in records:
+            try:
+                flow_id = self._payment_status_repository.resolve_flow_id(record)
+            except OAPaymentStatusError:
+                continue
+            if flow_id and flow_id in admitted_flow_ids:
+                admitted_records.append(record)
+        return admitted_records
 
     def _input_invoices_by_id(self) -> dict[str, Invoice]:
         return {

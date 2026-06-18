@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import (
     OAPaymentStatusConfigurationError,
     OAPaymentStatusExecutionError,
@@ -75,6 +76,34 @@ class ScriptedConnection:
 
 
 class OAPaymentStatusServiceTests(unittest.TestCase):
+    def test_payment_admitted_projection_reads_source_rows_by_payment_flow_ids(self) -> None:
+        source = StaticOASource([
+            _oa_record("oa-pay-flow-admitted"),
+            _oa_record("oa-pay-flow-duplicate"),
+        ])
+        payment_repository = StaticPaymentStatusRepository(admitted_flow_ids={"flow-admitted"})
+        projection = PaymentAdmittedOAProjectionAdapter(
+            source_adapter=source,
+            payment_status_repository=payment_repository,
+        )
+
+        records = projection.list_all_application_records()
+
+        self.assertEqual([record.id for record in records], ["oa-pay-flow-admitted"])
+        self.assertEqual(source.row_id_calls, [["oa-pay-flow-admitted", "oa-exp-flow-admitted"]])
+
+    def test_payment_admitted_projection_returns_empty_when_status_repository_is_missing(self) -> None:
+        source = StaticOASource([_oa_record("oa-pay-flow-admitted")])
+        projection = PaymentAdmittedOAProjectionAdapter(
+            source_adapter=source,
+            payment_status_repository=None,
+        )
+
+        records = projection.list_all_application_records()
+
+        self.assertEqual(records, [])
+        self.assertEqual(source.row_id_calls, [])
+
     def test_flow_id_candidates_prefer_mongo_document_id_for_payment_status_table(self) -> None:
         record = _oa_record(
             "oa-pay-2047",
@@ -149,6 +178,34 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         self.assertIn("ORDER BY create_time DESC, id DESC", connection.executed[0][0])
         self.assertTrue(connection.closed)
 
+    def test_get_payment_status_preserves_pending_zero_status(self) -> None:
+        connection = ScriptedConnection([{"flow_id": "507f1f77bcf86cd799439011", "pay_status": PAY_STATUS_PENDING}])
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        record = repository.get_payment_status("507f1f77bcf86cd799439011")
+
+        self.assertEqual(record, OAPaymentStatusRecord(flow_id="507f1f77bcf86cd799439011", pay_status=PAY_STATUS_PENDING))
+        self.assertEqual(record.label if record else "", "待支付")
+
+    def test_list_payment_statuses_returns_latest_record_by_flow_id(self) -> None:
+        connection = ScriptedConnection(
+            [
+                [
+                    {"flow_id": "flow-paid", "pay_status": PAY_STATUS_PAID},
+                    {"flow_id": "flow-pending", "pay_status": PAY_STATUS_PENDING},
+                    {"flow_id": "flow-paid", "pay_status": PAY_STATUS_PENDING},
+                ]
+            ]
+        )
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        statuses = repository.list_payment_statuses()
+
+        self.assertEqual(statuses["flow-paid"], OAPaymentStatusRecord(flow_id="flow-paid", pay_status=PAY_STATUS_PAID))
+        self.assertEqual(statuses["flow-pending"], OAPaymentStatusRecord(flow_id="flow-pending", pay_status=PAY_STATUS_PENDING))
+        self.assertIn("ORDER BY create_time DESC, id DESC", connection.executed[0][0])
+        self.assertTrue(connection.closed)
+
     def test_mark_paid_updates_all_existing_rows_for_flow_id(self) -> None:
         connection = ScriptedConnection(
             [
@@ -204,6 +261,39 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         with patch.dict(os.environ, {"FIN_OPS_OA_PAYMENT_STATUS_ENABLED": "1"}, clear=True):
             with self.assertRaises(OAPaymentStatusConfigurationError):
                 MySQLOAPaymentStatusRepository.from_environment()
+
+
+class StaticOASource:
+    def __init__(self, records: list[OAApplicationRecord]) -> None:
+        self.records = list(records)
+        self.row_id_calls: list[list[str]] = []
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized_row_ids = [str(row_id) for row_id in list(row_ids or [])]
+        self.row_id_calls.append(normalized_row_ids)
+        wanted = set(normalized_row_ids)
+        return [record for record in self.records if record.id in wanted]
+
+
+class StaticPaymentStatusRepository:
+    def __init__(self, *, admitted_flow_ids: set[str]) -> None:
+        self.admitted_flow_ids = set(admitted_flow_ids)
+
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        return {
+            flow_id: OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
+            for flow_id in self.admitted_flow_ids
+        }
+
+    def resolve_flow_id(self, record: OAApplicationRecord) -> str | None:
+        candidates = oa_flow_id_candidates(record)
+        return candidates.payment_flow_ids[0] if candidates.payment_flow_ids else None
+
+    def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
+        return self.list_payment_statuses().get(flow_id)
+
+    def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
 
 
 def _settings() -> OAPaymentStatusSettings:

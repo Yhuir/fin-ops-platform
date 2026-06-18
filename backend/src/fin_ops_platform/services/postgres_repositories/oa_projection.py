@@ -18,6 +18,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 
 
 OA_PROJECTION_SYNC_VERSION = "2026-06-17-workflow-status-v1"
+COMPLETED_WORKFLOW_STATUS_SQL = "(workflow_status is null or workflow_status = '' or workflow_status = 'completed')"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -133,6 +134,7 @@ class PostgresOAProjectionRepository:
                     select oa.id, oa.row_id, oa.scope_month
                     from app.oa_applications oa
                     where oa.scope_month = any(%s::date[])
+                      and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
                       and not (oa.row_id = any(%s::text[]))
                       and not exists (
                           select 1
@@ -171,6 +173,7 @@ class PostgresOAProjectionRepository:
                 select oa.id, oa.row_id, oa.scope_month
                 from app.oa_applications oa
                 where oa.scope_month = %s::date
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
                   and not (oa.row_id = any(%s::text[]))
                   and not exists (
                       select 1
@@ -199,6 +202,152 @@ class PostgresOAProjectionRepository:
             (scope_month, incoming_row_ids),
         )
         return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+
+    def delete_stale_completed_application_records(
+        self,
+        *,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+        scanned_records: list[OAApplicationRecord],
+    ) -> list[str]:
+        months = self._months_for_scope(scope_key=scope_key, records=scanned_records)
+        if not months:
+            return []
+        incoming_row_ids = sorted({str(record.id or "").strip() for record in records if str(record.id or "").strip()})
+
+        def write(connection: Any) -> list[str]:
+            if incoming_row_ids:
+                rows = connection.fetch_all(
+                    """
+                    with stale as (
+                        select oa.id, oa.row_id, oa.scope_month
+                        from app.oa_applications oa
+                        where oa.scope_month = any(%s::date[])
+                          and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                          and not (oa.row_id = any(%s::text[]))
+                          and not exists (
+                              select 1
+                              from app.manual_oa_imports manual
+                              where manual.row_id = oa.row_id
+                                and manual.status = 'active'
+                          )
+                    ),
+                    deleted_items as (
+                        delete from app.oa_application_items item
+                        using stale
+                        where item.oa_application_id = stale.id
+                        returning item.id
+                    ),
+                    deleted_attachments as (
+                        delete from app.oa_attachments attachment
+                        using stale
+                        where attachment.oa_application_id = stale.id
+                        returning attachment.id
+                    )
+                    delete from app.oa_applications oa
+                    using stale
+                    where oa.id = stale.id
+                    returning stale.row_id
+                    """,
+                    (months, incoming_row_ids),
+                )
+                return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+            rows = connection.fetch_all(
+                """
+                with stale as (
+                    select oa.id, oa.row_id, oa.scope_month
+                    from app.oa_applications oa
+                    where oa.scope_month = any(%s::date[])
+                      and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                      and not exists (
+                          select 1
+                          from app.manual_oa_imports manual
+                          where manual.row_id = oa.row_id
+                            and manual.status = 'active'
+                      )
+                ),
+                deleted_items as (
+                    delete from app.oa_application_items item
+                    using stale
+                    where item.oa_application_id = stale.id
+                    returning item.id
+                ),
+                deleted_attachments as (
+                    delete from app.oa_attachments attachment
+                    using stale
+                    where attachment.oa_application_id = stale.id
+                    returning attachment.id
+                )
+                delete from app.oa_applications oa
+                using stale
+                where oa.id = stale.id
+                returning stale.row_id
+                """,
+                (months,),
+            )
+            return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+
+        return run_in_transaction(self._connection, write) or []
+
+    def delete_non_completed_application_records(
+        self,
+        *,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+    ) -> list[str]:
+        months = self._months_for_scope(scope_key=scope_key, records=records)
+        if not months:
+            return []
+
+        def write(connection: Any) -> list[str]:
+            rows = connection.fetch_all(
+                """
+                with stale as (
+                    select oa.id, oa.row_id, oa.scope_month
+                    from app.oa_applications oa
+                    where oa.scope_month = any(%s::date[])
+                      and coalesce(nullif(oa.workflow_status, ''), 'completed') <> 'completed'
+                      and not exists (
+                          select 1
+                          from app.manual_oa_imports manual
+                          where manual.row_id = oa.row_id
+                            and manual.status = 'active'
+                      )
+                ),
+                deleted_items as (
+                    delete from app.oa_application_items item
+                    using stale
+                    where item.oa_application_id = stale.id
+                    returning item.id
+                ),
+                deleted_attachments as (
+                    delete from app.oa_attachments attachment
+                    using stale
+                    where attachment.oa_application_id = stale.id
+                    returning attachment.id
+                )
+                delete from app.oa_applications oa
+                using stale
+                where oa.id = stale.id
+                returning stale.row_id
+                """,
+                (months,),
+            )
+            return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+
+        return run_in_transaction(self._connection, write) or []
+
+    @staticmethod
+    def _months_for_scope(*, scope_key: str, records: list[OAApplicationRecord]) -> list[str]:
+        normalized_scope_key = text(scope_key) or "all"
+        if normalized_scope_key != "all":
+            scope_month = month_start(normalized_scope_key)
+            return [scope_month] if scope_month else []
+        return sorted({
+            record_month
+            for record in list(records or [])
+            if (record_month := month_start(record.month))
+        })
 
     def _migrate_legacy_row_references(self, connection: Any, alias_pairs: dict[str, str]) -> None:
         if not alias_pairs:
@@ -504,6 +653,7 @@ class PostgresOAProjectionRepository:
             select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             where scope_month = %s::date
+              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             order by row_id
             """,
             (month_start(normalized_month),),
@@ -515,6 +665,7 @@ class PostgresOAProjectionRepository:
             """
             select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
+            where """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             order by scope_month, row_id
             """
         )
@@ -529,6 +680,7 @@ class PostgresOAProjectionRepository:
             select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             where row_id = any(%s)
+              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             order by row_id
             """,
             (normalized_row_ids,),
@@ -542,6 +694,7 @@ class PostgresOAProjectionRepository:
             select distinct to_char(scope_month, 'YYYY-MM') as month
             from app.oa_applications
             where scope_month is not null
+              and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
             order by month
             """
         )

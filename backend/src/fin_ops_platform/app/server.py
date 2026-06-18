@@ -204,6 +204,7 @@ from fin_ops_platform.services.oa_pending_payment_service import (
 )
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
     InMemoryOutputInvoiceCollectionLifecycleRepository,
@@ -992,7 +993,8 @@ class Application:
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=oa_adapter,
+            oa_projection=self._oa_pending_payment_projection(),
+            payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
@@ -9417,7 +9419,7 @@ class Application:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=getattr(self, "_workbench_query_service", None),
+            oa_projection=self._oa_pending_payment_projection(),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -9457,7 +9459,7 @@ class Application:
             return service
         service = OaPendingPaymentCommandService(
             import_service=self._import_service,
-            oa_projection=getattr(self, "_workbench_query_service", None),
+            oa_projection=self._oa_pending_payment_projection(),
             relation_command_service=self._workbench_relation_command_service(),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
@@ -9466,6 +9468,35 @@ class Application:
         )
         self._oa_pending_payment_command_service_instance = service
         return service
+
+    def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
+        projection = getattr(self, "_oa_pending_payment_projection_instance", None)
+        if isinstance(projection, PaymentAdmittedOAProjectionAdapter):
+            return projection
+        projection = PaymentAdmittedOAProjectionAdapter(
+            source_adapter=self._oa_pending_payment_source_adapter(),
+            payment_status_repository=self._oa_payment_status_repository(),
+        )
+        self._oa_pending_payment_projection_instance = projection
+        return projection
+
+    def _oa_pending_payment_source_adapter(self) -> object | None:
+        source_adapter = getattr(self, "_source_oa_adapter", None)
+        if source_adapter is not None:
+            return source_adapter
+        cached = getattr(self, "_oa_pending_payment_source_adapter_instance", None)
+        if cached is not None:
+            return cached
+        mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
+        if mongo_oa_settings is None:
+            return None
+        adapter = MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
+        app_settings_service = getattr(self, "_app_settings_service", None)
+        get_oa_import_settings = getattr(app_settings_service, "get_oa_import_settings", None)
+        if callable(get_oa_import_settings):
+            adapter.set_import_settings_provider(get_oa_import_settings)
+        self._oa_pending_payment_source_adapter_instance = adapter
+        return adapter
 
     def _oa_pending_payment_read_model_service(self) -> OaPendingPaymentReadModelService | None:
         if not self._requires_sql_read_model_runtime():

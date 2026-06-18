@@ -79,6 +79,13 @@ export class OperationBarrierBlockedError extends Error {
   }
 }
 
+export class OperationBarrierTimeoutError extends OperationBarrierBlockedError {
+  constructor(message: string, payload: OperationBarrierStatus) {
+    super(message, payload);
+    this.name = "OperationBarrierTimeoutError";
+  }
+}
+
 export async function fetchOperationBarrierStatus(targets: OperationBarrierTarget[]): Promise<OperationBarrierStatus> {
   const payload = await apiRequestJson<ApiOperationBarrierStatus>(
     "/api/operation-barrier/status",
@@ -128,7 +135,7 @@ export async function waitForOperationFreshness(
     }
     await delay(intervalMs);
   }
-  throw new OperationBarrierBlockedError(operationBarrierMessage(latest, "操作同步等待超时"), latest ?? {
+  throw new OperationBarrierTimeoutError(operationBarrierMessage(latest, "操作同步等待超时"), latest ?? {
     status: "refreshing",
     fresh: false,
     targets: [],

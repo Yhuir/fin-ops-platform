@@ -10,6 +10,9 @@
 - `paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 判定，前端不得按金额字段自行推断。
 - `paymentStatus` 不输出 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计进入 `pending_review`，多 OA 合并付款先按 relation group 合计后再判定。
 - `/oa-pending-payments` 通过 `view_mode=completed|in_progress` 承载同一页面的两类 OA：completed 是原待付款核对，in_progress 只展示 OA 系统仍进行中的支付申请/日常报销。
+- OA 待付款核对的 OA 范围以 OA MySQL `t_payment_simple.flow_id` 为准。页面/read model 先用该字段匹配 OA Mongo `form_data._id`，再按 OA 当前 workflow status 分配到 completed/in-progress；未进入 `t_payment_simple` 的重复/异常 OA 不进入正常表格。
+- `t_payment_simple.id` 不是 OA ID，只能作为支付状态记录诊断字段；支付状态展示、tab 统计和写回闭环都必须围绕同一 `flow_id`。
+- 页面切换按钮数量来自 rows `summary.viewCounts.completed/in_progress`，统计口径与当前搜索/筛选条件一致，并且使用同一批 `t_payment_simple.flow_id` 准入后的 OA。
 - completed 与 in_progress 视图展示同一套 OA、支付状态、支出流水和进项发票证据四分组表格；没有发票证据时发票列显示 `-`。
 - OA/支付状态/支出流水/发票是表格主体的固定四段：OA 单元格内按“申请人 / 项目 / 金额”三栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态、可用确认动作和“未写回/已写回”；发票列纵向展示发票号、发票方、日期 chip 和金额，不显示“价税合计”chip。表格优先避免横向滚动，必要时通过紧凑字号、紧凑 chip、换行和行高增长承载信息。
 - 进行中 OA 的候选流水不能自动写回；必须由用户点击“确认已支付”，后端校验 workflow/outflow/金额/flow_id 后确认 Workbench relation，并写回 OA MySQL `t_payment_simple.pay_status=1`。
@@ -38,6 +41,25 @@
 ```
 
 ## 历史记录
+
+## 2026-06-18 - OA 待付款准入源改为 t_payment_simple.flow_id
+
+- 目标：把 OA 待付款核对的 OA 范围从“扫 OA 系统所有进行中/已完成 OA”调整为“以 `t_payment_simple.flow_id` 为支付状态管理准入表”，避免网络波动导致的重复 OA 污染付款核对页面。
+- 影响范围：`OaPendingPaymentQueryService` live query、OA payment status repository、Postgres OA pending read model rows summary、前端视图切换按钮、模块/产品/API/页面架构文档和相关测试。
+- 关键决策：`flow_id` 必须匹配 OA Mongo `form_data._id`；查到 OA 后按当前 workflow status 进入 completed/in-progress。`t_payment_simple.id` 不是 OA ID；写回时更新同一 `flow_id` 的 `pay_status=1`。查不到 OA 的 `flow_id` 不进入正常表格，后续可作为异常计数/诊断扩展。
+- 文档影响：更新本模块 README、state-machine、tests、implementation-notes，并同步 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md`、`docs/app-architecture/pages.md`。
+- 测试覆盖：新增/更新 `tests/test_oa_payment_status_service.py`、`tests/test_oa_pending_payment_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py` 和 `web/src/test/OaPendingPaymentsPage.test.tsx`，覆盖 latest flow_id 列表、准入过滤、`summary.viewCounts` 和 tab 数量展示。
+- 未测风险：本地自动化没有连接真实 OA Mongo/生产 MySQL 同步链路；生产中 `t_payment_simple.flow_id` 找不到 OA Mongo `_id` 的记录需要后续异常列表或运维报表承接。
+
+## 2026-06-18 - 拆分 completed OA projection 与 OA 待付款准入 projection
+
+- 目标：落实长期设计，避免 `app.oa_applications` 同时承担“普通已完成 OA 投影”和“OA 待付款支付准入 OA 投影”两个语义。
+- 影响范围：`PaymentAdmittedOAProjectionAdapter`、Postgres OA projection repository、`OAProjectionSyncService`、`InvoiceUsageCollectionSqlProjectionBuilder`、`InvoiceLifecycleSqlProjectionBuilder`、API server/worker 装配、workbench SQL projection、workbench relation projection/repository、模块/产品/API 文档和相关测试。
+- 关键决策：普通 `app.oa_applications` 只写入/读取 completed 或历史未知 workflow status，`oa.sync` 扫到 in-progress 时仍入队 `oa_pending_payment` refresh，但不再把 in-progress 写入普通 projection，并会清理旧 in-progress 残留。OA 待付款 read model 使用专用 `PaymentAdmittedOAProjectionAdapter`，先读取 `t_payment_simple.flow_id`，再生成 `oa-pay-/oa-exp-` row_id 候选向 OA Mongo 精确读取当前 OA。
+- 文档影响：更新本模块 README、state-machine、tests、implementation-notes，并同步 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md` 和 `docs/app-architecture/pages.md`。
+- 测试覆盖：新增/更新 `tests/test_oa_payment_status_service.py`、`tests/test_oa_projection_sync_service.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_invoice_usage_collection_sql_runtime.py` 和 `tests/test_invoice_lifecycle_page_integration.py`，并跑 workbench relation、worker registry、migration、runtime boundary 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_payment_status_service tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_oa_pending_payment_service tests.test_oa_pending_payment_api tests.test_invoice_usage_collection_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_registry tests.test_postgres_migrations tests.test_platform_runtime_boundary_guards tests.test_workbench_relation_repository tests.test_workbench_relation_sql_projection tests.test_invoice_lifecycle_page_integration -v`。
+- 未测风险：本地未连接真实 OA Mongo/生产 MySQL 做 read model rebuild smoke；部署后仍需触发 `oa.sync:all` 和 `oa_pending_payment:all`，确认普通 projection 中 in-progress 被清理，OA 待付款进行中数量来自 `t_payment_simple.flow_id` 准入后的专用投影。
 
 ## 2026-06-18 - completed/in-progress 统一四分组表格 UI
 

@@ -454,6 +454,7 @@ describe("Output invoice collections page", () => {
     const styles = readWebSource("src/app/styles.css");
     const pageButton = cssRule(styles, ".output-invoice-collections-button");
     const queryControls = cssRule(styles, ".output-invoice-collections-field input,\n.output-invoice-collections-field select");
+    const queryMonthTrigger = cssRule(styles, ".output-invoice-collections-field .month-picker-trigger");
     const loading = cssRule(styles, ".output-invoice-collections-loading__bar,\n.output-invoice-collections-loading__panel");
     const filterTrigger = cssRule(styles, ".output-invoice-collection-filter-menu__trigger");
     const filterItem = cssRule(styles, ".output-invoice-collection-filter-menu__item,\n.output-invoice-collection-filter-menu__clear");
@@ -484,8 +485,9 @@ describe("Output invoice collections page", () => {
     expect(filterFields).toContain("var(--motion-fast)");
     expect(filterApply).toContain("var(--motion-fast)");
     expect(expandableButton).toContain("var(--motion-fast)");
-    expect(tableShell).toContain("min-height: 320px");
-    expect(tableShell).toContain("max-height: calc(100vh - 214px)");
+    expect(queryMonthTrigger).toContain("min-height: 34px");
+    expect(tableShell).toContain("min-height: 640px");
+    expect(tableShell).toContain("max-height: calc(200vh - 428px)");
     expect(table).toContain("min-width: 1240px");
     expect(table).not.toContain("min-width: 1680px");
     expect(tableCells).toContain("transition: background-color var(--motion-fast)");
@@ -588,7 +590,9 @@ describe("Output invoice collections page", () => {
     const initialRowsRequest = rowsRequests(fetchMock)[0];
     expect(initialRowsRequest.searchParams.get("page")).toBe("1");
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
+    expect(initialRowsRequest.searchParams.get("month")).toBeNull();
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("全部发票");
     expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
@@ -613,11 +617,22 @@ describe("Output invoice collections page", () => {
       const request = rowsRequests(fetchMock).at(-1);
       expect(request?.searchParams.get("keyword")).toBeNull();
     });
-    fireEvent.input(within(page).getByLabelText("月份"), { target: { value: "2026-05" } });
+    await user.click(within(page).getByRole("button", { name: "销项发票月份" }));
+    await user.click(await screen.findByRole("radio", { name: "2026" }));
+    await user.click(screen.getByRole("radio", { name: "五月" }));
     await waitFor(() => {
       const request = rowsRequests(fetchMock).at(-1);
       expect(request?.searchParams.get("month")).toBe("2026-05");
     });
+    expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("2026年5月");
+
+    await user.click(within(page).getByRole("button", { name: "销项发票月份" }));
+    await user.click(await screen.findByRole("radio", { name: "全部发票" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("month")).toBeNull();
+    });
+    expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("全部发票");
 
     expect(within(page).getByRole("table", { name: "销项发票收款情况表" })).toBeInTheDocument();
 

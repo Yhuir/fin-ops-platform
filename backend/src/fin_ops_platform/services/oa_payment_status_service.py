@@ -59,6 +59,8 @@ class OAFlowIdCandidates:
 class OAPaymentStatusRepository(Protocol):
     def resolve_flow_id(self, record: OAApplicationRecord) -> str | None: ...
 
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]: ...
+
     def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None: ...
 
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord: ...
@@ -147,6 +149,32 @@ class MySQLOAPaymentStatusRepository:
         finally:
             connection.close()
 
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT flow_id, pay_status
+                    FROM t_payment_simple
+                    WHERE flow_id IS NOT NULL AND flow_id <> ''
+                    ORDER BY create_time DESC, id DESC
+                    """
+                )
+                rows = list(cursor.fetchall() or [])
+            statuses: dict[str, OAPaymentStatusRecord] = {}
+            for row in rows:
+                record = _payment_status_record(row)
+                if record is not None and record.flow_id not in statuses:
+                    statuses[record.flow_id] = record
+            return statuses
+        except Exception as exc:  # pragma: no cover - deployed dependency path
+            if isinstance(exc, OAPaymentStatusError):
+                raise
+            raise OAPaymentStatusExecutionError(f"Failed to list OA payment statuses: {exc}") from exc
+        finally:
+            connection.close()
+
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
         normalized_flow_id = _required_text(flow_id, "flow_id")
         connection = self._connect()
@@ -216,7 +244,12 @@ def _first_row_text(row: Any, index: int, key: str) -> str:
     if row is None:
         return ""
     if isinstance(row, dict):
-        return _optional_text(row.get(key) or row.get(key.lower()))
+        if key in row:
+            return _optional_text(row.get(key))
+        lowered_key = key.lower()
+        if lowered_key in row:
+            return _optional_text(row.get(lowered_key))
+        return ""
     try:
         return _optional_text(row[index])
     except (IndexError, TypeError):

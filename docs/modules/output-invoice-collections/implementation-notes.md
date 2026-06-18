@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-18 - 月份与全部发票单入口筛选
+
+- 目标：把销项发票收款情况页面的月份筛选升级为同一个入口内可选择具体月份或全部发票，并把表格可视高度提高到原先约 2 倍。
+- 影响范围：`MonthPicker` 可选 all-period 选项、`OutputInvoiceCollectionsPage` 查询 toolbar、销项表格高度样式和对应 Vitest 回归；后端 API/read model/worker 不变。
+- 关键决策：以空 `month` 沿用现有 API mapper 行为表示全部发票；选择具体月份时继续发送 `month=YYYY-MM`；不新增独立“显示全部”按钮，避免形成第二个筛选入口。
+- 文档影响：只记录模块实施决策；不改变产品业务口径、API contract、状态机、read model 或 worker 长期事实源。
+- 测试覆盖：更新 `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 覆盖首屏全部发票、同一按钮选择 `2026-05`、再切回全部发票；更新 `web/src/test/MonthPicker.test.tsx` 覆盖 all-period 选项。
+- 验证命令：`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx src/test/MonthPicker.test.tsx`。
+- 未测风险：未做真实浏览器视觉截图；大数据滚动和移动端视觉仍归专项 smoke。
+- 后续事项：如后端未来把全部发票改为显式 scope，需同步 API mapper 和本页测试断言。
+
 ## 2026-06-18 - Browser e2e 红蓝票 relation fan-out
 
 - 目标：补齐 `WB-REL-E2E-008` 中销项收款下游页面的一条 Spec-first Browser fan-out，证明红蓝票关系写入后页面不是靠本地状态成功，而是通过 rows refresh 展示 relation overlay。

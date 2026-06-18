@@ -129,7 +129,7 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
         row = service.list_rows()["rows"][0]
 
         self.assertEqual(row["paymentStatus"]["code"], "policy_oa_payment")
-        self.assertEqual(policy.oa_calls, 1)
+        self.assertEqual(policy.oa_calls, 2)
 
 
 def _counterparty() -> Counterparty:

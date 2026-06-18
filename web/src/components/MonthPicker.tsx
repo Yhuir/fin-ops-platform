@@ -6,6 +6,7 @@ type MonthPickerProps = {
   ariaLabel?: string;
   caption?: string | null;
   inline?: boolean;
+  allOptionLabel?: string;
 };
 
 const monthLabels = [
@@ -53,12 +54,19 @@ export default function MonthPicker({
   ariaLabel = "年月选择",
   caption = "月份",
   inline = false,
+  allOptionLabel,
 }: MonthPickerProps) {
   const { year, month } = parseMonthValue(value);
   const [open, setOpen] = useState(false);
   const [activeYear, setActiveYear] = useState(year);
   const yearOptions = useMemo(() => createYearOptions(activeYear), [activeYear]);
   const label = caption ?? ariaLabel;
+  const triggerLabel = allOptionLabel && !value ? allOptionLabel : formatMonthLabel(value);
+
+  const selectAll = () => {
+    onChange("");
+    setOpen(false);
+  };
 
   const selectMonth = (nextMonth: number) => {
     onChange(formatMonthValue(activeYear, nextMonth));
@@ -67,6 +75,21 @@ export default function MonthPicker({
 
   const pickerPanel = (
     <div className={inline ? "month-picker-inline-panel" : "month-picker-popover"} role="dialog" aria-label={`${ariaLabel}面板`}>
+      {allOptionLabel ? (
+        <div className="month-picker-section">
+          <div className="month-picker-chip-grid all" role="radiogroup" aria-label="范围">
+            <button
+              aria-checked={!value}
+              className={`month-picker-chip${!value ? " active" : ""}`}
+              role="radio"
+              type="button"
+              onClick={selectAll}
+            >
+              {allOptionLabel}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="month-picker-section">
         <div className="month-picker-section-title">年份</div>
         <div className="month-picker-chip-grid years" role="radiogroup" aria-label="年份">
@@ -133,7 +156,7 @@ export default function MonthPicker({
         }}
       >
         {caption ? <span className="month-picker-caption">{caption}</span> : null}
-        <strong>{formatMonthLabel(value)}</strong>
+        <strong>{triggerLabel}</strong>
       </button>
       {open ? pickerPanel : null}
     </div>
