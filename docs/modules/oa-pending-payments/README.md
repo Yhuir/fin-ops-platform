@@ -41,7 +41,8 @@
 - OA 待付款核对的准入事实源是 OA MySQL `t_payment_simple.flow_id`，不是 OA Mongo 全量。页面/read model 先读取该表的有效 `flow_id`，再用 `flow_id` 匹配 OA Mongo `form_data._id`；只有匹配成功的 OA 才进入正常表格。
 - `t_payment_simple.id` 只是支付状态记录 ID，可作为诊断/内部记录 ID，不是 OA ID；OA 匹配和写回必须使用 `flow_id`。
 - `completed` 是原 OA 待付款视图，只展示已进入 `t_payment_simple` 且当前已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
-- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
+- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；候选流水、自动决策和已有关联证据只作为可确认付款证据，必须由用户点击“确认已支付并写回”后才允许写回 OA MySQL。
+- `in_progress` 允许用户勾选未写回的 OA 后打开“关联支出流水”右侧抽屉。抽屉默认展示全部支出流水，并可按全部、未配对、已配对、已关联进行中 OA 筛选；只有未配对流水可选择并建立 Workbench active relation。该关联会刷新表格和关联台事实源，但不直接把 `t_payment_simple.pay_status` 写成已支付。
 - `summary.viewCounts.completed/in_progress` 按同一批 `t_payment_simple.flow_id` 准入后的 OA 当前 workflow status 计算，用于页面切换按钮数量；筛选和搜索条件会同步作用于该数量。
 - 普通 `app.oa_applications` 投影只服务已完成/历史未知 OA；本页面不再依赖普通 projection 扫进行中 OA，而是通过 `PaymentAdmittedOAProjectionAdapter` 以 `t_payment_simple.flow_id` 为准入表，精确读取 OA Mongo 当前记录后再按 `view_mode` 过滤。OA 系统里未进入 `t_payment_simple` 的重复/异常流程不展示。
 - 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。

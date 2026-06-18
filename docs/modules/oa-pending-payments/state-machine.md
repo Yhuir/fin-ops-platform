@@ -15,6 +15,7 @@
 | 付款状态 | `pending_review` | 同上 | OA 金额缺失、关联银行事实缺失、收入流水误关联、支出流水合计大于 OA 金额或证据不完整。 |
 | OA 写回状态 | `not_written` / `written` | OA MySQL `t_payment_simple` | 仅在支付状态为 `paid` 时读取；实机验证显示 `flow_id` 对应 OA Mongo `form_data._id`。 |
 | 银行证据 | `bank_present` / `bank_missing` | bank import facts + Workbench relation | 只有 `outflow` 支出流水计入付款证据；缺失事实不能退化成 `unpaid`。 |
+| 支出流水抽屉候选 | `unmatched` / `matched` / `linked_in_progress` | bank import facts + Workbench active relation | 抽屉默认展示全部支出流水；只有 `unmatched` 可被用户选择并关联到进行中 OA。 |
 | 发票证据 | `invoice_present` / `invoice_missing` | input invoice import facts + Workbench relation | 发票详情只展示进项发票字段；缺失发票不影响 OA 主行存在。 |
 | relation detail | `oa` / `bank` / `invoice` | OA pending payment row payload | 允许 `kind=oa|bank|invoice`；非法 kind 返回业务错误。 |
 
@@ -29,7 +30,8 @@
 - `paymentStatus` 必须由 lifecycle policy 或 query service 统一判定，页面不按金额字段自行计算。
 - 进行中 OA 视图复用同一付款状态判定。`relation_status='candidate'` 只能展示候选 chip 和“确认已支付”动作，不能单独把 OA 判定为 `paid` 或直接写回 OA。
 - `paymentStatus` 不再输出 `overpaid` 或 `merged_paid`；多 OA 合并付款通过 relation group 合计后判定为 `paid`，支出流水合计大于 OA 合计时进入 `pending_review`。
-- “确认已支付”必须先校验 OA 为 `in_progress`、银行流水为 outflow、支出流水合计等于 OA 金额、可解析 OA Mongo 文档 ID，再确认 Workbench relation 并写回 `t_payment_simple.pay_status=1`。
+- “确认已支付并写回”必须由用户点击触发。触发后先校验 OA 为 `in_progress`、银行流水为 outflow、支出流水合计等于 OA 金额、可解析 OA Mongo 文档 ID；如果已有 active relation 且包含所选流水则复用 relation，否则先确认 Workbench relation；最后写回 `t_payment_simple.pay_status=1`。
+- “关联支出流水”抽屉只创建 Workbench active relation，并标记 `special_metadata.origin=oa_pending_payment_in_progress`；它不写回 `t_payment_simple.pay_status`。后续仍需用户点击“确认已支付并写回”才改变 OA MySQL 支付状态。
 - 支出流水付款合计使用所有有效 outflow relation 的 decimal total；收入流水、缺失银行事实或无效 relation 进入 `pending_review`。
 - OA、支出流水和发票的 `relationCount`/`summaries` 必须完全来自 Workbench relation payload，不得由金额、日期或名称相似度推断。
 - completed 与 in-progress 视图使用同一套四分组表格 UI；进行中 OA 没有发票证据时发票列显示 `-`，不影响确认已支付主链路。
@@ -46,7 +48,7 @@
 - 禁止前端自造 filter-options 枚举或 payment status 枚举。
 - 禁止把 relation case id 当 OA id、bank transaction id 或 invoice id 请求详情。
 - 禁止用单条 OA 金额和同一 relation 下多条支出流水/发票逐行交叉展开，造成“支付多了”或重复显示同一发票。
-- 禁止只因为出现候选流水就自动写回 OA 支付状态；候选关系必须经用户确认或已是 active relation。
+- 禁止只因为出现候选流水、自动决策或抽屉关联流水就自动写回 OA 支付状态；写回必须经用户点击“确认已支付并写回”。
 - 禁止对非 `in_progress` OA 调用 `confirm-paid` 写回。
 - 禁止把 Flowable 流程实例 ID、流程请求 ID 或 relation case id 当 `t_payment_simple.flow_id`；写回 key 必须来自 OA Mongo `form_data._id`（投影中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀）。
 - 禁止用销项发票字段渲染进项发票详情。
@@ -67,6 +69,7 @@
 | invoice display | row payload 含发票证据 | completed 与 in-progress 表格都显示发票列；发票号、发票方、日期 chip 和金额纵向展示，支持单发票详情和多发票 relation 明细。 |
 | missing invoice display | row payload 缺少发票证据 | 发票列显示 `-`；候选流水确认前不把发票证据作为进行中 OA 主操作。 |
 | confirm paid | 进行中 OA 有候选或可确认支出流水 | 点击后调用 `POST /api/oa-pending-payments/confirm-paid`；成功提示“已确认支付并写回 OA”或等待写回状态刷新。 |
+| bank link drawer | 用户在进行中 OA 视图勾选未写回 OA 后打开 | 调用 `GET /api/oa-pending-payments/bank-transaction-candidates` 默认展示全部支出流水；支持全部、未配对、已配对、已关联进行中 OA 筛选；只有未配对流水可勾选。提交后调用 `POST /api/oa-pending-payments/link-bank-transactions` 创建 Workbench relation 并刷新页面，不写回 OA MySQL。 |
 | OA writeback display | rows payload 的 `oaPaymentWriteback` | 展示“未写回 / 已写回”；外部依赖不可用只展示同步状态异常，不暴露数据库错误。 |
 | filters/sort | 表头筛选菜单和排序按钮 | 参数必须映射到后端支持字段；多筛选为 AND 语义。 |
 | grouped relation display | row payload 的 `relationCount` / `summaries` | 多 OA、流水或发票只显示合计金额和 `+N`，点击 `+N` 打开对应 `kind=oa|bank|invoice` 的关联明细。 |
@@ -101,7 +104,7 @@ Refresh 触发来源：
 - OA sync / OA rebuild。
 - 银行流水导入确认。
 - 发票导入确认。
-- Workbench 关系确认/撤回、进行中 OA 确认已支付、batch accounting relation change、turnover relation change。
+- Workbench 关系确认/撤回、进行中 OA 确认已支付、进行中 OA 抽屉关联支出流水、batch accounting relation change、turnover relation change。
 - 待找发票规则保存和人工发票相关事件。
 - invoice lifecycle refresh、App Health/readiness backfill。
 - `startup_stale_scan` 默认关闭，且不直接刷新 OA 待付款 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
@@ -139,5 +142,6 @@ Worker 流程：
 | 2026-06-18 | OA pending 四分组表格取消横向滚动 | 表格改为 100% 自适应百分比列宽，局部缩小字号/chip/按钮并允许换行 | `cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
 | 2026-06-18 | OA 待付款准入事实源改为 `t_payment_simple.flow_id` 并在视图切换展示数量 | 页面/read model 先按支付状态管理表 flow_id 准入，再按 OA 当前 workflow status 进入 completed/in-progress；重复 OA 未入表不展示；tab 数量来自 `summary.viewCounts` | `tests.test_oa_payment_status_service`、`tests.test_oa_pending_payment_service`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-18 | 拆分普通 completed OA projection 与 OA 待付款专用准入 projection | `app.oa_applications` 和其他页面只消费 completed/legacy OA；OA 待付款 read model 使用 `PaymentAdmittedOAProjectionAdapter` 根据 `t_payment_simple.flow_id` 精确读取 OA Mongo，`oa.sync` 只写 completed projection 并清理旧 in-progress 投影残留 | `tests.test_oa_payment_status_service`、`tests.test_oa_projection_sync_service`、`tests.test_oa_projection_sql_runtime`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_workbench_relation_sql_projection` |
+| 2026-06-18 | 进行中 OA 增加人工写回与右侧支出流水关联抽屉 | 自动候选、自动决策和已有 active relation 只能点击确认后写回；抽屉默认展示全部支出流水但只允许选择未配对流水，提交只创建 Workbench relation、不写 MySQL；关联台显示“已关联进行中OA”chip | `tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-11 | 关联台分组关系收敛 | 移除 `overpaid`/`merged_paid` 展示口径；多 OA/流水/发票 relation 合并为一条核对行；详情支持 `kind=oa` | `tests.test_oa_pending_payment_service`、`tests.test_invoice_lifecycle_policy`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` 通过 |
 | 2026-06-11 | 补齐测试闭环状态机 | OA 主行、付款状态、详情、UI、read model 和 worker 状态边界 | `tests.test_oa_pending_payment_service`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` 通过 |

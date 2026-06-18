@@ -698,6 +698,19 @@ function confirmPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymen
   });
 }
 
+function bankCandidateRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/oa-pending-payments/bank-transaction-candidates");
+}
+
+function linkBankRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/oa-pending-payments/link-bank-transactions";
+  });
+}
+
 function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
@@ -944,7 +957,7 @@ describe("OA pending payments page", () => {
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("候选")).toBeInTheDocument();
     expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
-    expect(within(candidateRow).getByRole("button", { name: "确认已支付" })).toBeInTheDocument();
+    expect(within(candidateRow).getByRole("button", { name: "确认已支付并写回" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
@@ -1051,16 +1064,37 @@ describe("OA pending payments page", () => {
     expect(within(page).getByRole("button", { name: "开票日期 排序" })).toBeInTheDocument();
     const candidateCells = candidateRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(candidateCells[3]?.textContent?.trim()).toBe("-");
-    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付" }));
+    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付并写回" }));
 
     await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));
     const [, init] = confirmPaidRequests(fetchMock)[0];
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       oa_row_id: "oa-candidate",
-      bank_transaction_id: "bank-candidate-004",
+      bank_transaction_ids: ["bank-candidate-004"],
     });
     expect(await within(page).findByText("已确认支付并写回 OA。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
+    });
+
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+    expect(await screen.findByRole("heading", { name: "关联支出流水" })).toBeInTheDocument();
+    await waitFor(() => expect(bankCandidateRequests(fetchMock).at(-1)?.searchParams.get("relation_status")).toBe("all"));
+    expect(await screen.findByText("抽屉供应商")).toBeInTheDocument();
+    expect(screen.getAllByText("已关联进行中OA").length).toBeGreaterThan(0);
+    expect(screen.getByRole("checkbox", { name: /已关联供应商/ })).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: /抽屉供应商/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联 1 条流水" }));
+    await waitFor(() => expect(linkBankRequests(fetchMock)).toHaveLength(1));
+    const [, linkInit] = linkBankRequests(fetchMock)[0];
+    expect(linkInit?.method).toBe("POST");
+    expect(JSON.parse(String(linkInit?.body))).toMatchObject({
+      oa_row_ids: ["oa-candidate"],
+      bank_transaction_ids: ["bank-drawer-001"],
+    });
+    expect(await within(page).findByText("已关联支出流水，等待核对表刷新。")).toBeInTheDocument();
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });

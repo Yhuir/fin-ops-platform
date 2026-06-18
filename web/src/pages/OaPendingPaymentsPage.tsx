@@ -434,7 +434,7 @@ function OaBankLinkDrawer({
   onError: (message: string) => void;
   onClose: () => void;
 }) {
-  const [relationStatus, setRelationStatus] = useState<OaPendingPaymentBankCandidateRelationStatus>("unmatched");
+  const [relationStatus, setRelationStatus] = useState<OaPendingPaymentBankCandidateRelationStatus>("all");
   const [keyword, setKeyword] = useState("");
   const [rows, setRows] = useState<OaPendingPaymentBankCandidate[]>([]);
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
@@ -561,7 +561,7 @@ function OaBankLinkDrawer({
             <label className="oa-pending-payments-bank-drawer__row" key={row.id}>
               <input
                 checked={selectedBankIds.has(row.id)}
-                disabled={row.relationStatus === "matched"}
+                disabled={row.relationStatus !== "unmatched"}
                 onChange={() => toggleBank(row.id)}
                 type="checkbox"
               />

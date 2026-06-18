@@ -23,6 +23,7 @@
 | `no_oa_bank_batch` | 免 OA 批次 | 是 | 免 OA 批次提交和 internal transfer confirm-link 统一使用。 |
 | `turnover_manual_closure` | 外部往来 | 是 | 手工零差额闭环对应的 relation。通常只含 bank rows；当所选银行流水已处于 OA-bank relation 时，可由外部往来确认闭环合并为包含 `oa` + `bank` rows 的同一 active case。不得包含 invoice；包含发票或其他业务 row type 的完整关系必须在关联台处理。 |
 | `batch_accounting` | 批量账务 | 是 | 日常报销 OA 与银行流水批量账务关系。 |
+| `manual_confirmed` + `special_metadata.origin=oa_pending_payment_in_progress` | OA 待付款核对 | 是 | 进行中 OA 在 OA 待付款核对右侧抽屉中人工关联支出流水。它是 Workbench active relation fact，会影响关联台和下游 relation distribution；但不等于 OA MySQL 已写回，`t_payment_simple.pay_status=1` 只能由 OA 待付款“确认已支付并写回”动作触发。 |
 | `etc_business_batch` | ETC | 是 | ETC summary 或业务批次关系。 |
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
 | `etc_batch_invoice_link` | ETC repair/link | 是 | 历史 ETC 批次补关联或 existing batch link 兼容关系；新增写入必须通过 command service，不允许页面 service 直接写 pair snapshot。 |
