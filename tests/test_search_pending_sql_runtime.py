@@ -1361,6 +1361,126 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(pending_repo.version_queries[0]["direction"], "expense")
         self.assertEqual(pending_repo.version_queries[0]["filter"], "all")
 
+    def test_pending_invoice_api_workbench_relation_source_version_stale_enqueues_refresh(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+
+        class PendingRepo:
+            def __init__(self) -> None:
+                self.version_queries: list[dict[str, object]] = []
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-relation-stale",
+                            "bank_transaction": {
+                                "id": "txn-relation-stale",
+                                "trade_time": "2026-04-23 11:18:17",
+                                "effective_tag_label_path": [],
+                            },
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": _pending_invoice_expected_source_versions(),
+                }
+
+            def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.version_queries.append(dict(kwargs))
+                return {"workbench_relation_schema_version": "2026-06-relation-v1", "source_version": 42}
+
+        pending_repo = PendingRepo()
+        app._pending_invoice_sql_read_repository = pending_repo
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {
+                "list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("relation stale pending invoice API must not scan in-memory state")
+                )
+            },
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["rows"][0]["id"], "txn-relation-stale")
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("workbench_relation_source_versions_missing", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(pending_repo.version_queries[0]["direction"], "expense")
+        self.assertEqual(pending_repo.version_queries[0]["filter"], "all")
+
+    def test_pending_invoice_api_workbench_relation_source_version_mismatch_enqueues_refresh(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+
+        class PendingRepo:
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-relation-old",
+                            "bank_transaction": {
+                                "id": "txn-relation-old",
+                                "trade_time": "2026-04-23 11:18:17",
+                                "effective_tag_label_path": [],
+                            },
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        **_pending_invoice_expected_source_versions(),
+                        "workbench_relation_source_versions": {
+                            "workbench_relation_schema_version": "2026-06-relation-v1",
+                            "source_version": 41,
+                        },
+                    },
+                }
+
+            def pending_invoice_workbench_relation_source_versions(self, **_kwargs: object) -> dict[str, object]:
+                return {"workbench_relation_schema_version": "2026-06-relation-v1", "source_version": 42}
+
+        app._pending_invoice_sql_read_repository = PendingRepo()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {
+                "list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("relation mismatch pending invoice API must not scan in-memory state")
+                )
+            },
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+
     def test_pending_invoice_all_direction_miss_enqueues_expense_and_income_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -1561,6 +1681,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                             "source_versions": {
                                 **_pending_invoice_expected_source_versions(),
                                 "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 7},
+                                "workbench_relation_source_versions": {
+                                    "workbench_relation_schema_version": "relation-v1",
+                                    "source_version": 41,
+                                },
                             },
                         },
                         {
@@ -1568,6 +1692,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                             "source_versions": {
                                 **_pending_invoice_expected_source_versions(),
                                 "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 8},
+                                "workbench_relation_source_versions": {
+                                    "workbench_relation_schema_version": "relation-v1",
+                                    "source_version": 42,
+                                },
                             },
                         },
                     ]
@@ -1596,6 +1724,68 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {
                 "2026-04": {"bank_detail_schema_version": 12, "rules": 7},
                 "2026-05": {"bank_detail_schema_version": 12, "rules": 8},
+            },
+        )
+        self.assertEqual(
+            source_versions["workbench_relation_source_versions"],
+            {
+                "2026-04": {"workbench_relation_schema_version": "relation-v1", "source_version": 41},
+                "2026-05": {"workbench_relation_schema_version": "relation-v1", "source_version": 42},
+            },
+        )
+
+    def test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months(self) -> None:
+        class PendingRelationScopeConnection:
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.pending_invoice_rows" in normalized:
+                    return [{"scope_key": "2026-04"}, {"scope_key": "2026-05"}]
+                if "from read_model.workbench_relation_scopes" in normalized:
+                    self.relation_scope_params = params
+                    return [
+                        {
+                            "scope_key": "2026-04",
+                            "source_versions": {
+                                "workbench_relation_schema_version": "relation-v1",
+                                "source_version": 41,
+                            },
+                        },
+                        {
+                            "scope_key": "2026-05",
+                            "source_versions": {
+                                "workbench_relation_schema_version": "relation-v1",
+                                "source_version": 42,
+                            },
+                        },
+                    ]
+                return []
+
+            def transaction(self):
+                connection = self
+
+                class Transaction:
+                    def __enter__(self) -> PendingRelationScopeConnection:
+                        return connection
+
+                    def __exit__(self, exc_type, exc, traceback) -> bool:
+                        return False
+
+                return Transaction()
+
+        connection = PendingRelationScopeConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        source_versions = repository.pending_invoice_workbench_relation_source_versions(
+            direction="expense",
+            filter="all",
+        )
+
+        self.assertEqual(connection.relation_scope_params, ("default", ["2026-04", "2026-05"]))
+        self.assertEqual(
+            source_versions,
+            {
+                "2026-04": {"workbench_relation_schema_version": "relation-v1", "source_version": 41},
+                "2026-05": {"workbench_relation_schema_version": "relation-v1", "source_version": 42},
             },
         )
 

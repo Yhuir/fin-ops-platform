@@ -29,6 +29,7 @@ def pending_invoice_source_versions(
     attachment_invoice_parser_version: str,
     oa_projection_sync_version: str,
     bank_detail_source_versions: dict[str, Any] | None = None,
+    workbench_relation_source_versions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = settings if isinstance(settings, dict) else {}
     pending_groups = payload.get("pending_invoice_tag_groups")
@@ -44,6 +45,8 @@ def pending_invoice_source_versions(
     }
     if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
         result["bank_detail_source_versions"] = dict(bank_detail_source_versions)
+    if isinstance(workbench_relation_source_versions, dict) and workbench_relation_source_versions:
+        result["workbench_relation_source_versions"] = dict(workbench_relation_source_versions)
     return result
 
 
@@ -445,6 +448,10 @@ class PendingInvoiceSourceVersionsProvider:
             attachment_invoice_parser_version=self._attachment_invoice_parser_version_provider(),
             oa_projection_sync_version=self._oa_projection_sync_version_provider(),
             bank_detail_source_versions=self._bank_detail_source_versions(query=query or {}, payload=payload or {}),
+            workbench_relation_source_versions=self._workbench_relation_source_versions(
+                query=query or {},
+                payload=payload or {},
+            ),
         )
 
     def _bank_detail_source_versions(
@@ -454,6 +461,27 @@ class PendingInvoiceSourceVersionsProvider:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         source_versions_loader = getattr(self._repository, "pending_invoice_bank_detail_source_versions", None)
+        if not callable(source_versions_loader):
+            return {}
+        return dict(
+            source_versions_loader(
+                direction=str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense"),
+                filter=str(query.get("filter", [payload.get("filter") or "all"])[0] or "all"),
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+            or {}
+        )
+
+    def _workbench_relation_source_versions(
+        self,
+        *,
+        query: dict[str, list[str]],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_versions_loader = getattr(self._repository, "pending_invoice_workbench_relation_source_versions", None)
         if not callable(source_versions_loader):
             return {}
         return dict(

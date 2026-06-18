@@ -26,6 +26,7 @@ import {
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
+import { ApiClientError } from "../features/apiClient";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -309,6 +310,16 @@ function buildExpenseTypeRowsFromTimeRows(rows: CostTimeRow[]) {
     .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
 }
 
+function getCostStatisticsLoadErrorMessage(error: unknown) {
+  if (error instanceof ApiClientError) {
+    const message = error.message.trim();
+    if (message && (error.status === 401 || error.status === 403 || error.code === "invalid_oa_session")) {
+      return message;
+    }
+  }
+  return "成本统计数据加载失败，请稍后重试。";
+}
+
 function ScopeYearPicker({ ariaLabel, years, value, onChange }: ScopeYearPickerProps) {
   return (
     <div aria-label={ariaLabel} className="cost-year-picker-panel" role="group">
@@ -575,9 +586,9 @@ export default function CostStatisticsPage() {
             setExportReferenceData(payload);
           }
         }
-      } catch {
+      } catch (caught) {
         if (!controller.signal.aborted) {
-          setLoadError("成本统计数据加载失败，请稍后重试。");
+          setLoadError(getCostStatisticsLoadErrorMessage(caught));
         }
       } finally {
         if (!controller.signal.aborted) {

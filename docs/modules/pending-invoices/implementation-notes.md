@@ -124,6 +124,16 @@
 - 未测风险：未连接真实生产 Postgres 大数据量，不验证真实 SQL projection EXPLAIN、锁等待或长尾分页性能；未跑真实 RabbitMQ/Redis/systemd search-pending 与 invoice-lifecycle worker drain；未做真实浏览器大文件导出和网络中断恢复 smoke。
 - 后续事项：下一轮处理 `oa-pending-payments`，重点审计 OA/bank/invoice detail、read model freshness、filter-options 和 invoice lifecycle fan-out。
 
+## 2026-06-18 - pending invoice relation source freshness gate
+
+- 目标：修复关联台 relation 已更新但待找发票 `/api/pending-invoices/rows` 仍把旧的无 OA pending row 当作 fresh 返回的问题。
+- 影响范围：`PendingInvoiceReadModelService` expected-source provider、`PostgresReadModelRepository` pending invoice source-version 聚合、`tests/test_search_pending_sql_runtime.py`。
+- 关键决策：`SearchPendingSqlProjectionBuilder` 已在写入 `read_model.pending_invoice_scopes.source_versions` 时保存 `workbench_relation_source_versions`；API expected-source gate 必须从当前 pending rows 命中的月份读取 `read_model.workbench_relation_scopes.source_versions` 并纳入比较。base scope 聚合时同时保留 `bank_detail_source_versions` 和 `workbench_relation_source_versions` 的按月版本，避免 aggregate scope 丢失 relation freshness。
+- 文档影响：更新本模块测试矩阵和历史 bug 回归库。
+- 测试覆盖：新增 `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_api_workbench_relation_source_version_stale_enqueues_refresh`、`test_pending_invoice_api_workbench_relation_source_version_mismatch_enqueues_refresh`、`test_pending_invoice_repository_aggregates_bank_detail_source_versions_across_month_shards` relation 断言、`test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_api.py -q`。
+- 未测风险：未连接真实生产 Postgres 验证 23053.31 原始数据行，但 freshness 契约已覆盖同类 stale 机制；真实 worker drain 仍按运维 smoke 验证。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。

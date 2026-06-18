@@ -28,6 +28,29 @@
 
 ## 历史记录
 
+## 2026-06-18 - 成本统计 explorer 认证错误呈现修复
+
+- 目标：修复进入成本统计页时后端返回 `401 invalid_oa_session` 却被页面统一显示为“成本统计数据加载失败”的问题，避免把 OA 登录态缺失误判为成本统计/read model 故障。
+- 影响范围：`web/src/pages/CostStatisticsPage.tsx`、`web/src/test/CostStatisticsPage.test.tsx`、成本统计测试矩阵。
+- 关键决策：
+  - 保持后端 API、read model、worker、scope contract 和成本归因架构不变；直接请求应用接口已确认无 OA 登录态时后端返回结构化 `401` 和业务 `message`。
+  - 页面加载 explorer 失败时仅对 `401`、`403` 和 `invalid_oa_session` 暴露后端业务文案；普通 500/网络异常继续使用泛化成本统计失败文案，避免暴露底层异常。
+  - `202 refreshing`、empty accepted payload、SQL read model miss/stale 仍走既有刷新状态，不当作本次错误。
+- 文档影响：更新本实施记录和 `tests.md`；产品规格、API 契约、状态机、read model/worker 长期事实源不变。
+- 测试覆盖：
+  - 新增 `web/src/test/CostStatisticsPage.test.tsx::surfaces OA session errors from explorer loading`。
+  - 保留既有泛化 500 加载失败测试，避免所有后端错误都直接透出。
+- 七类测试覆盖：
+  - Business core unit tests：不适用；未改变成本归因、状态流转、金额计算或项目范围。
+  - Service-layer tests：不适用；未改 service/repository/read model/worker。
+  - API contract tests：后端契约未改；用直接应用请求确认 `401 invalid_oa_session` shape。
+  - Read model/cache/background job tests：不适用；未改变 read model freshness、queue、cache 或 worker。
+  - Frontend component and interaction tests：适用，新增页面级认证错误呈现回归。
+  - End-to-end business-flow integration tests：不适用；未跨模块改变业务流。
+  - Existing feature regression tests：适用，保留成本统计 500 泛化失败、refreshing empty payload 和既有交互回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`；直接应用请求 `/api/cost-statistics/explorer?month=2026-03&project_scope=active`；`cd web && npm test -- --run src/test/CostStatisticsApi.test.ts src/test/CostStatisticsPage.test.tsx`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_api tests.test_cost_statistics_sql_runtime -v`。
+- 未测风险：未跑真实 OA iframe 登录链路、真实浏览器手工进入、生产 PostgreSQL scope cleanup 或 RabbitMQ/Redis worker drain；本轮修复只覆盖错误呈现层。
+
 ## 2026-06-18 - Workbench 成本关系 Browser fan-out
 
 - 目标：补齐 Spec-first Browser E2E 中的成本统计下游 fan-out，防止关联台 open candidate 被误算进成本，或 confirmed 成本关系写入后成本页没有重新读取并展示。

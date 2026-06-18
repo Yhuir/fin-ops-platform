@@ -3159,6 +3159,68 @@ class PostgresReadModelRepository:
             )
         return _source_versions_from_scope_summary(scope_summary)
 
+    def pending_invoice_workbench_relation_source_versions(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            where.append("filter_group = %s")
+            params.append(normalized_filter)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        with self._connection.transaction() as connection:
+            month_rows = connection.fetch_all(
+                f"""
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from read_model.pending_invoice_rows
+                where {where_sql}
+                  and scope_month is not null
+                order by scope_key
+                """,
+                tuple(params),
+            )
+            scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in month_rows)
+            if not scope_keys:
+                return {}
+            rows = connection.fetch_all(
+                """
+                select scope_key, source_versions
+                from read_model.workbench_relation_scopes
+                where tenant_id = %s
+                  and scope_key = any(%s)
+                order by scope_key
+                """,
+                (tenant_id, scope_keys),
+            )
+        return _scope_source_versions_by_month(rows)
+
     def _pending_invoice_source_summary(
         self,
         *,
@@ -10503,6 +10565,7 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
     )
     aggregate = dict(first_versions)
     bank_detail_by_month: dict[str, Any] = {}
+    workbench_relation_by_month: dict[str, Any] = {}
     for row in normalized_rows:
         row_scope_key = text(row.get("scope_key")) or ""
         source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
@@ -10511,13 +10574,39 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
             if isinstance(source_versions.get("bank_detail_source_versions"), dict)
             else {}
         )
+        workbench_relation_versions = (
+            source_versions.get("workbench_relation_source_versions")
+            if isinstance(source_versions.get("workbench_relation_source_versions"), dict)
+            else {}
+        )
         _direction, _filter_group, scope_month = _parse_pending_invoice_scope_key(row_scope_key)
         month_key = scope_month[:7] if scope_month else row_scope_key
         if month_key:
-            bank_detail_by_month[month_key] = dict(bank_detail_versions)
+            if bank_detail_versions:
+                bank_detail_by_month[month_key] = dict(bank_detail_versions)
+            if workbench_relation_versions:
+                workbench_relation_by_month[month_key] = dict(workbench_relation_versions)
     if bank_detail_by_month:
         aggregate["bank_detail_source_versions"] = bank_detail_by_month
+    if workbench_relation_by_month:
+        aggregate["workbench_relation_source_versions"] = workbench_relation_by_month
     return {"scope_key": scope_key, "source_versions": aggregate}
+
+
+def _scope_source_versions_by_month(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    normalized_rows = [row for row in list(rows or []) if isinstance(row, dict)]
+    if not normalized_rows:
+        return {}
+    if len(normalized_rows) == 1:
+        source_versions = normalized_rows[0].get("source_versions")
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+    result: dict[str, Any] = {}
+    for row in normalized_rows:
+        scope_key = text(row.get("scope_key"))
+        source_versions = row.get("source_versions")
+        if scope_key and isinstance(source_versions, dict):
+            result[scope_key] = dict(source_versions)
+    return result
 
 
 def _workbench_relation_row_payload(row: dict[str, Any]) -> dict[str, Any]:

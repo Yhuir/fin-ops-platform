@@ -491,6 +491,24 @@ describe("Cost statistics page", () => {
     expect(await screen.findByText("成本统计数据加载失败，请稍后重试。")).toBeInTheDocument();
   });
 
+  test("surfaces OA session errors from explorer loading", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        error: "invalid_oa_session",
+        message: "缺少 OA 登录态，请从 OA 系统进入。",
+      }), {
+        status: 401,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      }),
+    ) as typeof fetch;
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByText("缺少 OA 登录态，请从 OA 系统进入。")).toBeInTheDocument();
+    expect(screen.queryByText("成本统计数据加载失败，请稍后重试。")).not.toBeInTheDocument();
+  });
+
   test("hides read model refresh details without treating empty accepted payload as final empty data", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     installMockApiFetch({ costRefreshingMonths: ["2026-03"] });
