@@ -1,6 +1,7 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 const workbenchRowIds = [
@@ -110,6 +111,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeRetry);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("does not retry a stale confirm-link preview after a 409 conflict", async ({ page }) => {
@@ -156,6 +158,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("prevents duplicate split-candidate submissions while the preview is submitting", async ({ page }) => {
@@ -184,6 +187,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("prevents duplicate withdraw-link submissions while the preview is submitting", async ({ page }) => {
@@ -213,5 +217,6 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

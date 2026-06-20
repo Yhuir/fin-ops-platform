@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
@@ -27,7 +27,46 @@ async function expectMenuInsideViewport(page: import("@playwright/test").Page, n
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
+function waitForOaPendingPaymentRows(page: import("@playwright/test").Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" && url.pathname.endsWith("/api/oa-pending-payments/rows");
+  });
+}
+
 test.describe("OA pending payments browser flow", () => {
+  test("recovers rows after a transient load failure when refreshed", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      oaPendingPaymentRowsFailuresBeforeSuccess: 2,
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/oa-pending-payments");
+    await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
+    await expect(page.getByText("OA 待付款核对加载暂时失败，请刷新后重试。")).toBeVisible();
+    await expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toBeVisible();
+    await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
+    await expect(page.getByText("暂无 OA 待付款核对数据")).toHaveCount(0);
+    expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(1);
+
+    let recovered = false;
+    for (let attempt = 0; attempt < 3 && !recovered; attempt += 1) {
+      const responsePromise = waitForOaPendingPaymentRows(page);
+      await page.getByRole("button", { name: "刷新 OA 待付款核对" }).click();
+      recovered = (await responsePromise).status() === 200;
+    }
+    expect(recovered).toBe(true);
+
+    await expect(page.getByText("OA 待付款核对加载暂时失败，请刷新后重试。")).toHaveCount(0);
+    await expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toHaveCount(0);
+    const recoveredRow = page.getByRole("row", { name: /浏览器付款申请人/ });
+    await expect(recoveredRow).toBeVisible();
+    await expect(recoveredRow).toContainText("浏览器待付款项目");
+    await expect(recoveredRow).toContainText("支付少了");
+    await expect(page.getByText("1-1 / 1")).toBeVisible();
+    expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(3);
+  });
+
   test("filters, sorts, and opens OA, bank, invoice, and rules drawers", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 

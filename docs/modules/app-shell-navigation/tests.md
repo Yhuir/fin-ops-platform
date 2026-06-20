@@ -38,6 +38,7 @@
 | shell 中 workbench/tax/cost/settings/import/turnover 导航 | 已覆盖 | `App.test.tsx` |
 | 真实浏览器 admin/read_export_only/forbidden/expired shell gate | 已覆盖，2026-06-17 新增 | `web/e2e/app-shell.spec.ts` |
 | 真实浏览器 compact drawer / embedded OA shell | 已覆盖，2026-06-17 新增 | `web/e2e/app-shell-responsive.spec.ts` |
+| 生产 user-scope route-shell smoke | 已覆盖，2026-06-19 生产只读 smoke | `web/e2e/production-route-shell.spec.ts` / `npm run e2e:production-shell`；真实 `https://www.yn-sourcing.com` + full-access user cookie 打开 16 个核心路由；0 session gate、0 loading hang、0 console/page/dialog/request failure、0 mutating request |
 
 ## 七类测试适用性
 
@@ -69,6 +70,7 @@
 6. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
 7. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
 8. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式，桌面侧栏默认折叠并可展开。
+9. 生产真实 Chromium 使用 full-access user cookie 打开 16 个核心路由，页面不能停在 session gate 或“正在加载页面”，不能产生隐藏浏览器错误、原生弹窗、非预期 requestfailed 或任何 mutating HTTP。
 
 ## 模块验证命令
 
@@ -87,15 +89,18 @@ bash scripts/verify.sh docs
 
 cd web && npx playwright test e2e/app-shell-responsive.spec.ts
 
+cd web && FIN_OPS_E2E_OA_TOKEN='<真实 OA Admin-Token>' npm run e2e:production-shell
+
 cd web && npm run e2e:smoke
 ```
 
 ## Nightly CI 覆盖
 
-该模块测试由 nightly CI 的 frontend Vitest、frontend build 和 Playwright e2e smoke 覆盖。若新增 route、provider、navigation 或 page session 机制，必须确认新增测试文件仍被 `npm test` 或 `npm run e2e:smoke` 发现。
+该模块测试由 nightly CI 的 frontend Vitest、frontend build 和 Playwright e2e smoke 覆盖。生产 route-shell smoke 需要真实 OA token，默认不进入 nightly；发布后或人工验证窗口使用 `FIN_OPS_E2E_OA_TOKEN` 显式运行 `npm run e2e:production-shell`。若新增 route、provider、navigation 或 page session 机制，必须确认新增测试文件仍被 `npm test` 或 `npm run e2e:smoke` 发现，并按需要更新 production route-shell 清单。
 
 ## 未测风险
 
 - 已有真实 Chromium smoke 覆盖 shell/session/protected route、移动 drawer 打开/导航/关闭和 embedded OA shell 展开；CSS sticky/sidebar 像素级视觉、真实触摸手势惯性和真实 OA iframe 尺寸仍需专项 Playwright 或发布前手工 smoke。
+- 生产 user-scope route-shell smoke 已证明真实域名和真实 full-access user cookie 下 16 个核心路由可打开且无隐藏浏览器错误/意外写请求，但它不替代页面级业务流、弹窗、下载、iframe、滚动、大表格、网络恢复或写后 read model 收敛测试。
 - route chunk preload 只验证调用和 fallback，不模拟真实网络分包失败后的浏览器缓存行为；当前契约是失败不阻断导航。
 - full route registry 数量测试会在新增页面时失败，需要同步更新预期和 App Status/domain docs，而不是随意放宽。

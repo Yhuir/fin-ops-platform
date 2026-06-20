@@ -20,6 +20,7 @@ const panes = [
         amount: "128,000.00",
         counterparty: "华东设备供应商",
         actionVariant: "detail-only",
+        availableActions: ["detail"],
         tableValues: {
           applicant: "赵华",
           projectName: "华东改造项目",
@@ -45,6 +46,7 @@ const panes = [
         amount: "128,000.00",
         counterparty: "华东设备供应商",
         actionVariant: "bank-review",
+        availableActions: ["detail"],
         tableValues: {
           direction: "支出",
           transactionTime: "2026-03-25 14:22",
@@ -74,6 +76,7 @@ const panes = [
         amount: "128,000.00",
         counterparty: "华东项目甲方",
         actionVariant: "detail-only",
+        availableActions: ["detail"],
         tableValues: {
           sellerTaxId: "91310000MA1K8A001X",
           sellerName: "溯源科技有限公司",

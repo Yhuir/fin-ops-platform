@@ -18,12 +18,13 @@
 | `RECON-WB-E2E-010` | `covered` | `web/e2e/workbench-large-scroll-flow.spec.ts`、`web/src/test/WorkbenchColumns.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | Browser 已覆盖 205 个 open group 的长列表首屏分页、加载更多、搜索过滤到指定 group、详情抽屉打开/关闭、选择状态保持、三栏横向滚动同步和关键按钮无遮挡。真实生产 P95/P99 性能仍属 staging/生产风险。 |
 | `RECON-WB-E2E-011` | `covered` | `web/e2e/workbench-network-recovery-flow.spec.ts`、API idempotency/rollback tests | Browser 已覆盖 confirm-link 一次网络失败后在同一预览重试成功、409 stale preview 不显示重试且要求重新预览、confirm/split_candidate/withdraw 预览提交期间双击不创建第二次 mutation。 |
 | `RECON-WB-E2E-012` | `covered` | `web/e2e/workbench-stale-error-flow.spec.ts`、`web/e2e/workbench-permissions-flow.spec.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | Browser 已覆盖 OA dirty/refreshing gate 禁用关联台写入口，并补回 `app_status` 存在时保留 `oaSync=dirty` 的前端契约；同时覆盖 `overall.write_safety.blocks_mutations=true` 下 `read_export_only`、`full_access`、`admin` 三类会话在 open/paired/processed/ignored 状态仍可查看读侧诊断，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且不发出任何 Workbench mutation API 或 operation barrier。 |
+| `RECON-WB-E2E-013` | `covered` | `web/e2e/workbench-cash-special-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | Browser 已覆盖 full-access 用户从已配对银行流水更多菜单执行现金过账、买票成本确认和取消现金处理，断言三个 mutation 请求体携带完整 group row ids、买票弹窗必填校验、operation barrier 调用和成功后无隐藏 UI/browser 错误；权限矩阵已覆盖 read-export 下同一行级菜单不可触发且三个 durable endpoint 零调用。 |
 
 ## 现有 E2E 审计结论
 
 - 保留：`workbench-relation-fanout.spec.ts`、`pending-invoices-fanout.spec.ts`。它们已按业务结果断言跨页面 fan-out，不只是断言当前代码行为。
 - 保留并后续加强：`batch-accounting-flow.spec.ts`、`turnover-ledger-flow.spec.ts`。它们证明 relation barrier 和 bucket/group 恢复，但属于下游 owner 页面发起的 relation 流程。
-- 已补齐：网络恢复、重复提交、409 stale preview 和 App Health write-safety 浏览器负面场景。
+- 已补齐：网络恢复、重复提交、409 stale preview、App Health write-safety 和已配对现金流水特殊处理浏览器场景。
 - 不需要推翻重写：当前 workbench 相关 e2e 没有发现保护错误行为的测试；主要问题是覆盖粒度还停留在 smoke。
 
 ## 下一轮补测建议

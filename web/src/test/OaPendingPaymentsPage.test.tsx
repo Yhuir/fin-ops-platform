@@ -906,7 +906,11 @@ describe("OA pending payments page", () => {
     expect(within(page).queryByText("交易开始")).not.toBeInTheDocument();
     expect(within(page).queryByText("交易结束")).not.toBeInTheDocument();
     expect(within(page).queryByText("全页面检索")).not.toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    const refreshButton = within(page).getByRole("button", { name: "刷新 OA 待付款核对" });
+    expect(refreshButton).toBeInTheDocument();
+    const rowsBeforeRefresh = rowsRequests(fetchMock).length;
+    await user.click(refreshButton);
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
     expect(within(page).queryByRole("columnheader", { name: "类型" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("columnheader", { name: "OA详情" })).not.toBeInTheDocument();
     expect(within(page).queryByText("销方名称")).not.toBeInTheDocument();
@@ -1183,7 +1187,7 @@ describe("OA pending payments page", () => {
     expect(rulesRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("uses a standard empty state while read model refresh details stay hidden", async () => {
+  test("shows a neutral refreshing state instead of a true empty state while rows read model refreshes", async () => {
     installOaPendingPaymentsFetch({
       rowsPayload: {
         ...rowsPayload,
@@ -1199,8 +1203,9 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
-    expect(within(page).queryByText(/OA 待付款核对数据正在刷新/)).not.toBeInTheDocument();
+    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
+    expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText(/oa_pending_payment_source_version_missing/)).not.toBeInTheDocument();
   });
 

@@ -32,6 +32,7 @@ type InputInvoiceUsageTableProps = {
   onSortChange: (field: string, direction?: InputInvoiceUsageSortDirection) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -375,6 +376,7 @@ export default function InputInvoiceUsageTable({
   onSortChange,
   onPageChange,
   onPageSizeChange,
+  emptyStateMessage = "当前条件下没有进项发票使用记录。",
   tableWrapRef,
 }: InputInvoiceUsageTableProps) {
   const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
@@ -498,7 +500,7 @@ export default function InputInvoiceUsageTable({
             {rows.length === 0 ? (
               <tr>
                 <td className="input-invoice-usage-table-state-cell" colSpan={10}>
-                  当前条件下没有进项发票使用记录。
+                  {emptyStateMessage}
                 </td>
               </tr>
             ) : rows.map((row) => {

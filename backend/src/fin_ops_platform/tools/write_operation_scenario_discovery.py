@@ -135,16 +135,33 @@ def _turnover_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[s
         """
         select
           relation_id,
-          coalesce(status, raw_payload->>'status', '') as status,
-          coalesce(relation_type, raw_payload->>'relation_type', raw_payload->>'family', '') as relation_type,
-          coalesce(raw_payload->>'source', raw_payload->>'relation_source', '') as source,
+          coalesce(status, raw_payload->'normalized_payload'->>'status', raw_payload->>'status', '') as status,
+          coalesce(
+            relation_type,
+            raw_payload->'normalized_payload'->>'relation_type',
+            raw_payload->>'relation_type',
+            raw_payload->'normalized_payload'->>'family',
+            raw_payload->>'family',
+            ''
+          ) as relation_type,
+          coalesce(
+            raw_payload->'normalized_payload'->>'source',
+            raw_payload->>'source',
+            raw_payload->>'relation_source',
+            ''
+          ) as source,
           coalesce(scope_month::text, left(coalesce(raw_payload->>'month', raw_payload->>'scope_month', ''), 10), '') as scope_month,
           version,
           updated_at
         from app.turnover_relations
         where relation_id is not null
-          and coalesce(status, raw_payload->>'status', '') not in ('withdrawn', 'cancelled')
-          and coalesce(raw_payload->>'source', raw_payload->>'relation_source', '') <> 'system'
+          and coalesce(status, raw_payload->'normalized_payload'->>'status', raw_payload->>'status', '') not in ('withdrawn', 'cancelled')
+          and coalesce(
+            raw_payload->'normalized_payload'->>'source',
+            raw_payload->>'source',
+            raw_payload->>'relation_source',
+            ''
+          ) = 'manual'
         order by updated_at desc nulls last, relation_id
         limit %s
         """,

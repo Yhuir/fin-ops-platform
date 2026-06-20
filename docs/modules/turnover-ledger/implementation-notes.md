@@ -4,8 +4,8 @@
 
 ## 当前决策
 
-- 外部往来款管理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、service/UoW、API contract、read model/worker、前端交互、跨页面集成和旧功能回归。
-- 本轮不新增低价值测试。后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `tests.md` 中七类矩阵补测试。
+- 外部往来款管理 Spec-first E2E 本地闭环状态为 `spec-first-covered`：`TURNOVER-E2E-001..009` 已映射到 Browser、组件、API、后端和 integration 覆盖；`TURNOVER-E2E-010` 真实基础设施 worker drain 明确保留为 staging/runtime risk。
+- 后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `e2e-spec.md` 和 `tests.md` 中七类矩阵补测试。
 - 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保持 open，直到发票等完整业务关系在关联台补齐；若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
@@ -16,6 +16,49 @@
 - 外部往来闭环和 OA/发票关联是两个不同事实：OA/发票关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；前端只展示正向 chip，“已关联 OA”“已关联 发票”“收支闭环”。未闭环不显示 chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回同一 `cash_closure_case_id` 的 Workbench active case，并恢复确认前的 OA-bank relation。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+
+## 2026-06-20 - grouped ledger 加载失败刷新恢复
+
+- 目标：补齐外部往来款首屏 `GET /api/turnover-ledger` 暂时失败后的 Browser 恢复链路，防止 API 503 被页面误显示成普通“暂无往来款台账”空态，或恢复后残留失败文案。
+- 影响范围：`TurnoverLedgerPage` 刷新入口、`TurnoverLedgerGroupedTable` 错误态空态 guard、`web/e2e/fixtures/apiMocks.ts` turnover ledger 临时失败 mock、`web/e2e/turnover-ledger-flow.spec.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` 和本模块/全局测试文档。
+- 关键决策：不改变外部往来业务逻辑、manual closure、withdraw、tag-selection 或 read model freshness 规则；新增 `刷新台账` 只复用现有 `loadLedger`，错误态只阻止普通空态展示。
+- 测试覆盖：组件测试覆盖首次 GET 503 显示“往来款台账加载暂时失败，请刷新后重试。”且不显示普通空态，点击刷新后 grouped table 恢复；Browser 测试覆盖真实 Chromium 中首屏 503、用户手动刷新直到 200/fresh、grouped rows 恢复、未选择时确认闭环保持禁用、成功恢复后无可见错误残留和无隐藏浏览器错误。
+- 未测风险：真实网络中断、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史外部往来关系和大数据 grouped table 性能仍需 staging/runtime smoke。
+
+## 2026-06-19 - 成功写流可见错误残留 guard
+
+- 目标：防止外部往来 tag-selection、manual closure、成本统计 fan-out 或 withdraw 已成功，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。
+- 影响范围：`web/e2e/turnover-ledger-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试矩阵和全局测试文档。
+- 关键决策：不改变产品逻辑或 deterministic mock；在标签保存、确认闭环、成本统计下游展示和撤回成功节点复用 `expectNoUnexpectedSuccessUiErrors(...)`，把“成功但报错提示仍显示”作为 Browser 回归失败。
+- 文档影响：更新本模块 `tests.md`、`e2e-coverage.md` 和全局 testing closure state。
+- 测试覆盖：`web/e2e/turnover-ledger-flow.spec.ts` 加强 tag-selection、manual closure、cost fan-out 和 withdraw 成功路径；静态诊断防止后续移除该 guard。
+- 验证命令：`cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实生产外部往来写入仍需真实认证、业务审批和可回滚 scenario；本轮只覆盖 deterministic Browser flow 的可见错误残留。
+
+## 2026-06-19 - Spec-first E2E covered 校准
+
+- 目标：把外部往来款管理从旧测试闭环 `documented-risk` 校准为页面级 Spec-first E2E covered，明确本地自动化覆盖和真实基础设施风险边界。
+- 影响范围：`docs/modules/turnover-ledger/e2e-spec.md`、`docs/modules/turnover-ledger/e2e-coverage.md`、`web/e2e/turnover-ledger-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块 README/tests/implementation notes 和全局 Spec-first inventory。
+- 关键决策：
+  - 新增 `TURNOVER-E2E-001..010`，覆盖页面 ready、标签准入保存、manual closure、成本统计 downstream fan-out、withdraw recovery、Workbench/OA 合并边界、stale 防 false-empty、extra、导出/权限和真实 infra worker drain。
+  - Browser 增量覆盖标签准入保存：断言 `PUT /api/turnover-ledger/tag-selection` body、`turnover_ledger:all` operation barrier、ledger reload、成功反馈和零浏览器错误。
+  - 不把真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 search UI、真实 XLSX 打开和生产历史数据写成本地 CI covered；这些继续由 `infra-smoke`、staging 或生产前 smoke 验证。
+- 测试覆盖：更新 `web/e2e/turnover-ledger-flow.spec.ts` 和 deterministic mock 的 turnover tag-selection mutable state。
+- 验证命令：`cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts --project=chromium`。
+- 未测风险：真实 worker drain、真实大月份、真实 XLSX 打开、生产半迁移历史数据和 legacy fallback 删除专项仍需 staging/runtime smoke。
+
+## 2026-06-19 - Browser e2e 补 turnover 到成本统计 fan-out
+
+- 目标：把外部往来 manual closure 的 Browser E2E 从本页 confirm/withdraw 扩展到下游成本统计，避免“周转页显示成功但成本统计仍读旧 read model 或浏览器有隐藏报错”。
+- 影响范围：`web/e2e/turnover-ledger-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、外部往来和成本统计测试矩阵、全局 Spec-first E2E inventory。
+- 关键决策：
+  - 测试不改变产品逻辑，只新增 opt-in deterministic mock `turnoverCostFanout` 表示 closure 已确认后成本统计 fresh read model 包含对应成本行。
+  - Browser 流在确认闭环并等待 operation barrier 后跳到成本统计，断言 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，按项目/费用类型/流水表展示 `外部往来闭环成本项目`、`外部往来款付款`、`浏览器 e2e 归还借款` 和 `建设银行`，再回外部往来完成撤回。
+  - 新增严格浏览器错误捕获：`pageerror`、`console.error`、非 abort `requestfailed` 和未预期 dialog 均会失败。
+- 文档影响：更新本文件、`tests.md`、成本统计模块测试/覆盖/实施记录和全局 testing closure 文档。
+- 测试覆盖：更新 `web/e2e/turnover-ledger-flow.spec.ts` 和 `web/e2e/fixtures/apiMocks.ts`。
+- 验证命令：`cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts --project=chromium`。
+- 未测风险：本地仍是 mocked Browser E2E，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `turnover-ledger` 与 `cost-statistics` worker drain；真实环境需要 staging/production smoke。
 
 ## 2026-06-17 - 手动闭环后保留同对方未选流水
 

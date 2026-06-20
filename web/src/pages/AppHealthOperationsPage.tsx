@@ -142,6 +142,70 @@ function sampleLabel(row: OperationsDashboardReadModelMetric) {
   return formatNumber(sampleCount);
 }
 
+function readModelState(row: OperationsDashboardReadModelMetric) {
+  if ((row.unavailable_count ?? 0) > 0) {
+    return { label: "failed", tone: "danger" as const };
+  }
+  if ((row.stale_count ?? 0) > 0) {
+    return { label: "refreshing", tone: "warning" as const };
+  }
+  if (row.status === "unknown") {
+    return { label: "unknown", tone: "neutral" as const };
+  }
+  return { label: "fresh", tone: "success" as const };
+}
+
+function workerState(row: OperationsDashboardPayload["runtime_performance"]["workers"][number]) {
+  if (row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch") {
+    return { label: row.warning_code || row.status, tone: row.status === "stale" ? "warning" as const : "danger" as const };
+  }
+  return { label: row.current_effective === false ? "historical" : "active", tone: row.current_effective === false ? "neutral" as const : "success" as const };
+}
+
+function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
+  const readModels = payload.runtime_performance.read_models;
+  const workers = payload.runtime_performance.workers;
+  const staleReadModels = readModels.reduce((total, row) => total + (row.stale_count ?? 0), 0);
+  const unavailableReadModels = readModels.reduce((total, row) => total + (row.unavailable_count ?? 0), 0);
+  const workerIssues = workers.filter((row) => row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch").length;
+  const outbox = payload.runtime_performance.outbox;
+  const queueBacklog = (outbox.pending_count ?? 0) + (outbox.publishing_count ?? 0) + (outbox.failed_count ?? 0) + (outbox.publish_failed_count ?? 0);
+  const rows = [
+    {
+      key: "read-models",
+      label: "Read model",
+      value: unavailableReadModels > 0
+        ? `${unavailableReadModels} failed`
+        : staleReadModels > 0
+          ? `${staleReadModels} refreshing`
+          : `fresh ${readModels.length}`,
+      tone: unavailableReadModels > 0 ? "danger" as const : staleReadModels > 0 ? "warning" as const : "success" as const,
+    },
+    {
+      key: "workers",
+      label: "Worker",
+      value: workerIssues > 0 ? `${workerIssues} issue` : `active ${workers.filter((row) => row.current_effective !== false).length}`,
+      tone: workerIssues > 0 ? "warning" as const : "success" as const,
+    },
+    {
+      key: "queue",
+      label: "Queue",
+      value: queueBacklog > 0 ? `${queueBacklog} backlog` : "no backlog",
+      tone: queueBacklog > 0 ? "warning" as const : "success" as const,
+    },
+  ];
+  return (
+    <div className="app-health-runtime-overview" data-testid="app-health-runtime-overview">
+      {rows.map((row) => (
+        <div key={row.key} className="app-health-runtime-overview__item">
+          <span>{row.label}</span>
+          <FinanceStatusTag tone={row.tone}>{row.value}</FinanceStatusTag>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function InventorySummary({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
   return (
     <div className="app-health-inventory-card">
@@ -277,26 +341,35 @@ function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
 
 function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }) {
   return (
-    <FinanceTable ariaLabel="Read Model 刷新" minWidth={720}>
+    <FinanceTable ariaLabel="Read Model 状态" minWidth={920}>
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" isRowHeader>Read Model</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
         <FinanceTableColumn columnRole="status">15m p95</FinanceTableColumn>
         <FinanceTableColumn columnRole="status">15m p99</FinanceTableColumn>
         <FinanceTableColumn columnRole="status">历史 p95</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">15m 样本</FinanceTableColumn>
+        <FinanceTableColumn columnRole="date">最近完成</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">stale</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">unavailable</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody>
           {rows.map((row) => (
-            <FinanceTableRow key={row.key} id={row.key}>
-              <FinanceTableCell columnRole="identity" textValue={row.key}>{row.key}</FinanceTableCell>
-              <PercentileCells value={row.refresh_duration_ms} />
-              <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
-              <FinanceTableCell columnRole="quantity">{sampleLabel(row)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.stale_count)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.unavailable_count)}</FinanceTableCell>
-            </FinanceTableRow>
+            (() => {
+              const state = readModelState(row);
+              return (
+                <FinanceTableRow key={row.key} id={row.key}>
+                  <FinanceTableCell columnRole="identity" textValue={row.key}>{row.key}</FinanceTableCell>
+                  <FinanceTableCell columnRole="status"><FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag></FinanceTableCell>
+                  <PercentileCells value={row.refresh_duration_ms} />
+                  <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
+                  <FinanceTableCell columnRole="quantity">{sampleLabel(row)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="date">{formatTimestamp(row.refresh_duration_windows?.recent_15m?.last_completed_at)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="quantity">{formatNumber(row.stale_count)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="quantity">{formatNumber(row.unavailable_count)}</FinanceTableCell>
+                </FinanceTableRow>
+              );
+            })()
           ))}
       </FinanceTableBody>
     </FinanceTable>
@@ -305,23 +378,41 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
 
 function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
-    <FinanceTable ariaLabel="Worker 心跳" minWidth={300}>
+    <FinanceTable ariaLabel="Worker 状态" minWidth={900}>
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" isRowHeader>Worker</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">kind</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">required</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">lag</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">warning</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody>
           {payload.runtime_performance.workers.length === 0 ? (
             <FinanceTableRow id="empty-worker">
               <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
               <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
             </FinanceTableRow>
           ) : (
             payload.runtime_performance.workers.map((row) => (
-              <FinanceTableRow key={row.worker_kind} id={row.worker_kind}>
-                <FinanceTableCell columnRole="identity" textValue={row.worker_kind}>{row.worker_kind}</FinanceTableCell>
+              (() => {
+                const state = workerState(row);
+                const workerName = row.worker_instance || row.worker_kind;
+                return (
+              <FinanceTableRow key={workerName} id={workerName}>
+                <FinanceTableCell columnRole="identity" textValue={workerName}>{workerName}</FinanceTableCell>
+                <FinanceTableCell columnRole="description" textValue={row.worker_kind}>{row.worker_kind}</FinanceTableCell>
+                <FinanceTableCell columnRole="status"><FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag></FinanceTableCell>
+                <FinanceTableCell columnRole="status">{row.required === false ? "optional" : "required"}</FinanceTableCell>
                 <FinanceTableCell columnRole="quantity">{formatSeconds(row.heartbeat_lag_seconds)}</FinanceTableCell>
+                <FinanceTableCell columnRole="description" textValue={row.warning_code || ""}>{row.warning_code || EMPTY_VALUE}</FinanceTableCell>
               </FinanceTableRow>
+                );
+              })()
             ))
           )}
       </FinanceTableBody>
@@ -332,6 +423,7 @@ function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
 function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }) {
   return (
     <Section title="后台" testId="app-health-runtime">
+      <RuntimeOverview payload={payload} />
       <div className="app-health-runtime-grid app-health-runtime-grid--primary">
         <OutboxTable payload={payload} />
         <QueueTable payload={payload} />

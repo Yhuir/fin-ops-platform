@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const workbenchRowIds = [
   "oa-o-202603-001",
@@ -72,6 +73,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("POST /api/workbench/exception/apply")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeApply);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeApply);
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await openZone.getByRole("button", { name: /已处理异常3项/ }).click();
     const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
@@ -104,6 +106,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("POST /api/workbench/actions/cancel-exception")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeCancel);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeCancel);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("moves an ignored invoice through ignored modal and restores it after unignore", async ({ page }) => {
@@ -131,6 +134,7 @@ test.describe("workbench exception browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeIgnore);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeIgnore);
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await openZone.getByRole("button", { name: /已忽略1项/ }).click();
     const ignoredModal = page.getByRole("dialog", { name: "已忽略弹窗" });
@@ -150,5 +154,6 @@ test.describe("workbench exception browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeUnignore);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeUnignore);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

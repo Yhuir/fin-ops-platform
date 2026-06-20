@@ -370,6 +370,33 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(view["schema_version"], COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
         self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
 
+    def test_repository_reads_cost_statistics_schema_version_from_payload_not_table_column(self) -> None:
+        connection = CostStatisticsReadConnection(
+            read_model_row={
+                "scope_key": "active:2026-05",
+                "project_scope": "active",
+                "scope_month": "2026-05-01",
+                "generated_at": "2026-05-21T09:00:00+00:00",
+                "entry_count": 1,
+                "payload": {
+                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                    "month": "2026-05",
+                    "time_rows": [{"transaction_id": "txn-1"}],
+                },
+            },
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_cost_statistics_view(scope_key="active:2026-05")
+
+        self.assertEqual(view["schema_version"], COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
+        parent_sql = next(
+            sql
+            for sql, _params in connection.fetch_one_calls
+            if "from read_model.cost_statistics_read_models" in sql
+        )
+        self.assertNotIn("schema_version", parent_sql)
+
     def test_repository_prefers_cost_statistics_row_table_over_snapshot_payload(self) -> None:
         connection = CostStatisticsReadConnection(
             read_model_row={

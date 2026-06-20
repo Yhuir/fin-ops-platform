@@ -725,6 +725,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "counterparty_name": "昆明供应商",
                     "amount": "10.00",
                     "generated_at": "2026-05-21T10:00:00+00:00",
+                    "group_zone": "paired",
+                    "group_id": "case:SEARCH-REL-001",
                     "payload": {"id": "txn-1", "counterparty_name": "昆明供应商"},
                 }
             ]
@@ -735,9 +737,13 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["row_id"], "txn-1")
+        self.assertEqual(rows[0]["payload"]["zone_hint"], "paired")
+        self.assertEqual(rows[0]["payload"]["group_id"], "case:SEARCH-REL-001")
+        self.assertEqual(rows[0]["payload"]["jump_target"]["group_id"], "case:SEARCH-REL-001")
         sql, params = connection.fetch_all_calls[0]
         self.assertIn("row_number() over", sql)
         self.assertIn("partition by row_id", sql)
+        self.assertIn("read_model.workbench_group_rows", sql)
         self.assertIn("where row_rank = 1", sql)
         self.assertEqual(params, ("2026-05-01", "2026-05"))
 
@@ -869,7 +875,19 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "filters": {"scope": "all", "month": "2026-05", "project_name": None, "status": None, "limit": 20},
                     "summary": {"total": 1, "oa": 0, "bank": 1, "invoice": 0},
                     "oa_results": [],
-                    "bank_results": [{"row_id": "txn-1"}],
+                    "bank_results": [
+                        {
+                            "row_id": "txn-1",
+                            "group_id": "case:SEARCH-REL-001",
+                            "jump_target": {
+                                "month": "2026-05",
+                                "row_id": "txn-1",
+                                "record_type": "bank",
+                                "zone_hint": "paired",
+                                "group_id": "case:SEARCH-REL-001",
+                            },
+                        }
+                    ],
                     "invoice_results": [],
                     "refresh_status": "fresh",
                     "source_versions": app._search_index_expected_source_versions(),
@@ -886,7 +904,9 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["bank_results"], [{"row_id": "txn-1"}])
+        self.assertEqual(payload["bank_results"][0]["row_id"], "txn-1")
+        self.assertEqual(payload["bank_results"][0]["group_id"], "case:SEARCH-REL-001")
+        self.assertEqual(payload["bank_results"][0]["jump_target"]["group_id"], "case:SEARCH-REL-001")
         self.assertEqual(payload["read_model_status"], "fresh")
 
     def test_pending_invoice_repository_reads_rows_page_and_summary(self) -> None:

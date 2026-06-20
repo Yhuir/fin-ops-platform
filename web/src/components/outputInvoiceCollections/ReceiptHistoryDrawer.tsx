@@ -8,6 +8,7 @@ import StatePanel from "../common/StatePanel";
 type ReceiptHistoryDrawerProps = {
   open: boolean;
   invoiceId: string | null;
+  canMutateData: boolean;
   loadHistory: (invoiceId: string) => Promise<OutputInvoiceReceiptHistoryResponse>;
   onVoidReceipt: (receiptId: string, reason: string) => Promise<void>;
   onReissueReceipt: (receiptId: string, reason: string) => Promise<void>;
@@ -18,6 +19,7 @@ type ReceiptHistoryDrawerProps = {
 export default function ReceiptHistoryDrawer({
   open,
   invoiceId,
+  canMutateData,
   loadHistory,
   onVoidReceipt,
   onReissueReceipt,
@@ -82,8 +84,10 @@ export default function ReceiptHistoryDrawer({
       await onVoidReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
+      return true;
     } catch (voidReason) {
       setError(voidReason instanceof Error ? voidReason.message : "作废收据失败");
+      return false;
     } finally {
       setSubmittingId("");
     }
@@ -96,8 +100,10 @@ export default function ReceiptHistoryDrawer({
       await onReissueReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
+      return true;
     } catch (reissueReason) {
       setError(reissueReason instanceof Error ? reissueReason.message : "重开收据失败");
+      return false;
     } finally {
       setSubmittingId("");
     }
@@ -126,10 +132,11 @@ export default function ReceiptHistoryDrawer({
       setError("请填写收据处理原因");
       return;
     }
-    if (pendingAction.kind === "void") {
-      await handleVoid(pendingAction.receiptId, trimmedReason);
-    } else {
-      await handleReissue(pendingAction.receiptId, trimmedReason);
+    const succeeded = pendingAction.kind === "void"
+      ? await handleVoid(pendingAction.receiptId, trimmedReason)
+      : await handleReissue(pendingAction.receiptId, trimmedReason);
+    if (!succeeded) {
+      return;
     }
     setPendingAction(null);
     setReason("");
@@ -187,7 +194,7 @@ export default function ReceiptHistoryDrawer({
                     ) : null}
                   </div>
                   <div className="output-invoice-collection-receipt-history-card__actions">
-                    {receipt.status === "issued" && receipt.id ? (
+                    {canMutateData && receipt.status === "issued" && receipt.id ? (
                       <button
                         className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--warning"
                         disabled={submittingId === receipt.id}
@@ -197,7 +204,7 @@ export default function ReceiptHistoryDrawer({
                         作废收据 {receiptIdentity}
                       </button>
                     ) : null}
-                    {receipt.status === "voided" && receipt.id ? (
+                    {canMutateData && receipt.status === "voided" && receipt.id ? (
                       <button
                         className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
                         disabled={submittingId === receipt.id}

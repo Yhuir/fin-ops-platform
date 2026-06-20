@@ -30,7 +30,7 @@
 | `pending-invoices` | `/pending-invoices` | `web/src/pages/PendingInvoicesPage.tsx` | `web/src/features/pendingInvoices/api.ts` | `routes_pending_invoices.py`、`server.py` `/api/pending-invoices*` | `pending_invoice`、`search`、`invoice_lifecycle`、`search-pending`、`invoice-lifecycle` | `tests/test_pending_invoice_*`、`web/src/test/PendingInvoices*.test.tsx` |
 | `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
 | `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
-| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` |
+| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` |
 | `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/NoOaBankBatchPage.tsx` | `web/src/features/noOaBankBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、`web/src/test/NoOaBankBatch*.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts` |
 | `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | `workbench_relation`、`workbench-relation` | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
 | `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
@@ -54,7 +54,11 @@
 
 当前 Browser e2e：
 
-- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示。
+- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证 read model `refreshing` / `stale` / `failed` 不显示最终空态或旧数据，`read_export_only` time-view 导出中心可成功触发 download event 且请求/文件字段正确；同时验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示；另有 390px 窄屏 120+ 行长字段 smoke，等待 explorer `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动、右侧列在 viewport 内、导出入口和选择器未被遮挡且无浏览器错误。
+- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中确认 ETC 导入后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示 ETC 导入通行成本项目、通行费和服务商，证明 ETC import 子链路不是只停留在导入页 job feedback。
+- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中 no-OA selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示免 OA 手续费成本项目、费用类型和银行流水字段，证明 no-OA submit 子链路不是只停留在本页 bucket 状态。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中外部往来 manual closure confirm 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示外部往来闭环成本项目、费用类型和银行流水字段，证明 turnover closure 子链路不是只停留在周转页闭环 chip 状态。
+- `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中设置页项目标记完成并保存后进入成本统计，等待 active/all `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，active scope 排除已完成项目，all scope 保留该项目和金额，证明 settings project scope 子链路不是只停留在设置页保存成功反馈。
 
 ## 模块细化：input-invoice-usage
 
@@ -92,14 +96,14 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/TaxOffsetPage.tsx` | 试算、保存、认证导入后必须刷新当前月份 payload；read model refreshing/stale 不能允许保存。 |
+| Frontend page | `web/src/pages/TaxOffsetPage.tsx` | 试算、保存、认证导入后必须刷新当前月份 payload；read model refreshing/stale/missing/failed/unavailable 不能显示真实空态或允许保存。 |
 | Certified import modal | `web/src/components/tax/CertifiedInvoiceImportModal.tsx` | React StrictMode effect replay 后 mounted guard 必须恢复；confirm 返回后必须关闭 modal 并调用页面刷新。 |
 | Frontend API mapper | `web/src/features/tax/api.ts` | preview/confirm/job payload、summary amount 和 source_versions shape 不能漂移。 |
 | API/read model | `/api/tax-offset*`、`TaxOffsetQueryService`、`TaxOffsetReadModelRefreshService` | miss/stale 必须走 freshness/enqueue；认证导入 confirm 必须 dirty tax offset month。 |
 
 当前 Browser e2e：
 
-- `web/e2e/tax-offset-flow.spec.ts`：真实 Chromium 中进入税金抵扣页，取消一张进项计划后触发 calculate，保存计划，再在页内 modal 上传认证结果 Excel、preview 行级计划内/外拆分、confirm 后等待 `/api/tax-offset` 刷新，验证已认证进项税额和已认证 drawer 更新。
+- `web/e2e/tax-offset-flow.spec.ts`：真实 Chromium 中进入税金抵扣页，验证 read-export 可读无保存/导入入口、forbidden/expired 零 tax protected API、admin 写入口可见；验证 390px 窄屏 81/92 行大表搜索、排序、筛选、共享横向滚动和按钮无遮挡；验证 `refreshing` / `missing` / `failed` read model 不显示真实空态、不泄露 stale reason、不允许保存计划，验证 `stale -> fresh` 自动重试恢复；同时覆盖取消一张进项计划后触发 calculate，保存计划，409 source/version conflict 错误可见且不显示保存成功/不伪刷新，再在页内 modal 上传认证结果 Excel、preview 行级计划内/外拆分、confirm 后等待 `/api/tax-offset` 刷新，验证已认证进项税额和已认证 drawer 更新。
 
 ## 模块细化：turnover-ledger
 
@@ -128,7 +132,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 `turnover_ledger` / `workbench_relation` / `workbench` operation barrier，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 operation barrier，进入成本统计验证 `/api/cost-statistics/explorer` fresh 和闭环成本行，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
 
 ## 模块细化：no-oa-bank-batches
 
@@ -158,7 +162,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体和 operation barrier fresh，切到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
+- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体和 operation barrier fresh，进入成本统计验证 downstream fresh read model 与免 OA 成本行，回到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
 
 ## 模块细化：batch-accounting
 
@@ -280,7 +284,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中加载 ready ETC 对账任务、选择 task、上传两份 zip、预览 audit/新增/重复/附件补齐/异常项、确认后展示 `etc_invoice_import` background job feedback，并断言没有走通用 `/imports/files/*` 导入端点。
+- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中加载 ready ETC 对账任务、选择 task、上传两份 zip、预览 audit/新增/重复/附件补齐/异常项、确认后展示 `etc_invoice_import` background job feedback，并进入 ETC 票据、税金抵扣和成本统计验证 downstream fresh read model 与导入影响行，同时断言没有走通用 `/imports/files/*` 导入端点。
 
 ## 模块细化：output-invoice-collections
 
@@ -306,7 +310,7 @@
 | rows read model miss/stale/source version mismatch | `output_invoice_collection.read_model.refresh`，reason `api_miss` / `api_stale` | 销项收款、App Status/App Health |
 | 手动收款状态保存/清空 | lifecycle fact + `output_invoice_collection` month scope，reason `lifecycle_status_changed` | 销项收款；通过 invoice lifecycle/readiness 间接影响税金、成本、search 的最终判断 |
 | 收款提醒 upsert/cancel | lifecycle fact + `output_invoice_collection` month scope，reason `lifecycle_reminder_changed` / `lifecycle_reminder_cancelled` | 销项收款、App Status/App Health |
-| 红蓝票关系 confirm/delete | red relation fact + `output_invoice_collection` month scope，reason `lifecycle_red_relation_changed` / cancelled | 销项收款、税金抵扣、成本统计、search 的后续 smoke |
+| 红蓝票关系 confirm/delete | red relation fact + `output_invoice_collection` month scope，reason `lifecycle_red_relation_changed` / cancelled | 销项收款 rows、红蓝票 relation 字段 export-preview/download、税金抵扣、成本统计、search 的后续 smoke |
 | receipt create | formal receipt fact + `output_invoice_collection` month scope，reason `receipt_created` | 销项收款、收据 history、App Status/App Health |
 | receipt void/reissue | receipt status fact + `output_invoice_collection` month scope，reason `receipt_voided` / `receipt_reissued` | 销项收款、收据 history、App Status/App Health |
 | receipt settings update | receipt settings fact；不直接刷新历史 rows，后续新建 receipt 使用新设置 | 销项收款 admin drawer |
@@ -320,6 +324,7 @@
 - `tests/test_invoice_usage_collection_sql_runtime.py` 保护 output read model stale -> `202 refreshing`、source_versions、all scope expansion 和 RabbitMQ event registration。
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 保护页面骨架、refreshing/empty、retry cleanup、workflow drawers 和 admin-only 设置。
 - `web/e2e/output-invoice-collections-flow.spec.ts` 用真实 Chromium 保护销项收款 rows/filter 首屏、收款状态/提醒保存、rows refresh、正式收据 create 和 history 展示。
+- `web/e2e/output-invoice-red-relation-fanout.spec.ts` 用真实 Chromium 保护红蓝票关系确认后 rows refresh、manual evidence 展示、relation 字段 export-preview/download、税金抵扣/成本统计下游 fresh read model，以及撤销后行状态恢复。
 
 ## 模块细化：etc-tickets
 
@@ -398,7 +403,7 @@
 - `tests/test_oa_applicant_credentials_*`、`tests/test_target_oa_applicant_token_provider.py` 保护独立凭据事实源、PG 加密、无密码回显和目标 OA token provider。
 - `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护 settings fan-out 到 read model/worker/App Status 的共享 contract。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` 保护设置页、关联台内设置入口、data reset progress/reentry、admin-only 凭据和全局状态提示。
-- `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈。
+- `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈；同一 spec 也覆盖项目标记完成 -> 保存 settings -> 成本统计 active/all fresh project scope。
 
 ## 模块细化：app-health-operations
 

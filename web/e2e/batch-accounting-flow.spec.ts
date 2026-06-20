@@ -1,9 +1,80 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+
+function startStrictBrowserErrorCapture(page: Page, options: { allowedConsoleErrors?: RegExp[] } = {}) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => {
+    errors.push(`pageerror: ${error.stack || error.message}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      const text = message.text();
+      if (options.allowedConsoleErrors?.some((pattern) => pattern.test(text))) {
+        return;
+      }
+      errors.push(`console.error: ${text}`);
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "";
+    if (failure === "net::ERR_ABORTED") {
+      return;
+    }
+    errors.push(`requestfailed: ${request.method()} ${request.url()} ${failure}`.trim());
+  });
+  page.on("dialog", async (dialog) => {
+    errors.push(`dialog: ${dialog.type()} ${dialog.message()}`);
+    await dialog.dismiss().catch(() => undefined);
+  });
+  return errors;
+}
+
+function waitForBatchAccountingList(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" && url.pathname.endsWith("/api/batch-accounting");
+  });
+}
 
 test.describe("batch accounting browser flow", () => {
+  test("recovers list after a transient load failure when refreshed", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page, {
+      allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
+    });
+    const api = await installDeterministicApiMocks(page, {
+      batchAccountingFailuresBeforeSuccess: 2,
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/batch-accounting");
+    await expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible();
+    await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible();
+    await expect(page.getByText("当前年份暂无批量账务流水")).toHaveCount(0);
+    expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(1);
+
+    let recovered = false;
+    for (let attempt = 0; attempt < 3 && !recovered; attempt += 1) {
+      const responsePromise = waitForBatchAccountingList(page);
+      await page.getByRole("button", { name: "刷新" }).click();
+      recovered = (await responsePromise).status() === 200;
+    }
+    expect(recovered).toBe(true);
+
+    await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toHaveCount(0);
+    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
+    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
+    const oaTable = page.getByRole("table", { name: "可关联OA项" });
+    await expect(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+    expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(3);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("keeps the bank rail readable in a narrow desktop viewport", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
     await page.setViewportSize({ width: 1180, height: 720 });
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
@@ -38,9 +109,38 @@ test.describe("batch accounting browser flow", () => {
       expect(box.x).toBeGreaterThanOrEqual(headerBox!.x - 1);
       expect(box.x + box.width).toBeLessThanOrEqual(headerRight);
     }
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("shows stale relation read model diagnostics without treating current rows as empty", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      batchAccountingReadModelStatus: "stale",
+    });
+
+    await page.goto("/batch-accounting");
+    await expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible();
+    await expect(page.getByText("关联台关系读模型 stale，正在刷新。")).toBeVisible();
+    await expect(page.getByText("batch_accounting_stale")).toBeVisible();
+    await expect(page.getByText("影响范围：2026-04")).toBeVisible();
+
+    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
+    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("当前年份暂无批量账务流水")).toBeHidden();
+
+    const oaTable = page.getByRole("table", { name: "可关联OA项" });
+    await oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }).check();
+    await oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }).check();
+    await expect(page.getByText("已选 OA 2 项")).toBeVisible();
+    await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
+    expect(api.count("POST /api/batch-accounting/submit")).toBe(0);
+    expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(0);
+    expect(browserErrors).toEqual([]);
   });
 
   test("submits and withdraws daily reimbursement rows through the relation freshness barrier", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/batch-accounting");
@@ -66,6 +166,7 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(api.count("GET /api/batch-accounting")).toBeGreaterThan(batchAccountingGetsBeforeSubmit);
     await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await page.getByRole("button", { name: "已提交 1" }).click();
     await expect(page.getByRole("button", { name: "已提交 1" })).toHaveAttribute("aria-pressed", "true");
@@ -90,9 +191,12 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
     await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
     await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await page.getByRole("button", { name: "未提交 1" }).click();
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("table", { name: "可关联OA项" }).getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
   });
 });

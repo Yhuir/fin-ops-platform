@@ -1110,7 +1110,7 @@ export default function NoOaBankBatchPage() {
           </header>
           <div className="no-oa-bank-batches-transactions__list">
             {loading ? <StatePanel compact tone="loading" title="流水加载中" /> : null}
-            {!loading && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title="当前标签下暂无流水" /> : null}
+            {!loading && !error && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title="当前标签下暂无流水" /> : null}
             {!loading ? visibleBatches.map((batch) => {
               const detail = details[batch.batchId];
               const rows = detail?.rows ?? [];

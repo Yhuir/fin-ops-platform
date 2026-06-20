@@ -44,7 +44,7 @@
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、请求性能、runtime outbox/RabbitMQ/read model/worker 指标。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
-- App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading。
+- App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
 
 ## 运行事实源
@@ -64,6 +64,7 @@
 | critical read model failed/unavailable | domain blocked/red，暴露 current-effective scope diagnostics | 对应页面不能假装 fresh；普通 read model failure 不进入全局写闸门，写入是否禁用由 `overall.write_safety` 和具体写 API precondition 决定 |
 | required worker missing/stale/mismatch | domain blocked/red 或 busy/yellow | 所有依赖该 worker 的页面不能假设会收敛 |
 | dirty scope/outbox backlog | domain busy/yellow | 用户看到后台刷新，而不是旧数据 fresh |
+| runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 read model、worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 fresh/refreshing/failed、active/working/stale/missing、pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |
 | dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见 |
 | dashboard metrics refresh 失败 | dashboard 保留上一份 payload 并显示 stale warning | 运维读侧不中断，但不能作为 fresh 事实 |
@@ -82,4 +83,6 @@
 
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
+- `e2e-spec.md`：维护系统状态页 Spec-first Browser 业务验收合同。
+- `e2e-coverage.md`：维护系统状态页 Spec-first 合同到自动化覆盖的映射。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。

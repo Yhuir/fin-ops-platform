@@ -53,7 +53,12 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-COMPAT"},
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-WITHDRAW-COMPAT",
+                    "note": "withdraw compatibility covers documented mismatch path",
+                },
             )
             withdraw_response = self._post(
                 app,
@@ -85,7 +90,12 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
             confirm_response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-PREVIEW-VERSION"},
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-WITHDRAW-PREVIEW-VERSION",
+                    "note": "withdraw preview covers documented mismatch path",
+                },
             )
             preview_response = self._post(
                 app,

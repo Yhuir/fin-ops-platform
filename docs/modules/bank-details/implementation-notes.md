@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-19 - 分类与导出成功路径 UI 错误残留 guard
+
+- 目标：补齐银行明细分类和导出 Browser 成功链路的“假成功”检测，防止分类/撤销/下载成功后页面仍残留保存失败、撤回失败、导出失败、同步失败或 read model 失败提示。
+- 影响范围：`web/e2e/bank-details-category-flow.spec.ts`、`web/e2e/bank-details-export-download.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试文档和全局 testing 文档。
+- 关键决策：只加固 deterministic Browser E2E，不改产品逻辑；forbidden/expired session 和非 fresh 导出业务错误仍作为 negative path 保留错误/权限断言，不接入成功 guard。
+- 文档影响：更新 `tests.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 workbench relation 导出覆盖说明。
+- 测试覆盖：候选确认/撤销、人工补分类/清除、relation 字段下载、筛选下载、read-export 下载和 admin 分类写入成功后调用 `expectNoUnexpectedSuccessUiErrors`；静态诊断防止后续移除。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-category-flow.spec.ts e2e/bank-details-export-download.spec.ts e2e/bank-details-filtered-export-permissions.spec.ts e2e/pending-invoices-export-download.spec.ts --project=chromium` 通过 11 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v` 通过 8 tests；`python3 -m py_compile tests/test_playwright_e2e_strict_diagnostics.py`、`bash scripts/verify.sh docs` 和目标文件 `git diff --check` 均通过。
+- 未测风险：真实 XLSX 完整解析、真实代理下载 headers、真实生产大数据性能和真实 worker drain 仍需 staging/runtime smoke。
+
 ## 2026-06-18 - Spec-first Browser 首屏与 fresh 空态闭环
 
 - 目标：补齐 `BANK-E2E-001` 的页面级 Browser 证据，覆盖默认当前年首屏、账户余额、默认交易列、relation/category 字段和 fresh 空结果空态。
@@ -36,7 +46,7 @@
 - 测试覆盖：新增 `web/e2e/bank-details-initial-state.spec.ts` 两条测试，覆盖首屏非空和 fresh 空结果；纳入 `npm run e2e:smoke`。
 - 验证命令：`cd web && npx playwright test e2e/bank-details-initial-state.spec.ts`。
 - 未测风险：真实历史多账户组合、真实 worker drain、真实生产大数据性能和真实 XLSX 完整解析仍按 staging/专项风险处理。
-- 后续事项：bank-details 的 `BANK-E2E-001..010` 已有覆盖；下一轮按全局 inventory 推进 `workbench-relations` 税金/search 或 imports/pending 等未覆盖模块。
+- 后续事项：bank-details 的 `BANK-E2E-001..010` 已有覆盖；下一轮按全局 inventory 推进 `workbench-relations` 导出权限/筛选组合、OA pending linked fan-out 或 imports/pending 等未覆盖模块。
 
 ## 2026-06-18 - Spec-first Browser 权限与会话 gate 闭环
 

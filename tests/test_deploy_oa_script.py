@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -385,6 +387,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("read-model-scope-contract <release-name> [args]", script)
         self.assertIn("read_model_scope_contract()", script)
         self.assertIn('run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"', script)
+        self.assertIn("read-model-slo-smoke <release-name> [args]", script)
+        self.assertIn("read_model_slo_smoke()", script)
+        self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", script)
+        self.assertIn('run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"', script)
         self.assertIn("FINOPS_WORKER_READY_TIMEOUT_SECONDS", script)
         self.assertIn("missing_required_worker_count", script)
         self.assertIn("stale_required_worker_count", script)
@@ -398,10 +404,34 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--worker-instance \\${FIN_OPS_WORKER_INSTANCE}", script)
         self.assertLess(script.rindex('ensure_runtime_workers "$src"'), script.rindex("wait_required_workers_ready"))
         self.assertLess(script.rindex("read_model_scope_contract()"), script.rindex('case "$cmd" in'))
+        self.assertLess(script.rindex("read_model_slo_smoke()"), script.rindex('case "$cmd" in'))
         self.assertNotIn("EnvironmentFile=/opt/fin-ops/fin-ops.env", script)
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
         self.assertNotIn("--worker-kind \\${FIN_OPS_WORKER_KIND}", script)
+
+    def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
+        env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
+
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "read-model-slo-smoke",
+                "fake-release",
+                "--apply",
+                "--json",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", result.stderr)
+        self.assertNotIn("release src directory not found", result.stderr)
 
 
 if __name__ == "__main__":

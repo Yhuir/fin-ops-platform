@@ -30,7 +30,7 @@
 | failed/partial/interrupted background job 进入 App Health attention | `tests/test_app_health_api.py`、`tests/test_background_job_service.py` | 已覆盖 |
 | legacy app Mongo export manifest、NDJSON counts、只读 store、不可覆盖目录 | `tests/test_export_app_mongo.py` | 已覆盖 |
 | runtime state policy 对 active/attention/background jobs 的镜像写入约束 | `tests/test_runtime_state_policy.py` | 已覆盖 |
-| Settings/Workbench UI 的 impact confirmation、OA password、progress reentry、权限隐藏 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 已覆盖；Browser e2e 覆盖真实 Chromium 下设置页影响确认、OA 密码复核、job polling、完成后 reload 与全局反馈。 |
+| Settings/Workbench UI 的 impact confirmation、OA password、progress reentry、权限隐藏、多页面 fresh contract | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 已覆盖；Browser e2e 覆盖真实 Chromium 下设置页影响确认、OA 密码复核、job polling、完成后 reload 与全局反馈，并在 reset 完成后进入银行明细验证 fresh empty、进入待找发票验证 fresh rows。 |
 
 ## 七类测试适用性
 
@@ -40,8 +40,8 @@
 | 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_background_job_service.py`、`tests/test_export_app_mongo.py` | 覆盖 state store 清理、文件删除调用、job 进度、payload sanitize、只读导出 | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
 | 3. API contract tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 admin-only、密码失败、同步 reset、job create/query/active、并发 409、protected_targets、敏感字段不泄露 | 无 P0 | 修改 route/error/status/job shape 时同步补契约断言 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_app_health_api.py`、`tests/test_background_job_service.py`、`tests/test_runtime_state_policy.py` | 覆盖 lifecycle fan-out、cost statistics clear、job attention/active、runtime state policy | P1 | 真 Redis cache、真实 Postgres dirty/outbox/worker drain 需要 staging/nightly smoke |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖确认、密码弹窗、cancel、错误、progress reentry、权限隐藏；Browser e2e 覆盖真实页面 job polling/reload | P1 | 真实浏览器视觉、长任务 progress、网络断开恢复需 smoke |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_settings_data_reset_service.py` 间接集成；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 UI -> job -> reload | 覆盖 reset -> lifecycle/rebuild -> API payload 的核心路径，以及设置页发起 job 到 reload 的浏览器路径 | P1 | 真实导入数据 -> reset -> worker drain -> 多页面最终 fresh 需 staging smoke |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖确认、密码弹窗、cancel、错误、progress reentry、权限隐藏；Browser e2e 覆盖真实页面 job polling/reload 和 reset 后跨页读取银行明细/待找发票 fresh contract | P1 | 真实浏览器视觉、长任务 progress、网络断开恢复需 smoke |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_settings_data_reset_service.py` 间接集成；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 UI -> job -> reload -> downstream reads | 覆盖 reset -> lifecycle/rebuild -> API payload 的核心路径，以及设置页发起 job 到 reload，再进入银行明细 fresh empty 和待找发票 fresh rows 的浏览器路径 | P1 | 真实导入数据 -> reset -> worker drain -> 多页面最终 fresh 需 staging smoke |
 | 7. Existing feature regression tests | 适用 | 各业务模块测试 + 本模块 reset 测试 | 覆盖银行/发票/OA/ETC/成本/App Health 关键旧行为 | 无 P0 | 每次改 reset action 必须列出旧页面/API/read model/export/权限影响面 |
 
 ## 历史 bug 回归库
@@ -50,6 +50,7 @@
 | --- | --- | --- | --- |
 | 2026-06-11 | 并发 data reset 可能重复创建危险后台任务，导致删除动作重入或 UI 进度错乱 | `test_reset_job_api_rejects_concurrent_job_without_echoing_password` | `PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_job_api_rejects_concurrent_job_without_echoing_password -v` |
 | 2026-06-17 | data reset 缺少真实浏览器闭环，无法证明影响确认、OA 密码复核、job polling、settings reload 和全局反馈在 Chromium 下可连续完成 | `web/e2e/settings-data-reset-flow.spec.ts` | `cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts` |
+| 2026-06-20 | data reset 完成后浏览器只停在 Settings 成功反馈，未证明受影响页面会重新读取 fresh read model 或避免旧银行流水残留 | `web/e2e/settings-data-reset-flow.spec.ts` | reset 后继续打开银行明细，断言 `read_model_status=fresh` 且旧流水为空；再打开待找发票，断言 `pending_invoice` fresh rows 可见 |
 | 既有 | 错误/缺失 OA 密码后仍清数据或回显密码 | `test_reset_api_rejects_missing_oa_password_without_clearing_data`、`test_reset_api_rejects_wrong_oa_password_without_clearing_data_or_echoing_secret`、`test_reset_api_does_not_leak_oa_password_when_verification_service_fails` | 模块后端验证 |
 | 既有 | OA reset 删除纯银行+发票关系或重复解析附件发票 | `test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation`、`test_reset_oa_and_rebuild_reuses_cached_attachment_invoices_without_reparsing` | 模块后端验证 |
 | 既有 | failed/partial reset job 不进入运维 attention | `test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention`、`test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable` | 模块后端验证 |
@@ -61,7 +62,7 @@
 - 发票 reset：导入银行+发票+税金认证 -> reset invoices -> 税金和发票相关页面刷新，银行事实保留。
 - OA reset：准备 OA 历史月份、附件发票、纯银行+发票关系 -> reset OA -> 只按保留月份重建，纯 relation 保留，OA relation 清理。
 - UI 恢复：Settings 发起 job -> 离开页面 -> 回到 Settings -> active job progress 恢复；并发提交返回 409。
-- Browser e2e：Settings 数据重置 -> 影响确认 -> OA 密码复核 -> job create/polling -> settings reload -> 全局成功反馈。
+- Browser e2e：Settings 数据重置 -> 影响确认 -> OA 密码复核 -> job create/polling -> settings reload -> 全局成功反馈 -> 银行明细 fresh empty -> 待找发票 fresh rows。
 
 ## 模块验证命令
 

@@ -645,11 +645,13 @@ function groupedPayloadWithoutFlow(family: string, missingBankRowId: string) {
 function installTurnoverLedgerFetch(options: {
   groupedOverrides?: Record<string, unknown>;
   groupedPayloads?: Array<Record<string, unknown>>;
+  groupedFailuresBeforeSuccess?: number;
   missingDetailForRelationId?: string;
   exportDownloadResponse?: (url: URL) => Response;
   operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
 } = {}) {
   let groupedRequestCount = 0;
+  let groupedFailuresRemaining = options.groupedFailuresBeforeSuccess ?? 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
@@ -741,6 +743,13 @@ function installTurnoverLedgerFetch(options: {
     }
     if (url.pathname === "/api/turnover-ledger" && method === "GET") {
       expect(url.searchParams.get("view")).toBe("grouped");
+      if (groupedFailuresRemaining > 0) {
+        groupedFailuresRemaining -= 1;
+        return Response.json({
+          error: "turnover_ledger_temporarily_unavailable",
+          message: "往来款台账加载暂时失败，请刷新后重试。",
+        }, { status: 503 });
+      }
       if (options.groupedPayloads?.length) {
         const payload = options.groupedPayloads[Math.min(groupedRequestCount, options.groupedPayloads.length - 1)];
         groupedRequestCount += 1;
@@ -1826,6 +1835,22 @@ describe("Turnover ledger page", () => {
     expect(await within(drawer).findByText("该流水所属往来关系已刷新或不存在，请刷新台账后再编辑。")).toBeInTheDocument();
     expect(within(drawer).queryByText(/turnover_rel_/)).not.toBeInTheDocument();
     expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
+  });
+
+  test("recovers grouped ledger after a transient load failure when refreshed", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({ groupedFailuresBeforeSuccess: 1 });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    expect(await within(page).findByText("往来款台账加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(within(page).queryByText("暂无往来款台账")).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "刷新台账" }));
+
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    expect(await within(table).findByText("贾小花")).toBeInTheDocument();
+    expect(within(page).queryByText("往来款台账加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
   });
 
   test("shows grouped read model stale warning and blocks manual closure", async () => {

@@ -313,11 +313,14 @@ function buildExpenseTypeRowsFromTimeRows(rows: CostTimeRow[]) {
 function getCostStatisticsLoadErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     const message = error.message.trim();
+    if (message && error.code === "cost_statistics_explorer_temporarily_unavailable") {
+      return message;
+    }
     if (message && (error.status === 401 || error.status === 403 || error.code === "invalid_oa_session")) {
       return message;
     }
   }
-  return "成本统计数据加载失败，请稍后重试。";
+  return "成本统计数据加载失败，请点击刷新重试。";
 }
 
 function ScopeYearPicker({ ariaLabel, years, value, onChange }: ScopeYearPickerProps) {
@@ -544,6 +547,10 @@ export default function CostStatisticsPage() {
   }
 
   const handleDomainMutation = useCallback(() => {
+    clearCostStatisticsExplorerCache();
+    setDomainRefreshNonce((current) => current + 1);
+  }, []);
+  const handleManualRefresh = useCallback(() => {
     clearCostStatisticsExplorerCache();
     setDomainRefreshNonce((current) => current + 1);
   }, []);
@@ -884,11 +891,23 @@ export default function CostStatisticsPage() {
     expenseTypeScopeEndDate,
   ]);
 
-  const readModelStatus = explorerData?.readModelStatus;
+  const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase();
   const isReadModelRefreshing = readModelStatus === "refreshing";
-  const isReadModelUnavailable = readModelStatus === "unavailable";
+  const isReadModelStale = readModelStatus === "stale";
+  const isReadModelUnavailable = readModelStatus === "unavailable"
+    || readModelStatus === "failed"
+    || readModelStatus === "missing"
+    || readModelStatus === "schema_mismatch";
+  const isReadModelNonFresh = Boolean(readModelStatus && readModelStatus !== "fresh");
+  const readModelStatusMessage = isReadModelRefreshing
+    ? "成本统计读模型正在刷新，当前结果生成后会自动更新。"
+    : isReadModelStale
+      ? "成本统计读模型不是最新，当前结果刷新完成后会自动更新。"
+      : isReadModelUnavailable
+        ? "成本统计数据暂不可用，请等待后台刷新完成后重试。"
+        : null;
 
-  const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelRefreshing && !isReadModelUnavailable
+  const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelNonFresh
     ? viewMode === "time"
       ? filteredTimeRows.length === 0
       : viewMode === "project"
@@ -981,6 +1000,14 @@ export default function CostStatisticsPage() {
   }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel]);
 
   const activeSummary = useMemo(() => {
+    if (isReadModelNonFresh) {
+      return {
+        rowLabel: "数据状态",
+        rowCount: "待刷新",
+        transactionCount: "待刷新",
+        totalAmount: "--",
+      };
+    }
     if (!explorerData) {
       return {
         rowLabel: "条目数",
@@ -1071,6 +1098,7 @@ export default function CostStatisticsPage() {
     bankRows.length,
     projectExpenseTypeRows.length,
     projectRows.length,
+    isReadModelNonFresh,
     selectedBankAccountLabel,
     selectedBankProjectName,
     selectedBankProjectRows,
@@ -1324,6 +1352,7 @@ export default function CostStatisticsPage() {
     [viewMode],
   );
 
+  const hasExplorerLoadError = Boolean(loadError) && !explorerData;
   const activeTransactionId =
     selectedTimeTransactionId ?? selectedProjectTransactionId ?? selectedBankTransactionId ?? selectedExpenseTransactionId;
   const isExportActionBusy = isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
@@ -1337,9 +1366,18 @@ export default function CostStatisticsPage() {
         </div>
         <div className="page-header-actions cost-header-actions">
           <button
-            className="cost-export-button"
+            aria-label="刷新成本统计"
+            className="cost-export-button cost-refresh-button"
             type="button"
             disabled={isExplorerLoading || Boolean(detailLoadingMessage)}
+            onClick={handleManualRefresh}
+          >
+            刷新
+          </button>
+          <button
+            className="cost-export-button"
+            type="button"
+            disabled={isExplorerLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError || isReadModelNonFresh}
             onClick={openExportCenter}
           >
             导出中心
@@ -1407,8 +1445,10 @@ export default function CostStatisticsPage() {
           <div className="state-panel">正在加载成本统计数据...</div>
         ) : null}
         {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
-        {isReadModelUnavailable ? (
-          <div className="state-panel error">成本统计数据暂不可用。</div>
+        {readModelStatusMessage ? (
+          <div className={`state-panel${isReadModelUnavailable ? " error" : ""}`} role="status">
+            {readModelStatusMessage}
+          </div>
         ) : null}
         {exportFeedback && !isExportCenterOpen ? (
           <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
@@ -1425,7 +1465,7 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
 
-        {!isExplorerLoading && explorerData && !isReadModelRefreshing ? (
+        {!isExplorerLoading && explorerData && !isReadModelNonFresh ? (
           <>
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout single-column">

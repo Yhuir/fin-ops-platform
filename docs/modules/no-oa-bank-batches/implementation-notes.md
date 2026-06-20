@@ -5,6 +5,7 @@
 ## 当前决策
 
 - 免 OA 流水批量处理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、application/service、API contract、read model/worker、前端交互、Workbench integration 和旧功能回归。
+- 2026-06-19 Spec-first E2E Audit 校准后，本地 `NO-OA-E2E-001..009` 已有 Browser、组件、API、service 和 integration 映射；`NO-OA-E2E-010` 真实基础设施 worker drain 保持 staging/runtime `external-risk`。
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
 - PostgreSQL list 读路径允许返回 fresh empty rows，但必须由 `job.read_model_dirty_scopes` 无 active blocker 且 `read_model.app_status_readiness` 记录为 fresh 共同证明；不能把无 rows 直接当 fresh。
@@ -16,6 +17,50 @@
 - `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 - relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
+
+## 2026-06-20 - no-OA list GET 加载失败刷新恢复
+
+- 目标：补齐 `/no-oa-bank-batches` 的本地 `NETWORK-RECOVERY` Browser 负面链路，防止首屏 `GET /api/no-oa-bank-batches` 暂时失败时页面同时显示普通空态，误导用户以为当前标签下没有流水。
+- 影响范围：`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块测试矩阵和全局 Spec-first/testing 文档。
+- 关键决策：只做产品侧最小修正；错误态不再显示“当前标签下暂无流水”，刷新仍复用既有 `刷新` 入口和 `loadBatches` 路径，不改变 list API contract、read model freshness、submit/withdraw、tag-selection 或 operation barrier 语义。
+- 测试覆盖：组件测试覆盖首屏 list 503 -> 错误态 -> 刷新 -> 列表恢复；Playwright 覆盖真实 Chromium 中 list 503、普通空态防伪成功、手动刷新恢复业务行、未选择时提交按钮仍禁用、失败文案清除和无可见错误残留。
+- 验证命令：`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx`；`cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`。
+- 未测风险：本轮只覆盖 `GET /api/no-oa-bank-batches` 首屏加载失败恢复；submit/withdraw/tag-selection mutation 级网络失败、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实生产历史 no-OA relation 和大数据月份仍按后续 Browser/staging/runtime smoke 管理。
+
+## 2026-06-19 - 成功写流可见错误残留 guard
+
+- 目标：防止 no-OA 标签保存、selected-row submit、成本统计 fan-out、withdraw 或 history 只读节点已经成功，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。
+- 影响范围：`web/e2e/no-oa-bank-batches-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试矩阵和全局测试文档。
+- 关键决策：不改变产品逻辑或 deterministic mock；在每个成功节点复用 `expectNoUnexpectedSuccessUiErrors(...)`，把“成功但报错提示仍显示”作为 Browser 回归失败。
+- 文档影响：更新本模块 `tests.md`、`e2e-coverage.md` 和全局 testing closure state。
+- 测试覆盖：`web/e2e/no-oa-bank-batches-flow.spec.ts` 加强标签保存、submit、成本统计下游、withdraw 和 history 成功路径；静态诊断防止后续移除该 guard。
+- 验证命令：`cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实生产 no-OA 写入仍需真实认证、业务审批和可回滚 scenario；本轮只覆盖 deterministic Browser flow 的可见错误残留。
+
+## 2026-06-19 - no-OA Spec-first covered 校准与标签保存 Browser E2E
+
+- 目标：建立 `/no-oa-bank-batches` 的 Spec-first E2E 合同和覆盖矩阵，并补齐标签准入保存的真实浏览器 freshness closure。
+- 影响范围：`docs/modules/no-oa-bank-batches/e2e-spec.md`、`docs/modules/no-oa-bank-batches/e2e-coverage.md`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块测试矩阵、全局 Spec-first inventory 和 testing closure state。
+- 关键决策：
+  - 不改产品逻辑；deterministic mock 支持 `PUT /api/no-oa-bank-batches/tag-selection` 返回保存后的 selected tag codes。
+  - Browser 测试断言标签 drawer 中选择“工资”、`PUT` body 包含 `expected_version=3` 和 `selected_tag_codes=["fee","salary"]`、operation barrier target 为 `no_oa_bank_batch:all`、保存成功后 drawer 关闭并重读 no-OA list。
+  - 本地 Spec-first covered 不等于真实 worker drain；真实 PostgreSQL/RabbitMQ/Redis/systemd no-OA、Workbench、search、cost worker 收敛继续作为 staging/runtime smoke。
+- 测试覆盖：扩展 `web/e2e/no-oa-bank-batches-flow.spec.ts`，新增 `saves tag scope through the freshness barrier and reloads the no-OA list`；新增 `e2e-spec.md` / `e2e-coverage.md` 映射 `NO-OA-E2E-001..010`。
+- 验证命令：`cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`。
+- 未测风险：真实生产历史 no-OA 批次/legacy relation/半迁移/重复 relation 回放、真实 worker drain、真实大月份/长标签树/长流水列表、真实网络恢复和 search 外层 UI。
+- 后续事项：后续只在新增 no-OA 写入口、独立 search Browser route、真实下载/导出或网络恢复 UI 时追加本地 Browser E2E；真实 worker 最新性走 staging/runtime smoke。
+
+## 2026-06-19 - Browser e2e 补 no-OA 到成本统计 fan-out
+
+- 目标：扩展免 OA 浏览器主链路，证明 selected-row submit 不只让 no-OA 本页状态变化，还会让成本统计通过自己的 fresh read model 展示对应手续费成本行。
+- 影响范围：`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块测试矩阵、成本统计测试矩阵和全局 testing closure state。
+- 关键决策：
+  - 复用现有 no-OA submit/withdraw spec，避免新增只覆盖成本页静态 mock 的平行测试。
+  - deterministic mock 使用 opt-in `noOaCostFanout`，提交前不影响成本统计；提交后成本统计项目视图出现 `免OA手续费成本项目`、金额 `8.80`、费用类型 `手续费` 和流水表 `网银手续费` / `建设银行`。
+  - 本轮不改变 no-OA API、read model、worker 或 business logic；真实 worker drain 仍按 `infra-smoke` / staging gate。
+- 测试覆盖：更新 `web/e2e/no-oa-bank-batches-flow.spec.ts` 并验证真实 Chromium 通过。
+- 验证命令：`cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd no-OA 和成本统计 worker、生产历史 no-OA 批次、超大月份和真实搜索 fan-out 仍需 staging/生产 smoke。
 
 ## 2026-06-17 - relation-backed stale 可见状态收敛
 

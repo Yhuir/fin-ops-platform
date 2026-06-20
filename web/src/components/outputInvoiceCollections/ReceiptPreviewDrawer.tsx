@@ -161,16 +161,18 @@ export default function ReceiptPreviewDrawer({
               <strong>小写：{payload.receipt.amount}</strong>
             </div>
             <p className="output-invoice-collection-receipt-card__note">正式创建后会分配收据编号并写入收据历史。</p>
-            <div className="output-invoice-collection-drawer__footer-actions">
-              <button
-                className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
-                disabled={submitting || !createReceipt || !payload.receipt.bankTransactionId}
-                type="button"
-                onClick={handleCreate}
-              >
-                创建正式收据
-              </button>
-            </div>
+            {createReceipt ? (
+              <div className="output-invoice-collection-drawer__footer-actions">
+                <button
+                  className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
+                  disabled={submitting || !payload.receipt.bankTransactionId}
+                  type="button"
+                  onClick={handleCreate}
+                >
+                  创建正式收据
+                </button>
+              </div>
+            ) : null}
           </article>
         ) : null}
       </div>

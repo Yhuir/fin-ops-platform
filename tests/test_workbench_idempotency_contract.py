@@ -683,6 +683,7 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
                     "case_id": "CASE-IDEM-COMPAT",
                     "idempotency_key": "confirm:compat-1",
                     "request_idempotency_key": "confirm:compat-1",
+                    "note": "idempotency compatibility covers documented mismatch path",
                 },
             )
 

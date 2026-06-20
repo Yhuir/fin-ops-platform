@@ -11,7 +11,7 @@ import sys
 from urllib.parse import urljoin
 
 from .cli_reports import write_json_report
-from .http_slo_probe import HttpProbeResponse, _auth_headers, _urllib_request
+from .http_slo_probe import HttpProbeResponse, _auth_headers, _decoded_response_body, _urllib_request
 
 DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 15.0
@@ -75,7 +75,7 @@ def collect_health_ready_payload(
             "errors": [str(exc) or exc.__class__.__name__],
         }
 
-    body = response.body or b""
+    body = _decoded_response_body(response.body or b"", response.headers)
     content_type = _header(response.headers, "content-type")
     errors: list[str] = []
     payload: dict[str, Any] = {}

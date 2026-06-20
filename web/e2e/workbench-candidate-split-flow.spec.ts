@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const workbenchRowIds = [
   "oa-o-202603-001",
@@ -72,5 +73,6 @@ test.describe("workbench automatic candidate split browser flow", () => {
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeSplit);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeSplit);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

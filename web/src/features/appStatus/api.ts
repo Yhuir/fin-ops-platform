@@ -3,7 +3,9 @@ import type {
   AppStatusDomain,
   AppStatusLevel,
   AppStatusOverview,
+  AppStatusQueueSummary,
   AppStatusReadModelScope,
+  AppStatusRuntimeSummaryGroup,
   AppStatusTask,
   AppStatusWriteSafety,
 } from "./types";
@@ -178,6 +180,37 @@ function mapWriteSafety(value: unknown, fallbackBlocksMutations: boolean): AppSt
   };
 }
 
+function mapSummaryGroup(value: unknown): AppStatusRuntimeSummaryGroup {
+  const raw = record(value);
+  return {
+    total: numberValue(raw.total),
+    fresh: numberValue(raw.fresh),
+    ready: numberValue(raw.ready),
+    idle: numberValue(raw.idle),
+    working: numberValue(raw.working),
+    refreshing: numberValue(raw.refreshing),
+    stale: numberValue(raw.stale),
+    missing: numberValue(raw.missing),
+    failed: numberValue(raw.failed),
+    unavailable: numberValue(raw.unavailable),
+    mismatched: numberValue(raw.mismatched),
+    required: numberValue(raw.required),
+    issueCount: numberValue(raw.issue_count ?? raw.issueCount),
+    scopeIssueCount: numberValue(raw.scope_issue_count ?? raw.scopeIssueCount),
+  };
+}
+
+function mapQueueSummary(value: unknown): AppStatusQueueSummary {
+  const raw = record(value);
+  return {
+    eventTypeCount: numberValue(raw.event_type_count ?? raw.eventTypeCount),
+    pending: numberValue(raw.pending),
+    processing: numberValue(raw.processing),
+    failed: numberValue(raw.failed),
+    backlog: numberValue(raw.backlog),
+  };
+}
+
 export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -202,6 +235,7 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
   }
   const fallbackBlocksMutations = overall.blocks_mutations === true || overall.blocksMutations === true;
   const writeSafety = mapWriteSafety(overall.write_safety ?? overall.writeSafety, fallbackBlocksMutations);
+  const runtimeSummary = record(raw.runtime_summary ?? raw.runtimeSummary);
   return {
     version: numberValue(raw.version, 1),
     generatedAt: stringValue(raw.generated_at ?? raw.generatedAt),
@@ -211,6 +245,11 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
       reason: overallReason,
       blocksMutations: writeSafety.blocksMutations,
       writeSafety,
+    },
+    runtimeSummary: {
+      readModels: mapSummaryGroup(runtimeSummary.read_models ?? runtimeSummary.readModels),
+      workers: mapSummaryGroup(runtimeSummary.workers),
+      queue: mapQueueSummary(runtimeSummary.queue),
     },
     domains: domains as AppStatusDomain[],
     backgroundTasks: backgroundTasks as AppStatusTask[],

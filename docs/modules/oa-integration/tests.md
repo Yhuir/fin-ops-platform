@@ -42,6 +42,7 @@
 | 场景 | 回归入口 | 保护点 |
 | --- | --- | --- |
 | OA Mongo 短暂断连导致页面误认为 fresh | `tests/test_mongo_oa_adapter.py` | 断连返回空结果但 read status 为 error，并进入 backoff。 |
+| OA lifecycle alias 导致附件发票 cross-OA blocker | 待补：`tests/test_mongo_oa_adapter.py`、`tests/test_audit_object_identity_tool.py`、alias policy/repository tests | `flowRequestId/processId` 缺失的进行中文档与带 `flowRequestId` 的已完成文档内容一致时，只能生成可审计 alias 候选；未批准 alias 仍 blocking，active alias 才可 canonicalize，且不得删除 OA 投影/cache。 |
 | OA sync API 在 HTTP 进程内直接同步 | `tests/test_oa_projection_sql_runtime.py` | 手动 sync API 只 enqueue worker job，不 inline sync。 |
 | 目标申请人凭据泄漏到 settings response | `tests/test_oa_applicant_credentials_api.py` | save/list/settings/delete response 不包含 password。 |
 | 进项 OA 反提缺凭据仍创建本地 batch | `tests/test_input_invoice_usage_oa_reverse_service.py` | 缺凭据时不创建 batch，不伪造 OA 草稿成功。 |

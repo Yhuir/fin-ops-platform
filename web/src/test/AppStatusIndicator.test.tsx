@@ -84,6 +84,38 @@ const globalAppStatus = {
       updated_at: "2026-06-04T10:05:00+08:00",
     },
   ],
+  runtime_summary: {
+    read_models: {
+      total: 4,
+      fresh: 1,
+      refreshing: 1,
+      stale: 0,
+      missing: 1,
+      failed: 1,
+      unavailable: 0,
+      issue_count: 3,
+      scope_issue_count: 1,
+    },
+    workers: {
+      total: 4,
+      required: 3,
+      ready: 1,
+      idle: 1,
+      working: 1,
+      stale: 1,
+      missing: 1,
+      mismatched: 0,
+      unavailable: 0,
+      issue_count: 2,
+    },
+    queue: {
+      event_type_count: 3,
+      pending: 2,
+      processing: 1,
+      failed: 3,
+      backlog: 6,
+    },
+  },
   background_tasks: [
     {
       job_id: "job_etc_001",
@@ -154,6 +186,13 @@ describe("global app status indicator", () => {
     const statusDialog = screen.getByRole("dialog", { name: "全局运行状态" });
     expect(within(statusDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
     expect(within(statusDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
+    const runtimeSummary = within(statusDialog).getByTestId("app-status-runtime-summary");
+    expect(runtimeSummary).toHaveTextContent("Read model");
+    expect(runtimeSummary).toHaveTextContent("1 失败 / 0 不可用");
+    expect(runtimeSummary).toHaveTextContent("Worker");
+    expect(runtimeSummary).toHaveTextContent("1 stale / 1 missing / 0 mismatch");
+    expect(runtimeSummary).toHaveTextContent("Queue");
+    expect(runtimeSummary).toHaveTextContent("3 failed / 6 backlog");
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();

@@ -10,6 +10,10 @@
 - 税金抵扣计划保存必须校验 `read_model_scope_key`、`source_versions` 和 `idempotency_key`；source mismatch 返回 conflict，不能基于旧 read model 保存。
 - 进项计划行只从 canonical invoice facts 读取；OA 附件正式发票必须先 promotion 到 Invoice repository / `app.invoices`，`app.oa_attachment_invoice_cache` 只作为解析缓存，不是税金抵扣事实源。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖税额试算、已认证导入、权限、计划保存、SQL read model、Redis cache、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
+- 2026-06-19 Spec-first 基线补齐：新增 `e2e-spec.md` / `e2e-coverage.md`，并用 Browser smoke 覆盖 Workbench relation -> tax offset fresh read model fan-out。
+- 2026-06-19 Browser conflict 回归补齐：计划保存遇到 source/version conflict 时，页面必须显示冲突错误、不能显示保存成功、不能刷新成伪成功，保存按钮必须恢复可用。
+- 2026-06-19 Browser 权限细分补齐：read-export 用户可读税金页但无保存/导入入口，forbidden/expired session 不加载 `/api/tax-offset` protected API，admin 可见保存和已认证导入入口。
+- 2026-06-19 Browser 大数据窄屏补齐：390px 视口下税金页必须保持大表搜索、排序、筛选、共享横向滚动和保存/导入按钮可用；tax 布局容器必须允许子项收缩，筛选弹层必须夹在 viewport 内。
 
 ## 记录模板
 
@@ -27,6 +31,82 @@
 ```
 
 ## 历史记录
+
+## 2026-06-19 - 税金抵扣成功写流 UI 错误残留 guard
+
+- 目标：补齐税金抵扣 Browser 成功链路的“假成功”检测，防止保存计划或已认证发票导入成功后页面仍残留保存失败、导入失败、同步失败或 read model 失败提示。
+- 影响范围：`web/e2e/tax-offset-flow.spec.ts`、共享 `successAssertions` helper、Playwright 严格诊断静态测试和本模块测试文档。
+- 关键决策：只加固 deterministic Browser E2E，不改产品逻辑；`未认证` 是合法业务状态，不属于失败残留。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：保存计划成功和已认证发票导入刷新成功节点都会调用 `expectNoUnexpectedSuccessUiErrors`。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts e2e/tax-offset-flow.spec.ts e2e/pending-invoices-rules-save-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实税局认证 XLSX 大样本、真实 OA/ETC 数据、真实 RabbitMQ/Redis/systemd tax-offset worker drain 和真实网络恢复仍需 staging/runtime smoke。
+- 后续事项：新增税金导入模式或计划保存下游页面时，按用户流程追加 Browser E2E 并接入同一成功残留 guard。
+
+## 2026-06-19 - 税金筛选弹层窄屏纵向定位修复
+
+- 目标：修复 `web/e2e/tax-offset-flow.spec.ts` 总 smoke 中发现的窄屏大表筛选回归：`筛选 对方名称` 弹层在 390px viewport 内打开后，目标 checkbox 虽然存在但位于 viewport 外，导致真实点击不可达并让 Playwright 超时。
+- 影响范围：`web/src/components/workbench/WorkbenchColumnFilterMenu.tsx`、`web/src/app/styles.css`、本模块实施记录。
+- 关键决策：这是共享 column filter popover 的可用性问题，不用 test-only force click 掩盖；弹层根据按钮上下可用空间选择向下或向上展开，并限制整体高度，让 option list 在弹层内部滚动。
+- 文档影响：更新 tax-offset implementation notes；既有 `TAX-E2E-008` 覆盖矩阵保持 covered。
+- 测试覆盖：复跑失败用例、完整 tax-offset Browser spec、workbench large-scroll Browser spec，以及 WorkbenchPaneFilter/TaxOffsetPage Vitest。
+- 验证命令：`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium -g "keeps large tax tables searchable, sortable, filterable, and horizontally scrollable on narrow screens"`；`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`；`cd web && npx playwright test e2e/workbench-large-scroll-flow.spec.ts --project=chromium`；`cd web && npm test -- --run src/test/WorkbenchPaneFilter.test.ts src/test/TaxOffsetPage.test.tsx`；`cd web && npm run e2e:smoke`，完整 smoke 147/147 passed。
+- 未测风险：真实生产超大月份、真实浏览器缩放比例和触摸滚动仍需 staging/手工 smoke。
+
+## 2026-06-19 - 税金抵扣大数据窄屏 Browser 保护
+
+- 目标：补齐 `TAX-E2E-008`，保护税金抵扣页在窄屏和大数据下的搜索、排序、筛选、横向滚动和关键按钮可用性。
+- 影响范围：`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/src/app/styles.css`、`web/src/components/workbench/WorkbenchColumnFilterMenu.tsx`、`docs/modules/tax-offset/e2e-coverage.md`、`docs/modules/tax-offset/tests.md`。
+- 关键决策：deterministic mock 新增 81 张销项/92 张进项的长字段 tax offset payload；Browser 测试以 390px Chromium 验证用户可见行为，不把它等同于真实生产超大数据 SQL/worker 性能证明。
+- 文档影响：更新 tax-offset coverage/tests/implementation notes，并同步全局 Spec-first inventory/closure/testing 文档。
+- 测试覆盖：`web/e2e/tax-offset-flow.spec.ts` 覆盖保存/导入按钮无遮挡、搜索第 89 条长列表进项、清空搜索、时间排序、对方名称筛选、共享横向滚动和右侧金额列可见；同时捕获并修复 tax 容器 `min-width:auto` 撑宽页面、共享筛选菜单窄屏定位出 viewport 的 UI 回归。
+- 验证命令：`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局 XLSX 大样本、真实 OA 附件/ETC 数据、生产级超大月份 SQL p95/p99 和真实网络中断仍需 staging/runtime smoke。
+- 后续事项：tax-offset 本地 Spec-first Browser ID 已覆盖；下一轮转真实基础设施 smoke 或其他 `spec-first-partial` 页面。
+
+## 2026-06-19 - 税金抵扣权限细分 Browser 保护
+
+- 目标：补齐 `TAX-E2E-007`，把 tax-offset 本页 read-export、forbidden、expired、admin 的 Browser 细分权限纳入 Spec-first E2E。
+- 影响范围：`web/e2e/tax-offset-flow.spec.ts`、`docs/modules/tax-offset/e2e-coverage.md`、`docs/modules/tax-offset/tests.md`。
+- 关键决策：本轮只补页面可见权限和 session gate 行为；后端写 API 拒绝仍由 `tests/test_tax_offset_api.py` 承担，不在 deterministic Browser mock 中伪造完整后端权限矩阵。
+- 文档影响：更新 tax-offset coverage/tests/implementation notes，并同步全局 Spec-first inventory/closure/testing 文档。
+- 测试覆盖：`web/e2e/tax-offset-flow.spec.ts` 覆盖 read-export 用户可读统计卡和表格但无保存/导入入口且零 tax write API、forbidden/expired session 在加载 `/api/tax-offset` 前被 gate、admin 可见保存和导入入口且导入 modal 无只读提示。
+- 验证命令：`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局 XLSX 大样本、真实 OA 附件/ETC 数据、大数据窄屏和真实网络中断仍需后续轮次。
+- 后续事项：继续补 `TAX-E2E-008` 大数据/窄屏；真实 worker drain 保持 staging/runtime smoke。
+
+## 2026-06-19 - 税金抵扣计划保存 conflict Browser 保护
+
+- 目标：补齐 `TAX-E2E-003` 的 Browser conflict/error 场景，防止 source/version conflict 被页面误处理成保存成功或刷新成伪成功。
+- 影响范围：`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`docs/modules/tax-offset/e2e-coverage.md`、`docs/modules/tax-offset/tests.md`。
+- 关键决策：产品代码已有 409 conflict 用户可见错误处理，本轮只加固 deterministic E2E mock 和 Browser 断言；测试 helper 只显式放行预期的 409 resource console error，其他浏览器错误仍失败。
+- 文档影响：更新 tax-offset coverage/tests/implementation notes，并同步全局 Spec-first inventory/closure/testing 文档。
+- 测试覆盖：`web/e2e/tax-offset-flow.spec.ts` 覆盖修改计划后保存返回 409，冲突错误可见、保存成功提示不存在、不会重新 GET `/api/tax-offset` 伪刷新、保存按钮恢复可用且 mutation 只发生一次。
+- 验证命令：`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局 XLSX 大样本、tax-offset 每按钮权限矩阵、大数据窄屏和真实网络中断仍需后续轮次。
+- 后续事项：继续补 `TAX-E2E-007` 权限细分和 `TAX-E2E-008` 大数据/窄屏；真实 worker drain 保持 staging/runtime smoke。
+
+## 2026-06-19 - 税金抵扣 read model 非 fresh Browser gate
+
+- 目标：补齐 `TAX-E2E-005`，防止税金抵扣页面在 read model `refreshing` / `stale` / `missing` / `failed` 时显示真实空态或允许基于非 fresh 数据保存计划。
+- 影响范围：`web/src/pages/TaxOffsetPage.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`docs/modules/tax-offset/e2e-coverage.md`、`docs/modules/tax-offset/tests.md`。
+- 关键决策：前端把明确非 `fresh` 的 tax offset read model 统一视为不可保存状态；`refreshing` / `stale` / `missing` 显示自动重试诊断，`failed` / `unavailable` / `schema_mismatch` 显示不可用诊断。deterministic Browser E2E 只证明页面 gate 和自动恢复，不替代真实 worker drain。
+- 文档影响：更新 tax-offset coverage/tests，并同步全局 Spec-first inventory/closure state。
+- 测试覆盖：`web/e2e/tax-offset-flow.spec.ts` 覆盖 `refreshing` / `missing` / `failed` 不 false-empty、不泄露 stale reason、不触发计划保存，以及 `stale -> fresh` 自动恢复；`web/src/test/TaxOffsetPage.test.tsx` 校准刷新诊断。
+- 验证命令：`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx`；`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局 XLSX 大样本、大数据窄屏和真实网络恢复仍需后续轮次。
+- 后续事项：继续补 `TAX-E2E-007` 权限细分和 `TAX-E2E-008` 大数据/窄屏。
+
+## 2026-06-19 - Spec-first E2E 基线和 Workbench relation fan-out
+
+- 目标：补齐税金抵扣页面 Spec-first E2E 文档基线，并把 Workbench relation 写入后的税金页 fresh read model 重读纳入 Browser smoke。
+- 影响范围：`docs/modules/tax-offset/e2e-spec.md`、`docs/modules/tax-offset/e2e-coverage.md`、`docs/modules/tax-offset/tests.md`、`web/e2e/workbench-relations-tax-offset-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts`。
+- 关键决策：本地 deterministic E2E 只证明页面消费 fresh `tax_offset` payload 和 relation fan-out 用户可见结果；真实 RabbitMQ/Redis/systemd `tax-offset` worker drain 继续标为 staging/runtime smoke 风险。
+- 文档影响：更新 tax-offset 模块 README/tests 和全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 Browser E2E 覆盖 `/tax-offset` 初始无目标计划行、Workbench confirm、回税金页重新请求 `/api/tax-offset`、显示 relation 影响行且无读模型错误。
+- 验证命令：`cd web && npx playwright test e2e/workbench-relations-tax-offset-fanout.spec.ts --project=chromium`。
+- 未测风险：Browser stale/refreshing/failed/missing、保存 409/conflict、真实 worker drain、真实税局 XLSX 大样本和真实网络恢复仍未闭环。
+- 后续事项：优先补 `TAX-E2E-005` Browser read model 负面状态，或继续按 `workbench-relations` 队列补 search fan-out。
 
 ## 2026-06-13 - OA 附件发票计划行改走 canonical invoice facts
 

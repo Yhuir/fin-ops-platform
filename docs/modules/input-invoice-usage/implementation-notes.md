@@ -36,6 +36,171 @@
 
 ## 历史记录
 
+## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
+
+- 目标：补齐进项发票使用页的本地 `NETWORK-RECOVERY` 负面链路，防止 rows 首屏暂时失败时显示普通空态、允许导出或隐藏真实加载错误。
+- 影响范围：`InputInvoiceUsagePage` 错误/刷新/导出禁用状态、`InputInvoiceUsageTable` 错误态空行文案、Playwright deterministic mock、`web/e2e/input-invoice-usage-flow.spec.ts`、`InputInvoiceUsagePage.test.tsx` 和测试闭环文档。
+- 关键决策：不改后端业务语义；Browser mock 表达 `/api/input-invoice-usage/rows` 暂时 503，页面必须显示错误提示和错误态空行，禁用筛选导出，并通过显式刷新恢复 fresh rows/pagination/export。
+- 文档影响：更新本文件、`e2e-coverage.md`、`tests.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/input-invoice-usage-flow.spec.ts::recovers rows after a transient load failure when refreshed`；扩展 `web/src/test/InputInvoiceUsagePage.test.tsx` 验证显式刷新入口会重新请求 rows。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`；本轮最终说明列出额外 Vitest/类型/docs 验证。
+- 未测风险：本地 deterministic Browser 不能证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实网络中断、真实 XLSX 下载性能、真实 OA 和生产数据量仍需 staging/runtime smoke。
+- 后续事项：继续补其他页面 mutation 网络中断恢复、真实 worker drain gate，或把全量 e2e smoke 跑到稳定绿色。
+
+## 2026-06-19 - 成功写流 UI 错误残留 guard
+
+- 目标：补齐进项发票使用 Browser 成功链路的“假成功”检测，防止支付规则保存、OA 草稿创建或用户确认已提交后页面仍残留操作失败、保存失败、同步失败或 read model 失败提示。
+- 影响范围：`web/e2e/input-invoice-usage-flow.spec.ts`、共享 `successAssertions` helper、Playwright 严格诊断静态测试和本模块测试文档。
+- 关键决策：只加固 deterministic Browser E2E，不改产品逻辑；`未提交`、`未关联oa` 等合法业务状态不是失败残留，不纳入 helper 模式。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：支付规则保存成功、OA 草稿创建确认弹窗、manual submitted 历史成功节点都会调用 `expectNoUnexpectedSuccessUiErrors`。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts e2e/tax-offset-flow.spec.ts e2e/pending-invoices-rules-save-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 OA、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、search 外层 UI 和真实网络中断恢复仍需 staging/runtime smoke。
+- 后续事项：新增 OA 状态刷新按钮或全局 search UI 时，按新入口补 Browser E2E 并接入同一成功残留 guard。
+
+## 2026-06-19 - Tax certified import fan-out applicability audit
+
+- 目标：收敛 `IN-USAGE-E2E-009` 中“认证状态变化 Browser fan-out”缺口，避免在进项使用页硬造没有用户入口的 Browser 场景。
+- 影响范围：`tests/test_derived_data_lifecycle_service.py`、本模块 `e2e-coverage.md` / `tests.md`；产品逻辑和前端交互不变。
+- 关键决策：税务认证导入的用户可见 Browser 流程归 `tax-offset` 模块，已有 `web/e2e/tax-offset-flow.spec.ts` 覆盖 XLSX 选择、preview、confirm、税金页刷新和已认证结果展示。跨 read model fan-out 的事实范围是 `tax_certified_import_confirmed -> invoice_lifecycle_read_model -> tax_offset_read_model/tax_offset_month_cache/search_cache`，不应错误扩展到 cost 或 OA pending。
+- 文档影响：`IN-USAGE-E2E-009` 继续保持 partial，但 Browser 缺口收敛为真实基础设施 worker drain；认证导入不再登记为进项使用页 Browser 缺口。
+- 测试覆盖：新增 `tests/test_derived_data_lifecycle_service.py::DerivedDataLifecycleServiceTests::test_tax_certified_import_confirmed_refreshes_lifecycle_tax_and_search_only`，固定认证导入 lifecycle/tax/search fan-out 范围。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_derived_data_lifecycle_service.py::DerivedDataLifecycleServiceTests::test_tax_certified_import_confirmed_refreshes_lifecycle_tax_and_search_only -q`；`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
+- 未测风险：deterministic Browser 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实税务认证导入文件解析和 all-scope worker shard drain 仍需 infra/staging smoke。
+- 后续事项：转入真实基础设施 worker drain smoke，或在新增全局 search UI 后补认证导入 search Browser fan-out。
+
+## 2026-06-19 - Payment rules enqueue invoice lifecycle refresh
+
+- 目标：推进 `IN-USAGE-E2E-009` 的 read model/worker freshness 闭环，修复支付规则版本变化后只刷新 `input_invoice_usage`、未刷新 `invoice_lifecycle` 的风险。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`tests/test_input_invoice_usage_payment_rules.py`、本模块 `e2e-coverage.md` / `tests.md`；前端交互和产品逻辑不变。
+- 关键决策：`InvoiceLifecyclePolicy.source_versions()` 和 `InvoiceLifecycleSqlProjectionBuilder._source_versions()` 都包含 `input_invoice_usage_payment_rules_version`；因此保存支付规则后必须同时入队 `input_invoice_usage:all` 和 `invoice_lifecycle:all`，否则 lifecycle projection 可能继续以旧规则版本标记 fresh。
+- 文档影响：`IN-USAGE-E2E-009` 继续保持 partial；支付规则保存的 Browser 覆盖仍是当前页 rows refresh，跨 read model freshness 改由 API/runtime 测试覆盖。
+- 测试覆盖：更新 `tests/test_input_invoice_usage_payment_rules.py::InputInvoiceUsagePaymentRulesTests::test_put_rules_handler_saves_and_enqueues_refresh`，断言保存规则后同时入队 `input_invoice_usage` 与 `invoice_lifecycle`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_input_invoice_usage_payment_rules.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_invoice_lifecycle_read_model_refresh.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_derived_data_lifecycle_service.py::DerivedDataLifecycleServiceTests::test_invoice_lifecycle_domain_precedes_downstream_invoice_pages -q`；`bash scripts/verify.sh docs`。
+- 未测风险：本地测试证明 durable queue enqueue contract，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实 `invoice_lifecycle` all-scope shard drain 仍需 infra/staging smoke。
+- 后续事项：继续补认证状态变化 Browser fan-out，或配置真实 infra env 后跑 worker drain smoke。
+
+## 2026-06-19 - OA reverse evidence detected Browser applicability audit
+
+- 目标：推进 `IN-USAGE-E2E-009`，审计 OA reverse `evidence_detected` 是否应补 Browser E2E，并加固 read model invalidation 自动化证据。
+- 影响范围：`tests/test_input_invoice_usage_oa_reverse_service.py`、本模块 `e2e-coverage.md` / `tests.md`；不改产品逻辑、API contract 或前端 UI。
+- 关键决策：`oa-status/refresh` 虽有后端 route 和前端 API client，但当前 `以发票反提 OA` UI 流程不暴露用户可点击的刷新 OA 状态入口，`canRefreshStatus` 在现有 Browser 流程中也不是可操作动作。因此本轮不硬造 Browser E2E；`evidence_detected` 由 service/API 测试覆盖 relation command 写入、409 no half-write、evidence payload 和成功 detected 后 read model invalidation。
+- 文档影响：`IN-USAGE-E2E-009` 继续保持 partial；缺口从 “OA reverse evidence detected Browser fan-out” 修正为 “当前无 Browser 入口，service/API 覆盖，未来暴露刷新按钮后再补 Browser”。真实 worker drain 仍保留为 infra/staging 风险。
+- 测试覆盖：补强 `tests/test_input_invoice_usage_oa_reverse_service.py`，断言 relation writer 传递 evidence payload，并断言 `refresh_oa_status` evidence detected 成功路径按发票月份 invalidates `input_invoice_usage_oa_reverse_evidence_detected`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_input_invoice_usage_oa_reverse_service.py -q`；`bash scripts/verify.sh docs`；`bash scripts/verify.sh infra-smoke`。
+- 未测风险：`infra-smoke` 本地 runtime/read-model smoke 通过，但当前环境未配置 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL`，真实 PostgreSQL/RabbitMQ preflight 被跳过；本地 service 测试仍不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。未来若新增 OA 状态刷新按钮，需要补 Browser E2E 捕获点击、错误弹窗、relation 写入和 rows refresh。
+- 后续事项：继续补 `IN-USAGE-E2E-009` 的支付规则到更多下游、认证状态变化 Browser fan-out，或补真实 infra worker drain smoke。
+
+## 2026-06-19 - Browser e2e OA reverse batch mutations refresh current rows
+
+- 目标：继续推进 `IN-USAGE-E2E-009`，补齐 OA reverse 草稿创建和用户确认 submitted 后的当前页 read model refresh 浏览器闭环。
+- 影响范围：`OaReverseWorkspaceDrawer` batch mutation 成功回调、`InputInvoiceUsagePage` 当前查询 refresh、`web/e2e/input-invoice-usage-flow.spec.ts` 和本模块覆盖文档；后端业务逻辑不变。
+- 关键决策：后端 `InputInvoiceUsageOaReverseService.create_draft_from_selection(...)` / `manual_oa_status(...)` 已在成功后 `_invalidate_read_models(...)`，本轮只修前端未通知父页面重新拉 rows 的缺口。`submitted_confirmed` 仍只是本地历史状态；真正 OA/发票 relation fan-out 只在 `evidence_detected` 通过 `WorkbenchRelationCommandService.confirm_relation(...)` 后发生。
+- 文档影响：`IN-USAGE-E2E-004` 继续 covered，并补充 draft/manual submitted 后当前 rows refresh；`IN-USAGE-E2E-009` 继续 partial，仍保留 OA reverse evidence detected 到更多下游和真实 worker drain 风险。
+- 测试覆盖：扩展 `web/e2e/input-invoice-usage-flow.spec.ts::creates an OA reverse draft from a selected invoice subset and records submitted history`，覆盖草稿创建后 rows refresh、manual submitted 后 rows refresh、submitted history、内部 batch id 不展示和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium --grep "OA reverse draft"`。
+- 未测风险：本地 Browser mock 不能证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；OA reverse `evidence_detected` 关系写入到更多下游页面仍需后续轮次或 staging/nightly。
+- 后续事项：继续补 `IN-USAGE-E2E-009` 的 `evidence_detected -> workbench_relation -> downstream read models` 或真实 infra worker drain smoke。
+
+## 2026-06-19 - Browser e2e payment rules save refreshes current rows
+
+- 目标：推进 `IN-USAGE-E2E-009` 的非 relation 触发源，证明 full-access 用户保存进项发票支付状态规则后，当前页面会按后端刷新语义重新读取 rows，而不是继续显示旧支付状态。
+- 影响范围：`PaymentStatusRulesDrawer` 保存成功回调、`InputInvoiceUsagePage` 当前查询 refresh、Playwright deterministic mock、`web/e2e/input-invoice-usage-flow.spec.ts` 和本模块覆盖文档；后端业务逻辑不变。
+- 关键决策：后端 `tests/test_input_invoice_usage_payment_rules.py` 已覆盖保存规则后入队 `input_invoice_usage:all`，本轮不重复改后端；前端补最小回调 `onSaved`，保存成功后触发当前页 `loadRows("refresh")`。Browser mock 表达版本递增、幂等键、保存后 fresh rows 的 contract，不把 mock worker 当成真实 infra drain。
+- 文档影响：`IN-USAGE-E2E-009` 继续保持 partial，但新增“支付规则保存 -> 当前页 rows refresh -> 新支付状态可见”的 Browser 覆盖；真实 worker drain 和支付规则到更多下游页面仍登记为未测风险。
+- 测试覆盖：新增 `web/e2e/input-invoice-usage-flow.spec.ts::refreshes current rows after full-access payment status rules are saved`，覆盖真实 Chromium 编辑规则、保存按钮状态、PUT `expectedVersion/idempotencyKey`、保存成功反馈、版本递增、当前 rows 重新读取、无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium --grep "payment status rules"`。
+- 未测风险：本地 Browser mock 不能证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；支付规则变化到更多下游页面、OA reverse、认证状态变化的 Browser fan-out 仍需后续轮次或 staging/nightly。
+- 后续事项：继续补 `IN-USAGE-E2E-009` 的更多非 relation 触发源 fan-out，或补真实 infra worker drain smoke。
+
+## 2026-06-19 - Search fan-out Browser applicability audit
+
+- 目标：审计 `IN-USAGE-E2E-009` 中 search downstream 是否应该补 Browser E2E，避免为不存在的前端入口硬造 Playwright。
+- 影响范围：本模块 `e2e-coverage.md` / `tests.md`；不改产品逻辑、API contract 或测试代码。
+- 关键决策：`/api/search` 当前没有独立前端 route；`web/src` 中只有 AppHealth/Vitest mock 和各业务页自己的本页搜索框引用，业务页面不会在 Browser 中调用 `/api/search`。因此 search downstream 在当前 UI 形态下属于 API/runtime coverage，不属于 Browser E2E 缺口。
+- 文档影响：`IN-USAGE-E2E-009` 继续保持 partial，但缺口从 “search Browser fan-out” 修正为 “search 由 API/runtime 覆盖，未来如新增外层搜索入口再补 Browser”；继续保留支付规则、OA reverse、认证状态变化到更多下游和真实 infra worker drain 风险。
+- 测试覆盖：复用现有 `tests/test_workbench_relation_repository.py` 和 `tests/test_search_pending_sql_runtime.py`，覆盖 relation 写入 high priority 入队 `search`、search worker projection 保留 linked group jump target、`/api/search` SQL read model hit 返回 `fresh` group context 且不回扫 in-memory 状态。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_reads_sql_index tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_miss_enqueues_refresh_without_sync_scan tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_refresh_handler_skips_stale_search_source_version -q`；`bash scripts/verify.sh docs`。
+- 未测风险：没有真实 Browser `/api/search` 入口可点；如果后续增加全局搜索 UI，需要新增 Spec-first Browser E2E。真实 worker drain 仍需 staging/nightly。
+- 后续事项：继续补 `IN-USAGE-E2E-009` 的支付规则、OA reverse、认证状态变化到更多下游，或补真实 infra worker drain smoke。
+
+## 2026-06-19 - Browser e2e relation downstream fan-out partial
+
+- 目标：推进 `IN-USAGE-E2E-009`，用真实 Chromium 证明进项发票使用情况中的 Workbench candidate relation 经确认后，不只本页变 linked，下游 OA 待付款、税金抵扣和成本统计也通过各自 read model 看到 confirmed 后的新事实。
+- 影响范围：`web/e2e/input-invoice-relation-fanout.spec.ts`、本模块 `e2e-coverage.md` / `tests.md`；产品逻辑和 API contract 不变。
+- 关键决策：复用现有 deterministic mock 的 `relationConfirmed` 状态和 `oaPendingPaymentRelationFanout` / `taxOffsetRelationFanout` / `costStatisticsRelationFanout` 选项，不新增业务语义；Browser 测试从进项使用页的 candidate 证据出发，经 Workbench confirm 后分别进入下游页面，并断言页面重新请求 rows/payload、候选消失、confirmed 文案和金额/税额/项目事实出现。
+- 文档影响：`IN-USAGE-E2E-009` 从 missing 更新为 partial；明确已覆盖 relation-confirm 到 OA pending/tax/cost 的 Browser fan-out，后续 search applicability audit 又确认 `/api/search` 当前无独立 Browser route 且由 API/runtime 覆盖；仍缺支付规则、OA reverse、认证状态变化到更多下游的 Browser fan-out，以及真实 infra worker drain。
+- 测试覆盖：Playwright 扩展 `input invoice usage relation browser fan-out` 场景，覆盖 candidate OA evidence non-selectable、Workbench confirm、input invoice usage linked evidence、OA pending `已支付`、tax offset 进项票认证计划、cost statistics 项目/费用类型/流水表和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-relation-fanout.spec.ts --project=chromium`。
+- 未测风险：本地 Browser mock 只证明 UI/fan-out contract；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、支付规则/OA reverse/认证状态变化后的全链路仍需后续轮次或 staging/nightly。
+- 后续事项：继续补 `IN-USAGE-E2E-009` 的非 relation 触发源，或补真实 infra worker drain smoke。
+
+## 2026-06-19 - Browser e2e read-export 权限零 durable write
+
+- 目标：完成 `IN-USAGE-E2E-007` 的本页权限 Browser 覆盖，证明 `read_export_only` 用户能读列表和导出，但不能保存支付规则、创建 OA 草稿、创建 batch 或提交 OA manual status。
+- 影响范围：Playwright deterministic API mock、`web/e2e/input-invoice-usage-flow.spec.ts`、本模块 `e2e-coverage.md` / `tests.md` 和全局 Spec-first E2E 状态文档；产品逻辑不变。
+- 关键决策：`/api/input-invoice-usage/oa-reverse/preview` 当前是 read-like POST，后端用 read session 放行并通过 `canCreateDraft=false` 禁止只读用户创建草稿；Browser 权限测试单独允许该 preview POST，但对 payment rules save、OA draft、batch 和 manual status 等 durable write endpoint 断言零调用。
+- 文档影响：`IN-USAGE-E2E-007` 从 partial 更新为 covered；本模块仍保持 spec-first-partial，因为 `IN-USAGE-E2E-009` 下游 fan-out 和真实 infra worker drain 仍未完整闭环。
+- 测试覆盖：Playwright 新增 `read_export_only` 场景，覆盖列表可读、导出预览可用、支付规则 drawer 只读且无保存/编辑控件、OA reverse preview 返回不可创建草稿、创建草稿按钮禁用、durable write endpoint 零调用和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium --grep "read-export users"`；完整模块回归和 smoke 见本轮最终说明。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 OA、真实 XLSX workbook 完整解析/性能和 `IN-USAGE-E2E-009` downstream fan-out 仍需后续 smoke。
+- 后续事项：继续补 `IN-USAGE-E2E-009` downstream fan-out，或在有真实 infra env 时补 rows/detail/export 从 non-fresh 恢复 fresh 的 worker drain smoke。
+
+## 2026-06-19 - Browser e2e fresh rows filter/sort/page-size
+
+- 目标：完成 `IN-USAGE-E2E-001` 的真实浏览器覆盖，证明进项发票使用情况 fresh rows 首屏、筛选、排序和 page-size 控件与 rows API contract 和可见行同步。
+- 影响范围：Playwright deterministic API mock、`web/e2e/input-invoice-usage-flow.spec.ts`、本模块 `e2e-coverage.md` / `tests.md` 和全局 Spec-first E2E 状态文档；产品逻辑不变。
+- 关键决策：新增专用 `inputInvoiceUsageFilterSortRows` deterministic dataset，让 filter-options 包含当前页外供应商，测试证明筛选选项不是从当前页 rows 伪造；Browser 断言 rows URL 的 `page/page_size/filters/sort_field/sort_direction` 和 DOM 可见行一致。
+- 文档影响：`IN-USAGE-E2E-001` 从 partial 更新为 covered；权限全矩阵、下游 fan-out、真实 worker drain 和真实大数据性能继续登记为风险/后续队列。
+- 测试覆盖：Playwright 新增 fresh rows/filter/sort/page-size 场景，覆盖首屏有界分页、页外全局筛选项、销方筛选、开票日期升序排序、page-size 切换、零 mutation 和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL 大数据 EXPLAIN/锁等待、真实浏览器长表滚动、真实 worker drain 和每按钮权限矩阵仍需后续 smoke。
+- 后续事项：`IN-USAGE-E2E-007` 已补；继续补 `IN-USAGE-E2E-009` downstream fan-out 或真实 infra worker drain。
+
+## 2026-06-19 - Browser e2e 当前筛选导出/download
+
+- 目标：完成 `IN-USAGE-E2E-008` 的真实浏览器覆盖，证明进项发票使用情况导出使用当前筛选，不受当前分页限制，并且 row-limit/read model 非 fresh 状态不会触发下载。
+- 影响范围：Playwright deterministic API mock、`web/e2e/input-invoice-usage-flow.spec.ts`、本模块 `e2e-coverage.md` / `tests.md` 和全局 Spec-first E2E 状态文档；产品逻辑不变。
+- 关键决策：导出测试按业务 Spec 验收，不按当前组件实现细节验收；Browser 断言 export-preview/export URL contract、download event、文件内容字段、row-limit 结构化错误和导出 read model refreshing 禁用下载。
+- 文档影响：`IN-USAGE-E2E-008` 从 missing 更新为 covered；真实 XLSX 完整解析/性能、权限全矩阵、真实 worker drain 和下游 fan-out 继续登记为风险/后续队列。
+- 测试覆盖：Playwright 新增当前筛选导出真实下载、row-limit 零下载、export read model 非 fresh 禁用下载三个场景，覆盖真实 Chromium 下载事件、API contract、零 mutation 和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`。
+- 未测风险：下载体使用 deterministic mock 内容，不解析真实 XLSX workbook；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 后恢复 fresh、真实大数据导出性能和每按钮权限矩阵仍需后续 smoke。
+- 后续事项：`IN-USAGE-E2E-001` / `IN-USAGE-E2E-007` 已补；继续补 `IN-USAGE-E2E-009` downstream fan-out 或真实 infra worker drain。
+
+## 2026-06-19 - Browser e2e fresh +N relation detail 展开
+
+- 目标：完成 `IN-USAGE-E2E-006` 的真实浏览器正向覆盖，证明多 OA 关系在进项发票使用情况行内显示合计后，用户点击 `+N` 能从单行 read model relation detail endpoint 展开完整摘要。
+- 影响范围：`web/e2e/input-invoice-usage-flow.spec.ts`、本模块 `e2e-coverage.md` / `tests.md` 和全局 Spec-first E2E 状态文档。
+- 关键决策：沿用现有 deterministic API mock 的 fresh relation detail contract，不改产品逻辑；Browser 断言 detail endpoint 返回 200、drawer 展示两条 OA 摘要，不显示 loading/不可用态，不触发任何 mutation API。
+- 文档影响：`IN-USAGE-E2E-006` 从 partial 更新为 covered；后续已补 `IN-USAGE-E2E-008` download，权限组合、下游 fan-out 和真实 worker drain 仍作为后续风险/队列。
+- 测试覆盖：Playwright 新增 fresh `+N` relation detail 正向展开场景，覆盖真实 Chromium 点击、drawer 渲染、API contract、零 mutation 和无浏览器错误。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`。
+- 未测风险：当前仅覆盖 OA 多关系正向展开；银行/发票多关系正向展开由 API/Vitest 覆盖，后续如发现浏览器差异可补代表性 bank/invoice 场景。真实 worker drain 后恢复 fresh、真实 OA/PostgreSQL/RabbitMQ/Redis/systemd 和真实下载性能/完整 XLSX 解析仍需后续 smoke。
+- 后续事项：`IN-USAGE-E2E-001` / `IN-USAGE-E2E-007` / `IN-USAGE-E2E-008` 已补；继续补 `IN-USAGE-E2E-009` downstream fan-out 或真实 infra worker drain。
+
+## 2026-06-19 - Browser e2e relation detail refreshing 诊断
+
+- 目标：完成 `IN-USAGE-E2E-005` 的 relation detail Browser negative 场景，防止 `+N` 明细在 read model stale/refreshing 时长期停留在 loading 或显示假空态。
+- 影响范围：`InputInvoiceUsage` relation detail API mapper、Playwright deterministic API mocks、`web/e2e/input-invoice-usage-flow.spec.ts`、`InputInvoiceUsageFiltersAndDrawers.test.tsx` 和本模块测试/覆盖文档。
+- 关键决策：`/api/input-invoice-usage/rows/{row_id}/relation-details` 返回非 fresh read model contract 时，前端把 detail 映射为 `detailAvailable=false`，drawer 显示“详情暂不可用”和业务诊断，不泄露 stale reason，也不展示旧明细。
+- 文档影响：`IN-USAGE-E2E-005` 从 partial 更新为 covered；真实 worker drain 后恢复 fresh 仍登记为 infra/staging risk。
+- 测试覆盖：Vitest 覆盖 relation detail mapper 对 `read_model_status=refreshing` 的不可用详情映射；Playwright 覆盖真实浏览器点击 `+N` 后收到 202 relation detail contract、显示诊断、不长期 loading、不展示 stale 明细、零 mutation 和无浏览器错误。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`。
+- 未测风险：真实 worker drain 后恢复 fresh、真实 OA/PostgreSQL/RabbitMQ/Redis/systemd 和真实下载性能仍需后续 smoke。
+- 后续事项：`IN-USAGE-E2E-001` / `IN-USAGE-E2E-007` / `IN-USAGE-E2E-008` 已补；继续补 `IN-USAGE-E2E-009` downstream fan-out 或真实 infra worker drain。
+
+## 2026-06-19 - Browser e2e rows read model refreshing 防 false-empty
+
+- 目标：推进 `IN-USAGE-E2E-005`，修复进项发票使用页在 rows read model 非 fresh 时显示普通空态的问题，并补真实 Chromium 负面保护。
+- 影响范围：`InputInvoiceUsagePage` refreshing UI、`InputInvoiceUsagePage.test.tsx`、Playwright deterministic API mocks、`web/e2e/input-invoice-usage-flow.spec.ts` 和本模块测试/覆盖文档。
+- 关键决策：当 rows/filter-options 返回 `read_model_status=refreshing` 时，页面显示“进项发票使用情况数据正在刷新”，不渲染普通 empty state 或空表；mock 用 `inputInvoiceUsageReadModelStatus` 表达 stale/missing/refreshing，但对页面保持真实 API contract：`202`、空 rows、`refresh_enqueued=true`。
+- 文档影响：当时 `IN-USAGE-E2E-005` 仍保持 partial；后续已补 relation detail Browser negative 并更新为 covered。
+- 测试覆盖：Vitest 覆盖 refreshing 诊断、非普通空态和路由卸载后不重试；Playwright 覆盖 stale rows contract 下刷新诊断、不显示旧发票行、普通空态或空表、零 mutation 和无浏览器错误。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx`；`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium`。
+- 未测风险：真实 worker drain 后恢复 fresh、真实 Redis/RabbitMQ/systemd backlog、真实大数据浏览器和下载性能仍需后续 smoke。
+- 后续事项：后续已补 `IN-USAGE-E2E-001` 筛选/排序/page-size、`IN-USAGE-E2E-005` relation detail Browser negative、`IN-USAGE-E2E-006` 正向 `+N` 明细展开、`IN-USAGE-E2E-007` 权限零 durable write 和 `IN-USAGE-E2E-008` download；继续补 downstream fan-out 或真实 infra worker drain。
+
 ## 2026-06-18 - OA reverse 新增暂存 bucket
 
 - 目标：修复创建 OA 草稿后用户关闭确认弹窗时，本地批次缺少可恢复入口的问题。

@@ -30,6 +30,10 @@ BUSY_READ_MODEL_STATUSES = {
 BLOCKED_READ_MODEL_STATUSES = {"failed", "unavailable"}
 BUSY_WORKER_STATUSES = {"stale"}
 BLOCKED_WORKER_STATUSES = {"missing", "mismatch", "unavailable"}
+FRESH_STATUSES = {"ready", "fresh", "available"}
+REFRESHING_STATUSES = {"loading", "pending", "processing", "publishing", "refreshing"}
+FAILED_STATUSES = {"failed", "unavailable", "mismatch"}
+WORKING_WORKER_STATUSES = {"working", "running", "processing"}
 
 
 class AppStatusOverviewService:
@@ -94,10 +98,126 @@ class AppStatusOverviewService:
             "version": APP_STATUS_VERSION,
             "generated_at": generated_at,
             "overall": overall,
+            "runtime_summary": self._runtime_summary_payload(
+                read_model_statuses=resolved_read_models,
+                worker_statuses=resolved_workers,
+                outbox_statuses=resolved_outbox,
+            ),
             "domains": domains,
             "background_tasks": tasks,
             "alerts": self._active_alerts(app_health_snapshot.get("alerts")),
         }
+
+    def _runtime_summary_payload(
+        self,
+        *,
+        read_model_statuses: dict[str, dict[str, Any]],
+        worker_statuses: dict[str, dict[str, Any]],
+        outbox_statuses: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "read_models": self._read_model_summary_payload(read_model_statuses),
+            "workers": self._worker_summary_payload(worker_statuses),
+            "queue": self._queue_summary_payload(outbox_statuses),
+        }
+
+    def _read_model_summary_payload(self, read_model_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "total": 0,
+            "fresh": 0,
+            "refreshing": 0,
+            "stale": 0,
+            "missing": 0,
+            "failed": 0,
+            "unavailable": 0,
+            "issue_count": 0,
+            "scope_issue_count": 0,
+        }
+        for key, payload in read_model_statuses.items():
+            if key == "__runtime__" or not isinstance(payload, dict):
+                continue
+            counts["total"] += 1
+            status = self._normalize_status(payload)
+            if status in FRESH_STATUSES:
+                counts["fresh"] += 1
+            elif status in REFRESHING_STATUSES:
+                counts["refreshing"] += 1
+            elif status == "missing":
+                counts["missing"] += 1
+            elif status in {"failed", "unavailable"}:
+                counts[status] += 1
+            else:
+                counts["stale"] += 1
+            if status not in FRESH_STATUSES:
+                counts["issue_count"] += 1
+            raw_scopes = payload.get("scopes")
+            if isinstance(raw_scopes, list):
+                for scope in raw_scopes:
+                    if isinstance(scope, dict) and self._normalize_status(scope) not in FRESH_STATUSES:
+                        counts["scope_issue_count"] += 1
+        return counts
+
+    def _worker_summary_payload(self, worker_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "total": 0,
+            "required": 0,
+            "ready": 0,
+            "idle": 0,
+            "working": 0,
+            "stale": 0,
+            "missing": 0,
+            "mismatched": 0,
+            "unavailable": 0,
+            "issue_count": 0,
+        }
+        for key, payload in worker_statuses.items():
+            if key == "__runtime__" or not isinstance(payload, dict):
+                continue
+            counts["total"] += 1
+            if payload.get("required") is not False:
+                counts["required"] += 1
+            status = self._normalize_status(payload)
+            warning_code = str(payload.get("warning_code") or "").strip()
+            if warning_code == "required_worker_missing" or status == "missing":
+                counts["missing"] += 1
+            elif warning_code in {"worker_kind_mismatch", "worker_event_type_mismatch"} or status == "mismatch":
+                counts["mismatched"] += 1
+            elif status == "stale":
+                counts["stale"] += 1
+            elif status in WORKING_WORKER_STATUSES:
+                counts["working"] += 1
+            elif status in FRESH_STATUSES:
+                counts["ready"] += 1
+                counts["idle"] += 1
+            else:
+                counts["unavailable"] += 1
+            if (status not in FRESH_STATUSES and status not in WORKING_WORKER_STATUSES) or warning_code:
+                counts["issue_count"] += 1
+        return counts
+
+    def _queue_summary_payload(self, outbox_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "event_type_count": 0,
+            "pending": 0,
+            "processing": 0,
+            "failed": 0,
+            "backlog": 0,
+        }
+        for event_type, payload in outbox_statuses.items():
+            if event_type == "__runtime__" or not isinstance(payload, dict):
+                continue
+            counts["event_type_count"] += 1
+            status = self._normalize_status(payload)
+            count = self._int_value(payload.get("count"))
+            if status == "pending":
+                counts["pending"] += count
+            elif status in {"processing", "publishing"}:
+                counts["processing"] += count
+            elif status in FAILED_STATUSES:
+                counts["failed"] += count
+            if status not in FRESH_STATUSES:
+                counts["backlog"] += count
+        return counts
 
     def _domain_payload(
         self,

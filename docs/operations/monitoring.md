@@ -308,6 +308,31 @@ enqueue-to-fresh 是否满足目标。`summary.enqueue_to_fresh_ms` 会输出 p5
 过滤 smoke scope。它适合先验证当前会阻断页面可用性的 read model；最终全 app 验收仍必须解释
 `critical=false` read model 的产品含义，不能用 critical-only 结果代替全量闭环。
 
+## 生产外部 Gate 输入预检
+
+生产 admin Browser smoke、authenticated HTTP/SSE SLO 和 controlled write-operation apply 依赖真实登录态、
+管理员凭据、数据库连接、写操作 scenario 和审批 ticket。执行这些 gate 前先运行：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gate_preflight --json
+```
+
+预检输出只包含 gate 状态、缺失的 env 名称和 `secret_values_redacted=true`，不输出 token、cookie、数据库 URL
+或 scenario 文件内容。需要无人值守脚本在缺少输入时失败时，使用：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gate_preflight --require-ready
+```
+
+退出码约定：
+
+- `0`：所有外部 gate 的本地输入已配置；仍需由各 gate 自己证明 token 权限、页面/API 正常和 SLO 达标。
+- `2`：至少一个 gate 缺少 token、cookie、scenario、数据库连接或审批 ticket；这应标记为
+  `external_input_required`，不是产品代码失败。
+
+特别注意：`write_operation_apply` 只有在同时具备真实认证、PostgreSQL URL、安全隔离 scenario 和
+`FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 时才允许执行。生产 mutating smoke 必须可回滚、范围明确，并保留审批记录。
+
 ## 登录态 HTTP SLO 采样
 
 页面首包和关键读 API p95 使用只读 HTTP probe 采集：
@@ -338,6 +363,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 - 默认目标是每个 probe p95 `<= 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
 - read model API 可接受 `200` 或 `202`，但必须记录响应中的 `read_model_status`、`cache_status` 和 `refresh_enqueued`，用于区分 fresh snapshot、refreshing 和后台追赶。
 - 工具默认要求真实认证；没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`FIN_OPS_HTTP_SLO_BEARER_TOKEN`、`FIN_OPS_HTTP_SLO_COOKIE` 或 CLI auth 参数时返回 `auth_missing`，不能作为生产页面 SLO 证据。
+- 工具默认发送 `Accept-Encoding: gzip`，用于对齐真实浏览器经过 Nginx 的传输口径；JSON/HTML 解析会先解压 gzip body，`response_bytes` 记录压缩后的网络传输字节数。生产公网性能判断应使用该默认口径，避免用未压缩的大 JSON 传输时间误判浏览器首屏 SLO。
 - API probe 如果拿到 `text/html` 或 HTML 文档体，即使 HTTP status 是 200，也按 `html_response_for_api_probe` 失败处理。这通常表示 API prefix、Nginx fallback 或路径配置错误；例如 `www.yn-sourcing.com/health/ready` 会落到前端页面壳，生产 readiness 应使用 `/fin-ops-api/health/ready`。
 - Readiness payload 单独用只读 probe 验证，不需要登录态：
 
@@ -430,8 +456,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 ## 受控写操作 E2E SLO Smoke
 
-真实写操作闭环使用 `write_operation_e2e_smoke` 执行。该工具默认只校验 scenario 并输出计划；只有显式 `--apply`
-且存在真实认证 header/cookie 时才会发起 mutating HTTP 请求。
+真实写操作闭环使用 `write_operation_e2e_smoke` 执行。该工具默认只校验 scenario 并输出计划；只有显式 `--apply`、存在真实认证 header/cookie，且提供业务审批引用 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 时才会发起 mutating HTTP 请求。
 
 scenario 文件示例：
 
@@ -478,9 +503,11 @@ apply：
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
   --scenario /tmp/finops-write-e2e-scenarios.json \
   --apply \
+  --approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --write-target-ms 1000 \
@@ -491,6 +518,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 执行前要求：
 
 - scenario 必须使用可控测试对象或已确认可回滚的业务对象；不要直接对生产真实待处理业务做破坏性测试。
+- `--apply` 必须带审批引用；缺少 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 会返回 `status=approval_missing`，且不会连接 Postgres 或发起 mutating HTTP。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
 - mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
 - 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 p95
@@ -504,12 +532,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --apply-read-model-smoke \
   --write-scenario /tmp/finops-write-e2e-scenarios.json \
   --apply-write-scenarios \
+  --write-approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --http-target-ms 1000 \
   --sse-target-ms 1000 \
   --health-ready-target-ms 1000 \
@@ -526,9 +556,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - 登录态 HTTP SLO：必须使用真实 OA token/Admin-Token/cookie，覆盖全 app 页面 shell 与首屏 API p95。
 - 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
-- 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
+- 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 和 `--write-approval-ticket` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
 
-缺少真实认证、缺少 scenario、只 dry-run、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
+缺少真实认证、缺少 scenario、只 dry-run、缺少审批引用、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
 Postgres-backed gates 在缺少 `FIN_OPS_POSTGRES_DATABASE_URL` / `DATABASE_URL` 时会返回
 `status=configuration_missing`、`blocking_condition=database_url_required`、`required_env`、
 安全 `next_actions`、`allowed_remote_evidence` 和 `forbidden_without_approval`。这表示需要在安全运行环境

@@ -618,7 +618,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
         self.assertEqual(adapter.get_read_status().code, "ready")
 
-    def test_list_application_records_applies_form_type_filter_and_keeps_in_progress_projection(self) -> None:
+    def test_list_application_records_applies_form_type_and_status_filters(self) -> None:
         adapter = CountingStubMongoOAAdapter(
             form_documents={
                 "2": [
@@ -688,10 +688,10 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         records = adapter.list_application_records("2026-03")
 
-        self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
+        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
         self.assertEqual(
             {record.id: record.workflow_status for record in records},
-            {"oa-pay-2047": "completed", "oa-pay-2048": "in_progress"},
+            {"oa-pay-2047": "completed"},
         )
         self.assertEqual(records[0].apply_type, "支付申请")
         self.assertEqual(adapter.form_load_calls, [("2", "2026-03")])
@@ -2416,7 +2416,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(counterparties[0]["name"], "中国电信股份有限公司昆明分公司")
         self.assertEqual(documents[0]["project_name"], "云南溯源科技")
 
-    def test_completed_and_in_progress_oa_rows_are_projected(self) -> None:
+    def test_default_projection_keeps_completed_rows_and_excludes_in_progress_rows(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [
@@ -2464,10 +2464,9 @@ class MongoOAAdapterTests(unittest.TestCase):
         months = adapter.list_available_months()
 
         self.assertEqual([record.id for record in records], ["oa-pay-2047"])
-        self.assertEqual([record.id for record in progress_records], ["oa-pay-2048"])
-        self.assertEqual(progress_records[0].workflow_status, "in_progress")
+        self.assertEqual([record.id for record in progress_records], [])
         self.assertEqual([document["external_id"] for document in documents], ["2047"])
-        self.assertEqual(months, ["2026-03", "2026-04"])
+        self.assertEqual(months, ["2026-03"])
 
     def test_import_settings_filter_form_types_and_statuses(self) -> None:
         adapter = StubMongoOAAdapter(
@@ -2652,7 +2651,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             ],
         )
         adapter.set_import_filter_provider(
-            lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed"]}
+            lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed", "in_progress"]}
         )
 
         records = adapter.list_application_records("2026-03")

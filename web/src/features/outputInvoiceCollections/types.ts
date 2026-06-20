@@ -15,6 +15,7 @@ export type OutputInvoiceCollectionFilter = {
 
 export type OutputInvoiceCollectionWorkflow =
   | { kind: "statusRules" }
+  | { kind: "export" }
   | { kind: "collectionStatus"; rowId: string }
   | { kind: "redRelation"; rowId: string }
   | { kind: "receiptHistory"; invoiceId: string; rowId: string }
@@ -196,6 +197,21 @@ export type OutputInvoiceCollectionFilterOptionsResponse = {
   }>;
   readModelStatus?: string;
   readModelScopeKey?: string;
+};
+
+export type OutputInvoiceCollectionExportPreview = {
+  fileName: string;
+  rowCount: number;
+  scopeLabel: string;
+  columns: string[];
+  sampleRows: Array<Record<string, string>>;
+  readModelStatus?: string;
+  message?: string;
+};
+
+export type OutputInvoiceCollectionExportDownload = {
+  blob: Blob;
+  fileName: string;
 };
 
 export type OutputInvoiceCollectionDetailResponse = {

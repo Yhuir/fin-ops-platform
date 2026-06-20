@@ -1879,7 +1879,7 @@ class PostgresReadModelRepository:
         if scope_key == "all":
             rows = self._connection.fetch_all(
                 f"""
-                select scope_key, source_versions, cache_status
+                select scope_key, row_count, source_versions, cache_status
                 from {scope_table_name}
                 where scope_key <> 'all'
                 order by generated_at desc, scope_key desc
@@ -1890,12 +1890,13 @@ class PostgresReadModelRepository:
                     f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
                 )
                 return dict(row) if isinstance(row, dict) else None
-            for row in rows:
+            rows_for_all_status = self._invoice_relation_all_scope_effective_rows(rows)
+            for row in rows_for_all_status:
                 if not isinstance(row, dict):
                     continue
                 if text(row.get("cache_status")) not in {"", "fresh"}:
                     return {"scope_key": "all", "source_versions": {}}
-            return {"scope_key": "all", "source_versions": self._common_source_versions(rows)}
+            return {"scope_key": "all", "source_versions": self._common_source_versions(rows_for_all_status)}
         row = self._connection.fetch_one(
             f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
             (scope_key,),
@@ -1920,6 +1921,11 @@ class PostgresReadModelRepository:
         if dirty_row is None:
             return "fresh"
         return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    @staticmethod
+    def _invoice_relation_all_scope_effective_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        non_empty_rows = [row for row in rows if isinstance(row, dict) and int_value(row.get("row_count"), 0) > 0]
+        return non_empty_rows or rows
 
     @staticmethod
     def _common_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2326,11 +2332,32 @@ class PostgresReadModelRepository:
                 "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
                 (tenant_id, normalized_scope_key),
             )
+            insert_rows: list[tuple[Any, ...]] = []
             for row in rows_to_save:
                 payload = _invoice_lifecycle_row_payload(row)
                 row_scope_month = month_start(payload.get("scope_month") or normalized_scope_key) or scope_month
-                connection.execute(
-                    """
+                insert_rows.append(
+                    (
+                        tenant_id,
+                        text(payload.get("subject_id")),
+                        text(payload.get("subject_type")),
+                        normalized_scope_key,
+                        row_scope_month,
+                        text(payload.get("invoice_identity_key")),
+                        text(payload.get("lifecycle_status")) or "unknown",
+                        jsonb(payload.get("acquisition_status") if isinstance(payload.get("acquisition_status"), dict) else {}),
+                        jsonb(payload.get("payment_status") if isinstance(payload.get("payment_status"), dict) else {}),
+                        jsonb(payload.get("collection_status") if isinstance(payload.get("collection_status"), dict) else {}),
+                        jsonb(payload.get("certification_status") if isinstance(payload.get("certification_status"), dict) else {}),
+                        jsonb(normalized_source_versions),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload, "source_versions": normalized_source_versions}),
+                        text(row.get("generated_at")),
+                    )
+                )
+            _execute_many(
+                connection,
+                """
                     insert into read_model.invoice_lifecycle_rows(
                         tenant_id, subject_id, subject_type, scope_key, scope_month, invoice_identity_key,
                         lifecycle_status, acquisition_status, payment_status, collection_status, certification_status,
@@ -2351,25 +2378,9 @@ class PostgresReadModelRepository:
                         raw_payload = excluded.raw_payload,
                         generated_at = excluded.generated_at,
                         updated_at = now()
-                    """,
-                    (
-                        tenant_id,
-                        text(payload.get("subject_id")),
-                        text(payload.get("subject_type")),
-                        normalized_scope_key,
-                        row_scope_month,
-                        text(payload.get("invoice_identity_key")),
-                        text(payload.get("lifecycle_status")) or "unknown",
-                        jsonb(payload.get("acquisition_status") if isinstance(payload.get("acquisition_status"), dict) else {}),
-                        jsonb(payload.get("payment_status") if isinstance(payload.get("payment_status"), dict) else {}),
-                        jsonb(payload.get("collection_status") if isinstance(payload.get("collection_status"), dict) else {}),
-                        jsonb(payload.get("certification_status") if isinstance(payload.get("certification_status"), dict) else {}),
-                        jsonb(normalized_source_versions),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload, "source_versions": normalized_source_versions}),
-                        text(row.get("generated_at")),
-                    ),
-                )
+                """,
+                insert_rows,
+            )
             self._upsert_invoice_lifecycle_scope(
                 connection,
                 tenant_id=tenant_id,
@@ -7291,7 +7302,7 @@ class PostgresReadModelRepository:
             return None
         row = self._connection.fetch_one(
             """
-            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, schema_version, payload, raw_payload
+            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, payload, raw_payload
             from read_model.cost_statistics_read_models
             where scope_key = %s
             limit 1
@@ -7742,48 +7753,14 @@ class PostgresReadModelRepository:
             raise ValueError("cost_statistics_rows requires a concrete scope_month.")
         generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
         cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        row_params: list[tuple[Any, ...]] = []
         for index, item in enumerate(time_rows):
             if not isinstance(item, dict):
                 continue
             row = serialize_value(item)
             transaction_id = text(row.get("transaction_id")) or f"row-{index}"
             row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
-            connection.execute(
-                """
-                insert into read_model.cost_statistics_rows(
-                    scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
-                    trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
-                    remark, project_id, project_name, expense_type, expense_content, amount,
-                    oa_applicant, source_versions, generated_at, cache_status, payload, raw_payload
-                )
-                values (
-                    %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                )
-                on conflict (scope_key, row_key) do update set
-                    project_scope = excluded.project_scope,
-                    scope_month = excluded.scope_month,
-                    transaction_id = excluded.transaction_id,
-                    group_id = excluded.group_id,
-                    trade_time_text = excluded.trade_time_text,
-                    trade_date = excluded.trade_date,
-                    counterparty_name = excluded.counterparty_name,
-                    payment_account_label = excluded.payment_account_label,
-                    direction = excluded.direction,
-                    remark = excluded.remark,
-                    project_id = excluded.project_id,
-                    project_name = excluded.project_name,
-                    expense_type = excluded.expense_type,
-                    expense_content = excluded.expense_content,
-                    amount = excluded.amount,
-                    oa_applicant = excluded.oa_applicant,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    cache_status = excluded.cache_status,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
+            row_params.append(
                 (
                     scope_key,
                     project_scope,
@@ -7810,6 +7787,45 @@ class PostgresReadModelRepository:
                     jsonb({"normalized_payload": row}),
                 ),
             )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.cost_statistics_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
+                trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
+                remark, project_id, project_name, expense_type, expense_content, amount,
+                oa_applicant, source_versions, generated_at, cache_status, payload, raw_payload
+            )
+            values (
+                %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+            )
+            on conflict (scope_key, row_key) do update set
+                project_scope = excluded.project_scope,
+                scope_month = excluded.scope_month,
+                transaction_id = excluded.transaction_id,
+                group_id = excluded.group_id,
+                trade_time_text = excluded.trade_time_text,
+                trade_date = excluded.trade_date,
+                counterparty_name = excluded.counterparty_name,
+                payment_account_label = excluded.payment_account_label,
+                direction = excluded.direction,
+                remark = excluded.remark,
+                project_id = excluded.project_id,
+                project_name = excluded.project_name,
+                expense_type = excluded.expense_type,
+                expense_content = excluded.expense_content,
+                amount = excluded.amount,
+                oa_applicant = excluded.oa_applicant,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            row_params,
+        )
 
     def _replace_tax_offset_items(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
         connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))

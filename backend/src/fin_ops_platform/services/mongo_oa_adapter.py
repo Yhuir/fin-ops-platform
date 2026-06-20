@@ -529,7 +529,11 @@ class MongoOAAdapter(OAAdapter):
                 self._set_read_status("error", "OA 连接失败")
                 return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
             for document in payment_documents:
-                record = self._build_payment_request_record(document, project_names)
+                record = self._build_payment_request_record(
+                    document,
+                    project_names,
+                    respect_status_settings=False,
+                )
                 if record is not None:
                     records_by_id[record.id] = record
 
@@ -543,7 +547,11 @@ class MongoOAAdapter(OAAdapter):
                 return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
             records_by_expense_external_id: dict[str, OAApplicationRecord] = {}
             for document in expense_documents:
-                for record in self._build_expense_claim_records(document, project_names):
+                for record in self._build_expense_claim_records(
+                    document,
+                    project_names,
+                    respect_status_settings=False,
+                ):
                     records_by_id[record.id] = record
                     external_id = record.id.removeprefix("oa-exp-")
                     records_by_expense_external_id[external_id] = record
@@ -856,9 +864,15 @@ class MongoOAAdapter(OAAdapter):
         self,
         document: dict[str, Any],
         project_names: dict[str, str],
+        *,
+        respect_status_settings: bool = True,
     ) -> OAApplicationRecord | None:
         data = self._document_data(document)
-        if not self._should_include_projection_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
+        if not self._should_include_projection_document(
+            OA_IMPORT_FORM_TYPE_PAYMENT,
+            data,
+            respect_status_settings=respect_status_settings,
+        ):
             return None
         amount = self._first_text(data, "amount")
         applicant = self._first_text(data, "userName", "applicant")
@@ -919,9 +933,15 @@ class MongoOAAdapter(OAAdapter):
         self,
         document: dict[str, Any],
         project_names: dict[str, str],
+        *,
+        respect_status_settings: bool = True,
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
-        if not self._should_include_projection_document(OA_IMPORT_FORM_TYPE_EXPENSE, data):
+        if not self._should_include_projection_document(
+            OA_IMPORT_FORM_TYPE_EXPENSE,
+            data,
+            respect_status_settings=respect_status_settings,
+        ):
             return []
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant:
@@ -3041,11 +3061,21 @@ class MongoOAAdapter(OAAdapter):
             and self._canonical_status_key(data) in set(settings["statuses"])
         )
 
-    def _should_include_projection_document(self, form_type: str, data: dict[str, Any]) -> bool:
-        return (
-            self._should_include_form_type(form_type)
-            and self._canonical_status_key(data) in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}
-        )
+    def _should_include_projection_document(
+        self,
+        form_type: str,
+        data: dict[str, Any],
+        *,
+        respect_status_settings: bool = True,
+    ) -> bool:
+        if not self._should_include_form_type(form_type):
+            return False
+        status_key = self._canonical_status_key(data)
+        if status_key not in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}:
+            return False
+        if respect_status_settings and status_key not in set(self._current_import_settings()["statuses"]):
+            return False
+        return True
 
     @staticmethod
     def _canonical_status_key(data: dict[str, Any]) -> str:

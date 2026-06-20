@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import unittest
 
@@ -34,6 +35,7 @@ class HttpSloProbeTests(unittest.TestCase):
 
         for name in (
             "workbench_groups_all_paired",
+            "operations_app_health_dashboard",
             "pending_invoices_rows",
             "input_invoice_usage_rows",
             "pending_invoices_filter_options",
@@ -80,6 +82,8 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("oa_page=1", probe_paths["batch_accounting"])
         self.assertIn("oa_page_size=200", probe_paths["batch_accounting"])
         self.assertIn("q=%E5%85%AC%E5%8F%B8", probe_paths["search_all"])
+        admin_probe = next(probe for probe in http_slo_probe.DEFAULT_API_PROBES if probe.name == "operations_app_health_dashboard")
+        self.assertEqual(admin_probe.auth_scope, "admin")
 
     def test_configured_default_page_probes_have_stable_page_names(self) -> None:
         args = http_slo_probe.build_parser().parse_args(["--target-ms", "5000"])
@@ -156,10 +160,65 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["summary"]["sample_count"], 2)
         self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/workbench/summary?month=all")
+        self.assertEqual(observed[0][1]["Accept-Encoding"], "gzip")
         self.assertTrue(report["auth_configured"])
         self.assertNotIn("secret-token", json.dumps(report))
         self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 2})
         self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 2})
+
+    def test_gzip_json_response_is_decoded_for_metadata(self) -> None:
+        payload = gzip.compress(b'{"read_model_status":"fresh","cache_status":"fresh"}')
+
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json", "content-encoding": "gzip"},
+                body=payload,
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("workbench", "/api/workbench/summary?month=all")],
+            headers={"Authorization": "Bearer secret-token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+            include_samples=True,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 1})
+        self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 1})
+        self.assertEqual(report["samples"][0]["response_bytes"], len(payload))
+
+    def test_admin_scoped_probe_uses_admin_headers_without_overriding_user_probes(self) -> None:
+        observed: list[tuple[str, dict[str, str]]] = []
+
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            observed.append((url, dict(headers)))
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"read_model_status":"fresh"}',
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[
+                http_slo_probe.HttpProbe("session", "/api/session/me"),
+                http_slo_probe.HttpProbe("operations", "/api/operations/app-health-dashboard", auth_scope="admin"),
+            ],
+            headers={"Authorization": "Bearer user-token"},
+            admin_headers={"Authorization": "Bearer admin-token", "Cookie": "Admin-Token=admin-token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(observed[0][1]["Authorization"], "Bearer user-token")
+        self.assertEqual(observed[1][1]["Authorization"], "Bearer admin-token")
+        self.assertEqual(observed[1][1]["Cookie"], "Admin-Token=admin-token")
 
     def test_plain_status_field_does_not_count_as_read_model_status(self) -> None:
         def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:

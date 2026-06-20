@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 function requestPath(requestUrl: string) {
@@ -59,5 +60,6 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(detailDialog).toContainText("智能工厂项目");
     await expect(detailDialog).toContainText("智能工厂设备商");
     await expect(detailDialog).toContainText("智能工厂设备尾款");
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

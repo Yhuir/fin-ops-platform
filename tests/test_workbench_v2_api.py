@@ -5559,9 +5559,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         invalidate_read_model_scopes.assert_called_once()
         self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
         schedule_read_model_persist.assert_called_once()
+        # The lifecycle invalidation above still covers all; the operation-level
+        # persist target stays month-scoped so browser barriers do not wait on all.
         self.assertCountEqual(
             schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03", "all"],
+            ["2026-03"],
         )
         self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
         self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "mark_exception")
@@ -5598,7 +5600,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         schedule_read_model_persist.assert_called_once()
         self.assertCountEqual(
             schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03", "all"],
+            ["2026-03"],
         )
         self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
         self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "oa_bank_exception")

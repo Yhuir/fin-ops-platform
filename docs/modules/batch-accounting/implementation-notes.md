@@ -1,5 +1,22 @@
 # 批量账务 实施记录
 
+## 2026-06-20 - GET 列表加载失败刷新恢复
+
+- 目标：补齐批量账务首屏 `GET /api/batch-accounting` 暂时失败后的 Browser 恢复链路，防止 API 503 被页面误显示成普通“暂无流水”空态，或恢复后残留失败文案。
+- 影响范围：`BatchAccountingPage` 错误态空态 guard、`web/e2e/fixtures/apiMocks.ts` 批量账务临时失败 mock、`web/e2e/batch-accounting-flow.spec.ts`、`web/src/test/BatchAccountingPage.test.tsx` 和本模块/全局测试文档。
+- 关键决策：不改变批量账务业务逻辑、submit/withdraw 语义或 relation freshness 规则；刷新仍复用页面现有 `loadData`，错误态只阻止普通空态展示。
+- 测试覆盖：组件测试覆盖首次 GET 503 显示“批量账务数据加载暂时失败，请刷新后重试。”且不显示普通空态，点击刷新后业务银行行恢复；Browser 测试覆盖真实 Chromium 中首屏 503、用户手动刷新直到 200/fresh、银行/OA 行恢复、提交按钮保持未选择时禁用、成功恢复后无可见错误残留和无隐藏浏览器错误。
+- 未测风险：真实网络中断、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史批量账务 relation 和大年份性能仍需 staging/runtime smoke。
+
+## 2026-06-19 - relation read model stale Browser 防 false-empty
+
+- 目标：把批量账务 `workbench_relation` non-fresh 诊断从组件/API 覆盖补到真实 Chromium，防止页面把 stale relation read model 下的当前可用 rows 误显示成普通空态，或在只读诊断场景意外触发 submit/withdraw mutation。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/batch-accounting-flow.spec.ts`、本模块测试/覆盖文档和 read-models shared 覆盖文档。
+- 关键决策：不改产品逻辑。保留既有语义：GET payload 透出 `read_model_status` / `read_model_stale_reasons` / `read_model_scope_keys` / `refresh_enqueued`；普通 read model non-fresh 不全局禁用具备 canonical write safety 的操作，mutation 是否允许仍由权限/session、canonical relation、idempotency、owner 状态和后端写安全决定。
+- 测试覆盖：`batch-accounting-flow` 新增 `read_model_status=stale` Browser 用例，断言 warning/reason/scope 可见、银行/OA rows 保留、不显示 `当前年份暂无批量账务流水`、选择后 submit 按 canonical write safety 保持可用，且 submit/withdraw mutation 计数为 0。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/modules/read-models/e2e-coverage.md`、`docs/modules/read-models/tests.md` 和 `docs/dev/testing.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史 relation distribution 和真实大年份数据仍走 `infra-smoke` / staging 或生产批准 smoke，不写成本地 deterministic Browser covered。
+
 ## 2026-06-16 - P2/P3 前端首屏分页接入
 
 - 目标：让批量账务页面实际消费后端显式分页 contract，避免未提交 bucket 首屏一次性拉取大年份范围全部银行/OA 候选。
@@ -34,6 +51,7 @@
 
 ## 当前决策
 
+- 批量账务 Spec-first E2E 本地闭环状态为 `spec-first-covered`：`BATCH-E2E-001..009` 已映射到 Browser、组件、API、后端和 integration 覆盖；`BATCH-E2E-010` 真实基础设施 worker drain 明确保留为 staging/runtime risk。
 - 批量账务不拥有独立 read model；列表和 mutation 前置判断依赖 `workbench_relation` read model freshness。
 - `GET /api/batch-accounting` 必须保持只读，不能为了修复历史关系在 GET 路径写入。
 - `read_model_status !== "fresh"` 时前端必须显示 warning，不能把空关系当作真实未提交；写操作是否可提交由后端 canonical write safety、权限/session、DB 和 owner/version/idempotency 判定，普通 relation distribution 追赶中不应作为长期全局禁用理由。
@@ -58,6 +76,28 @@
 ```
 
 ## 历史记录
+
+## 2026-06-19 - 成功写流可见错误残留 guard
+
+- 目标：防止批量账务 submit/withdraw 已成功、bucket 也已刷新，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。
+- 影响范围：`web/e2e/batch-accounting-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试矩阵和全局测试文档。
+- 关键决策：不改变产品逻辑或 deterministic mock；在提交成功、撤回成功和回到未提交 bucket 后复用 `expectNoUnexpectedSuccessUiErrors(...)` 做用户可见错误残留检查。
+- 文档影响：更新本模块 `tests.md`、`e2e-coverage.md` 和全局 testing closure state。
+- 测试覆盖：`web/e2e/batch-accounting-flow.spec.ts` 加强 submit/withdraw 成功路径；静态诊断防止后续移除该 guard。
+- 验证命令：`cd web && npx playwright test e2e/batch-accounting-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实生产批量账务写入仍需真实认证、业务审批和可回滚 scenario；本轮只覆盖 deterministic Browser flow 的可见错误残留。
+
+## 2026-06-19 - Spec-first E2E covered 校准
+
+- 目标：把批量账务从全局 Spec-first `partial` 校准为页面级 covered，明确本地自动化覆盖和真实基础设施风险边界。
+- 影响范围：`docs/modules/batch-accounting/e2e-spec.md`、`docs/modules/batch-accounting/e2e-coverage.md`、`web/e2e/batch-accounting-flow.spec.ts`、本模块 README/tests/implementation notes 和全局 Spec-first inventory。
+- 关键决策：
+  - 新增 `BATCH-E2E-001..010`，覆盖页面 ready、首屏分页、提交、差额说明、撤回、non-fresh 诊断、command boundary、relation fan-out、权限、窄屏和真实 infra worker drain。
+  - Browser 增量不改变业务流程，只为现有窄桌面和 submit/withdraw 流加入严格浏览器错误捕获，防止“操作成功但弹窗/console/request 失败”被漏掉。
+  - 不把真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实大年份、高行数和下游最终显示写成本地 CI covered；这些继续由 `infra-smoke`、staging 或生产前 smoke 验证。
+- 测试覆盖：更新 `web/e2e/batch-accounting-flow.spec.ts`。
+- 验证命令：`cd web && npx playwright test e2e/batch-accounting-flow.spec.ts --project=chromium`。
+- 未测风险：真实 worker drain、真实历史 legacy relation、真实大年份/长 OA 文本浏览器性能和下游页面最终显示仍需 staging/runtime smoke。
 
 ## 2026-06-16 - P2/P3 显式分页首屏保护
 

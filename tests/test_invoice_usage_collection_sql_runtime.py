@@ -887,6 +887,69 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("read_model_stale_reasons", payload)
         self.assertEqual(queue.refreshes, [])
 
+    def test_output_api_all_scope_ignores_stale_empty_month_scope_versions(self) -> None:
+        base_versions = output_invoice_collection_source_versions()
+        stale_versions = {
+            **base_versions,
+            "oa_projection_sync_version": "2026-05-28-scope-replace-v1",
+        }
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._import_service = ImportNormalizationService()
+        app._workbench_pair_relation_service = WorkbenchPairRelationService()
+        app._workbench_relation_facade = FreshEmptyWorkbenchRelationFacade()
+        app._output_invoice_collection_sql_read_repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(
+                output_rows=[
+                    {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "id": "output_invoice_collection_row_1",
+                            "invoiceId": "invoice-1",
+                            "invoice": {"invoiceNo": "9001", "invoiceDate": "2026-05-08", "totalWithTax": "118.00"},
+                            "collectionStatus": {
+                                "code": "pending_collection",
+                                "label": "待收款",
+                                "collectedAmount": "0.00",
+                                "pendingAmount": "118.00",
+                            },
+                            "bankTransactions": {"relationCount": 0},
+                            "redInvoiceRelation": {"relationCount": 0},
+                            "receipt": {"status": "pending", "label": "待出收据"},
+                        },
+                        "raw_payload": {},
+                    }
+                ],
+                output_scope_rows=[
+                    {
+                        "scope_key": "2026-05",
+                        "row_count": 1,
+                        "source_versions": base_versions,
+                        "cache_status": "fresh",
+                    },
+                    {
+                        "scope_key": "2025-12",
+                        "row_count": 0,
+                        "source_versions": stale_versions,
+                        "cache_status": "fresh",
+                    },
+                ],
+                scope_exists=False,
+            )
+        )
+
+        response = app._handle_api_output_invoice_collections_rows({"page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["id"], "output_invoice_collection_row_1")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
+
     def test_output_api_stale_returns_refreshing_without_stale_rows(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)

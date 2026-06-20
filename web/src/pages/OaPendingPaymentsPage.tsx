@@ -7,6 +7,7 @@ import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   confirmOaPendingPaymentPaid,
   fetchOaPendingPaymentBankCandidates,
@@ -55,16 +56,55 @@ function filterConfigsFromOptions(fields: Array<OaPendingPaymentFieldConfig & { 
   return fields.map(({ options: _options, ...field }) => field);
 }
 
+const readModelStatusPriority = ["unavailable", "schema_mismatch", "missing", "failed", "stale", "refreshing", "fresh"];
+
+type ReadModelStatusPayload = {
+  readModelStatus?: string | null;
+  read_model_status?: string | null;
+};
+
+function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): string {
+  const statuses = payloads
+    .map((payload) => (payload.readModelStatus ?? payload.read_model_status ?? "").trim().toLowerCase())
+    .filter(Boolean);
+  if (statuses.length === 0) {
+    return "fresh";
+  }
+  const knownStatuses = statuses.filter((status) => readModelStatusPriority.includes(status));
+  if (knownStatuses.length > 0) {
+    return knownStatuses.sort((left, right) => (
+      readModelStatusPriority.indexOf(left) - readModelStatusPriority.indexOf(right)
+    ))[0];
+  }
+  return statuses.find((status) => status !== "fresh") ?? "fresh";
+}
+
+function isReadModelFresh(status: string) {
+  return status === "fresh";
+}
+
+function readModelStatusTitle(status: string) {
+  if (status === "stale") {
+    return "OA 待付款核对数据不是最新";
+  }
+  if (status === "failed" || status === "unavailable") {
+    return "OA 待付款核对数据暂不可用";
+  }
+  return "OA 待付款核对数据正在刷新";
+}
+
 export default function OaPendingPaymentsPage() {
+  const { canMutateData } = useSessionPermissions();
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
+  const [readModelStatus, setReadModelStatus] = useState("fresh");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [confirmingRowIds, setConfirmingRowIds] = useState<Set<string>>(() => new Set());
@@ -104,6 +144,7 @@ export default function OaPendingPaymentsPage() {
         setSummary(payload.summary ?? { rowCount: payload.pagination?.total ?? 0 });
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
+        setReadModelStatus(readModelStatusFromPayloads(payload, optionsPayload));
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -112,6 +153,7 @@ export default function OaPendingPaymentsPage() {
         setRows([]);
         setTotal(0);
         setSummary({ rowCount: 0 });
+        setReadModelStatus("fresh");
         setError(caught instanceof Error ? caught.message : "OA 待付款核对加载失败。");
       })
       .finally(() => {
@@ -164,6 +206,10 @@ export default function OaPendingPaymentsPage() {
   }, []);
 
   const handleConfirmPaid = useCallback((row: OaPendingPaymentRow) => {
+    if (!canMutateData) {
+      setError("当前账号仅支持查看和导出，不能确认或写回 OA 支付状态。");
+      return;
+    }
     const oaRowId = row.oa.primaryOaId || row.oa.id;
     const bankTransactionIds = confirmBankTransactionIds(row);
     if (!oaRowId) {
@@ -192,7 +238,7 @@ export default function OaPendingPaymentsPage() {
           return next;
         });
       });
-  }, [loadRows]);
+  }, [canMutateData, loadRows]);
 
   const handleToggleOaSelection = useCallback((row: OaPendingPaymentRow) => {
     const ids = selectableOaRowIds(row);
@@ -229,12 +275,21 @@ export default function OaPendingPaymentsPage() {
 
   const actions = useMemo(() => (
     <div className="oa-pending-payments-actions">
+      <button
+        aria-label="刷新 OA 待付款核对"
+        className="oa-pending-payments-button"
+        disabled={loading || refreshing}
+        onClick={() => loadRows("refresh")}
+        type="button"
+      >
+        刷新
+      </button>
       {query.viewMode === "in_progress" ? (
         <button
           aria-label="关联支出流水"
           onClick={() => setBankLinkDrawerOpen(true)}
           className="oa-pending-payments-button oa-pending-payments-button--primary"
-          disabled={selectedOaRowIds.size === 0}
+          disabled={!canMutateData || selectedOaRowIds.size === 0}
           type="button"
         >
           <PanelRightOpen aria-hidden="true" size={16} />
@@ -252,8 +307,9 @@ export default function OaPendingPaymentsPage() {
         支出流水无需开票规则设置
       </button>
     </div>
-  ), [query.viewMode, selectedOaRowIds.size]);
-  const isEmpty = !loading && !error && rows.length === 0;
+  ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
+  const isEmpty = !loading && !refreshing && !error && rows.length === 0;
+  const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
 
@@ -313,7 +369,17 @@ export default function OaPendingPaymentsPage() {
               </div>
             ) : (
               <>
-                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+                {!canMutateData ? (
+                  <StatePanel compact tone="warning">
+                    当前账号仅支持查看和导出，不能确认写回 OA 或关联支出流水。
+                  </StatePanel>
+                ) : null}
+                {showReadModelState ? (
+                  <StatePanel tone={readModelStatus === "refreshing" ? "loading" : "warning"} title={readModelStatusTitle(readModelStatus)} compact>
+                    当前数据仍在刷新或等待后台任务完成，请稍后重试。
+                  </StatePanel>
+                ) : null}
+                {isEmpty && !showReadModelState ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
                 <OaPendingPaymentsTable
                   rows={rows}
                   page={query.page}
@@ -331,10 +397,17 @@ export default function OaPendingPaymentsPage() {
                   onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
-                  onConfirmPaid={handleConfirmPaid}
+                  onConfirmPaid={canMutateData ? handleConfirmPaid : undefined}
                   selectedOaRowIds={selectedOaRowIds}
-                  onToggleOaSelection={query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
+                  onToggleOaSelection={canMutateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
                   confirmingRowIds={confirmingRowIds}
+                  emptyStateMessage={
+                    error
+                      ? "OA 待付款核对加载失败，请点击刷新重试。"
+                      : refreshing
+                        ? "OA 待付款核对数据正在刷新，请稍候。"
+                        : undefined
+                  }
                 />
               </>
             )}
@@ -357,7 +430,7 @@ export default function OaPendingPaymentsPage() {
         onClose={() => setRulesOpen(false)}
       />
       <OaBankLinkDrawer
-        open={bankLinkDrawerOpen}
+        open={canMutateData && bankLinkDrawerOpen}
         selectedOaRowIds={[...selectedOaRowIds]}
         onLinked={handleBankLinkSuccess}
         onError={setError}

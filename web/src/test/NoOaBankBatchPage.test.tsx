@@ -379,7 +379,8 @@ function largeListPayload(total = 205) {
   };
 }
 
-function installFetchMock(payload = listPayload) {
+function installFetchMock(payload = listPayload, options: { listFailuresBeforeSuccess?: number } = {}) {
+  let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && (!init?.method || init.method === "GET")) {
@@ -390,6 +391,13 @@ function installFetchMock(payload = listPayload) {
       return jsonResponse({ ...tagSelectionPayload, version: 4, selected_tag_codes: body.selected_tag_codes ?? [] });
     }
     if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+      if (listFailuresRemaining > 0) {
+        listFailuresRemaining -= 1;
+        return jsonResponse({
+          error: "no_oa_bank_batch_temporarily_unavailable",
+          message: "免OA流水批次加载暂时失败，请刷新后重试。",
+        }, 503);
+      }
       return jsonResponse(withPagination(payload, url));
     }
     if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
@@ -611,6 +619,31 @@ describe("NoOaBankBatchPage", () => {
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
 
     expect(fetchMock.mock.calls.some(([, init]) => ["POST", "PUT", "PATCH", "DELETE"].includes(String(init?.method ?? "GET")))).toBe(false);
+  });
+
+  test("recovers after a transient no OA batch list failure when refreshed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(listPayload, { listFailuresBeforeSuccess: 1 });
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(await screen.findByText("免OA流水批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("当前标签下暂无流水")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("免OA流水批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "费用 1批 · 2条" })).toBeInTheDocument();
+    });
+    expect(await screen.findByText("网银手续费")).toBeInTheDocument();
+
+    const listRequests = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET");
+    });
+    expect(listRequests.length).toBeGreaterThanOrEqual(2);
   });
 
   test("uses backend pagination for no OA first-screen batches", async () => {

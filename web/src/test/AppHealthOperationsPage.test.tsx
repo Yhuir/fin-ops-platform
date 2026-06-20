@@ -87,14 +87,24 @@ describe("AppHealthOperationsPage", () => {
     const runtime = screen.getByTestId("app-health-runtime");
     expectProjectSection(runtime);
     expect(runtime).toHaveTextContent("后台");
+    const runtimeOverview = within(runtime).getByTestId("app-health-runtime-overview");
+    expect(runtimeOverview).toHaveTextContent("Read model");
+    expect(runtimeOverview).toHaveTextContent("1 refreshing");
+    expect(runtimeOverview).toHaveTextContent("Worker");
+    expect(runtimeOverview).toHaveTextContent("active 1");
+    expect(runtimeOverview).toHaveTextContent("Queue");
+    expect(runtimeOverview).toHaveTextContent("4 backlog");
     expect(within(runtime).getByRole("grid", { name: "Outbox 状态" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "RabbitMQ 队列" })).toBeInTheDocument();
-    expect(within(runtime).getByRole("grid", { name: "Read Model 刷新" })).toBeInTheDocument();
-    expect(within(runtime).getByRole("grid", { name: "Worker 心跳" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "Read Model 状态" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "Worker 状态" })).toBeInTheDocument();
     expect(runtime).toHaveTextContent("pending");
     expect(runtime).toHaveTextContent("finops.workbench.read_model.refresh");
     expect(runtime).toHaveTextContent("workbench");
+    expect(runtime).toHaveTextContent("refreshing");
     expect(runtime).toHaveTextContent("runtime-worker");
+    expect(runtime).toHaveTextContent("active");
+    expect(runtime).toHaveTextContent("required");
 
     expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
     expect(screen.queryByTestId("app-health-background-jobs")).not.toBeInTheDocument();

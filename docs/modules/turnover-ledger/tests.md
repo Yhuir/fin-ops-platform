@@ -9,7 +9,7 @@
 | 影响面 | 当前事实源 | 需要保护的行为 |
 | --- | --- | --- |
 | 页面和 API client | `web/src/pages/TurnoverLedgerPage.tsx`、`web/src/features/turnoverLedger/api.ts` | grouped table、标签抽屉、补充信息 drawer、人工闭环 drawer、导出 dialog、loading/empty/error/stale、权限禁用 |
-| Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | tag-selection、extra、confirm、withdraw 成功后等待 `turnover_ledger` barrier fresh，再 reload grouped payload；失败不假装同步 |
+| Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | tag-selection、extra、confirm、withdraw 成功后等待 `turnover_ledger` barrier fresh，再 reload grouped payload；失败不假装同步，成功后不能残留操作失败/同步失败/read model 失败等可见错误提示 |
 | API contract | `backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_turnover_ledger.py`、`docs/dev/api-contracts.md` | `GET /api/turnover-ledger`、tag-selection、bank-row-tags batch、extra、confirm、withdraw、export-preview/export |
 | Business core | `TurnoverRelationService`、`TurnoverLedgerService`、`TurnoverLedgerExtraService` | 外部往来标签准入、同组一收一支、零差额、同对方、同语义、人工闭环、撤回、extra 校验、内部转账排除 |
 | Write UoW | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、`turnover_ledger_write_adapters.py` | stale precondition、idempotency、relation/extra/settings/bankdetail 写入、dirty/outbox 同事务、rollback、Workbench relation command service 委托 |
@@ -45,6 +45,8 @@
 - `web/src/test/TurnoverLedgerPage.test.tsx`
 - `web/src/test/domainEvents.test.ts`
 - `web/e2e/turnover-ledger-flow.spec.ts`
+- `docs/modules/turnover-ledger/e2e-spec.md`
+- `docs/modules/turnover-ledger/e2e-coverage.md`
 
 ## 七类测试适用性
 
@@ -54,9 +56,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_api.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_workbench_pair_relation_service.py` | 已覆盖 UoW transaction、rollback、dirty/outbox、stale precondition、idempotency、settings/extra/bankdetail/relation ports、Workbench relation command service 委托、缺 command fail-fast、既有 OA-bank relation 合并进外部往来闭环、撤回闭环恢复旧 OA-bank relation 和 Workbench pair relation、`cash_closure_case_id` 撤回不回退 legacy pair service。 |
 | 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` | 已覆盖列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、导出上限结构化错误、HTML response routing error。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、registry/App Status 登记。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 API mapper、tag drawer 保存、grouped table、正向 chip（“已关联 OA”“已关联 发票”“收支闭环”）、移除旧负向/泛化 chip、manual closure、仅已关联 OA 的 flow row 不禁用确认闭环、同一 `cash_closure_case_id` flow-row toolbar 撤回、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event；真实 Chromium 覆盖同组两条 flow rows 确认闭环和 toolbar 撤回。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性；Browser e2e 覆盖 confirm/withdraw 后等待后端 freshness targets 并重读 grouped payload。 |
-| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract，以及真实浏览器里 closure/recovery 不破坏表格选择和 toolbar 状态。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 API mapper、首屏 grouped GET 暂时失败后的错误态/刷新恢复/防 false-empty、tag drawer 保存、grouped table、正向 chip（“已关联 OA”“已关联 发票”“收支闭环”）、移除旧负向/泛化 chip、manual closure、仅已关联 OA 的 flow row 不禁用确认闭环、同一 `cash_closure_case_id` flow-row toolbar 撤回、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event；真实 Chromium 覆盖首屏 503 后手动刷新台账恢复、标签准入保存、`turnover_ledger:all` barrier、台账重读、同组两条 flow rows 确认闭环、成本统计 fresh read model fan-out、toolbar 撤回，并在恢复/成功节点检查无可见错误残留。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性；Browser e2e 覆盖 tag-selection -> barrier -> reload、confirm 后等待 operation barrier、进入成本统计断言 fresh explorer 和闭环成本行，再回周转页 withdraw 后重读 grouped payload，且成功后没有操作失败/同步失败/read model 失败等可见错误残留。 |
+| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、标签准入 selected codes、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract、成本统计下游 fresh read model 展示，以及真实浏览器里 tag selection、closure/recovery 不破坏表格选择、toolbar 状态和“成功但报错提示仍显示”的回归。 |
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
@@ -64,6 +66,7 @@
 
 | 场景 | 代表测试 |
 | --- | --- |
+| grouped GET 暂时失败恢复 | `web/src/test/TurnoverLedgerPage.test.tsx::recovers grouped ledger after a transient load failure when refreshed`、`web/e2e/turnover-ledger-flow.spec.ts::recovers grouped ledger after a transient load failure when refreshed` |
 | 外部往来标签准入默认选择和版本冲突 | `test_turnover_ledger_tag_selection_get_put_and_version_conflict` |
 | tag-selection queue failure rollback | `test_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save`、`test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit` |
 | grouped read model stale/missing | `test_stale_sql_read_model_is_not_returned_as_fresh_and_enqueues_refresh`、`test_missing_required_sql_read_model_returns_empty_refreshing_payload_and_enqueues_miss` |
@@ -83,8 +86,8 @@
 | fresh missing bank tag rows 不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
 | blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | bank detail tag facade 下游版本合同 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows`、`BankTransactionTagReadFacadeTests.test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions` |
-| 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure` |
-| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后只把后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation` 作为硬等待目标，`workbench` 月份/all 聚合继续后台收敛；若 POST 成功后的 operation barrier/reload 被 blocked 或超时，页面显示“操作已提交，后台同步尚未完成” warning，不弹“操作失败”；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖同组 flow rows confirm/withdraw recovery |
+| 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure`、`web/e2e/turnover-ledger-flow.spec.ts::shows stale grouped ledger data without allowing manual closure` |
+| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后只把后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation` 作为硬等待目标，`workbench` 月份/all 聚合继续后台收敛；若 POST 成功后的 operation barrier/reload 被 blocked 或超时，页面显示“操作已提交，后台同步尚未完成” warning，不弹“操作失败”；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖标签准入保存 -> barrier -> ledger reload，以及同组 flow rows confirm -> 成本统计 fresh read model fan-out -> withdraw recovery，并检查成功后无可见错误残留 |
 | 手动闭环后同对方剩余流水保留 | `test_manual_closure_keeps_remaining_same_counterparty_rows_in_auto_relation`、`test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure` |
 
 ## 历史 bug 回归库
@@ -122,12 +125,13 @@
 
 本地自动化重点保护：
 
-1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> grouped ledger 展示。
-2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖两条同组 flow rows 的 confirm 主链路，并断言闭环后只显示“收支闭环”。
+1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> 等待 `turnover_ledger:all` operation barrier -> grouped ledger 重新加载。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖标签准入保存请求体、barrier、reload 和成功后无可见错误残留。
+2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation -> 成本统计 fresh read model 展示闭环成本行；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖两条同组 flow rows 的 confirm 主链路，并断言闭环后只显示“收支闭环”、成本统计展示 `外部往来闭环成本项目`，且成功后无可见错误残留。
 3. 手动闭环 relation 撤回 -> 只撤回同一 `cash_closure_case_id` 的多流水闭环，并恢复确认前的 OA-bank relation；关联台已经配对的同组银行收支闭环从外部往来页撤回时走 `/api/turnover-ledger/closures/withdraw`，与关联台撤回同一条 Workbench command service 链路；已升级为包含发票或其他业务 row type 时必须从关联台撤回；Workbench relation read model 不 fresh 时必须 fail fast 且不产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
 4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
-5. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。
-6. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放；若写成功后的 barrier/reload 被 blocked 或超时，仅显示后台同步 warning，不得把已提交操作渲染成“操作失败”。Browser smoke 已断言 confirm/withdraw 都触发 `POST /api/operation-barrier/status`。
+5. grouped ledger `read_model_status=stale` -> 页面显示非最新 warning、保留当前 flow rows；即使选中两条真实流水，确认闭环仍禁用，Browser smoke 断言零 confirm mutation。
+6. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。
+7. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放；若写成功后的 barrier/reload 被 blocked 或超时，仅显示后台同步 warning，不得把已提交操作渲染成“操作失败”。Browser smoke 已断言 confirm/withdraw 都触发 `POST /api/operation-barrier/status`。
 
 真实环境 smoke 仍需在发布前执行：
 
@@ -165,12 +169,12 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest、frontend build 和 deterministic Playwright smoke 覆盖本模块。Browser smoke 当前包含 `web/e2e/turnover-ledger-flow.spec.ts`，用于保护真实 Chromium 中 manual closure confirm/withdraw、operation barrier 和 grouped payload recovery。由于 turnover 后端测试数量多，nightly 可以发现大部分 API/UoW/read model/worker 回归；本地开发时仍应优先运行上方目标验证命令，减少反馈时间。
+`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest、frontend build 和 deterministic Playwright smoke 覆盖本模块。Browser smoke 当前包含 `web/e2e/turnover-ledger-flow.spec.ts`，用于保护真实 Chromium 中 grouped GET 暂时 503 后手动刷新恢复、tag-selection save、operation barrier、ledger reload、manual closure confirm、成本统计 fresh read model fan-out、withdraw、grouped payload recovery 和成功后无可见错误残留。由于 turnover 后端测试数量多，nightly 可以发现大部分 API/UoW/read model/worker 回归；本地开发时仍应优先运行上方目标验证命令，减少反馈时间。
 
 ## 未测风险
 
 - 真实生产 PostgreSQL 历史数据中的重复、缺字段、半迁移状态，不能由本地 fixture 完全证明。
 - 真实 RabbitMQ/Redis/systemd worker drain、网络抖动和 worker 重启恢复需要 staging 或生产前 smoke。
-- 大数据量 grouped table、导出 XLSX 文件、浏览器视觉遮挡、error/network recovery 和真实下载打开耗时需要真实浏览器/样本验证；本地 Playwright smoke 只覆盖小样本 confirm/withdraw 主链路。
+- 大数据量 grouped table、导出 XLSX 文件、浏览器视觉遮挡、mutation 级网络失败和真实下载打开耗时需要真实浏览器/样本验证；本地 Playwright smoke 只覆盖小样本 grouped GET 失败恢复和 confirm/withdraw 主链路。
 - 外部往来写路径仍保留 legacy fallback 分支；常规 manual closure/withdraw 已通过 command service 收敛，未来删除 fallback 前需要单独回归。
 - 自动标签规则恢复只证明银行明细 read model 可从当前定义补齐历史确认语义；真实生产仍需刷新对应 `bank_detail`、`turnover_ledger`、`workbench_relation`、`workbench` scopes 后验证 open 区可见。

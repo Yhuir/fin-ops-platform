@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const TRANSACTION_ID = "bk-o-202603-001";
 
@@ -47,12 +48,14 @@ test.describe("bank details category confirmation browser flow", () => {
     await expect(row.getByText("成本 / 设备款")).toBeVisible();
     await expect(row.getByRole("button", { name: "待确认" })).toHaveCount(0);
     await expect(row.getByRole("button", { name: "撤销" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await row.getByRole("button", { name: "撤销" }).click();
     await expect.poll(() => api.count(categoryPath("DELETE", "category-confirmation"))).toBe(1);
     expect(api.count(categoryPath("DELETE", "category-assignment"))).toBe(0);
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThanOrEqual(3);
     await expect(row.getByRole("button", { name: "待确认" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("assigns an unmatched row from active rules with third-level turnover semantics", async ({ page }) => {
@@ -102,11 +105,13 @@ test.describe("bank details category confirmation browser flow", () => {
     await expect(row.getByText("外部往来款付款 / 借出款 / 业务往来")).toBeVisible();
     await expect(row.getByRole("button", { name: "待分类" })).toHaveCount(0);
     await expect(row.getByRole("button", { name: "撤销" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
 
     await row.getByRole("button", { name: "撤销" }).click();
     await expect.poll(() => api.count(categoryPath("DELETE", "category-assignment"))).toBe(1);
     expect(api.count(categoryPath("DELETE", "category-confirmation"))).toBe(0);
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThanOrEqual(3);
     await expect(row.getByRole("button", { name: "待分类" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

@@ -440,7 +440,7 @@ describe("Input invoice usage page", () => {
     expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
-  test("uses a standard empty state while read model refresh details stay hidden", async () => {
+  test("shows refreshing diagnostics instead of a true empty state while read model details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/input-invoice-usage/rows") {
@@ -470,8 +470,10 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
-    expect(within(page).queryByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
+    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).getByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
   });
 
   test("unmounts the page while away and retries after route remount", async () => {
@@ -503,7 +505,8 @@ describe("Input invoice usage page", () => {
 
     renderAuthenticatedAppAt("/input-invoice-usage");
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
@@ -548,8 +551,13 @@ describe("Input invoice usage page", () => {
     expect(await within(page).findByRole("table", { name: "进项发票使用情况表" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("input-invoice-usage-button--accent");
-    expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    const refreshButton = within(page).getByRole("button", { name: "刷新" });
+    expect(refreshButton).toBeInTheDocument();
     expect(Array.from((within(page).getByLabelText("每页行数") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
+
+    const rowsBeforeRefresh = rowsRequests(fetchMock).length;
+    await user.click(refreshButton);
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
     for (const label of ["进项发票", "支付状态", "OA", "流水"]) {

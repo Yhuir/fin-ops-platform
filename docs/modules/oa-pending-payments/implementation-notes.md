@@ -42,6 +42,61 @@
 
 ## 历史记录
 
+## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
+
+- 目标：补齐 OA 待付款核对页的本地 `NETWORK-RECOVERY` 负面链路，防止 rows 首屏暂时失败时显示普通空态或用户无法从页面恢复。
+- 影响范围：`OaPendingPaymentsPage` 显式刷新入口和错误/刷新状态、`OaPendingPaymentsTable` 错误态空行文案、Playwright deterministic mock、`web/e2e/oa-pending-payments-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` 和测试闭环文档。
+- 关键决策：不改后端业务语义或真实 API contract；mock 表达 `/api/oa-pending-payments/rows` 暂时 503，页面必须显示错误提示和错误态空行，不显示普通空态，并允许用户点击显式刷新恢复 fresh rows/pagination。
+- 文档影响：更新本文件、`e2e-coverage.md`、`tests.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/oa-pending-payments-flow.spec.ts::recovers rows after a transient load failure when refreshed`；扩展 `web/src/test/OaPendingPaymentsPage.test.tsx` 验证刷新入口会重新请求 rows。
+- 验证命令：`cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts --project=chromium`；本轮最终说明列出额外 Vitest/类型/docs 验证。
+- 未测风险：本地 deterministic Browser 不证明真实 OA Mongo/MySQL、PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实网络中断、生产大数据和真实用户 confirm-paid/link-bank 写流恢复。
+- 后续事项：继续补其它页面或 mutation 级网络恢复；真实 rows/detail non-fresh 恢复和 confirm-paid/link-bank worker drain 仍走 staging/runtime gate。
+
+## 2026-06-19 - OA pending rows/detail non-fresh Browser E2E
+
+- 目标：补齐 `OA-PENDING-E2E-008`，让真实 Chromium 覆盖 rows/detail read model 非 fresh 时的页面诊断，避免把 refreshing 空 rows 当成真实空态。
+- 影响范围：`OaPendingPaymentsPage`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块状态机/coverage/tests 和全局 Spec-first E2E 文档。
+- 关键决策：这是 Spec-first 产品行为修复。rows/filter-options 返回 `read_model_status=refreshing` 或 202 且 rows 为空时，页面显示中性“OA 待付款核对数据正在刷新”，不展示真实空态，也不向业务用户暴露 stale reason；detail 202 继续通过 drawer 展示“详情暂不可用”。
+- 文档影响：更新 `state-machine.md`、`e2e-coverage.md`、`tests.md`、本实施记录，并同步全局 Spec-first inventory/closure state/testing 文档。
+- 测试覆盖：新增 `web/e2e/oa-pending-payments-nonfresh-flow.spec.ts` 两条 Browser 测试；更新组件测试覆盖 rows refreshing 诊断和 detail unavailable。
+- 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npx playwright test e2e/oa-pending-payments-nonfresh-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不替代真实 OA Mongo/MySQL、真实 PostgreSQL/RabbitMQ/Redis/systemd `invoice-usage-collection` worker drain；真实 worker 停止/恢复、source-version stale 到 fresh 的恢复链路仍需要 staging/生产 smoke。
+- 后续事项：补真实基础设施 confirm-paid/link-bank/rows-detail worker drain smoke，以及真实生产大数据、网络恢复和视觉遮挡 smoke。
+
+## 2026-06-19 - 进行中 OA bank-link Browser E2E
+
+- 目标：补齐 `OA-PENDING-E2E-007`，让真实 Chromium 覆盖进行中 OA 勾选后打开“关联支出流水”抽屉、筛选/禁选/提交和刷新闭环。
+- 影响范围：`web/e2e/oa-pending-payments-bank-link-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 文档和测试矩阵。
+- 关键决策：只加固 Browser E2E 和 deterministic mock，不改产品逻辑；link-bank 成功流只模拟 Workbench relation/read model 更新，断言页面仍 `未写回` 且 `confirm-paid` 零调用，避免把抽屉关联误当成 OA MySQL 支付状态写回。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录，并同步全局 Spec-first inventory/closure state/testing 文档。
+- 测试覆盖：新增 `web/e2e/oa-pending-payments-bank-link-flow.spec.ts` 两条 Browser 测试，覆盖抽屉默认全部、已配对/已关联禁选、relation_status 筛选、提交 body、rows/read model refresh、失败错误可见、零半写和不调用 confirm-paid。
+- 验证命令：`cd web && npx playwright test e2e/oa-pending-payments-bank-link-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不替代真实 OA Mongo/MySQL、真实 PostgreSQL/RabbitMQ/Redis/systemd `invoice-usage-collection` worker drain；真实 Workbench active relation 和 OA pending read model fan-out 仍需要 staging/生产样本 smoke。
+- 后续事项：补 `OA-PENDING-E2E-008` rows/detail non-fresh Browser 诊断，以及真实基础设施 confirm-paid/link-bank worker drain smoke。
+
+## 2026-06-19 - 进行中 OA confirm-paid Browser E2E
+
+- 目标：补齐 `OA-PENDING-E2E-006`，让真实 Chromium 覆盖进行中 OA 用户点击“确认已支付并写回”的成功刷新、重复提交防护和失败零半写。
+- 影响范围：`web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 文档和测试矩阵。
+- 关键决策：只加固 Browser E2E 和 deterministic mock，不改产品逻辑；mock 成功流模拟 confirm-paid 返回 `readModelRefresh` 后 rows/read model 重新请求并显示 `已写回`，失败流模拟后端 409 并断言页面保留 `未写回`、不触发 rows refresh。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录，并同步全局 Spec-first inventory/closure state/testing 文档。
+- 测试覆盖：新增 `web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts` 两条 Browser 测试，覆盖成功写回、防重复提交、POST body、read model refresh、失败错误可见和零半写。
+- 验证命令：`cd web && npx playwright test e2e/oa-pending-payments-confirm-paid-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不替代真实 OA Mongo/MySQL、真实 PostgreSQL/RabbitMQ/Redis/systemd `invoice-usage-collection` worker drain；真实 confirm-paid 写回仍需要 staging/生产样本 smoke。
+- 后续事项：补 `OA-PENDING-E2E-007` 进行中 OA 关联支出流水 Browser 流、`OA-PENDING-E2E-008` rows/detail non-fresh Browser 诊断，以及真实基础设施 confirm-paid worker drain smoke。
+
+## 2026-06-19 - Spec-first OA pending linked fan-out Browser E2E
+
+- 目标：补齐 Workbench confirm 后 OA 待付款页面必须通过 read model 重新读取并从候选/少付状态更新为 linked/已支付状态的 Browser 保护。
+- 影响范围：`web/e2e/workbench-relations-oa-pending-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 文档和测试矩阵。
+- 关键决策：新增 opt-in deterministic mock `oaPendingPaymentRelationFanout`，不影响既有 OA 页面 smoke；Browser flow 先进入 OA 待付款确认候选状态，再通过 Workbench confirm，回到 OA 待付款断言 rows 重新请求、状态变为 `已支付`、候选标记消失并显示 `关联台已确认`。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 README、tests 和本实施记录，并同步全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-relations-oa-pending-fanout.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不替代真实 OA Mongo/MySQL、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；进行中 OA 确认写回和关联支出流水仍缺完整 Browser 流。
+- 后续事项：补进行中 OA confirm-paid Browser 流、link-bank-transactions Browser 流和 rows/detail non-fresh 浏览器诊断。
+
 ## 2026-06-18 - OA 待付款准入源改为 t_payment_simple.flow_id
 
 - 目标：把 OA 待付款核对的 OA 范围从“扫 OA 系统所有进行中/已完成 OA”调整为“以 `t_payment_simple.flow_id` 为支付状态管理准入表”，避免网络波动导致的重复 OA 污染付款核对页面。

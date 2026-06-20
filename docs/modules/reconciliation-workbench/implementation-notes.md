@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-20 - 已配对现金流水特殊处理 Browser E2E
+
+- 目标：把已配对现金流水的 `确认为过账`、`确认为买票`、`取消现金处理` 从权限只读拦截补齐为 full-access 真实浏览器主流程，避免“按钮能点但请求体、barrier、弹窗校验或成功后报错未覆盖”。
+- 影响范围：`web/e2e/workbench-cash-special-flow.spec.ts`、deterministic API mock、`npm run e2e:smoke`、关联台 Spec-first E2E 文档；不改产品页面逻辑或后端业务逻辑。
+- 关键决策：按业务规格断言 full-access 用户在已配对银行流水更多菜单执行三种现金特殊处理；每个 mutation 都必须携带完整 group row ids，买票必须校验买票成本和项目名称，写入后等待 `workbench_relation` operation barrier，通过 Workbench operation projection/background refresh 保持页面可继续操作，并由 strict Playwright fixture 捕获成功后的隐藏 UI/browser 错误。
+- 文档影响：更新本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md`、`implementation-notes.md`，同步 `docs/dev/testing.md`、`docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-cash-special-flow.spec.ts`；扩展 `web/e2e/fixtures/apiMocks.ts` 的现金特殊处理 action result 与 mock routes；`web/e2e/permissions-role-matrix.spec.ts` 已覆盖 read-export 下同入口零 mutation。
+- 验证命令：`cd web && npx playwright test e2e/workbench-cash-special-flow.spec.ts --project=chromium`；`cd web && npx playwright test e2e/permissions-role-matrix.spec.ts --project=chromium -g "read-export users cannot trigger submitted-state write controls"`；`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`bash scripts/verify.sh docs`；`cd web && npx tsc --noEmit --pretty false`。
+- 未测风险：本地 mock 不证明真实 PostgreSQL/worker 里现金特殊处理 command 的持久化、审计和成本统计下游结果；真实 worker drain 与成本/账务展示仍需 staging/production write-operation audit。
+
 ## 2026-06-19 - 关联台刷新提示归口 App Status
 
 - 目标：移除关联台页内“刷新中/待刷新，当前结果可能不是完整最新数据”的横幅，避免同一运行状态在页面和状态框重复展示。

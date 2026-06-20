@@ -9,7 +9,7 @@
 - 普通 app settings 仍以 `ApplicationStateStore` 为事实源；OA 申请人凭据使用独立 secret repository，不能进入普通 settings payload。
 - 数据重置属于高风险运维操作：必须 admin-only、密码确认、protected targets、job progress、失败不泄密，并在重置后避免旧 read model/cache 被展示为 fresh。
 - 规则和标签保存不应同步重建所有下游页面，但必须产生明确 dirty/lifecycle fan-out，并由 App Status/下游页面呈现 stale 或 refreshing。
-- 本模块首轮闭环状态为 `documented-risk`：本地测试覆盖 service/API/UI contract，真实 OA、真实生产 reset 和多页面最终 smoke 仍需 staging/生产前验证。
+- 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖 service/API/UI contract、data reset Browser 用户路径和项目范围到成本统计 fresh fan-out；真实 OA、真实生产 reset、真实 worker drain 和多页面最终 smoke 仍需 staging/生产前验证。
 
 ## 记录模板
 
@@ -27,6 +27,42 @@
 ```
 
 ## 历史记录
+
+## 2026-06-19 - 成功写流可见错误残留 guard
+
+- 目标：防止 data reset 或项目范围保存到成本统计 active/all fresh fan-out 已成功，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。
+- 影响范围：`web/e2e/settings-data-reset-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试矩阵和全局测试文档。
+- 关键决策：不改变产品逻辑或 deterministic mock；在数据重置完成、settings 保存成功、成本统计 active scope 和 all scope 成功节点复用 `expectNoUnexpectedSuccessUiErrors(...)`。
+- 文档影响：更新本模块 `tests.md`、`e2e-coverage.md` 和全局 testing closure state。
+- 测试覆盖：`web/e2e/settings-data-reset-flow.spec.ts` 加强 data reset 和 project scope fan-out 成功路径；静态诊断防止后续移除该 guard。
+- 验证命令：`cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实生产 data reset、真实 OA 和全页面 worker drain 仍需 staging/production smoke；本轮只覆盖 deterministic Browser flow 的可见错误残留。
+
+## 2026-06-19 - Settings 页面级 Spec-first E2E covered
+
+- 目标：把 settings 从首轮 `documented-risk` 校准为页面级 `spec-first-covered`，明确页面 Browser 合同、覆盖映射和真实基础设施风险边界。
+- 影响范围：`web/e2e/settings-data-reset-flow.spec.ts`、`docs/modules/settings/e2e-spec.md`、`docs/modules/settings/e2e-coverage.md`、settings 测试矩阵和全局 Spec-first E2E inventory。
+- 关键决策：
+  - 不改产品逻辑；现有 service/API/component/Browser 测试已经覆盖 settings 主要业务合同。
+  - 给 data reset Browser 流补严格浏览器错误捕获，确保影响确认、OA 密码复核、job polling、settings reload 期间隐藏 `pageerror`、`console.error`、非 abort request failure 或未预期 dialog 会失败。
+  - 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储、生产备份恢复和全页面 worker drain 不用本地 deterministic E2E 伪装覆盖，继续登记为 staging/runtime smoke external-risk。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、本文件和全局 testing closure 文档。
+- 测试覆盖：更新 `web/e2e/settings-data-reset-flow.spec.ts`。
+- 验证命令：`cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
+- 未测风险：真实生产 data reset 备份/worker drain/Redis cache、真实 OA 登录/草稿、真实 PostgreSQL pgcrypto key/历史 settings payload 和所有下游页面最终 smoke仍需 staging/production smoke。
+
+## 2026-06-19 - Browser e2e 补项目范围到成本统计 fan-out
+
+- 目标：把 settings 项目状态管理的 Browser E2E 从 data reset 扩展到下游成本统计，避免“设置保存成功但成本统计 active/all project scope 仍读旧状态”。
+- 影响范围：`web/e2e/settings-data-reset-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、settings 和成本统计测试矩阵、全局 Spec-first E2E inventory。
+- 关键决策：
+  - 测试不改变产品逻辑，只新增 opt-in deterministic mock `settingsProjectScopeFanout` 表示 settings 保存后的 `completed_project_ids` 会影响成本统计 explorer 的 active/all project scope。
+  - Browser 流在设置页把项目标记完成并保存，断言 POST `completed_project_ids=["settings-cost-project-e2e"]`，再进入成本统计验证 active scope 排除该项目，all scope 保留该项目和金额。
+  - 新增严格浏览器错误捕获：`pageerror`、`console.error`、非 abort `requestfailed` 和未预期 dialog 均会失败。
+- 文档影响：更新本文件、`tests.md`、成本统计模块测试/覆盖/实施记录和全局 testing closure 文档。
+- 测试覆盖：更新 `web/e2e/settings-data-reset-flow.spec.ts` 和 `web/e2e/fixtures/apiMocks.ts`。
+- 验证命令：`cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts --project=chromium`。
+- 未测风险：本地仍是 mocked Browser E2E，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd settings lifecycle 与 cost-statistics worker drain；真实环境需要 staging/production smoke。
 
 ## 2026-06-16 - settings mutation API 权限闭环
 

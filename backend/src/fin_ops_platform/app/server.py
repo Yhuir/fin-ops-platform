@@ -990,10 +990,14 @@ class Application:
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
+        oa_pending_payment_projection = self._oa_pending_payment_projection(
+            source_adapter=oa_adapter,
+            use_lazy_source=False,
+        )
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=self._oa_pending_payment_projection(),
+            oa_projection=oa_pending_payment_projection,
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -1844,6 +1848,10 @@ class Application:
             return self._handle_api_output_invoice_collections_rows(query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
             return self._handle_api_output_invoice_collections_filter_options(query, headers)
+        if method == "GET" and route_path == "/api/output-invoice-collections/export-preview":
+            return self._handle_api_output_invoice_collections_export_preview(query, headers)
+        if method == "GET" and route_path == "/api/output-invoice-collections/export":
+            return self._handle_api_output_invoice_collections_export(query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
             return self._handle_api_output_invoice_collections_status_rules(headers)
         if method == "POST" and route_path == "/api/output-invoice-collections/receipt-preview":
@@ -9101,10 +9109,7 @@ class Application:
             updated = self._app_settings_service.update_input_invoice_usage_payment_status_rules(
                 payload,
                 actor_id=str(actor_id or "input_invoice_usage_payment_rules"),
-                after_input_invoice_usage_payment_rules_saved=lambda event: self._enqueue_input_invoice_usage_read_model_refresh(
-                    str(event.get("scope_key") or "all"),
-                    reason=str(event.get("reason") or "payment_status_rules_updated"),
-                ),
+                after_input_invoice_usage_payment_rules_saved=self._enqueue_input_invoice_usage_payment_rules_refreshes,
             )
         except AppSettingsValidationError as exc:
             status = (
@@ -9118,6 +9123,12 @@ class Application:
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
         return self._json_response(HTTPStatus.OK, updated)
+
+    def _enqueue_input_invoice_usage_payment_rules_refreshes(self, event: dict[str, object]) -> None:
+        scope_key = str(event.get("scope_key") or "all")
+        reason = str(event.get("reason") or "payment_status_rules_updated")
+        self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason)
+        self._enqueue_generic_read_model_refreshes("invoice_lifecycle", [scope_key], reason=reason)
 
     def _handle_api_input_invoice_usage_oa_reverse_preview(
         self,
@@ -9473,12 +9484,19 @@ class Application:
         self._oa_pending_payment_command_service_instance = service
         return service
 
-    def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
+    def _oa_pending_payment_projection(
+        self,
+        *,
+        source_adapter: object | None = None,
+        use_lazy_source: bool = True,
+    ) -> PaymentAdmittedOAProjectionAdapter:
         projection = getattr(self, "_oa_pending_payment_projection_instance", None)
         if isinstance(projection, PaymentAdmittedOAProjectionAdapter):
             return projection
+        if source_adapter is None and use_lazy_source:
+            source_adapter = self._oa_pending_payment_source_adapter()
         projection = PaymentAdmittedOAProjectionAdapter(
-            source_adapter=self._oa_pending_payment_source_adapter(),
+            source_adapter=source_adapter,
             payment_status_repository=self._oa_payment_status_repository(),
         )
         self._oa_pending_payment_projection_instance = projection
@@ -9745,6 +9763,45 @@ class Application:
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(status_code, payload)
+
+    def _handle_api_output_invoice_collections_export_preview(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            status_code, payload = self._output_invoice_collection_routes().export_preview(query, session=session)
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(status_code, payload)
+
+    def _handle_api_output_invoice_collections_export(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            filename, content = self._output_invoice_collection_routes().export(query, session=session)
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            },
+        )
 
     def _handle_api_output_invoice_collections_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
         session, auth_error = self._resolve_output_invoice_collection_read_session(headers)

@@ -113,6 +113,14 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(call["idempotency_key"], "input_invoice_oa_reverse:batch-oa-reverse-1:oa-row-1")
         self.assertEqual(call["history_operation_type"], "input_invoice_oa_reverse_confirm")
         self.assertEqual(
+            call["evidence"],
+            {
+                "oa_process_status": "进行中",
+                "candidate_count": 1,
+                "raw_payload": {"caseId": "OA-001"},
+            },
+        )
+        self.assertEqual(
             call["special_metadata"],
             {
                 "input_invoice_usage_oa_reverse_batch_id": "batch-oa-reverse-1",
@@ -558,16 +566,19 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
 
     def test_status_refresh_with_evidence_updates_detection_and_calls_relation_writer_once(self) -> None:
         relation_calls: list[tuple[object, InputInvoiceUsageOaEvidence]] = []
+        invalidations: list[tuple[list[str], str]] = []
         evidence = InputInvoiceUsageOaEvidence(
             oa_row_id="oa-projected-001",
             process_status="进行中",
             candidates=[{"oaRowId": "oa-projected-001"}],
+            raw_payload={"caseId": "OA-EVIDENCE-001"},
         )
         service = self._service(
             invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
             oa_client=FakeOaDraftClient(),
             evidence_provider=StaticEvidenceProvider(evidence),
             relation_writer=lambda batch, evidence: relation_calls.append((batch, evidence)),
+            read_model_invalidator=lambda scopes, reason: invalidations.append((list(scopes), reason)),
         )
         batch = self._create_batch(service, ["inv-1"])
         drafted = service.create_oa_draft(
@@ -590,6 +601,17 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["oaDetectionStatus"], "detected")
         self.assertEqual(refreshed["oaRowId"], "oa-projected-001")
         self.assertEqual(len(relation_calls), 1)
+        relation_batch, relation_evidence = relation_calls[0]
+        self.assertEqual(relation_batch.batch_id, refreshed["batchId"])
+        self.assertEqual(relation_batch.oa_row_id, "oa-projected-001")
+        self.assertIs(relation_evidence, evidence)
+        self.assertEqual(
+            invalidations,
+            [
+                (["2026-05"], "input_invoice_usage_oa_reverse_draft_created"),
+                (["2026-05"], "input_invoice_usage_oa_reverse_evidence_detected"),
+            ],
+        )
 
     def _create_batch(self, service: InputInvoiceUsageOaReverseService, invoice_ids: list[str]) -> dict[str, object]:
         preview = service.preview({"invoiceIds": invoice_ids, "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)

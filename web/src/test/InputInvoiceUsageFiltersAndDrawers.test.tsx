@@ -19,6 +19,7 @@ import PaymentStatusRulesDrawer, {
 } from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import {
   createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageRowRelationDetail,
   fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
   previewInputInvoiceUsageOaReverse,
@@ -235,6 +236,37 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 });
 
 describe("Input invoice usage workflow drawers", () => {
+  test("relation detail mapper surfaces read model refreshing as an unavailable detail state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      expect(url.pathname).toBe("/api/input-invoice-usage/rows/row-refreshing/relation-details");
+      expect(url.searchParams.get("kind")).toBe("oa");
+      return new Response(JSON.stringify({
+        row_id: "row-refreshing",
+        kind: "oa",
+        title: "OA关联明细",
+        read_model_status: "refreshing",
+        refresh_enqueued: true,
+        sections: [],
+      }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    const detail = await fetchInputInvoiceUsageRowRelationDetail({
+      kind: "relationList",
+      id: "row-refreshing",
+      rowId: "row-refreshing",
+      relationKind: "oa",
+    });
+
+    expect(detail.title).toBe("OA关联明细");
+    expect(detail.detailAvailable).toBe(false);
+    expect(detail.unavailableReason).toBe("进项发票使用情况关联明细正在刷新，完成后请重新打开详情。");
+    expect(detail.sections).toEqual([]);
+  });
+
   test("OA reverse API mapper uses one-step draft and submitted history contracts", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

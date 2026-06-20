@@ -139,7 +139,9 @@ class SearchPendingSqlProjectionBuilder:
             """
             with ranked_rows as (
                 select
+                    generation_id,
                     row_id,
+                    scope_key,
                     source_kind,
                     status,
                     scope_month,
@@ -158,11 +160,22 @@ class SearchPendingSqlProjectionBuilder:
                   and (scope_key = %s or scope_key is null)
                   and row_id is not null
             )
-            select row_id, source_kind, status, scope_month, project_name, counterparty_name,
-                   amount, generated_at, payload, raw_payload
+            select ranked_rows.row_id, ranked_rows.source_kind, ranked_rows.status, ranked_rows.scope_month,
+                   ranked_rows.project_name, ranked_rows.counterparty_name, ranked_rows.amount,
+                   ranked_rows.generated_at, ranked_rows.payload, ranked_rows.raw_payload,
+                   group_row.zone as group_zone, group_row.group_id
             from ranked_rows
+            left join lateral (
+                select zone, group_id
+                from read_model.workbench_group_rows group_rows
+                where group_rows.generation_id = ranked_rows.generation_id
+                  and group_rows.scope_key = ranked_rows.scope_key
+                  and group_rows.row_id = ranked_rows.row_id
+                order by case when zone = 'paired' then 0 else 1 end, zone, group_id, row_index
+                limit 1
+            ) group_row on true
             where row_rank = 1
-            order by source_kind, row_id
+            order by ranked_rows.source_kind, ranked_rows.row_id
             """,
             (month_start(month), month),
         )
@@ -173,7 +186,8 @@ class SearchPendingSqlProjectionBuilder:
             source_kind = str(row.get("source_kind") or payload.get("type") or payload.get("record_type") or "").strip()
             if not row_id or source_kind not in {"oa", "bank", "invoice"}:
                 continue
-            zone_hint = str(row.get("status") or payload.get("zone_hint") or "open").strip() or "open"
+            zone_hint = str(row.get("group_zone") or row.get("status") or payload.get("zone_hint") or "open").strip() or "open"
+            group_id = text(row.get("group_id") or payload.get("group_id"))
             title = _search_title(source_kind, payload, row)
             primary_meta = _primary_meta(payload, row)
             secondary_meta = _secondary_meta(payload, row)
@@ -190,6 +204,7 @@ class SearchPendingSqlProjectionBuilder:
                 payload.get("reason"),
                 payload.get("remark"),
                 payload.get("summary"),
+                group_id,
             )
             result_payload = {
                 "row_id": row_id,
@@ -203,6 +218,9 @@ class SearchPendingSqlProjectionBuilder:
                 "status_label": _status_label(zone_hint),
                 "jump_target": {"month": month, "row_id": row_id, "record_type": source_kind, "zone_hint": zone_hint},
             }
+            if group_id:
+                result_payload["group_id"] = group_id
+                result_payload["jump_target"]["group_id"] = group_id
             result.append(
                 {
                     "row_id": row_id,

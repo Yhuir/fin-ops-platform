@@ -5,6 +5,7 @@ import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
 import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
@@ -265,6 +266,7 @@ function AmountMismatchWarning({
 
 export default function BatchAccountingPage() {
   const { runOperation } = useGlobalOperationOverlay();
+  const { canMutateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
   const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
@@ -341,12 +343,13 @@ export default function BatchAccountingPage() {
     && differenceCents !== 0;
   const submittedAmountMismatch = bucket === "submitted" && selectedRelationAmountCheck?.status === "mismatch";
   const canSubmit = Boolean(selectedBankRow)
+    && canMutateData
     && selectedOaRows.length > 0
     && isValidYear(bankYear)
     && isValidYear(oaYear)
     && !mutating
     && (differenceCents === 0 || differenceNote.trim().length > 0);
-  const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
+  const canWithdraw = Boolean(selectedBankRow?.relationId) && canMutateData && !mutating;
   const bankPagination = payload.pagination.bankRows ?? {
     page: bankPage,
     pageSize: BATCH_ACCOUNTING_PAGE_SIZE,
@@ -632,6 +635,11 @@ export default function BatchAccountingPage() {
           {readModelScopeMessage ? <span>{readModelScopeMessage}</span> : null}
         </StatePanel>
       ) : null}
+      {!canMutateData ? (
+        <StatePanel compact tone="warning">
+          当前账号仅支持查看和导出，不能提交或撤回批量账务关联。
+        </StatePanel>
+      ) : null}
 
       <div className="batch-accounting-layout">
         <section aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">
@@ -666,7 +674,7 @@ export default function BatchAccountingPage() {
               <StatePanel compact tone="loading" title="正在加载流水" />
             </div>
           ) : null}
-          {!loading && payload.bankRows.length === 0 ? (
+          {!loading && !error && payload.bankRows.length === 0 ? (
             <div className="batch-accounting-bank-panel__state">
               <StatePanel compact tone="empty" title="当前年份暂无批量账务流水" />
             </div>

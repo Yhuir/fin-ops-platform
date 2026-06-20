@@ -325,6 +325,14 @@ export default function InputInvoiceUsagePage() {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
   }, [setQuery]);
 
+  const handlePaymentStatusRulesSaved = useCallback(() => {
+    loadRows("refresh");
+  }, [loadRows]);
+
+  const handleOaReverseBatchChanged = useCallback(() => {
+    loadRows("refresh");
+  }, [loadRows]);
+
   const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget) => {
     if (target.kind === "invoice") {
       return fetchInputInvoiceUsageInvoiceDetail(target.id);
@@ -371,9 +379,19 @@ export default function InputInvoiceUsagePage() {
 
   const loadExportPreview = useCallback(() => fetchInputInvoiceUsageExportPreview(exportRequest), [exportRequest]);
   const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
+  const isReadModelRefreshing = readModelStatus === "refreshing";
+  const exportDisabled = Boolean(error) || isReadModelRefreshing;
 
   const actions = useMemo(() => (
     <PageToolbar className="input-invoice-usage-actions">
+      <button
+        className="input-invoice-usage-button"
+        disabled={loading || refreshing}
+        onClick={() => loadRows("refresh")}
+        type="button"
+      >
+        刷新
+      </button>
       <button
         className="input-invoice-usage-button"
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
@@ -383,6 +401,7 @@ export default function InputInvoiceUsagePage() {
       </button>
       <button
         className="input-invoice-usage-button"
+        disabled={exportDisabled}
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
         type="button"
       >
@@ -390,8 +409,8 @@ export default function InputInvoiceUsagePage() {
         筛选内容导出
       </button>
     </PageToolbar>
-  ), [setQuery]);
-  const isEmpty = !loading && !error && rows.length === 0;
+  ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
+  const isEmpty = !loading && !refreshing && !error && !isReadModelRefreshing && rows.length === 0;
 
   return (
     <>
@@ -441,26 +460,40 @@ export default function InputInvoiceUsagePage() {
               </div>
             ) : (
               <>
+                {isReadModelRefreshing ? (
+                  <StatePanel tone="loading" compact title="进项发票使用情况数据正在刷新">
+                    进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。
+                  </StatePanel>
+                ) : null}
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
-                <InputInvoiceUsageTable
-                  rows={rows}
-                  page={query.page}
-                  pageSize={query.pageSize}
-                  total={total}
-                  filterConfigs={filterConfigs}
-                  filterOptions={filterOptions}
-                  filters={query.filters}
-                  sortField={query.sortField}
-                  sortDirection={query.sortDirection}
-                  expandedCells={expandedCells}
-                  onToggleCellExpand={handleToggleCellExpand}
-                  onOpenDetail={handleOpenDetail}
-                  onFilterApply={handleFilterApply}
-                  onFilterClear={handleFilterClear}
-                  onSortChange={handleSortChange}
-                  onPageChange={handlePageChange}
-                  onPageSizeChange={handlePageSizeChange}
-                />
+                {!isReadModelRefreshing ? (
+                  <InputInvoiceUsageTable
+                    rows={rows}
+                    page={query.page}
+                    pageSize={query.pageSize}
+                    total={total}
+                    filterConfigs={filterConfigs}
+                    filterOptions={filterOptions}
+                    filters={query.filters}
+                    sortField={query.sortField}
+                    sortDirection={query.sortDirection}
+                    expandedCells={expandedCells}
+                    onToggleCellExpand={handleToggleCellExpand}
+                    onOpenDetail={handleOpenDetail}
+                    onFilterApply={handleFilterApply}
+                    onFilterClear={handleFilterClear}
+                    onSortChange={handleSortChange}
+                    onPageChange={handlePageChange}
+                    onPageSizeChange={handlePageSizeChange}
+                    emptyStateMessage={
+                      error
+                        ? "进项发票使用情况加载失败，请点击刷新重试。"
+                        : refreshing
+                          ? "进项发票使用情况正在刷新，请稍候。"
+                          : undefined
+                    }
+                  />
+                ) : null}
               </>
             )}
           </div>
@@ -481,12 +514,14 @@ export default function InputInvoiceUsagePage() {
         loadStagedDrafts={fetchInputInvoiceUsageOaReverseStagedDrafts}
         loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}
+        onBatchChanged={handleOaReverseBatchChanged}
         onClose={handleCloseWorkflow}
       />
       <PaymentStatusRulesDrawer
         open={query.activeWorkflow === "paymentRules"}
         loadRules={fetchInputInvoiceUsagePaymentStatusRules}
         saveRules={saveInputInvoiceUsagePaymentStatusRules}
+        onSaved={handlePaymentStatusRulesSaved}
         onClose={handleCloseWorkflow}
       />
       <InputInvoiceUsageExportDrawer

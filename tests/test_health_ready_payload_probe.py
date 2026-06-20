@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from time import sleep
 import unittest
@@ -33,6 +34,28 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
         self.assertEqual(report["api_performance_endpoints_returned"], 20)
         self.assertEqual(report["api_performance_endpoint_count"], 25)
         self.assertEqual(report["api_performance_omitted_endpoint_count"], 5)
+        self.assertEqual(report["errors"], [])
+
+    def test_decodes_gzip_ready_payload(self) -> None:
+        payload = {
+            "status": "ready",
+            "api_performance": {
+                "endpoint_count": 1,
+                "omitted_endpoint_count": 0,
+                "endpoints": {"GET /api/example": {}},
+            },
+        }
+        report = collect_health_ready_payload(
+            base_url="https://example.test",
+            request_fn=lambda _url, _headers, _timeout: HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json", "content-encoding": "gzip"},
+                body=gzip.compress(json.dumps(payload).encode("utf-8")),
+            ),
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["health_status"], "ready")
         self.assertEqual(report["errors"], [])
 
     def test_fails_for_unbounded_api_performance_payload(self) -> None:

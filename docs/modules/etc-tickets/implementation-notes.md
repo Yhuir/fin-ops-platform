@@ -8,6 +8,7 @@
 - `etc_business_batches` 继续作为用户可见业务批次事实源，`etc_reconciliation_tasks` 继续作为导入、核对、来源文件和提交闭环的 workflow 状态，不物理合并为单表/单实体。
 - 历史已在关联台 paired 的 ETC 批次可通过专用 migration service 转入新业务批次模型；迁移必须复用 `EtcService`、pair relation service、现有 state/repository 持久化和 Workbench invalidation，不允许临时 SQL 直接改 read model。
 - `etc_invoice_summary` 在 open 区和 paired 区都必须保留可展开 ETC 发票明细；已存在 active pair relation 的 ETC 外部批次不得继续泄漏到 open 区。
+- 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖业务批次、发票明细、OA 草稿、人工提交、delete/reset、source file、Workbench summary 和 strict Browser 主链路；真实大 ZIP、对象存储、OA、历史迁移和 worker drain 仍需 staging/生产前验证。
 
 ## 记录模板
 
@@ -25,6 +26,99 @@
 ```
 
 ## 历史记录
+
+## 2026-06-20 - ETC submitted reset/delete mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 已提交 bucket 下 business batch reset/delete 的 Browser 负面链路，防止 `DELETE /api/etc/business-batches/{id}` 因 relation command 或服务暂时失败时页面误删已提交批次、误改 tab 计数或关闭确认弹窗。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有失败后保留 delete dialog 和已提交批次行的行为，本轮只给 deterministic mock 增加已提交初始状态，并在真实 Chromium 中验证 submitted reset/delete 的 expectedVersion/reason、失败保持和重试成功。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖已提交 bucket 中删除批次第一次 503、请求体携带 submitted `expectedVersion` 和“释放发票”原因、错误可见、确认弹窗/已提交行/计数保持、第二次 200 后弹窗关闭、已提交列表刷新为空且失败文案清除。
+- 验证命令：`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 submitted reset/delete endpoint 暂时失败在本地 Browser 的恢复行为；真实 relation command service 内部异常、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 OA、对象存储/Nginx、大 ZIP 和 import confirm 仍需后续 backend/staging/runtime smoke。
+
+## 2026-06-20 - ETC ticket-root source upload mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 的 ticket-root source upload mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止第一次 `POST /api/etc/reconciliation-tasks/{taskId}/ticket-root-files` 暂时失败时页面误追加文件或残留成功后错误。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有上传失败后保留当前 task、显示错误并允许再次选择文件的行为，本轮只加固 deterministic mock、Vitest retry 交互和真实 Chromium 负面流。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖第一次 ticket-root upload 503、错误可见、不追加 `ticket-root-upload.txt`、上传入口保持可用、第二次 200 后追加 TXT source file 且失败文案清除；Vitest 覆盖同一 retry 交互并验证失败后 task version 未推进、成功后 version 推进。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 ticket-root source upload mutation 的本地 transient failure；submitted reset/delete transient failure 已由后续本地 Browser 覆盖，真实对象存储写入失败/权限、Nginx 上传中断、大 ZIP、import confirm、真实 OA 页面和真实 worker drain 仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - ETC source file delete mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 的 source file delete mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止第一次 `DELETE /api/etc/reconciliation-tasks/{taskId}/source-files/{fileId}` 暂时失败时页面误删文件或关闭确认弹窗。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有失败后保留 source file 删除确认弹窗和文件行的行为，本轮只加固 deterministic mock、Vitest retry 交互和真实 Chromium 负面流。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖第一次 source file delete 503、错误可见、确认弹窗保持、文件行保持、第二次 200 后弹窗关闭、文件列表刷新为空且失败文案清除；Vitest 覆盖同一 retry 交互。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 source file delete mutation 的本地 transient failure；ticket-root source upload 和 submitted reset/delete transient failure 已由后续本地 Browser 覆盖，真实对象存储写入失败/权限、import confirm、真实 OA 页面、对象存储/Nginx、大 ZIP 和真实 worker drain 仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - ETC business batch delete mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 的 business batch delete mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止第一次 `DELETE /api/etc/business-batches/{id}` 暂时失败时页面误删行或关闭确认弹窗。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有失败后保留 delete dialog 和批次行的行为，本轮只加固 deterministic mock、Vitest retry 交互和真实 Chromium 负面流。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖第一次 delete 503、错误可见、确认弹窗保持、批次行保持、第二次 200 后弹窗关闭、列表刷新为空且失败文案清除；Vitest 覆盖同一 retry 交互。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖未提交 business batch delete mutation 的本地 transient failure；submitted reset/delete、source file delete 和 ticket-root source upload 已由后续本地 Browser retry 覆盖，import confirm、真实 OA 页面、真实对象存储/Nginx 上传中断、大 ZIP 和真实 worker drain 仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - ETC manual OA status mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 的人工确认 OA 状态 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止第一次 `POST /api/etc/business-batches/{id}/manual-oa-status` 暂时失败时页面错误切到已提交 bucket。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有失败后保留 OA 提交确认区域/dialog 的行为，本轮只加固 deterministic mock、Vitest retry 交互和真实 Chromium 负面流。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖第一次 manual OA status 503、错误可见、不切 `已提交` bucket、提交确认保持可重试、第二次 200 后进入 submitted bucket 且失败文案清除；Vitest 覆盖同一 retry 交互。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 manual OA status mutation 的本地 transient failure；delete、submitted reset/delete、source file delete 和 ticket-root source upload 已由本地 Browser retry 覆盖，import confirm、真实 OA 页面、真实对象存储/Nginx 上传中断、大 ZIP 和真实 worker drain 仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - ETC OA draft mutation 暂时失败重试恢复
+
+- 目标：补齐 `/etc-tickets` 的 OA 草稿创建 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止第一次 `POST /api/etc/business-batches/{id}/oa-draft` 暂时失败时页面进入 OA 提交确认伪成功。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、本模块测试矩阵和全局 testing closure 文档。
+- 关键决策：不改产品逻辑和后端 API；页面已有失败后保留创建草稿 dialog 的行为，本轮只加固 deterministic mock、Vitest retry 交互和真实 Chromium 负面流。
+- 文档影响：更新本实施记录、`e2e-coverage.md`、`tests.md` 和全局 Spec-first/Testing closure 文档。
+- 测试覆盖：Playwright 覆盖第一次 OA draft 503、错误可见、不进入 `OA提交确认`、dialog 保持、重试 200 后进入提交确认且失败文案清除；Vitest 覆盖同一 retry 交互。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 OA draft mutation 的本地 transient failure；manual status、delete、submitted reset/delete、source file delete 和 ticket-root source upload 已由本地 Browser retry 覆盖，import confirm、真实 OA 页面、真实对象存储/Nginx 上传中断、大 ZIP 和真实 worker drain 仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - ETC business-batches GET 加载失败刷新恢复
+
+- 目标：补齐 `/etc-tickets` 的本地 `NETWORK-RECOVERY` Browser 负面链路，防止 `/api/etc/business-batches` 暂时失败时误显示“无匹配批次”或只能靠整页 reload。
+- 影响范围：`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块测试矩阵和全局文档。
+- 关键决策：只加一个显式 `刷新` 入口并复用 `loadBatches`；未提交 tab 同步刷新 reconciliation tasks；不改变 business batch API、OA 草稿、manual status、source file、delete/reset 或 Workbench relation 语义。
+- 文档影响：更新本实施记录、测试矩阵、Browser 覆盖映射和全局 testing closure 文档。
+- 测试覆盖：组件测试 + Playwright 覆盖 business-batches 503、错误态、防普通空态、点击刷新后批次/发票明细恢复、提交 OA 仍可用、成功后无可见错误残留。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：只覆盖 GET `/api/etc/business-batches` 首屏恢复；OA 草稿/manual/delete/submitted reset/source file delete/ticket-root source upload mutation 级网络恢复已由后续本地 Browser 覆盖，import confirm、真实对象存储/Nginx 上传中断、真实 OA、真实 worker drain 和大 ZIP 仍需 staging/runtime smoke。
+
+## 2026-06-19 - 成功写流可见错误残留 guard
+
+- 目标：防止 ETC OA 草稿创建或人工确认已提交已经成功，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。
+- 影响范围：`web/e2e/etc-tickets-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试矩阵和全局测试文档。
+- 关键决策：不改变产品逻辑或 deterministic mock；在 OA 草稿创建成功、人工确认已提交成功节点复用 `expectNoUnexpectedSuccessUiErrors(...)`。
+- 文档影响：更新本模块 `tests.md`、`e2e-coverage.md` 和全局 testing closure state。
+- 测试覆盖：`web/e2e/etc-tickets-flow.spec.ts` 加强 OA draft 和 manual status 成功路径；静态诊断防止后续移除该 guard。
+- 验证命令：`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实 OA 草稿页面、对象存储/Nginx、大 ZIP 和 worker drain 仍需 staging/production smoke；本轮只覆盖 deterministic Browser flow 的可见错误残留。
+
+## 2026-06-19 - ETC 票据管理页面级 Spec-first E2E covered
+
+- 目标：把 `etc-tickets` 从首轮 `documented-risk` 校准为页面级 `spec-first-covered`，明确 Browser 合同、覆盖映射和真实基础设施风险边界。
+- 影响范围：`web/e2e/etc-tickets-flow.spec.ts`、`docs/modules/etc-tickets/e2e-spec.md`、`docs/modules/etc-tickets/e2e-coverage.md`、ETC 测试矩阵和全局 Spec-first E2E inventory。
+- 关键决策：
+  - 不改产品逻辑；现有 service/API/component/Browser 测试已经覆盖 ETC 页面主要业务合同。
+  - 给 ETC Browser 主链路补严格浏览器错误捕获，确保未提交业务批次、发票明细、OA 草稿、manual submitted bucket 切换期间隐藏 `pageerror`、`console.error`、非 abort request failure 或未预期 dialog 会失败。
+  - business batch delete 和 submitted reset/delete 暂时失败重试由后续 Browser 覆盖；source file、大 ZIP、Workbench summary 和历史 migration 由后端/组件证据映射；真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 不用本地 deterministic E2E 伪装覆盖，继续登记为 staging/runtime smoke external-risk。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、本文件和全局 testing closure 文档。
+- 测试覆盖：更新 `web/e2e/etc-tickets-flow.spec.ts`。
+- 验证命令：`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
+- 未测风险：真实大 ZIP/票根网 PDF/XML/TXT 混合包、真实对象存储/Nginx 上传、真实 OA 草稿页面、生产历史迁移 dry-run/execute、Workbench/税金/成本/search 全量重建最终页面 smoke 和真实 worker drain。
 
 ## 2026-06-18 - 票根网TXT编码兼容
 

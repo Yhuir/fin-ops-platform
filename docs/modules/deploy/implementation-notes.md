@@ -13,6 +13,33 @@
 
 ## 历史记录
 
+## 2026-06-19 - Spec-first E2E docs guard
+
+- 目标：防止后续新增模块时漏建 `e2e-spec.md` / `e2e-coverage.md`，或 Spec ID 没有 coverage 映射，导致全页面 Spec-first E2E controller 无法可靠推进。
+- 影响范围：`scripts/verify.sh` 的 docs check、`tests/test_spec_first_e2e_docs.py`、`tests/test_nightly_ci.py`、`docs/dev/testing.md` 和本模块测试矩阵；不改变业务代码、部署脚本执行顺序、worker、Nginx 或 runtime env。
+- 关键决策：`verify.sh docs` 保持轻量，只检查长期文档入口和每个模块的 Spec-first E2E 文件存在；更细的模块索引、全局 inventory 和 Spec ID -> coverage 映射由 backend unittest 保护，并进入 `verify.sh all`。
+- 测试覆盖：新增 `tests/test_spec_first_e2e_docs.py`，覆盖所有 `docs/modules/*/README.md` 都有 `e2e-spec.md` / `e2e-coverage.md`、模块索引和目录一致、全局 inventory 提及每个模块、每个 `e2e-spec.md` 的 Spec ID 都映射到 `e2e-coverage.md`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_spec_first_e2e_docs -v`、`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`、`bash scripts/verify.sh docs`。
+- 未测风险：该 guard 只保护文档入口和映射完整性，不证明每个 Spec 的真实业务行为已经自动化，也不替代 staging/runtime gates。
+
+## 2026-06-19 - Write-operation E2E approval gate hotfix release
+
+- 目标：把 `write_operation_e2e_smoke --apply` 与 `runtime_sync_closure_gate --apply-write-scenarios` 的审批闸门发布到生产，确保真实业务写 smoke 在缺少审批引用时无法误触 mutating HTTP。
+- 影响范围：生产 active release、API/worker systemd drop-in、SLO/closure 工具；不改变业务 API、read model projection、worker handler、Nginx 或 env contract。
+- 关键决策：继续使用临时干净 worktree，从生产基线 `codex/invoice-lifecycle-batch-hotfix` 创建 `codex/write-e2e-approval-gate-hotfix`，只提交 write-operation approval gate 工具代码和测试，避免带入主工作树其他 Spec-first E2E 未提交改动。release `main-33a150e7-write-e2e-approval-gate-20260619151922` 先 `--no-activate` 上传并通过 `check-release`，再用 root-owned `finops-deploy-control activate` 激活。
+- 验收结果：激活后 `/health/ready` 返回 `status=ready`；API、RabbitMQ dispatcher 和 20 个 worker unit active，WorkingDirectory 指向 `main-33a150e7-write-e2e-approval-gate-20260619151922`。生产本机执行 minimal turnover scenario 的 `write_operation_e2e_smoke --apply` 但不带 approval，返回 exit code 2、`status=approval_missing`、`error=write_operation_e2e_requires_approval_ticket`、`scenario_count=1`、`approval_configured=false`；未执行业务写操作。发布后 critical `read_model_slo_smoke --critical-only --apply --target-ms 5000` 15/15 pass，summary p50 约 926.619ms、p95/max 约 4960.071ms；DB 汇总为 `job.outbox_events=done`、`job.read_model_dirty_scopes=done`、`read_model.app_status_readiness=fresh`。
+- 测试覆盖：hotfix worktree 运行 `PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_e2e_smoke tests.test_runtime_sync_closure_gate tests.test_p2p3_gate_result_classifier -v` 34 tests passed；`py_compile` 和 `git diff --check` 通过；前端 `/fin-ops/` build 通过，保留现有 CSS minify warnings。
+- 未测风险：该 release 只证明审批闸门已经部署并能阻止缺 approval 的 apply；真实 write-operation closure 仍需业务批准、真实认证和受控 mutating scenario 样本。
+
+## 2026-06-19 - Invoice lifecycle batch save hotfix release
+
+- 目标：用正式 release-based 部署路径发布只包含 `invoice_lifecycle` read model rows batch save 的后端 hotfix，关闭生产 critical read model 5 秒 SLO 风险。
+- 影响范围：生产 active release、API/worker systemd drop-in、read model critical apply gate；不改变 deploy 脚本、systemd 模板、Nginx 或 env contract。
+- 关键决策：当前主工作树包含大量未完成 Spec-first E2E 改动，不能用 `--allow-dirty` 直接部署。采用临时干净 worktree `codex/invoice-lifecycle-batch-hotfix`，只提交 `read_models.py` 与对应 boundary test，构建 `/fin-ops/` 前端 dist，先 `--no-activate` 上传并通过 `check-release`，再用 root-owned `finops-deploy-control activate` 激活 release `main-99ea9b35-invoice-lifecycle-batch-20260619145710`。
+- 验收结果：发布后 `/health/ready` ready，API、RabbitMQ dispatcher 和 20 个 worker 的 `WorkingDirectory` 均指向新 release；production critical `read_model_slo_smoke --critical-only --apply --target-ms 5000` 15/15 pass，summary p95/max 约 3.52 秒；DB 汇总为 outbox/dirty 全 `done`，readiness 全 `fresh`。
+- 测试覆盖：发布前 hotfix worktree 运行 `pytest` invoice lifecycle/read model targeted tests 28 passed，`npm run build` 通过；生产 release 通过 deploy-control check-release、activate readiness、critical apply gate。
+- 未测风险：这次 release 只证明 direct refresh worker drain 和该 hotfix 发布路径；真实业务写操作 profile 仍需有业务样本或 staging 场景继续审计。
+
 ## 2026-06-19 - RabbitMQ dispatcher import fact route
 
 - 目标：让 release/env 示例与 runtime worker registry 保持一致，确保 RabbitMQ dispatcher 会发布 `import.fact.changed` wakeup。

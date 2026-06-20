@@ -6,9 +6,12 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
+from io import BytesIO
 import json
 from typing import Any
 from urllib.parse import unquote
+
+from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
@@ -34,6 +37,28 @@ CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
 SOURCE_VERSION = OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
+OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT = 20000
+OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
+    "序号",
+    "发票号码",
+    "开票日期",
+    "购方",
+    "购方识别号",
+    "价税合计",
+    "收款状态",
+    "已收金额",
+    "待收金额",
+    "收款方",
+    "收款日期",
+    "收款金额",
+    "收款银行",
+    "摘要",
+    "红蓝票关系",
+    "红蓝票来源",
+    "红蓝票依据",
+    "收据状态",
+    "收据号码",
+]
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -486,6 +511,89 @@ class OutputInvoiceCollectionQueryService:
             "sourceVersion": SOURCE_VERSION,
         }
 
+    def export_preview(
+        self,
+        *,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        month: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = "invoice_date",
+        sort_direction: str | None = "desc",
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        rows = self._export_rows(
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            month=month,
+            filters=filters,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            tenant_id=tenant_id,
+        )
+        return self.export_preview_for_rows(rows=rows)
+
+    def export(
+        self,
+        *,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        month: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = "invoice_date",
+        sort_direction: str | None = "desc",
+        tenant_id: str = "default",
+    ) -> tuple[str, bytes]:
+        rows = self._export_rows(
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            month=month,
+            filters=filters,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            tenant_id=tenant_id,
+        )
+        return self.export_for_rows(rows)
+
+    def export_preview_for_rows(self, *, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        self._ensure_export_row_limit(rows)
+        sample_rows = [self._export_row(index, row) for index, row in enumerate(rows[:5], start=1)]
+        file_name = self._export_file_name()
+        return {
+            "file_name": file_name,
+            "fileName": file_name,
+            "row_count": len(rows),
+            "rowCount": len(rows),
+            "scope_label": "当前筛选",
+            "scopeLabel": "当前筛选",
+            "columns": list(OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS),
+            "sample_rows": sample_rows,
+            "sampleRows": sample_rows,
+            "read_model_status": "fresh",
+            "readModelStatus": "fresh",
+        }
+
+    def export_for_rows(self, rows: list[dict[str, Any]]) -> tuple[str, bytes]:
+        self._ensure_export_row_limit(rows)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "销项收款"
+        sheet.append(list(OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS))
+        for index, row in enumerate(rows, start=1):
+            export_row = self._export_row(index, row)
+            sheet.append([export_row.get(column, "") for column in OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS])
+        for column_cells in sheet.columns:
+            first_cell = column_cells[0]
+            width = min(36, max(10, len(str(first_cell.value or "")) + 4))
+            sheet.column_dimensions[first_cell.column_letter].width = width
+        buffer = BytesIO()
+        workbook.save(buffer)
+        return self._export_file_name(), buffer.getvalue()
+
     def _query_context(self, *, month_hint: str | None = None) -> DistributedInvoiceRelationContext:
         return DistributedInvoiceRelationContext(
             import_service=self._import_service,
@@ -493,6 +601,82 @@ class OutputInvoiceCollectionQueryService:
             month_hint=month_hint,
             require_fresh_relations=self._require_fresh_relations,
         )
+
+    def _export_rows(
+        self,
+        *,
+        keyword: str | None,
+        invoice_date_from: str | None,
+        invoice_date_to: str | None,
+        month: str | None,
+        filters: str | list[dict[str, Any]] | None,
+        sort_field: str | None,
+        sort_direction: str | None,
+        tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        parsed_filters = self._parse_filters(filters)
+        normalized_sort_field, normalized_sort_direction = self._parse_sort(sort_field, sort_direction)
+        context = self._query_context(month_hint=month)
+        rows = self._filtered_sorted_rows(
+            context=context,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            month=month,
+            filters=parsed_filters,
+            sort_field=normalized_sort_field,
+            sort_direction=normalized_sort_direction,
+            tenant_id=tenant_id,
+        )
+        self._ensure_export_row_limit(rows)
+        return rows
+
+    @staticmethod
+    def _ensure_export_row_limit(rows: list[dict[str, Any]]) -> None:
+        total = len(rows)
+        if total <= OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT:
+            return
+        raise OutputInvoiceCollectionError(
+            "output_invoice_collection_export_row_limit_exceeded",
+            f"销项发票收款情况导出超过 {OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT} 行，请缩小筛选范围后重试。",
+            details={"total": total, "limit": OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT},
+        )
+
+    @staticmethod
+    def _export_file_name() -> str:
+        return f"销项发票收款情况-{datetime.now(UTC).date().isoformat()}.xlsx"
+
+    @staticmethod
+    def _export_row(index: int, row: dict[str, Any]) -> dict[str, Any]:
+        invoice = dict(row.get("invoice") or {})
+        collection = dict(row.get("collectionStatus") or {})
+        bank_payload = dict(row.get("bankTransactions") or row.get("bank") or {})
+        red_payload = dict(row.get("redInvoiceRelation") or row.get("redInvoice") or {})
+        receipt = dict(row.get("receipt") or {})
+        bank_primary = _first_relation_summary(bank_payload)
+        red_summaries = _relation_summaries(red_payload)
+        latest_receipt = dict(receipt.get("latestReceipt") or receipt.get("latest_receipt") or {})
+        return {
+            "序号": index,
+            "发票号码": invoice.get("displayNo") or invoice.get("invoiceNo") or "",
+            "开票日期": invoice.get("invoiceDate") or invoice.get("issueDate") or "",
+            "购方": invoice.get("buyerName") or "",
+            "购方识别号": invoice.get("buyerTaxNo") or "",
+            "价税合计": invoice.get("totalWithTax") or "",
+            "收款状态": collection.get("label") or collection.get("code") or "",
+            "已收金额": collection.get("collectedAmount") or "",
+            "待收金额": collection.get("pendingAmount") or "",
+            "收款方": bank_primary.get("counterpartyName") or "",
+            "收款日期": bank_primary.get("tradeTime") or "",
+            "收款金额": bank_primary.get("amount") or "",
+            "收款银行": bank_primary.get("bankName") or "",
+            "摘要": bank_primary.get("summary") or "",
+            "红蓝票关系": _join_non_empty(item.get("invoiceNo") or item.get("displayNo") for item in red_summaries),
+            "红蓝票来源": _join_non_empty(item.get("source") for item in red_summaries),
+            "红蓝票依据": _join_non_empty(item.get("evidence") or item.get("reason") for item in red_summaries),
+            "收据状态": receipt.get("label") or receipt.get("status") or "",
+            "收据号码": latest_receipt.get("receiptNo") or latest_receipt.get("receipt_no") or "",
+        }
 
     def _filtered_sorted_rows(
         self,
@@ -1492,6 +1676,33 @@ def _decimal(value: Any) -> Decimal:
 
 def _money(value: Any) -> str:
     return f"{_decimal(value).quantize(CENT)}"
+
+
+def _relation_summaries(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries = [item for item in list(payload.get("summaries") or []) if isinstance(item, dict)]
+    primary = payload.get("primary")
+    if isinstance(primary, dict):
+        primary_key = json.dumps(primary, ensure_ascii=False, sort_keys=True)
+        existing_keys = {json.dumps(item, ensure_ascii=False, sort_keys=True) for item in summaries}
+        if primary_key not in existing_keys:
+            summaries.insert(0, primary)
+    if not summaries:
+        return [payload] if payload else []
+    return summaries
+
+
+def _first_relation_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    summaries = _relation_summaries(payload)
+    return summaries[0] if summaries else {}
+
+
+def _join_non_empty(values: Any) -> str:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return "；".join(result)
 
 
 def _within_cent(left: Decimal, right: Decimal) -> bool:

@@ -26,11 +26,13 @@ class OperationExpectation:
     reason: str
     action_names: tuple[str, ...] = ()
     required: bool = True
+    event_type: str | None = None
 
 
 @dataclass(frozen=True)
 class OperationExpectationResult:
     operation: str
+    event_type: str
     scope_type: str
     reason: str
     action_names: tuple[str, ...]
@@ -151,6 +153,49 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "tax_offset", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "search", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "search", "workbench_relation_changed"),
+    OperationExpectation("invoice_import_confirmed", "workbench", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "workbench_relation", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "invoice_lifecycle", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "search", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "pending_invoice", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "input_invoice_usage", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "output_invoice_collection", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "oa_pending_payment", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "cost_statistics", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "tax_offset", "invoice_file_import_confirm"),
+    OperationExpectation("bank_import_confirmed", "workbench", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "workbench_relation", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "invoice_lifecycle", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "search", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "pending_invoice", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "input_invoice_usage", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "output_invoice_collection", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "oa_pending_payment", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "bank_account_balance", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "cost_statistics", "import_state_changed"),
+    OperationExpectation(
+        "bank_import_confirmed",
+        "bank_detail",
+        "import_facts_changed",
+        event_type="import.fact.changed",
+    ),
+    OperationExpectation("etc_import_confirmed", "workbench", "etc_invoice_import_confirm"),
+    OperationExpectation("etc_import_confirmed", "workbench_relation", "etc_invoice_import_confirm"),
+    OperationExpectation("etc_import_confirmed", "invoice_lifecycle", "etc_invoice_import_confirm"),
+    OperationExpectation("etc_import_confirmed", "tax_offset", "etc_invoice_import_confirm"),
+    OperationExpectation("etc_import_confirmed", "cost_statistics", "etc_invoice_import_confirm"),
     OperationExpectation("no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
@@ -327,12 +372,12 @@ def recent_read_model_refresh_events_since(
           d.last_error as dirty_last_error
         from job.outbox_events e
         left join job.read_model_dirty_scopes d
-          on d.tenant_id = e.tenant_id
+         on d.tenant_id = e.tenant_id
          and d.scope_type = e.scope_type
          and d.scope_key = e.scope_key
-         and d.source_version = e.source_version
+         and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and e.event_type like '%%.read_model.refresh'
+          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= %s
         order by e.created_at desc, e.id desc
         limit %s
@@ -388,12 +433,12 @@ def _recent_read_model_refresh_events(
           d.last_error as dirty_last_error
         from job.outbox_events e
         left join job.read_model_dirty_scopes d
-          on d.tenant_id = e.tenant_id
+         on d.tenant_id = e.tenant_id
          and d.scope_type = e.scope_type
          and d.scope_key = e.scope_key
-         and d.source_version = e.source_version
+         and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and e.event_type like '%%.read_model.refresh'
+          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= now() - (%s * interval '1 hour')
         order by e.created_at desc, e.id desc
         limit %s
@@ -410,10 +455,12 @@ def _evaluate_expectation(
     target_ms: float,
     p99_target_ms: float,
 ) -> OperationExpectationResult:
+    expected_event_type = expectation.event_type or f"{expectation.scope_type}.read_model.refresh"
     samples = [
         row
         for row in rows
-        if str(row.get("scope_type") or "") == expectation.scope_type
+        if str(row.get("event_type") or "") == expected_event_type
+        and str(row.get("scope_type") or "") == expectation.scope_type
         and str(row.get("reason") or "") == expectation.reason
         and (
             not expectation.action_names
@@ -424,6 +471,7 @@ def _evaluate_expectation(
     if not samples:
         return OperationExpectationResult(
             operation=expectation.operation,
+            event_type=expected_event_type,
             scope_type=expectation.scope_type,
             reason=expectation.reason,
             action_names=expectation.action_names,
@@ -471,6 +519,7 @@ def _evaluate_expectation(
         status = "pass"
     return OperationExpectationResult(
         operation=expectation.operation,
+        event_type=expected_event_type,
         scope_type=expectation.scope_type,
         reason=expectation.reason,
         action_names=expectation.action_names,

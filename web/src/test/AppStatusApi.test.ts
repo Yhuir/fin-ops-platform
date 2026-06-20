@@ -177,4 +177,85 @@ describe("app status API mapper", () => {
       },
     ]);
   });
+
+  test("maps runtime summary counts from snake_case app status payload", () => {
+    const mapped = mapAppStatusOverview({
+      version: 1,
+      generated_at: "2026-06-04T10:00:00+08:00",
+      overall: {
+        level: "busy",
+        color: "yellow",
+        reason: "Read model 正在刷新",
+        blocks_mutations: false,
+      },
+      runtime_summary: {
+        read_models: {
+          total: 4,
+          fresh: 1,
+          refreshing: 1,
+          stale: 0,
+          missing: 1,
+          failed: 1,
+          unavailable: 0,
+          issue_count: 3,
+          scope_issue_count: 1,
+        },
+        workers: {
+          total: 4,
+          required: 3,
+          ready: 1,
+          idle: 1,
+          working: 1,
+          stale: 1,
+          missing: 1,
+          mismatched: 0,
+          unavailable: 0,
+          issue_count: 2,
+        },
+        queue: {
+          event_type_count: 3,
+          pending: 2,
+          processing: 1,
+          failed: 3,
+          backlog: 6,
+        },
+      },
+      domains: [],
+      background_tasks: [],
+      alerts: [],
+    });
+
+    expect(mapped?.runtimeSummary.readModels).toEqual({
+      total: 4,
+      fresh: 1,
+      ready: 0,
+      idle: 0,
+      working: 0,
+      refreshing: 1,
+      stale: 0,
+      missing: 1,
+      failed: 1,
+      unavailable: 0,
+      mismatched: 0,
+      required: 0,
+      issueCount: 3,
+      scopeIssueCount: 1,
+    });
+    expect(mapped?.runtimeSummary.workers).toMatchObject({
+      total: 4,
+      required: 3,
+      ready: 1,
+      working: 1,
+      stale: 1,
+      missing: 1,
+      issueCount: 2,
+    });
+    expect(mapped?.runtimeSummary.queue).toEqual({
+      eventTypeCount: 3,
+      pending: 2,
+      processing: 1,
+      failed: 3,
+      backlog: 6,
+    });
+  });
 });

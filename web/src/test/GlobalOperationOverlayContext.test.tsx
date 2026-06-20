@@ -16,8 +16,10 @@ function deferred<T>() {
 
 function OperationButton({
   onAction,
+  blockOnError,
 }: {
   onAction: (helpers: { setMessage: (message: string) => void }) => Promise<unknown>;
+  blockOnError?: boolean;
 }) {
   const { runOperation } = useGlobalOperationOverlay();
   return (
@@ -27,6 +29,7 @@ function OperationButton({
         void runOperation({
           loadingMessage: "正在保存操作...",
           action: onAction,
+          blockOnError,
         });
       }}
     >
@@ -85,5 +88,26 @@ describe("GlobalOperationOverlayProvider", () => {
 
     expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
     consoleError.mockRestore();
+  });
+
+  test("can clear failures immediately when the caller owns local error feedback", async () => {
+    const user = userEvent.setup();
+    render(
+      <GlobalOperationOverlayProvider>
+        <OperationButton
+          blockOnError={false}
+          onAction={async () => {
+            throw new Error("抽屉内联失败");
+          }}
+        />
+      </GlobalOperationOverlayProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "执行操作" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("抽屉内联失败")).not.toBeInTheDocument();
   });
 });

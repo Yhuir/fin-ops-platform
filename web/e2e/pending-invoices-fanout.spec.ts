@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("pending invoices browser flow", () => {
@@ -46,6 +47,7 @@ test.describe("pending invoices browser flow", () => {
     await expect(pendingRowAfter.getByText("已支付已开票")).toBeVisible();
     await expect(pendingRowAfter.getByText("12561048")).toBeVisible();
     await expect(pendingRowAfter.getByText("陈涛")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(pendingRowsBefore);
   });
 });

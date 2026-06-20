@@ -1,4 +1,6 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page } from "./strictTest";
+
+import { expectNoUnexpectedSuccessUiErrors } from "./successAssertions";
 
 export async function confirmWorkbenchRelation(page: Page) {
   await page.getByRole("link", { name: "关联台" }).click();
@@ -20,4 +22,5 @@ export async function confirmWorkbenchRelation(page: Page) {
 
   await previewDialog.getByRole("button", { name: "确认关联" }).click();
   await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
+  await expectNoUnexpectedSuccessUiErrors(page);
 }

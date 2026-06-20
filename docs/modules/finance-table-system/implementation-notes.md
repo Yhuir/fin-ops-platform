@@ -27,6 +27,29 @@
 
 ## 历史记录
 
+## 2026-06-19 - 共享 column filter 小屏定位修复
+
+- 目标：修复共享 `WorkbenchColumnFilterMenu` 在 tax-offset 390px 窄屏场景下可能把选项渲染到 viewport 外，导致筛选项无法真实点击的问题。
+- 影响范围：`web/src/components/workbench/WorkbenchColumnFilterMenu.tsx`、`web/src/app/styles.css`、tax-offset 大表 Browser smoke。
+- 关键决策：保持 filter menu 作为共享 UI primitive；不在测试里使用 force click。popover 根据按钮上下可用空间选择展开方向，并限制整体高度，option list 在内部滚动。
+- 文档影响：更新本模块 implementation notes；页面级覆盖仍归 tax-offset 和 workbench 模块。
+- 测试覆盖：`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts`、`web/src/test/WorkbenchPaneFilter.test.ts`、`web/src/test/TaxOffsetPage.test.tsx`。
+- 验证命令：`cd web && npx playwright test e2e/tax-offset-flow.spec.ts --project=chromium -g "keeps large tax tables searchable, sortable, filterable, and horizontally scrollable on narrow screens"`；`cd web && npx playwright test e2e/workbench-large-scroll-flow.spec.ts --project=chromium`；`cd web && npm test -- --run src/test/WorkbenchPaneFilter.test.ts src/test/TaxOffsetPage.test.tsx`；`cd web && npm run e2e:smoke`，完整 smoke 147/147 passed。
+- 未测风险：真实生产超大表格、触摸滚动、浏览器缩放和更多页面 wrapper 的长选项组合仍需后续 smoke。
+
+## 2026-06-19 - Spec-first E2E 合同与覆盖矩阵补齐
+
+- 目标：把 `finance-table-system` 从共享表格 partial 状态推进到本地 Spec-first covered，明确共享 primitive 与页面 wrapper 的测试责任边界。
+- 影响范围：新增 `e2e-spec.md`、`e2e-coverage.md`，更新本模块 README 和全局 Spec-first/testing closure 状态。
+- 关键决策：共享 `FinanceTable` 仍只提供 presentation primitive；页面级筛选、排序、分页、导出、read model freshness、权限和详情 drawer/dialog 继续归对应页面模块覆盖，不上提成错误的全局业务抽象。
+- 文档影响：新增 Spec ID `FIN-TABLE-E2E-001..010`，并把真实生产大数据滚动、浏览器下载保存、代理 header 和真实 XLSX 打开结果明确保留为 `external-risk`。
+- 测试覆盖：映射到 `FinanceTable`、table token/alignment、table session、页面级 Vitest，以及 `finance-table-system-flow`、银行明细/关联台/成本统计等代表性真实 Chromium 表格 smoke。
+- 验证命令：
+  - `bash scripts/verify.sh docs`
+  - `git diff --check -- docs/modules/finance-table-system docs/dev/spec-first-e2e-inventory.md docs/dev/testing-closure-state.md`
+- 未测风险：未新增 Playwright；本轮是 Spec-first 文档闭环和现有证据映射。真实生产大数据、下载保存和新增 wrapper 自动发现仍需后续 staging/runtime 或工具化 gate。
+- 后续事项：新增或迁移业务表格 wrapper 时，先登记到本模块和目标页面模块，再补页面级筛选/排序/导出/状态测试。
+
 ## 2026-06-11 - Finance Table System 首轮测试闭环
 
 - 目标：完成共享表格系统 CodeGraph 审计、测试矩阵、状态机、实施记录和共享 primitive 回归测试补强。

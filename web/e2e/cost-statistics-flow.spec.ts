@@ -1,12 +1,291 @@
-import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+
+import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+
+type CostExplorerBrowserPayload = {
+  read_model_scope_key?: string;
+  read_model_status?: string;
+  summary?: {
+    row_count?: number;
+    transaction_count?: number;
+  };
+};
 
 function requestPath(requestUrl: string) {
   return new URL(requestUrl).pathname;
 }
 
+function waitForCostStatisticsExplorer(page: Page, month = "2026-03", projectScope = "active") {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET"
+      && url.pathname.endsWith("/api/cost-statistics/explorer")
+      && url.searchParams.get("month") === month
+      && url.searchParams.get("project_scope") === projectScope;
+  });
+}
+
+function collectBrowserErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      errors.push(`console error: ${message.text()}`);
+    }
+  });
+  page.on("dialog", (dialog) => {
+    errors.push(`dialog: ${dialog.type()} ${dialog.message()}`);
+  });
+  page.on("pageerror", (error) => errors.push(`page error: ${error.message}`));
+  page.on("requestfailed", (request) => {
+    const failure = request.failure();
+    if (failure?.errorText === "net::ERR_ABORTED") {
+      return;
+    }
+    errors.push(`request failed: ${request.method()} ${request.url()} ${failure?.errorText ?? ""}`.trim());
+  });
+  return errors;
+}
+
+async function expectVisibleAndUncovered(locator: Locator, label: string) {
+  await expect(locator).toBeVisible();
+  await locator.scrollIntoViewIfNeeded();
+  const result = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1);
+    const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1);
+    const topElement = document.elementFromPoint(x, y);
+    return {
+      height: rect.height,
+      inViewport: rect.width > 0
+        && rect.height > 0
+        && rect.bottom > 0
+        && rect.right > 0
+        && rect.top < window.innerHeight
+        && rect.left < window.innerWidth,
+      isUncovered: topElement === element || Boolean(topElement && (element.contains(topElement) || topElement.contains(element))),
+      topElement: topElement?.tagName ?? null,
+      width: rect.width,
+      x,
+      y,
+    };
+  });
+  expect(result.inViewport, `${label} should be inside the viewport: ${JSON.stringify(result)}`).toBe(true);
+  expect(result.isUncovered, `${label} should not be covered: ${JSON.stringify(result)}`).toBe(true);
+}
+
+async function expectHorizontalScroll(locator: Locator, label: string) {
+  await expect(locator).toBeVisible();
+  const result = await locator.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return {
+      clientWidth: element.clientWidth,
+      scrollLeft: element.scrollLeft,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(result.scrollWidth, `${label} should overflow horizontally: ${JSON.stringify(result)}`).toBeGreaterThan(result.clientWidth);
+  expect(result.scrollLeft, `${label} should scroll horizontally: ${JSON.stringify(result)}`).toBeGreaterThan(0);
+}
+
+async function expectInViewport(locator: Locator, label: string) {
+  await expect(locator).toBeVisible();
+  await locator.scrollIntoViewIfNeeded();
+  const result = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      height: rect.height,
+      inViewport: rect.width > 0
+        && rect.height > 0
+        && rect.bottom > 0
+        && rect.right > 0
+        && rect.top < window.innerHeight
+        && rect.left < window.innerWidth,
+      width: rect.width,
+    };
+  });
+  expect(result.inViewport, `${label} should be inside the viewport: ${JSON.stringify(result)}`).toBe(true);
+}
+
+async function expectVerticalScroll(locator: Locator, label: string) {
+  await expect(locator).toBeVisible();
+  const result = await locator.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    };
+  });
+  expect(result.scrollHeight, `${label} should overflow vertically: ${JSON.stringify(result)}`).toBeGreaterThan(result.clientHeight);
+  expect(result.scrollTop, `${label} should scroll vertically: ${JSON.stringify(result)}`).toBeGreaterThan(0);
+}
+
 test.describe("cost statistics browser flow", () => {
+  test("recovers explorer after a transient load failure when refreshed", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      costStatisticsExplorerFailuresBeforeSuccess: 2,
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeVisible();
+    await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "导出中心" })).toBeDisabled();
+    expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(1);
+
+    let recovered = false;
+    for (let attempt = 0; attempt < 3 && !recovered; attempt += 1) {
+      const responsePromise = waitForCostStatisticsExplorer(page);
+      await page.getByRole("button", { name: "刷新成本统计" }).click();
+      recovered = (await responsePromise).status() === 200;
+    }
+    expect(recovered).toBe(true);
+
+    await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toHaveCount(0);
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible();
+    await expect(page.getByRole("gridcell", { name: "PLC 模块采购", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "导出中心" })).toBeEnabled();
+    expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const scenario of [
+    {
+      status: "refreshing" as const,
+      message: "成本统计读模型正在刷新，当前结果生成后会自动更新。",
+    },
+    {
+      status: "stale" as const,
+      message: "成本统计读模型不是最新，当前结果刷新完成后会自动更新。",
+    },
+    {
+      status: "failed" as const,
+      message: "成本统计数据暂不可用，请等待后台刷新完成后重试。",
+    },
+  ]) {
+    test(`does not treat ${scenario.status} read model payloads as final empty cost data`, async ({ page }) => {
+      const browserErrors: string[] = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") {
+          browserErrors.push(`console error: ${message.text()}`);
+        }
+      });
+      page.on("pageerror", (error) => browserErrors.push(`page error: ${error.message}`));
+      page.on("requestfailed", (request) => {
+        const failure = request.failure();
+        if (failure?.errorText === "net::ERR_ABORTED") {
+          return;
+        }
+        browserErrors.push(`request failed: ${request.method()} ${request.url()} ${failure?.errorText ?? ""}`.trim());
+      });
+
+      await installDeterministicApiMocks(page, {
+        sessionMode: "full_access",
+        costStatisticsReadModelStatus: scenario.status,
+      });
+
+      await page.goto("/cost-statistics");
+      await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: scenario.message })).toBeVisible();
+      await expect(page.getByText("待刷新")).toHaveCount(2);
+      await expect(page.getByText("--")).toBeVisible();
+      await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
+      await expect(page.getByText("云南溯源科技")).toHaveCount(0);
+      await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "导出中心" })).toBeDisabled();
+      expect(browserErrors).toEqual([]);
+    });
+  }
+
+  test("downloads the current time-view cost rows with request filters and cost fields", async ({ page }, testInfo) => {
+    const browserErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        browserErrors.push(`console error: ${message.text()}`);
+      }
+    });
+    page.on("pageerror", (error) => browserErrors.push(`page error: ${error.message}`));
+    page.on("requestfailed", (request) => {
+      const failure = request.failure();
+      if (failure?.errorText === "net::ERR_ABORTED") {
+        return;
+      }
+      browserErrors.push(`request failed: ${request.method()} ${request.url()} ${failure?.errorText ?? ""}`.trim());
+    });
+    const api = await installDeterministicApiMocks(page, {
+      costStatisticsExportDownloadSuccess: true,
+      sessionMode: "read_export_only",
+    });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "导出中心" })).toBeEnabled();
+
+    await page.getByRole("button", { name: "导出中心" }).click();
+    const exportDialog = page.getByRole("dialog", { name: "导出中心" });
+    await expect(exportDialog).toBeVisible();
+    await expect(exportDialog.getByRole("button", { name: "导出" })).toBeEnabled();
+
+    const previewResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname.endsWith("/api/cost-statistics/export-preview");
+    });
+    await exportDialog.getByRole("button", { name: "仅预览" }).click();
+    const previewResponse = await previewResponsePromise;
+    const previewUrl = new URL(previewResponse.url());
+    expect(previewResponse.status()).toBe(200);
+    expect(previewUrl.searchParams.get("view")).toBe("time");
+    expect(previewUrl.searchParams.get("month")).toBe("2026-03");
+    expect(previewUrl.searchParams.get("project_scope")).toBe("active");
+    expect(previewUrl.searchParams.has("page")).toBe(false);
+    expect(previewUrl.searchParams.has("page_size")).toBe(false);
+    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("云南溯源科技");
+    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("设备货款及材料费");
+
+    const exportResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname.endsWith("/api/cost-statistics/export");
+    });
+    const downloadPromise = page.waitForEvent("download");
+    await exportDialog.getByRole("button", { name: "导出" }).click();
+    const [exportResponse, download] = await Promise.all([exportResponsePromise, downloadPromise]);
+
+    const exportUrl = new URL(exportResponse.url());
+    expect(exportResponse.status()).toBe(200);
+    expect(exportUrl.searchParams.get("view")).toBe("time");
+    expect(exportUrl.searchParams.get("month")).toBe("2026-03");
+    expect(exportUrl.searchParams.get("project_scope")).toBe("active");
+    expect(exportUrl.searchParams.has("page")).toBe(false);
+    expect(exportUrl.searchParams.has("page_size")).toBe(false);
+    expect(download.suggestedFilename()).toBe("成本统计_全部期间_按时间统计.xlsx");
+
+    const downloadPath = testInfo.outputPath(download.suggestedFilename());
+    await download.saveAs(downloadPath);
+    const downloadedText = await readFile(downloadPath, "utf8");
+    expect(downloadedText).toContain("时间,项目名称,费用类型,金额,费用内容,对方户名,支付账户");
+    expect(downloadedText).toContain("cost-txn-e2e-001");
+    expect(downloadedText).toContain("云南溯源科技");
+    expect(downloadedText).toContain("设备货款及材料费");
+    expect(downloadedText).toContain("PLC 模块采购");
+    expect(downloadedText).toContain("浏览器设备供应商");
+    expect(downloadedText).toContain("view=time");
+    expect(downloadedText).toContain("month=2026-03");
+    expect(downloadedText).toContain("project_scope=active");
+    expect(downloadedText).toContain("page=");
+    expect(downloadedText).toContain("page_size=");
+    await expect(exportDialog.getByText("已导出 成本统计_全部期间_按时间统计.xlsx")).toBeVisible();
+    expect(api.count("GET /api/cost-statistics/export-preview")).toBe(1);
+    expect(api.count("GET /api/cost-statistics/export")).toBe(1);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("drills into project cost rows and surfaces export row-limit feedback", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
@@ -77,5 +356,183 @@ test.describe("cost statistics browser flow", () => {
     await expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible();
     expect(api.count("GET /api/cost-statistics/export-preview")).toBe(1);
     expect(api.count("GET /api/cost-statistics/export")).toBe(1);
+  });
+
+  test("shows bank and expense-type baselines with drilldown details", async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+
+    await page.getByRole("button", { name: "按银行" }).click();
+    await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
+    await expect(page.getByText("从左到右依次展开：银行账户 / 项目名 / 流水，支持按范围重新统计")).toBeVisible();
+
+    await page.getByRole("button", { name: /工商银行 账户 0001/ }).click();
+    await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
+    const bankRows = page.getByRole("grid", { name: "银行对应流水表" });
+    await expect(bankRows).toBeVisible();
+    await expect(bankRows).toContainText("PLC 模块采购");
+    await expect(bankRows).toContainText("浏览器设备供应商");
+
+    const bankDetailRequest = page.waitForRequest((request) =>
+      requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
+    );
+    await bankRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+    const bankDetailUrl = new URL((await bankDetailRequest).url());
+    expect(bankDetailUrl.searchParams.get("project_scope")).toBe("active");
+    const bankDetailDialog = page.getByRole("dialog", { name: "流水详情" });
+    await expect(bankDetailDialog).toBeVisible();
+    await expect(bankDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
+    await expect(bankDetailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
+    await bankDetailDialog.getByRole("button", { name: "关闭" }).click();
+    await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "按费用类型" }).click();
+    await expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible();
+    await expect(page.getByText("按费用类型查看 2026年3月 的对应流水")).toBeVisible();
+    await page.getByRole("button", { name: /设备货款及材料费/ }).first().click();
+    const expenseRows = page.getByRole("grid", { name: "按费用类型流水表" });
+    await expect(expenseRows).toBeVisible();
+    await expect(expenseRows).toContainText("云南溯源科技");
+    await expect(expenseRows).toContainText("PLC 模块采购");
+
+    const expenseDetailRequest = page.waitForRequest((request) =>
+      requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
+    );
+    await expenseRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+    const expenseDetailUrl = new URL((await expenseDetailRequest).url());
+    expect(expenseDetailUrl.searchParams.get("project_scope")).toBe("active");
+    const expenseDetailDialog = page.getByRole("dialog", { name: "流水详情" });
+    await expect(expenseDetailDialog).toBeVisible();
+    await expect(expenseDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
+    await expect(expenseDetailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
+    await expenseDetailDialog.getByRole("button", { name: "关闭" }).click();
+    await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("does not treat non-fresh transaction detail or export responses as successful results", async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+    let downloadFired = false;
+    page.on("download", () => {
+      downloadFired = true;
+    });
+    await installDeterministicApiMocks(page, {
+      costStatisticsExportDownloadSuccess: true,
+      costStatisticsExportReadModelStatus: "stale",
+      costStatisticsTransactionDetailReadModelStatus: "stale",
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+
+    const detailResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001");
+    });
+    await page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+    const detailResponse = await detailResponsePromise;
+    expect(detailResponse.status()).toBe(409);
+    await expect(page.getByText("流水详情加载失败，请稍后重试。")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
+    await expect(page.getByText("浏览器成本统计明细")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "导出中心" }).click();
+    const exportDialog = page.getByRole("dialog", { name: "导出中心" });
+    await expect(exportDialog).toBeVisible();
+    const previewResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/export-preview");
+    });
+    await exportDialog.getByRole("button", { name: "仅预览" }).click();
+    const previewResponse = await previewResponsePromise;
+    expect(previewResponse.status()).toBe(409);
+    await expect(exportDialog.getByText("成本统计数据正在刷新，请稍后重试导出。")).toBeVisible();
+    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toHaveCount(0);
+
+    const exportResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/export");
+    });
+    await exportDialog.getByRole("button", { name: "导出" }).click();
+    const exportResponse = await exportResponsePromise;
+    expect(exportResponse.status()).toBe(409);
+    await expect(exportDialog.getByText("成本统计数据正在刷新，请稍后重试导出。")).toBeVisible();
+    await page.waitForTimeout(250);
+    expect(downloadFired).toBe(false);
+    expect(browserErrors.filter((error) => !error.includes("409 (Conflict)"))).toEqual([]);
+  });
+
+  test("keeps large cost tables fresh, scrollable, and usable on narrow screens", async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+    await page.setViewportSize({ width: 390, height: 820 });
+    await installDeterministicApiMocks(page, {
+      costStatisticsLargeDataset: true,
+      sessionMode: "full_access",
+    });
+
+    const timeExplorerResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/explorer")
+        && url.searchParams.get("month") === "2026-03"
+        && url.searchParams.get("project_scope") === "active";
+    });
+    await page.goto("/cost-statistics");
+    const timeExplorerPayload = await (await timeExplorerResponsePromise).json() as CostExplorerBrowserPayload;
+    expect(timeExplorerPayload.read_model_status).toBe("fresh");
+    expect(timeExplorerPayload.read_model_scope_key).toBe("active:2026-03");
+    expect(timeExplorerPayload.summary?.row_count).toBeGreaterThanOrEqual(120);
+
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expectVisibleAndUncovered(page.getByRole("button", { name: "导出中心" }), "narrow export center button");
+    const timeGrid = page.getByRole("grid", { name: "按时间统计表" });
+    await expect(timeGrid).toBeVisible();
+    await expect(timeGrid).toContainText("大型成本流水费用内容 120");
+    await expect(timeGrid).toContainText("大型成本浏览器稳定性项目");
+
+    const timeTableScroll = page.locator(".cost-table-section").filter({ has: timeGrid }).locator(".finance-table__scroll").first();
+    await expectHorizontalScroll(timeTableScroll, "large time-view cost table");
+    await expectInViewport(page.getByRole("columnheader", { name: "费用内容" }), "time-view rightmost cost column");
+    await expectVerticalScroll(timeTableScroll, "large time-view cost table");
+
+    const projectExplorerResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/explorer")
+        && url.searchParams.get("month") === "all"
+        && url.searchParams.get("project_scope") === "active";
+    });
+    await page.getByRole("button", { name: "按项目" }).click();
+    const projectExplorerPayload = await (await projectExplorerResponsePromise).json() as CostExplorerBrowserPayload;
+    expect(projectExplorerPayload.read_model_status).toBe("fresh");
+    expect(projectExplorerPayload.read_model_scope_key).toBe("active:all");
+
+    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
+    const largeProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();
+    await expectVisibleAndUncovered(largeProject, "large cost project selector");
+    await largeProject.click();
+    const largeExpenseType = page.getByRole("button", { name: /大型宽表费用类型-1/ }).first();
+    await expectVisibleAndUncovered(largeExpenseType, "large cost expense type selector");
+    await largeExpenseType.click();
+
+    const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
+    await expect(projectRows).toBeVisible();
+    await expect(projectRows).toContainText("大型成本流水费用内容");
+    await expect(projectRows).toContainText("大型成本浏览器供应商");
+
+    const projectTableScroll = page.locator(".cost-explorer-lane-table").locator(".finance-table__scroll").first();
+    await expectHorizontalScroll(projectTableScroll, "large project-drilldown cost table");
+    await expectInViewport(page.getByRole("columnheader", { name: "费用内容" }), "project-drilldown rightmost cost column");
+    await expectVerticalScroll(projectTableScroll, "large project-drilldown cost table");
+    expect(browserErrors).toEqual([]);
   });
 });

@@ -32,6 +32,8 @@ commands:
                                       run Workbench object identity audit using runtime env
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
+  read-model-slo-smoke <release-name> [args]
+                                      run read model SLO smoke dry-run using runtime env; --apply is refused
   restart                              restart API, active workers, and active dispatcher
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
@@ -383,6 +385,23 @@ read_model_scope_contract() {
   run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"
 }
 
+read_model_slo_smoke() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "read-model-slo-smoke requires release name"
+  shift
+  local arg src
+  for arg in "$@"; do
+    case "$arg" in
+      --apply|--apply=*)
+        die "read-model-slo-smoke only permits dry-run through deploy-control; run --apply only from an explicitly approved root session"
+        ;;
+    esac
+  done
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -416,6 +435,10 @@ case "$cmd" in
   read-model-scope-contract)
     shift
     read_model_scope_contract "$@"
+    ;;
+  read-model-slo-smoke)
+    shift
+    read_model_slo_smoke "$@"
     ;;
   restart)
     assert_runtime_env_contract

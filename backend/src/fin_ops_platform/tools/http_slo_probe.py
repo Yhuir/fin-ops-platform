@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import gzip
 import json
 from math import ceil
 from pathlib import Path
@@ -45,6 +46,7 @@ class HttpProbe:
     kind: str = "api"
     expected_statuses: tuple[int, ...] = (200,)
     target_ms: float = DEFAULT_TARGET_MS
+    auth_scope: str = "user"
 
 
 @dataclass(frozen=True)
@@ -120,7 +122,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("session_me", "/api/session/me"),
     HttpProbe("app_health", "/api/app-health"),
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
-    HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard"),
+    HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
     HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
@@ -228,7 +230,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     args = build_parser().parse_args(argv)
     probes = _configured_probes(args)
     headers = _auth_headers(
-        bearer_token=args.bearer_token,
+        bearer_token=args.bearer_token or args.admin_token,
+        admin_token="" if args.bearer_token else args.admin_token,
+        cookie=args.cookie,
+    )
+    admin_headers = _auth_headers(
+        bearer_token="" if args.bearer_token else args.admin_token,
         admin_token=args.admin_token,
         cookie=args.cookie,
     )
@@ -237,6 +244,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         api_prefix=args.api_prefix,
         probes=probes,
         headers=headers,
+        admin_headers=admin_headers,
         iterations=max(1, int(args.iterations)),
         warmup=max(0, int(args.warmup)),
         timeout_seconds=max(0.1, float(args.timeout_seconds)),
@@ -259,6 +267,7 @@ def collect_http_slo(
     api_prefix: str = "",
     probes: Sequence[HttpProbe] | None = None,
     headers: Mapping[str, str] | None = None,
+    admin_headers: Mapping[str, str] | None = None,
     iterations: int = DEFAULT_ITERATIONS,
     warmup: int = DEFAULT_WARMUP,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -266,8 +275,11 @@ def collect_http_slo(
     include_samples: bool = False,
     request_fn: RequestFn | None = None,
 ) -> dict[str, Any]:
-    normalized_headers = {str(key): str(value) for key, value in (headers or {}).items() if str(value).strip()}
-    auth_configured = any(key.lower() in {"authorization", "cookie"} for key in normalized_headers)
+    normalized_headers = _normalized_probe_headers(headers or {})
+    normalized_admin_headers = _normalized_probe_headers(admin_headers or {})
+    auth_configured = any(key.lower() in {"authorization", "cookie"} for key in normalized_headers) or any(
+        key.lower() in {"authorization", "cookie"} for key in normalized_admin_headers
+    )
     if require_auth and not auth_configured:
         return {
             "version": 1,
@@ -290,7 +302,7 @@ def collect_http_slo(
                     url=url,
                     iteration=index + 1,
                     warmup=warmup_sample,
-                    headers=normalized_headers,
+                    headers=_headers_for_probe(probe, user_headers=normalized_headers, admin_headers=normalized_admin_headers),
                     timeout_seconds=timeout_seconds,
                     request_fn=request,
                 )
@@ -343,7 +355,8 @@ def _collect_one(
         response = request_fn(url, headers, timeout_seconds)
         elapsed_ms = (monotonic() - started) * 1000
         content_type = _header(response.headers, "content-type")
-        body = response.body or b""
+        raw_body = response.body or b""
+        body = _decoded_response_body(raw_body, response.headers)
         metadata = _extract_response_metadata(body, content_type)
         status_ok = response.status_code in probe.expected_statuses
         html_api_error = _html_response_error(probe, content_type, body) if status_ok else None
@@ -357,7 +370,7 @@ def _collect_one(
             warmup=warmup,
             elapsed_ms=elapsed_ms,
             status_code=response.status_code,
-            response_bytes=len(body),
+            response_bytes=len(raw_body),
             content_type=content_type,
             ok=ok,
             error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
@@ -505,6 +518,7 @@ def _load_probe_config(path: Path, *, default_target_ms: float) -> list[HttpProb
                 kind=str(raw.get("kind") or "api").strip() or "api",
                 expected_statuses=tuple(int(value) for value in statuses),
                 target_ms=float(raw.get("target_ms") or default_target_ms),
+                auth_scope=_normalize_auth_scope(raw.get("auth_scope")),
             )
         )
     return probes
@@ -518,14 +532,37 @@ def _with_target(probes: Sequence[HttpProbe], target_ms: float) -> list[HttpProb
             kind=probe.kind,
             expected_statuses=probe.expected_statuses,
             target_ms=target_ms,
+            auth_scope=probe.auth_scope,
         )
         for probe in probes
     ]
 
 
+def _headers_for_probe(
+    probe: HttpProbe,
+    *,
+    user_headers: Mapping[str, str],
+    admin_headers: Mapping[str, str],
+) -> Mapping[str, str]:
+    if _normalize_auth_scope(probe.auth_scope) == "admin" and admin_headers:
+        return admin_headers
+    return user_headers
+
+
+def _normalize_auth_scope(value: object) -> str:
+    return "admin" if str(value or "").strip().lower() == "admin" else "user"
+
+
+def _normalized_probe_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    normalized = _auth_headers()
+    normalized.update({str(key): str(value) for key, value in headers.items() if str(value).strip()})
+    return normalized
+
+
 def _auth_headers(*, bearer_token: str = "", admin_token: str = "", cookie: str = "") -> dict[str, str]:
     headers: dict[str, str] = {
         "Accept": "application/json, text/html;q=0.9, */*;q=0.1",
+        "Accept-Encoding": "gzip",
         "User-Agent": "fin-ops-http-slo-probe/1",
     }
     normalized_cookie = str(cookie or "").strip()
@@ -540,6 +577,15 @@ def _auth_headers(*, bearer_token: str = "", admin_token: str = "", cookie: str 
     elif normalized_admin_token:
         headers["Authorization"] = f"Bearer {normalized_admin_token}"
     return headers
+
+
+def _decoded_response_body(body: bytes, headers: Mapping[str, str]) -> bytes:
+    if _header(headers, "content-encoding").lower() != "gzip":
+        return body
+    try:
+        return gzip.decompress(body)
+    except (OSError, EOFError):
+        return body
 
 
 def _extract_response_metadata(body: bytes, content_type: str) -> dict[str, Any]:

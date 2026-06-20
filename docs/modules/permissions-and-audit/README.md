@@ -66,4 +66,7 @@
 
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
+- `e2e-spec.md`：维护权限与审计横切 Spec-first Browser/API 验收合同。
+- `e2e-coverage.md`：维护权限与审计 Spec-first 合同到自动化覆盖的映射。
+- `write-entry-inventory.md`：维护 `PERM-E2E-003` 页面写入口权限矩阵和 Browser 覆盖缺口。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。

@@ -28,6 +28,76 @@
 
 ## 历史记录
 
+## 2026-06-19 - Authenticated HTTP probe 发现成本统计 schema 查询漂移
+
+- 目标：推进生产 authenticated runtime gate，并修复 probe 暴露的成本统计 SQL read model 查询与真实表结构不一致问题。
+- 影响范围：`read_model.cost_statistics_read_models` 查询合同、`PostgresReadModelRepository.get_cost_statistics_view(...)`、成本统计 authenticated HTTP endpoints、生产 release `main-bf02acc5-coststats-schema-20260619172500`。
+- 生产证据：目标 OA 凭据可产生真实 `full_access` 登录态，`/api/session/me` 通过，SSE `/api/app-health/stream` 和 `/api/workbench/events?month=all` first-event 通过；full authenticated HTTP probe 暴露成本统计两个 GET endpoint 返回 `500`，日志为 `column "schema_version" does not exist`。
+- 根因：repository 查询选择了 `schema_version` 表列，但 `0006_read_models.sql` 的 `read_model.cost_statistics_read_models` 没有该列；schema version 应从 `payload` / `raw_payload` 读取。已有本地测试没模拟真实表结构缺列。
+- 修复与发布：新增成本统计 SQL runtime 回归测试，移除父表 select 中的不存在列，提交 `bf02acc5 Fix cost statistics read model schema query` 并发布 release `main-bf02acc5-coststats-schema-20260619172500`。
+- 验证：hotfix worktree `tests/test_cost_statistics_sql_runtime.py tests/test_postgres_repositories_boundaries.py` 通过 `38 passed`；发布后 `/health/ready` ready，`runtime_blocker_count=0`；targeted read model apply 中 `cost_statistics` 和 `output_invoice_collection` 2/2 通过；成本统计 authenticated endpoints 返回 `200`。
+- 未闭合项：authenticated HTTP full gate 仍需要 admin 登录态和 `output_invoice_collection:all` freshness 问题后续处理；真实 write-operation apply 仍需要业务审批 ticket。
+
+## 2026-06-19 - Cost statistics direct refresh SLO 失败与批量保存发布复验
+
+- 目标：把生产 critical read model apply gate 从 dry-run 推进到真实 enqueue-to-fresh 复验，并处理发现的 `cost_statistics` direct refresh 5 秒 SLO 失败。
+- 影响范围：生产 release `main-33a150e7-write-e2e-approval-gate-20260619151922` 到 `main-3d88ce99-coststats-batch-20260619170500` 的 critical read model apply gate、`PostgresReadModelRepository._replace_cost_statistics_rows(...)`、repository boundary tests；不改成本归因业务规则、scope contract、payload shape、API response 或前端。
+- 生产证据：`read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 120` 中 15 个 critical scope 均达到 dirty/outbox `done` 且 readiness `fresh` 或 `dirty_done`，证明 worker drain 和 read model 最新状态可以收敛；但 `invoice_lifecycle:2026-04` enqueue-to-fresh 约 5286.961ms、`cost_statistics:active:2026-04` 约 6459.019ms，整体 `status=fail`。随后只重跑两个失败 scope，`invoice_lifecycle` 约 2336.86ms 通过，`cost_statistics:active:2026-04` 仍约 7003.227ms 失败；公网 `health_ready_payload_probe` 仍通过，`runtime_blocker_count=0`。
+- 根因调查：`cost_statistics` 失败不是数据不 fresh，而是 handler duration/row 写入尾延迟超过目标。代码路径为 `CostStatisticsSqlProjectionBuilder._publish_cost_statistics_scope(...)` -> `PostgresReadModelRepository.save_cost_statistics_read_models(...)` -> `_replace_cost_statistics_rows(...)`；该方法在删除 scope rows 后对每条 `time_rows` 调用一次 `connection.execute(...)`，仍是逐行 insert/upsert，和此前 invoice lifecycle 慢点同类。
+- 修复与发布：新增 RED 测试 `tests/test_postgres_repositories_boundaries.py::test_cost_statistics_rows_are_saved_in_batch`，先证明当前 `executed_many` 为 0；随后把 `_replace_cost_statistics_rows(...)` 改为构造 params 列表并调用 `_execute_many(...)`，保持同一事务、delete、字段、`on conflict (scope_key, row_key)` 更新语义不变。为避免混入主工作区大量未提交变更，基于生产 commit `33a150e7` 创建隔离 clean worktree，提交 `3d88ce99 Optimize cost statistics read model row saves`，通过 release `main-3d88ce99-coststats-batch-20260619170500` 发布激活。
+- 发布后复验：新 release 上公网 `health_ready_payload_probe` 通过，`elapsed_ms=104.986`、`runtime_release.consistent=true`、`runtime_blocker_count=0`；`read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 120` 15/15 pass，summary p50 约 490.393ms、p95/max 约 3176.5ms，`cost_statistics:active:2026-04` 降至约 3176.5ms，`invoice_lifecycle:2026-04` 约 1400.792ms。
+- 文档影响：更新本实施记录、`docs/modules/cost-statistics/implementation-notes.md` 和 `docs/dev/testing-closure-state.md`；长期架构边界不变。
+- 测试覆盖：新增 repository boundary test 覆盖成本统计 rows 批量保存；既有 `tests/test_cost_statistics_sql_runtime.py` 继续保护 payload/readiness/cache 行为。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_repositories_boundaries.py::test_cost_statistics_rows_are_saved_in_batch -q` 先 RED 后 PASS；`PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_repositories_boundaries.py tests/test_cost_statistics_sql_runtime.py -q` 通过 37 tests；`PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/services/postgres_repositories/read_models.py` 通过。
+- 未测风险：direct critical read model refresh SLO 已在生产复验通过；真实业务写操作 SLO、认证态 HTTP SLO 和受控 mutating write scenario 仍未闭环。
+
+## 2026-06-19 - 生产运行时只读巡检补充
+
+- 目标：在不重启、不部署、不执行 mutating smoke 的前提下，补强 Spec-first E2E 总目标里 read model/worker 最新状态的外部证据，并明确仍不能宣称闭环的部分。
+- 影响范围：生产 release `main-8b5942e4-http-slo-admin-scope-202606191805` 的 API、RabbitMQ dispatcher、20 个 runtime worker、`health_ready_payload_probe`、`runtime_sync_closure_gate` 和 `read_model_slo_smoke` dry-run；不写业务数据，不 enqueue refresh，不运行 `--apply`。
+- 关键决策：只读巡检证明当前 runtime blocker 为 0、API ready、release consistent、API/dispatcher/20 个 worker active，且 runtime gate 的 `runtime_health` pass；但本轮没有提供认证 token，也没有 approval ticket，因此不能把 authenticated HTTP SLO、direct read model enqueue-to-fresh smoke 或真实业务写操作 SLO 标记为完成。
+- 生产只读证据：SSH 只读检查显示 API、RabbitMQ dispatcher 和 20 个 `fin-ops-worker@*.service` active；systemd `WorkingDirectory` 均指向 release `main-8b5942e4-http-slo-admin-scope-202606191805/src`。公网 `health_ready_payload_probe` 返回 `status=pass`、`health_status=ready`、`elapsed_ms=144.671`、`runtime_blocker_count=0`、`runtime_release.consistent=true`。加载 systemd env 后 `read_model_slo_smoke --critical-only --target-ms 5000` 返回 `status=dry_run`、`planned_scope_count=15`；PostgreSQL 权威表只读汇总为 `job.outbox_events=[["done", 157060]]`、`job.read_model_dirty_scopes=[["done", 143020]]`、`read_model.app_status_readiness=[["fresh", 169]]`。
+- 未闭环证据：`read_model_slo_smoke --critical-only` 本轮未带 `--apply`，只规划 15 个 critical scope，不能替代 enqueue-to-fresh 证明；公网 `runtime_sync_closure_gate` 只读模式中 `runtime_health` 和 `health_ready_payload` 通过，但 `read_model_direct_smoke` 因未 apply 失败，authenticated HTTP/SSE 因缺 bearer/admin token 未闭合，`write_operation_audit` 有 447 个事件样本但 56/56 expectations 未达标或缺样本，`write_operation_e2e` 缺写场景、apply 标志和 approval ticket。
+- 文档影响：更新本实施记录和 `docs/dev/testing-closure-state.md`；长期 gate 边界仍以 `docs/operations/monitoring.md` 为准。
+- 测试覆盖：本轮只运行生产只读工具，没有新增测试；现有 `tests/test_runtime_sync_closure_gate.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_scenario_discovery.py` 和 `tests/test_write_operation_e2e_smoke.py` 继续保护工具合同。
+- 验证命令：生产只读命令包括 SSH 只读 systemd 状态检查、`health_ready_payload_probe --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --json`、生产本机加载 systemd env 后 `/opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.read_model_slo_smoke --json --critical-only` dry-run、PostgreSQL 只读状态聚合，以及 `runtime_sync_closure_gate --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --allow-unauthenticated-http --json`。
+- 未测风险：还没有认证态 HTTP/API freshness SLO、没有本轮 direct `--apply` enqueue-to-fresh smoke、没有受控 mutating write scenario；最终闭环仍需要真实认证、审批引用和可接受的生产或 staging 写操作样本。
+
+## 2026-06-19 - 当前 release critical direct apply 复验
+
+- 目标：把当前生产 release 的 read model gate 从 dry-run 推进到 direct enqueue-to-fresh 证据，并确认前一轮只读复查后的 worker drain 仍能在 5 秒目标内收敛。
+- 影响范围：生产 release `main-8b5942e4-http-slo-admin-scope-202606191805` 的 critical read model refresh queue 和 app status readiness；不执行业务写接口，不改变业务关系。
+- 关键决策：`runtime_sync_closure_gate --apply-read-model-smoke` 可以补 read model direct apply 证据，但未传 `--apply-write-scenarios` / `--write-scenario` / approval ticket 时不会触发业务写操作。首轮 full gate 的 `read_model_direct_smoke` 最终 done/fresh 但 2 个 scope 超过 5 秒目标：`invoice_lifecycle:2026-04` 约 7116.852ms、`cost_statistics:active:2026-04` 约 7273.758ms；随后只重跑这两个 scope 2/2 pass；最终完整 `read_model_slo_smoke --apply --critical-only` 15/15 pass。
+- 生产证据：聚焦复验中 `invoice_lifecycle:2026-04` 约 1221.935ms、`cost_statistics:active:2026-04` 约 3056.738ms；完整复跑 summary p50 约 580.34ms，p95/max 约 3863.253ms，handler p95/max 约 3535.364ms。复跑后 PostgreSQL 权威表汇总为 `job.outbox_events=[["done", 157126]]`、`job.read_model_dirty_scopes=[["done", 143083]]`、`read_model.app_status_readiness=[["fresh", 169]]`。
+- 文档影响：更新本实施记录、`e2e-coverage.md` 和 `docs/dev/testing-closure-state.md`；长期测试入口不变。
+- 测试覆盖：本轮执行生产 direct apply gate，没有新增代码测试；既有 `tests/test_read_model_slo_smoke.py`、`tests/test_runtime_sync_closure_gate.py` 和 read model repository tests 继续保护工具合同。
+- 验证命令：生产 `runtime_sync_closure_gate --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --allow-unauthenticated-http --apply-read-model-smoke --read-model-target-ms 5000 --health-ready-target-ms 1000 --timeout-seconds 120 --json`；生产 `read_model_slo_smoke --apply --read-model-key invoice_lifecycle --read-model-key cost_statistics --scope invoice_lifecycle=2026-04 --scope cost_statistics=active:2026-04 --target-ms 5000 --timeout-seconds 120 --json`；生产 `read_model_slo_smoke --apply --critical-only --target-ms 5000 --timeout-seconds 120 --json`。
+- 未测风险：direct critical read model apply 已闭合；authenticated HTTP/SSE、admin dashboard 和真实业务 write-operation apply 仍未闭合，继续由 `READMODEL-E2E-006` 和 app-health/runtime gate 管理。
+
+## 2026-06-19 - Write-operation audit 只读证据与 scenario discovery
+
+- 目标：在 direct read model refresh SLO 闭环后，继续验证真实业务写操作是否能证明 writer -> durable outbox/dirty scope -> worker -> readiness 的端到端刷新链路。
+- 影响范围：生产 `write_operation_slo_audit` 只读审计、`write_operation_scenario_discovery` 只读候选生成、read-models 未测风险；不执行 mutating HTTP，不写业务数据。
+- 关键决策：168 小时窗口的 `write_operation_slo_audit --target-ms 1000 --p99-target-ms 3000` 返回 `status=fail`，`event_sample_count=5000`，`expectation_count=56`，`failed=56`，其中 `missing=12`、非 missing 的历史样本大多为 1 秒/3 秒 SLO 超时；这说明历史真实写入样本不能证明当前目标闭环。以 hotfix 激活时间 `2026-06-19T14:58:07+08:00` 作为 `--since` 后，审计返回 `event_sample_count=21`，但 56/56 expectation 都是 `missing`，说明新 release 后还没有高影响真实业务写操作 profile 样本，不能把 direct refresh 证据当作真实业务写链路证据。
+- 只读 discovery 结果：生产 `write_operation_scenario_discovery --limit 10` 返回 `status=ready`，候选计数为 turnover 10、Workbench withdraw context 10、no-OA withdraw context 10，并写出 30 个 scenario 到 `/tmp/finops-write-e2e-scenarios-20260619.json`。所有 scenario 都要求真实认证和人工/业务审批后才能 apply。随后 `write_operation_e2e_smoke --scenario /tmp/finops-write-e2e-scenarios-20260619.json` dry-run 通过，`scenario_count=30`，其中 `turnover_manual_closure_or_withdraw` 10 个、`workbench_relation_withdraw` 10 个、`no_oa_bank_batch_withdraw` 10 个；dry-run 未配置 auth 且未带 `--apply`，因此没有执行任何写操作。
+- 最小 apply 候选分级：只读解析 discovery/scenario 文件后，turnover 候选 10 个，其中 7 个 `suggested`、2 个 `deterministic`、1 个 `confirmed`，风险均为 `existing_relation_withdraw_requires_manual_business_approval`；Workbench withdraw 候选 10 个均为 `active` 且风险为 `existing_workbench_relation_withdraw_requires_manual_business_approval`；no-OA withdraw 候选 10 个均为 `submitted`，月份集中在 2026-02/2026-03，风险为 `existing_no_oa_batch_withdraw_requires_manual_business_approval`。因此第一条受控 apply smoke 应优先选择 turnover `suggested` relation，而不是先撤 Workbench active 关系或 no-OA submitted 批次。已在生产 `/tmp/finops-write-e2e-scenarios-20260619-minimal-turnover-dryrun.json` 生成只含 1 条 `turnover_manual_closure_or_withdraw` 的 minimal scenario，并通过 `write_operation_e2e_smoke` dry-run：`status=dry_run`、`scenario_count=1`、`auth_configured=false`；计划写入口为 `POST /api/turnover-ledger/relations/turnover_rel_05cac958eb8c7c74/withdraw`，后置探针为 turnover grouped 与 App Health dashboard。该证据仍不是 mutating closure；工具已加审批闸门，正式执行必须同时提供真实认证和 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET`，否则返回 `approval_missing` 且不会连接 Postgres 或执行 mutating HTTP。
+- 文档影响：更新本实施记录和全局 testing closure 状态；长期运维口径仍以 `docs/operations/monitoring.md` 的 write-operation gate 边界为准。
+- 测试覆盖：本轮只读运行生产工具，并补强 apply 审批闸门。`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_scenario_discovery.py`、`tests/test_write_operation_e2e_smoke.py` 继续保护工具合同；`tests/test_runtime_sync_closure_gate.py` 保护最终 closure gate 必须带 `--write-approval-ticket`。
+- 生产闸门验证：已发布并激活 release `main-33a150e7-write-e2e-approval-gate-20260619151922`，生产本机对 minimal turnover scenario 执行 `write_operation_e2e_smoke --apply` 但不带 approval，返回 exit code 2、`status=approval_missing`、`error=write_operation_e2e_requires_approval_ticket`、`scenario_count=1`、`approval_configured=false`。该验证没有执行任何业务写操作。
+- 发布后 read model/worker 验证：同一 release 上执行 critical `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 120`，15 个 critical scope 全部通过，summary p50 约 926.619ms、p95/max 约 4960.071ms，handler p95/max 约 4783.4ms。随后只读 DB 汇总显示 `job.outbox_events` 156974 行全为 `done`、`job.read_model_dirty_scopes` 142936 行全为 `done`、`read_model.app_status_readiness` 169 行全为 `fresh`。
+- 未测风险：还没有执行受控 mutating scenario；因此真实业务写操作 profile 仍未闭环。下一步必须从 discovery 候选中选择可撤回/可接受审计的测试对象，提供真实 OA/Admin auth 和审批引用，再运行 `write_operation_e2e_smoke --apply --approval-ticket <approval>` 或 `runtime_sync_closure_gate --apply-write-scenarios --write-approval-ticket <approval>`。
+
+## 2026-06-19 - Invoice lifecycle read model 批量保存与生产 SLO 跟进
+
+- 目标：把 Spec-first E2E 真实运行闭环推进到 read model/worker 最新状态验证，并收敛生产 `invoice_lifecycle` critical refresh 超过 5 秒的尾延迟。
+- 影响范围：`PostgresReadModelRepository.save_invoice_lifecycle_rows(...)`、生产 critical `read_model_slo_smoke --apply` 证据、read-models 测试矩阵；不改变 invoice lifecycle payload、scope、freshness 或 worker 入队合同。
+- 关键决策：真实生产 critical apply 证明 15/15 个关键 scope 都达到 outbox/dirty `done` 且 readiness `fresh`，数据一致性和 worker drain 成功；失败点是 SLO，初次 apply 中 `invoice_lifecycle`、`oa_pending_payment`、`cost_statistics` 超过 5 秒，聚焦重试后只剩 `invoice_lifecycle` 约 5.76 秒。服务器只读分段显示 `invoice_lifecycle` 2026-04 的 projection 读取低于 1 秒，瓶颈在逐行保存 `read_model.invoice_lifecycle_rows`。修复把逐行 insert/upsert 改为 `_execute_many(...)` 批量保存，仍在同一事务内先删除 scope rows、再写 rows、最后 upsert scope。已通过 release `main-99ea9b35-invoice-lifecycle-batch-20260619145710` 激活到生产，发布后 critical apply gate 15/15 pass，summary p95/max 约 3.52 秒，`invoice_lifecycle` 约 1.29 秒。
+- 文档影响：更新本实施记录、`tests.md` 和 `docs/dev/testing-closure-state.md`；长期架构边界不变。
+- 测试覆盖：新增 `tests/test_postgres_repositories_boundaries.py::test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated`，证明 invoice lifecycle rows 使用 batch insert/upsert 且 scope 仍在同一事务更新；相关 invoice lifecycle read model/API/page integration 回归继续覆盖 payload/read facade 行为。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：critical direct refresh SLO 已闭环；真实业务写操作 SLO audit 仍需要有对应业务写入样本或受控 staging 场景，不能用 direct refresh 完全替代真实业务写链路。
+- 后续事项：若未来 `invoice_lifecycle` critical scope 再次超过 5 秒，进入 SQL write profiling、索引/constraint/transaction size 分析；同时继续推进真实业务写入 profile 的 SLO audit。
+
 ## 2026-06-19 - Pending invoice scope contract 防复发与运行状态闭环
 
 - 目标：关闭发票导入修复后的 Runtime Read Model 残留，防止非法 `pending_invoice` 裸月份 scope 再次进入 durable queue/readiness。
@@ -256,3 +326,83 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`。
 - 未测风险：阶段 1 未包含真实生产库清理。
 - 后续事项：已由后续 scope contract 检查/清理入口和架构守卫补齐。
+## 2026-06-19 - Invoice relation all-scope source version 聚合排除历史空 scope
+
+- 目标：修复 invoice relation 类 read model 默认 all 读取中，历史空月份 scope 的旧 source version 污染当前非空 all 页面 freshness 的问题。本次由生产 `output_invoice_collection` authenticated HTTP gate 暴露。
+- 根因：`_invoice_relation_scope_row(scope_key="all")` 通过所有月度 scope 的共同 source versions 推导 all source versions；`row_count=0` 的历史空 scope 不贡献任何 rows，却会因为旧 `oa_projection_sync_version` 让共同版本字段被删除，进而让 API 返回 refreshing/stale。由于 all fan-out worker 不会刷新这些无 shard 的历史空 scope，问题可长期存在。
+- 修复：当 all scope 存在 `row_count > 0` 的 scope rows 时，只用这些非空 scope rows 判断 cache status 和共同 source versions；没有非空 scope 时保留原 all-empty 行为，避免伪造 fresh。
+- 测试覆盖：`tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_output_api_all_scope_ignores_stale_empty_month_scope_versions`；相邻回归 `test_input_api_all_scope_uses_rows_when_month_relation_versions_differ` 和 `test_output_api_stale_returns_refreshing_without_stale_rows` 保持通过。
+- 生产验证：release `main-9e9546ac-output-invoice-all-scope-20260619173552` 通过 health ready；生产 DB 中 `output_invoice_collection` current dirty/outbox 为空；两个目标 OA 登录态下 output rows/filter-options 返回 `200 fresh`。
+- 后续风险：该规则适用于 invoice relation all-scope 读取；其它 read model 的 all/aggregate scope 仍需按各自 scope contract 独立审计，不能泛化为“所有空 scope 都可忽略”。
+
+## 2026-06-20 - 生产只读 P0/P2 审计与 dry-run helper 安全入口
+
+- 目标：在只有唯一 production PostgreSQL、没有 staging 数据库的条件下，按 P0/P1/P2 安全门推进 read model/worker drain 证据，禁止业务事实写入和未经批准的 `--apply`。
+- 生产只读证据：SSH `finops-prod` 以 `finops-deploy` 登录成功；`fin-ops.service`、`fin-ops-rabbitmq-dispatcher.service` 和 20 个 `fin-ops-worker@*.service` 均为 active；`/health` 与 `/health/ready` 返回 ready，`runtime_release.consistent=true`、`production_runtime_guard.consistent=true`、`queue_backend=postgres`、`redis_status=ready`、`workbench_relation_read_model.status=ready`、`workbench_relation_dirty_backlog=0`。
+- 生产只读 scope contract：通过 root-owned helper 执行 `read-model-scope-contract <release> --json`，结果 `ok=true`、`violation_count=0`、`current_uncovered_outbox_failure_count=0`，未执行 `--apply`。
+- P0 DB 表级闭环：使用 root 只读加载 runtime env 并在 PostgreSQL `BEGIN READ ONLY` 事务中执行固定聚合；`job.outbox_events` 157144 行全部 `done`，非 done 为空，recent `failed` / `dead_lettered` / `publish_failed` 样本为空；`job.read_model_dirty_scopes` 143101 行全部 `done`，非 done 为空；`read_model.app_status_readiness` 169 行全部 `fresh`，覆盖 14 个 read model key。
+- P2 dry-run 闭环：安装 root-owned helper `/usr/local/sbin/finops-deploy-control`，SHA256 为 `9e8d57011e0b5b63e136a2159153cb943a31e6987162900a34a849f73eff7e89`，包含 `read-model-slo-smoke` 且拒绝 `--apply`；生产运行 `read-model-slo-smoke codex-http-slo-gzip-probe-3546e985-20260619210708 --json --critical-only --target-ms 5000` 返回 `status=dry_run`、`planned_scope_count=15`、`missing_read_model_keys=[]`，只发现 critical scopes，未 enqueue、未 apply、未写 DB。
+- 生产数据质量发现：通过 root-owned helper 执行 `workbench-audit-identity <release> --json --limit 1`，Workbench 自身 `cross_zone_identity_duplicate_group_count=0`、`open_visible_owner_duplicate_group_count=0`、`orphan_relation_group_count=0`；但 OA attachment invoice 层存在 `blocking_issue_count=6`、`oa_attachment_invoice_blocking_duplicate_group_count=6` 的 cross-OA 重复，后续需单独判定是合法重复、解析别名还是导入/缓存去重缺陷。
+- 本地安全改动：`deploy/oa/bin/finops-deploy-control.sh` 新增 `read-model-slo-smoke <release-name> [args]`，只调用固定模块 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，并在 release lookup 与 runtime env 加载前拒绝 `--apply`；同版本 helper 已安装到生产 `/usr/local/sbin/finops-deploy-control`。
+- 阻断项：P0 DB 表级只读聚合和 P2 critical dry-run 已闭合；direct enqueue-to-fresh `--apply` 仍不在本目标内，只有另有显式审批才可讨论。P1 Browser smoke 已在 app-health-operations 记录中闭合。
+- 验证命令：`bash -n deploy/oa/bin/finops-deploy-control.sh`；`PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script -v`；本地 `read-model-slo-smoke fake-release --apply` 拒绝验证；生产 PostgreSQL `BEGIN READ ONLY` 固定聚合；生产 `sudo -n /usr/local/sbin/finops-deploy-control read-model-slo-smoke codex-http-slo-gzip-probe-3546e985-20260619210708 --json --critical-only --target-ms 5000`。
+- 后续事项：6 个 OA attachment invoice cross-OA duplicate 继续走只读语义审计和 source alias/migration identity 修复设计；不要通过 SQL 删除缓存、发票或伪造 readiness。
+
+## 2026-06-20 - OA attachment invoice cross-OA duplicate 只读审计
+
+- 目标：对生产 `workbench-audit-identity` 暴露的 6 个 `oa_attachment_invoice` cross-OA blocking duplicate 做只读深挖，明确它们更像 OA 迁移/同步 alias，还是应进入人工业务去重。
+- 只读证据：6 组均为 `classification=cross_oa`，`oa_attachment_invoice_duplicate_classification_counts={"cross_oa": 6}`；Workbench 自身 `cross_zone_identity_duplicate_group_count=0`、`open_visible_owner_duplicate_group_count=0`、`orphan_relation_group_count=0`，问题集中在 OA attachment invoice cache/source identity 层。
+- 明细模式：`053002200111:15312761` 出现在 `oa-exp-2005` 与 `oa-exp-69898450db8c0a3633bd748c`，申请人周洁莹、日期 2026-02-01、金额 800.00、项目云南溯源科技一致；`153012525093:00233178` 出现在 `oa-exp-2035` 与 `oa-exp-69a7aeaedb8c0a3633bd74a7`，申请人胡瑢、日期 2026-03-01、金额 248.00、项目一致；其余 4 个 identity 均出现在 `oa-exp-2062` 与 `oa-exp-69c0b43adb8c0a3633bd74c4` 的同一 item 行，申请人刘际涛、日期 2026-03-01、金额 3061.64、项目组合一致。
+- 代码判断：`audit_object_identity._classify_oa_attachment_invoice_duplicate_groups(...)` 只有在同一 canonical 发票 identity 映射到多个 `oa_application_id` / OA row/source 时才标为 `cross_oa`；同 OA 内的同一缓存、多实际附件或同实际附件 alias 会被分类为非 blocker。因此这 6 组不能简单视作缓存重复。
+- 关键决策：当前不删除 OA attachment invoice cache、不删除发票、不手工改 readiness；下一步先建立 OA source alias / migration identity 证据，确认短号 `oa-exp-20xx` 与长 hash `oa-exp-69...` 是否代表同一 OA 单迁移后的新旧 ID。只有证明确为 alias，才应在 source identity/alias 合并层修复；若不是 alias，则应进入人工业务去重流程。
+- 后续事项：新增只读 OA alias audit，比较两端 `oa_application_id`、`oa_source_id`、`row_id`、附件 hash、发票代码号码、金额、申请人、项目和 source row item；修复方案优先放在 OA source identity / attachment cache source mapping，而不是 downstream read model 或手工 SQL 清理。
+
+## 2026-06-20 - 当前 gzip release critical read model apply 复验
+
+- 目标：在唯一 production PostgreSQL 上补齐 P0/P1/P2 之后的 direct read model worker drain 证据；只允许 enqueue read model refresh 和等待 worker 收敛，不执行业务写接口、不删除或修改业务事实。
+- 影响范围：生产 release `codex-http-slo-gzip-probe-3546e985-20260619210708` 的 15 个 critical read model scope、runtime queue、App Status readiness；不改变代码。
+- 生产只读证据：`fin-ops.service`、`fin-ops-rabbitmq-dispatcher.service` 和 20 个 `fin-ops-worker@*.service` 均为 active；本机 `/health` 与 `/health/ready` 返回 `status=ready`，`runtime_release.consistent=true`、`production_runtime_guard.consistent=true`、`runtime_blocker_count=0`。scope contract 返回 `ok=true`、`violation_count=0`、`current_uncovered_outbox_failure_count=0`。
+- Dry-run 证据：`finops-deploy-control read-model-slo-smoke codex-http-slo-gzip-probe-3546e985-20260619210708 --json --critical-only --target-ms 5000` 返回 `status=dry_run`、`planned_scope_count=15`、`missing_read_model_keys=[]`。
+- Apply 证据：经显式批准后，在 root session 中直接运行 `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90`；首轮 15 个 critical scope 均达到 outbox/dirty `done` 且 readiness `fresh` 或 `dirty_done`，但 5 个 scope 超过 5000ms target：`bank_detail:2026-01` 约 `5797.305ms`、`invoice_lifecycle:2026-04` 约 `9110.171ms`、`input_invoice_usage:2026-06` 约 `5694.337ms`、`cost_statistics:active:2026-04` 约 `7447.847ms`、`turnover_ledger:all` 约 `6478.222ms`。
+- 聚焦复验：只重跑上述 5 个慢 scope 后，`bank_detail`、`input_invoice_usage`、`cost_statistics`、`turnover_ledger` 均通过，`invoice_lifecycle:2026-04` 仍约 `5798.987ms`；随后单跑 `invoice_lifecycle:2026-04` 通过，约 `1278.87ms`。
+- 最终完整复跑：再次执行完整 critical `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90`，15/15 pass，summary p50 约 `693.739ms`、p95/max 约 `4122.628ms`，handler p95/max 约 `3963.749ms`。该结果闭合当前 direct critical read model enqueue-to-fresh 证据。
+- 复核：最终生产 PostgreSQL `BEGIN READ ONLY` 聚合显示 `job.outbox_events` 157193 行全部 `done`，`job.read_model_dirty_scopes` 143148 行全部 `done`，`read_model.app_status_readiness` 169 行全部 `fresh`；本轮 retry/full-rerun dirty scopes 全部 `done`。
+- 未闭合风险：direct critical read model worker drain 已闭合，但首轮出现过接近 5s 的长尾，后续仍应在 write-operation E2E 或 nightly/发布前 gate 中继续观察。真实业务写操作 attribution 仍需要受控 mutating scenario、审批 ticket 和认证后才能证明，不能用 direct refresh 代替。
+- 验证命令：本地 `bash scripts/verify.sh infra-smoke` 通过 77 tests、18 skipped；生产 `read-model-scope-contract --json`；生产 `read-model-slo-smoke --critical-only` dry-run；生产 direct `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90` 首轮、聚焦复验、单项复验和完整复跑；生产 PostgreSQL 只读状态聚合；本机 `/health` 与 `/health/ready` 检查。
+
+## 2026-06-20 - 当前 gzip release write-operation scenario 只读 dry-run
+
+- 目标：在不执行业务写操作的前提下，重新发现当前 production 可用于 Write Operation E2E 的最小候选，并验证 scenario contract。
+- 影响范围：生产 `write_operation_scenario_discovery`、`write_operation_e2e_smoke` dry-run；不执行 `--apply`、不调用 mutating HTTP、不写业务数据。
+- Token 状态：当前本地 shell 和生产 runtime env 都未配置 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` / `FIN_OPS_E2E_ADMIN_TOKEN` / user bearer/cookie，因此本轮不能验证 admin token 权限，也不能进入 apply。
+- 只读 discovery：`write_operation_scenario_discovery --limit 20` 返回 `status=ready`，候选包括 turnover 20、Workbench withdraw 20、no-OA withdraw 20，并写出 `/tmp/finops-write-e2e-scenarios-20260620.json`。
+- 最小 dry-run：选取 turnover `suggested` relation `turnover_rel_05cac958eb8c7c74`，生成 `/tmp/finops-write-e2e-scenarios-20260620-minimal-turnover.json`；`write_operation_e2e_smoke --scenario ... --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --json` 返回 `status=dry_run`、`scenario_count=1`、`auth_configured=false`、`approval_configured=false`。
+- 关键决策：下一步如果要 apply，必须由用户明确批准具体 scenario `turnover-withdraw-turnover_rel_05cac958eb8c7c74`、提供 approval ticket，并重新提供可用 auth token；否则继续停留在 dry-run，不做 production mutation。
+
+## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
+
+- 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。
+- 影响范围：`turnover-withdraw-turnover_rel_05cac958eb8c7c74`；approval reference `FINOPS-PROD-WRITE-SMOKE-20260620-TURNOVER-001`；不允许自动切换到其它 scenario。
+- 执行前快照：目标 relation 在 `app.turnover_relations` 中为 `status=suggested`、version `1`、counterparty `合肥钩知专利代理事务所（特殊普通合伙）`、bank row `txn_imported_1245`、金额 `2925.00`；执行前 outbox/dirty/readiness 全部干净。
+- Apply 结果：`write_operation_e2e_smoke --apply` 成功带入认证和 approval，但写步骤 `POST /api/turnover-ledger/relations/turnover_rel_05cac958eb8c7c74/withdraw` 返回 `400 unexpected_status`；工具返回 `status=fail`，post API probes 与 write SLO 被跳过，没有继续执行其它 scenario。
+- 执行后复核：relation 仍为 `suggested`、version `1`，无 `app.turnover_relation_events` 新增记录，apply 时间窗口无新增 outbox/dirty，`job.outbox_events` 全部 `done`、`job.read_model_dirty_scopes` 全部 `done`、`read_model.app_status_readiness` 全部 `fresh`。本次没有业务数据落地变更，不需要回滚。
+- 关键结论：当前 discovery 选出的 `suggested` turnover relation 不是有效 withdraw apply 候选。已通过隔离 hotfix release `codex-write-scenario-discovery-hotfix-21a734b0-20260620` 发布 `write_operation_scenario_discovery` 修正：turnover 候选只选择 `source=manual` 的 relation，并读取 `raw_payload.normalized_payload.source`，避免 nested `source=system` 的系统候选被误选。发布后生产只读重跑 discovery 显示 turnover 候选 5 个，`turnover_sources=["manual"]`、`non_manual_turnover_candidates=0`；没有执行新的 mutating apply。
+
+## 2026-06-20 - 贾小花 turnover write-operation scenario 复核
+
+- 目标：评估用户指定的贾小花 300,000.00 收支闭环是否可作为真实 Write Operation E2E scenario，并在用户批准后尝试 apply。
+- 只读匹配：`turnover_rel_89e8fb47e3ffce91` 为 `confirmed/manual`，三笔银行流水为 `txn_imported_1277` 2026-02-04 收 200,000.00、`txn_imported_1292` 2026-02-04 收 100,000.00、`txn_imported_1344` 2026-03-04 支 300,000.00，counterparty 均为贾小花，relation `settled_amount=300000.00`、`balance_amount=0.00`。
+- Apply 结果：使用 production full-access 目标 OA 凭据在远端内存中获取 bearer token，执行 `write_operation_e2e_smoke --apply --approval-ticket FINOPS-PROD-WRITE-SMOKE-20260620-JIAXIAOHUA-TURNOVER-001`；写步骤 `POST /api/turnover-ledger/relations/turnover_rel_89e8fb47e3ffce91/withdraw` 返回 409，因此 write SLO 和 post API probes 未运行。
+- 根因：active Workbench relation `case_id=turnover:turnover_rel_89e8fb47e3ffce91` 已包含三笔 bank row 和 `oa-pay-2025`，row types 为 bank/bank/bank/oa。该状态必须从关联台撤回完整关系，外部往来页 withdraw 入口按合同拒绝。
+- 复核：relation 仍为 `confirmed`、version `1`；未新增 withdraw event；apply 时间窗口未新增 outbox/dirty；outbox/dirty/readiness 均无非 done / 非 fresh。本次没有业务数据落地变更。
+- 后续：若继续推进这个样本，需新建 Workbench withdraw scenario，并由用户单独批准撤回 `case_id=turnover:turnover_rel_89e8fb47e3ffce91` 所代表的完整 active Workbench 关系。
+
+## 2026-06-20 - 贾小花 Workbench 完整关系撤回结果
+
+- 目标：在用户明确批准后，改用关联台 `withdraw-link` 撤回 `case_id=turnover:turnover_rel_89e8fb47e3ffce91` 的完整 active relation，并验证真实写入口、read model/worker fan-out 和 post API。
+- 写入口：`POST /api/workbench/actions/withdraw-link`，payload `month=all`、`row_ids=["txn_imported_1344","txn_imported_1292","txn_imported_1277","oa-pay-2025"]`，approval reference `FINOPS-PROD-WRITE-SMOKE-20260620-JIAXIAOHUA-WORKBENCH-001`。
+- 结果：写步骤 HTTP 200，约 `762.793ms`；post API probes 通过，Workbench grouped fresh，turnover ledger grouped 200。当前 active Workbench relation 已恢复为 bank-only `turnover_manual_closure`，仅包含三笔 bank row；原含 `oa-pay-2025` 的完整 relation 已撤回。外部往来 relation 本身保持 `confirmed`，余额仍 `0.00`。
+- SLO：窄口径 `workbench_relation_withdraw` 通过；严格 `workbench_relation_withdraw_cross_page` 失败，原因是 `workbench:all`、`pending_invoice`、`cost_statistics` 超过 5 秒，且 `invoice_lifecycle`、`input_invoice_usage`、`tax_offset` 未产生该 profile 期待的近期 refresh event。该结果说明真实写入和基础 read model drain 成功，但这个样本不应直接等同于全下游跨页闭环；需要后续拆分“样本不适用 scope”和“真实性能长尾”。
+- 2026-06-20 后续归因：`workbench_relation_withdraw_cross_page` 是 broad profile，不适合该 bank/turnover 恢复样本。新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` profile：要求 `workbench`、`workbench_relation`、`bank_detail`、`pending_invoice`、`cost_statistics`、`search`，但不要求 invoice-only 的 `invoice_lifecycle`、`input_invoice_usage`、`tax_offset`。本轮慢尾仍保留为 read model/worker 性能风险，不能因为 profile 拆分而视为 5s 写后跨页收敛已闭合。
+- 生产只读下钻：bank/turnover profile 下 `pending_invoice` 慢尾不是 handler 本身慢，最终 `runtime_result.duration_ms` 多数只有几十到一百多毫秒；慢尾来自 `bank_detail_read_model_not_fresh` dependency defer，并由多个 pending scope 反复补投同一 `bank_detail:2026-03`，把银行明细 source version 从 `44635` bump 到 `44638`。`RuntimeWorker` 追加 dependency fresh guard：依赖 scope 已 fresh 时记录 `already_fresh`，不再 enqueue 依赖 refresh，避免下游 fan-out 自己制造新的 stale。
+- 生产健康：写后 outbox/dirty/readiness 无非 done / 非 fresh；`/health/ready` ready；API、dispatcher 和 20 个 worker active。

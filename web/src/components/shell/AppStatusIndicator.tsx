@@ -5,7 +5,7 @@ import { Link as RouterLink } from "react-router-dom";
 
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
 import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
-import type { AppStatusDomain, AppStatusTask } from "../../features/appStatus/types";
+import type { AppStatusDomain, AppStatusQueueSummary, AppStatusRuntimeSummaryGroup, AppStatusTask } from "../../features/appStatus/types";
 
 function toneFromLevel(level: string) {
   if (level === "blocked") {
@@ -130,6 +130,50 @@ function domainDebugTitle(domain: AppStatusDomain) {
   return [domain.label, domain.reason, ...domain.details].filter(Boolean).join(" · ");
 }
 
+function readModelSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
+  if (!summary || summary.total === 0) {
+    return "暂无 read model 事实";
+  }
+  if ((summary.failed ?? 0) > 0 || (summary.unavailable ?? 0) > 0) {
+    return `${summary.failed ?? 0} 失败 / ${summary.unavailable ?? 0} 不可用`;
+  }
+  if ((summary.refreshing ?? 0) > 0 || (summary.stale ?? 0) > 0 || (summary.missing ?? 0) > 0) {
+    return `${summary.refreshing ?? 0} 刷新中 / ${summary.stale ?? 0} 过期 / ${summary.missing ?? 0} 缺失`;
+  }
+  return `全部 fresh ${summary.fresh ?? 0}/${summary.total}`;
+}
+
+function workerSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
+  if (!summary || summary.total === 0) {
+    return "暂无 worker 事实";
+  }
+  const issueCount = (summary.stale ?? 0) + (summary.missing ?? 0) + (summary.mismatched ?? 0) + (summary.unavailable ?? 0);
+  if (issueCount > 0) {
+    return `${summary.stale ?? 0} stale / ${summary.missing ?? 0} missing / ${summary.mismatched ?? 0} mismatch`;
+  }
+  if ((summary.working ?? 0) > 0) {
+    return `${summary.working ?? 0} working / ${summary.idle ?? 0} idle`;
+  }
+  return `全部 active ${summary.ready ?? summary.idle ?? 0}/${summary.required ?? summary.total}`;
+}
+
+function queueSummaryLabel(summary: AppStatusQueueSummary | undefined) {
+  if (!summary || summary.eventTypeCount === 0) {
+    return "无队列积压";
+  }
+  if (summary.failed > 0) {
+    return `${summary.failed} failed / ${summary.backlog} backlog`;
+  }
+  if (summary.pending > 0 || summary.processing > 0) {
+    return `${summary.pending} pending / ${summary.processing} processing`;
+  }
+  return "无队列积压";
+}
+
+function summaryTone(value: number | undefined) {
+  return value && value > 0 ? "warning" : "success";
+}
+
 export default function AppStatusIndicator() {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
@@ -145,8 +189,14 @@ export default function AppStatusIndicator() {
   const popperId = "global-app-status-popover";
   const tasks = appStatus?.backgroundTasks ?? [];
   const domains = appStatus?.domains ?? [];
+  const runtimeSummary = appStatus?.runtimeSummary;
   const busyDomainCount = domains.filter((domain) => domain.level === "busy").length;
   const blockedDomainCount = domains.filter((domain) => domain.level === "blocked").length;
+  const readModelIssues = runtimeSummary
+    ? (runtimeSummary.readModels.issueCount ?? 0) + (runtimeSummary.readModels.scopeIssueCount ?? 0)
+    : 0;
+  const workerIssues = runtimeSummary?.workers.issueCount ?? 0;
+  const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog : 0;
 
   const clearCloseTimer = () => {
     if (closeTimerRef.current !== null) {
@@ -314,6 +364,32 @@ export default function AppStatusIndicator() {
                   </section>
                 </>
               ) : null}
+
+              <Separator />
+
+              <section className="app-status-section">
+                <h3>运行摘要</h3>
+                <div className="app-status-runtime-summary" data-testid="app-status-runtime-summary">
+                  <div className="app-status-summary-row">
+                    <span>Read model</span>
+                    <Chip size="sm" color={summaryTone(readModelIssues)} variant="soft">
+                      {readModelSummaryLabel(runtimeSummary?.readModels)}
+                    </Chip>
+                  </div>
+                  <div className="app-status-summary-row">
+                    <span>Worker</span>
+                    <Chip size="sm" color={summaryTone(workerIssues)} variant="soft">
+                      {workerSummaryLabel(runtimeSummary?.workers)}
+                    </Chip>
+                  </div>
+                  <div className="app-status-summary-row">
+                    <span>Queue</span>
+                    <Chip size="sm" color={summaryTone(queueIssues)} variant="soft">
+                      {queueSummaryLabel(runtimeSummary?.queue)}
+                    </Chip>
+                  </div>
+                </div>
+              </section>
 
               <Separator />
 

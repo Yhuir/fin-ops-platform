@@ -9,7 +9,7 @@
 - 绿色状态必须有 readiness 证明。registry 中的 read model 如果缺少 readiness 记录，必须 busy/yellow；runtime snapshot unavailable 必须 blocked/red，不能空 green。
 - Operations dashboard 是 admin-only 只读入口，不执行 retry、acknowledge、requeue、republish 或 repair。运维动作仍走 runbook/CLI/API 专门入口。
 - Registry 强一致是本模块的核心防线：新增页面、read model、worker、job type 或 dependency 时，必须同步 domain/read model/job/dependency/worker registries 和测试。
-- 本模块首轮闭环状态为 `documented-risk`：本地测试覆盖 service/API/UI contract，真实 systemd/RabbitMQ/Redis/Nginx SSE/大库指标仍需 staging/生产 smoke。
+- 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖 service/API/UI contract、admin-only dashboard Browser、session gate 和 strict Browser 错误捕获；真实 systemd/RabbitMQ/Redis/Nginx SSE/大库指标仍需 staging/生产 smoke。
 
 ## 记录模板
 
@@ -27,6 +27,160 @@
 ```
 
 ## 历史记录
+
+## 2026-06-20 - Read Model / Worker 全局状态摘要可见
+
+- 目标：让用户不用进入具体业务页面，也能从左上角 App Status hover 和 `/operations/app-health` 看到 read model 是否 fresh、worker 是否 active/working、queue 是否存在 backlog。
+- 影响范围：`/api/app-health.app_status.runtime_summary`、`AppStatusIndicator`、`AppHealthOperationsPage`、系统状态测试矩阵；不改变 read model refresh、worker 执行、queue 写入或业务写接口。
+- 关键决策：后端 `AppStatusOverviewService` 统一聚合 runtime summary，前端只展示后端事实。worker `working/running/processing` 是正常工作态，不计入 issue；warning、stale、missing、mismatch、unavailable 才计入 issue。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md`、`e2e-spec.md` 和本实施记录。
+- 测试覆盖：新增/更新 `tests.test_app_status_overview_service.AppStatusOverviewServiceTests.test_runtime_summary_counts_read_models_workers_and_queue_backlog`、`web/src/test/AppStatusApi.test.ts` runtime summary mapper、`web/src/test/AppStatusIndicator.test.tsx` popover runtime summary、`web/src/test/AppHealthOperationsPage.test.tsx` dashboard runtime overview。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppStatusIndicator.test.tsx src/test/AppHealthOperationsPage.test.tsx`；`python3 -m py_compile backend/src/fin_ops_platform/services/app_status_overview_service.py`。
+- 未测风险：本地测试证明 payload 和 UI contract；真实生产 systemd/RabbitMQ/Redis/Nginx/SSE、大库指标和实际 worker drain 仍需生产只读 smoke 或运行时 gate 证明。
+- 后续事项：如果后续新增 read model、worker、job type 或 dependency，必须同步 registry 和 runtime summary 相关测试，不能只改 UI 文案。
+
+## 2026-06-20 - 生产 Browser smoke 使用 Admin-Token 闭合 P1 只读 gate
+
+- 目标：用真实生产 `Admin-Token` 执行只读 Playwright smoke，验证 admin AppHealth 页面和核心 route shell 不再停留在登录态、加载态或隐藏浏览器错误。
+- 影响范围：生产 Browser smoke 证据和 P1 gate 状态；不改变产品代码、后端 API、权限、read model、worker 或生产数据。
+- 执行方式：通过 macOS 隐藏输入框临时接收 `Admin-Token`，仅注入当前 Playwright 进程环境，不打印 token、不写入文件；`FIN_OPS_E2E_SKIP_WEBSERVER=1`，`PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com`。
+- 生产证据：`web/e2e/production-admin-app-health.spec.ts` 1/1 passed，admin-only AppHealth 页面打开、dashboard API 返回 200，且无 `POST`/`PUT`/`PATCH`/`DELETE` 请求；同一 token 作为 `FIN_OPS_E2E_OA_TOKEN` 运行 `web/e2e/production-route-shell.spec.ts` 1/1 passed，核心页面 route shell 均未触发“缺少 OA 登录态”“正在加载页面”或 mutating request。
+- 关键决策：该 smoke 证明生产浏览器外壳、admin AppHealth 入口和核心页面 session gate 可用；它仍是 route-shell 级只读 smoke，不替代每个页面的完整业务流程 E2E，也不证明 write-operation apply。
+- 测试覆盖：复用 `production-admin-app-health.spec.ts` 和 `production-route-shell.spec.ts` 的只读 request guard、session/loading 文案检查和 dashboard 200 断言。
+- 验证命令：`FIN_OPS_E2E_PRODUCTION_ADMIN_SMOKE=1 FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com npx playwright test e2e/production-admin-app-health.spec.ts --project=chromium`；`FIN_OPS_E2E_PRODUCTION_SMOKE=1 FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com npx playwright test e2e/production-route-shell.spec.ts --project=chromium`。
+- 未测风险：P2 direct read model SLO dry-run 仍需安装 root-owned DryRun helper 或提供安全 DB URL；6 个 OA attachment invoice cross-OA duplicate 仍需单独只读语义审计。
+
+## 2026-06-20 - P0/P1/P2 生产安全 gate 闭合
+
+- 目标：完成 P0 runtime/DB 表级只读证据、P1 production read-only Browser smoke 和 P2 critical read model dry-run，作为后续逐页面 Spec-first E2E 的生产基础设施前置 gate。
+- P0 证据：公网 `health_ready_payload_probe` 通过，`health_status=ready`、`runtime_blocker_count=0`、release 为 `codex-http-slo-gzip-probe-3546e985-20260619210708`；生产 API、RabbitMQ dispatcher 和 20 个 worker active；PostgreSQL `BEGIN READ ONLY` 聚合显示 `job.outbox_events` 157144 行全部 `done`、非 done 为空、recent `failed`/`dead_lettered`/`publish_failed` 样本为空，`job.read_model_dirty_scopes` 143101 行全部 `done`，`read_model.app_status_readiness` 169 行全部 `fresh`。
+- P1 证据：`production-admin-app-health.spec.ts` 和 `production-route-shell.spec.ts` 均通过，无 mutating request，无 session/permission/loading gate。
+- P2 证据：生产 helper 已安装 `read-model-slo-smoke` dry-run 子命令，SHA256 `9e8d57011e0b5b63e136a2159153cb943a31e6987162900a34a849f73eff7e89`；`read-model-slo-smoke ... --critical-only --target-ms 5000` 返回 `status=dry_run`、`planned_scope_count=15`、`missing_read_model_keys=[]`，未执行 `--apply`、未 enqueue、未写 DB。
+- 关键决策：本 gate 完成的是生产基础设施只读闭环，不等于每个页面每个功能完整业务 E2E；direct read model `--apply` 和业务 write-operation E2E 仍需要单独审批与安全 scenario。
+- 文档影响：同步 read-models 实施记录中的 P0 DB 表级聚合和 P2 dry-run 证据。
+- 未测风险：6 个 OA attachment invoice cross-OA duplicate 仍需单独只读语义审计与 source alias/migration identity 修复设计。
+
+## 2026-06-20 - health-ready probe gzip JSON 解压与公网只读复验
+
+- 目标：修复 `health_ready_payload_probe` 对公网 gzip JSON readiness 响应的误判，避免将真实 `ready` payload 记录为 `invalid_json_response`。
+- 影响范围：`fin_ops_platform.tools.health_ready_payload_probe`、App Health 生产只读 readiness 证据；不改变后端 `/health/ready` API、Nginx 配置、业务 API、权限或 read model/worker 行为。
+- 根因：`health_ready_payload_probe` 复用 `http_slo_probe._auth_headers()`，默认发送 `Accept-Encoding: gzip`，但读取响应后没有复用 gzip 解压逻辑；公网 `https://www.yn-sourcing.com/fin-ops-api/health/ready` 返回 gzip 压缩 JSON 时，probe 在解析压缩字节流前就进入 `invalid_json_response`。
+- 修复：`health_ready_payload_probe` 读取 body 后先调用 `http_slo_probe._decoded_response_body(...)`，与 HTTP SLO probe 的 gzip 处理保持一致。
+- 生产复验证据：公网 `health_ready_payload_probe --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --target-ms 1000 --json` 通过，`elapsed_ms=195.12`、`health_status=ready`、`runtime_blocker_count=0`、`api_performance_endpoints_returned=20`、`api_performance_endpoint_count=73`、`runtime_release_name=codex-http-slo-gzip-probe-3546e985-20260619210708`。
+- 当前 closure gate：本地 `runtime_sync_closure_gate --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --allow-unauthenticated-http --health-ready-target-ms 1000 --json` 仍按安全合同返回 `postgres_configuration_missing` / `database_url_required`，不能把缺 DB URL 当通过；该命令未触发 `--apply`、未执行业务写操作。
+- 测试覆盖：`tests.test_health_ready_payload_probe.HealthReadyPayloadProbeTests.test_decodes_gzip_ready_payload` 覆盖 gzip JSON readiness 解压；既有 bounded payload、HTML fallback、runtime blocker 提取测试保持通过。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_health_ready_payload_probe -v`；`python3 -m py_compile backend/src/fin_ops_platform/tools/health_ready_payload_probe.py tests/test_health_ready_payload_probe.py`；公网 health-ready probe；runtime closure gate 只读缺配置检查。
+- 未测风险：P1 Browser smoke 仍缺 `FIN_OPS_E2E_OA_TOKEN` / `FIN_OPS_E2E_ADMIN_TOKEN`；P2 direct read model SLO dry-run 仍需安装已补强的 root-owned helper 或提供安全 DB URL。
+
+## 2026-06-19 - 生产外部 gate 输入预检
+
+- 目标：把生产 admin Browser、authenticated HTTP/SSE 和 controlled write-operation apply 的缺凭证/缺审批状态从人工判断改为可复跑的只读预检，避免无人值守流程把外部输入缺失误判为产品代码失败。
+- 影响范围：`fin_ops_platform.tools.production_external_gate_preflight`、`scripts/verify.sh infra-smoke`、全局 testing/nightly 文档、运维 monitoring runbook 和 testing closure 状态；不改变 AppHealth 页面、dashboard 权限、HTTP SLO 采样逻辑或写操作 smoke 的审批约束。
+- 关键决策：预检只输出 gate 状态和 env 名称，不输出 token、cookie、数据库 URL 或 scenario 内容；`--require-ready` 缺输入返回 `2`。生产 write-operation apply 仍必须同时具备真实认证、PostgreSQL URL、安全隔离 scenario 和审批 ticket。
+- 文档影响：更新本文件、`docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/operations/monitoring.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `tests/test_production_external_gate_preflight.py`，覆盖缺输入、全输入和 `--require-ready` 退出码，并断言 secret 值不会出现在 JSON 报告中。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_production_external_gate_preflight -v`；`python3 -m py_compile backend/src/fin_ops_platform/tools/production_external_gate_preflight.py tests/test_production_external_gate_preflight.py`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gate_preflight --json`；`bash scripts/verify.sh docs`。
+- 未测风险：当前生产仍缺真实 admin token/cookie 和写操作 approval ticket，因此 admin AppHealth Browser smoke 与真实 mutating write-operation apply 仍不能标记通过。
+
+## 2026-06-19 - 生产 admin AppHealth Browser smoke gate
+
+- 目标：把 admin-only AppHealth 页面从“缺真实 admin 浏览器验证”推进为可复跑的生产只读 Playwright gate，避免只靠 API probe 或本地 mock 证明页面可用。
+- 影响范围：`web/e2e/production-admin-app-health.spec.ts`、`web/package.json`、Playwright strict diagnostics guard、系统状态测试矩阵和全局 testing closure 状态；不改变 AppHealth 产品逻辑、dashboard 权限、API contract 或运行时指标采集。
+- 关键决策：生产 admin smoke 默认跳过；只有显式设置 `FIN_OPS_E2E_PRODUCTION_ADMIN_SMOKE=1` 和 `FIN_OPS_E2E_ADMIN_TOKEN` 时才向 `www.yn-sourcing.com` 注入 `Admin-Token` cookie。测试关闭 screenshot/trace/video，监听并拒绝 `POST`/`PUT`/`PATCH`/`DELETE`，断言 `/fin-ops/operations/app-health` 展示 `AppHealth 运维状态`、数据/请求/后台三块，且 `/api/operations/app-health-dashboard` 返回 200。
+- 文档影响：更新本文件、`tests.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/production-admin-app-health.spec.ts`；扩展 `tests/test_playwright_e2e_strict_diagnostics.py`，静态锁定 env gate、token 来源、只读请求 guard、关闭敏感产物和 npm script。
+- 验证命令：`cd web && FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com npx playwright test e2e/production-admin-app-health.spec.ts --project=chromium` 默认 skip；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`cd web && npx tsc --noEmit --pretty false`；`bash scripts/verify.sh docs`。
+- 未测风险：当前没有真实 admin token/cookie，因此本轮只能证明生产 admin Browser gate 已编码、默认安全、可复跑；实际 dashboard 200 和大库指标渲染仍需 admin 凭据后执行。
+
+## 2026-06-19 - gzip-aware HTTP SLO probe 生产复验
+
+- 目标：修正公网 HTTP SLO 探针与真实浏览器传输口径不一致的问题，并复验上一轮 user-level 慢项是否仍真实存在。
+- 影响范围：`http_slo_probe`、App Health runtime closure 证据、全局 testing closure 状态；不改变业务 API、read model、dashboard 权限或 Nginx 配置。
+- 关键决策：生产 Nginx 已启用 gzip，浏览器首屏会请求压缩响应；SLO 工具应默认发送 `Accept-Encoding: gzip`，解压后提取 JSON metadata 和 HTML fallback，但 `response_bytes` 记录压缩传输字节。此前未压缩口径下的大 JSON p95 超时不能直接等同浏览器慢。
+- 发布证据：hotfix commit `3546e985 Make HTTP SLO probe gzip-aware` 已通过 release `codex-http-slo-gzip-probe-3546e985-20260619210708` 激活；API、RabbitMQ dispatcher、RabbitMQ broker 和 20 个 worker 均 active；生产 release import 断言 `_auth_headers().Accept-Encoding=gzip`。
+- 生产复验证据：使用生产目标 OA 凭据在远端内存中临时登录为 full-access user bearer，不输出 token、不落盘、不执行写接口。关键 probe `session_me`、`workbench_groups_all_paired`、`cost_statistics_explorer_all`、`turnover_ledger_grouped`、`etc_reconciliation_tasks` 运行 1 warmup + 2 measured，`status=pass`、`failure_count=0`、`probe_count=5`、`sample_count=10`、`max_p95_ms=190.321`；随后排除 admin-only dashboard 后完整 user-scope authenticated HTTP matrix 运行 37 个 API probes、111 个 measured samples，`status=pass`、`failure_count=0`、`max_p95_ms=735.265`；authenticated SSE 2/2 pass，`max_first_event_ms=343.0`。
+- 测试覆盖：`tests.test_http_slo_probe.HttpSloProbeTests.test_collects_samples_with_api_prefix_without_leaking_auth` 锁定默认 gzip header；`test_gzip_json_response_is_decoded_for_metadata` 锁定 gzip JSON 解压、metadata 提取和压缩传输字节记录；既有 admin-scope 测试继续保护 dashboard 凭证分流。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe tests.test_runtime_sync_closure_gate tests.test_slo_tool_defaults -v`；`python3 -m py_compile backend/src/fin_ops_platform/tools/http_slo_probe.py tests/test_http_slo_probe.py`；生产只读 `finops-deploy-control status` / systemd active 检查和关键 authenticated HTTP probe。
+- 未测风险：本轮没有 admin token/cookie 证明 `/api/operations/app-health-dashboard` 200，也没有执行业务写操作 apply；full closure 仍依赖 admin 登录态、审批 ticket、安全 scenario 和生产 Browser smoke。
+
+## 2026-06-19 - 生产只读 runtime gate 复查
+
+- 目标：在不执行写操作、不重启服务、不触发 read model apply 的前提下，复查当前生产 release 的 runtime/read model/worker 外部证据，推进 Spec-first E2E 总目标中的真实基础设施闭环。
+- 影响范围：系统状态实施记录和全局 testing closure 状态；不改变产品代码、不改变 dashboard 权限、不执行业务写操作。
+- 生产证据：公网 `/fin-ops-api/health/ready` 通过，`elapsed_ms=144.671`、`runtime_blocker_count=0`、release 为 `main-8b5942e4-http-slo-admin-scope-202606191805` 且 `runtime_release.consistent=true`。SSH 只读检查显示 `fin-ops.service`、RabbitMQ dispatcher 和 20 个 `fin-ops-worker@*.service` 均 `active/running`，三类 systemd WorkingDirectory 均指向同一 release。加载 systemd env 后，`read_model_slo_smoke --critical-only` dry-run 规划 15 个 critical scopes；生产 PostgreSQL 权威表只读汇总显示 `job.outbox_events=[["done", 157060]]`、`job.read_model_dirty_scopes=[["done", 143020]]`、`read_model.app_status_readiness=[["fresh", 169]]`。公网 `runtime_sync_closure_gate` 的 `runtime_health` 和 `health_ready_payload` checks 通过。
+- 关键决策：本轮只读取证据，不把 dry-run 当作 enqueue-to-fresh 证明，不把缺认证的 HTTP/SSE 401 或本机 backend port 上的页面 shell 404 当作业务失败，也不绕过 write-operation 审批闸门。
+- 文档影响：更新本实施记录和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：本轮是生产只读取证，不新增代码测试；既有 `health_ready_payload_probe`、`read_model_slo_smoke` 和 `runtime_sync_closure_gate` 测试继续覆盖工具合同。
+- 验证命令：公网 `health_ready_payload_probe --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --target-ms 1000 --json`；SSH 只读 `systemctl list-units 'fin-ops*'`、`systemctl show ... WorkingDirectory`；生产本机加载 systemd env 后使用 `/opt/fin-ops/venv/bin/python` 执行 `read_model_slo_smoke --critical-only --target-ms 5000 --json`；生产 PostgreSQL 只读汇总 `job.outbox_events`、`job.read_model_dirty_scopes`、`read_model.app_status_readiness`；公网 `runtime_sync_closure_gate --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --allow-unauthenticated-http --health-ready-target-ms 1000 --json`。
+- 未测风险：没有运行 `read_model_slo_smoke --apply`，因此本轮不证明新的 direct enqueue-to-fresh worker drain；没有配置 bearer/admin token，所以 authenticated HTTP/SSE gate 仍未闭合；没有 write scenario、approval ticket 和真实认证，所以 write-operation E2E 仍未闭合；write-operation audit 仍显示缺少近期高影响真实写入 profile 样本。
+
+## 2026-06-19 - 当前 release read model apply gate 复验
+
+- 目标：在只读 runtime gate 通过后，补齐当前生产 release 的 direct read model enqueue-to-fresh 证据。
+- 影响范围：App Health closure ledger、read-models 和 runtime-workers 运行证据；不执行业务写接口，不改变 dashboard 权限。
+- 生产证据：`runtime_sync_closure_gate --apply-read-model-smoke` 首轮证明 `runtime_health` 和 `health_ready_payload` 通过，但 `invoice_lifecycle:2026-04` 与 `cost_statistics:active:2026-04` 超过 5 秒目标；两项聚焦复验 2/2 pass；最终完整 `read_model_slo_smoke --apply --critical-only --target-ms 5000 --timeout-seconds 120` 15/15 pass，summary p50 约 580.34ms，p95/max 约 3863.253ms。复验后 PostgreSQL 汇总为 `job.outbox_events=[["done", 157126]]`、`job.read_model_dirty_scopes=[["done", 143083]]`、`read_model.app_status_readiness=[["fresh", 169]]`。
+- 关键决策：direct read model apply 已能证明当前 release 的 worker drain/readiness 收敛；full closure gate 仍不能标记 complete，因为 authenticated HTTP/SSE 和真实 write-operation E2E 仍缺 token、approval ticket 和安全 scenario。
+- 文档影响：同步 `docs/dev/testing-closure-state.md`、`docs/modules/read-models/e2e-coverage.md`、`docs/modules/read-models/implementation-notes.md` 和 `docs/modules/runtime-workers/e2e-coverage.md`。
+- 测试覆盖：本轮运行生产 gate，没有新增代码测试；既有 closure/read-model gate 单测继续保护工具合同。
+- 未测风险：admin dashboard authenticated gate、SSE authenticated gate 和 mutating write-operation E2E 仍未闭合。
+
+## 2026-06-19 - 当前 release authenticated user HTTP/SSE gate 复验
+
+- 目标：在 direct read model apply 通过后，继续推进 authenticated runtime gate，区分 user-level 认证/SSE、admin-only dashboard 和 HTTP 性能慢项。
+- 影响范围：App Health closure ledger、`http_slo_probe` / `sse_smoke_probe` 生产证据和全局 testing closure 状态；不执行业务写接口，不输出 token。
+- 生产证据：生产有 2 个 configured target OA credentials；使用目标 OA 申请人凭据临时登录得到的 bearer token 调用 `/api/session/me`，两者均返回 `200`、`access_tier=full_access`、`can_access_app=true`、`can_mutate_data=true`、`can_admin_access=false`。因此 user-level 认证可用，但没有 admin session。
+- User-level HTTP 结果：排除 admin-only dashboard 后，37 个 API probes、111 个 measured samples 中失败 5 项，均为 `200` 或 `200 fresh` 的耗时超标；focused rerun 后 `bank_details_auto_tag_rules` 通过，剩余 4 项仍超 1 秒：`workbench_groups_all_paired` p95 约 2680.029ms、`cost_statistics_explorer_all` p95 约 1160.09ms、`turnover_ledger_grouped` p95 约 1181.292ms、`etc_reconciliation_tasks` p95 约 1396.46ms。
+- SSE 结果：`/api/app-health/stream` 与 `/api/workbench/events?month=all` 2/2 pass，first event 分别约 350.665ms 和 217.741ms。
+- 关键决策：user-level authenticated session 和 SSE gate 已闭合；HTTP gate 仍为 performance partial，不应被标记 complete。admin-only dashboard 仍需要真实 admin token/cookie，不能用 full_access 非 admin token 代替。
+- 文档影响：更新本实施记录和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：本轮运行生产 probes，没有新增代码测试；既有 `tests/test_http_slo_probe.py`、`tests/test_sse_smoke_probe.py` 和 `tests/test_runtime_sync_closure_gate.py` 继续保护工具合同。
+- 未测风险：4 个 user-level HTTP 慢项尚未优化或重新定标；admin dashboard 和 mutating write-operation E2E 仍未闭合。
+
+## 2026-06-19 - HTTP SLO admin-only probe 凭证分流
+
+- 目标：让最终 authenticated HTTP gate 能同时使用普通 OA bearer token 和 admin token 验证所有默认 API probes，避免 admin-only dashboard 只能全局使用普通 token 导致稳定 403。
+- 影响范围：`http_slo_probe`、`runtime_sync_closure_gate`、系统状态测试矩阵和全局 testing closure 状态；不改变 dashboard 权限、不改变业务 API。
+- 关键决策：`HttpProbe` 新增 `auth_scope`，默认 `user`；`operations_app_health_dashboard` 标记为 `admin`。`collect_http_slo(...)` 支持 `admin_headers`，admin-scoped probe 使用 admin headers，普通 probe 使用 user headers。CLI 同时提供 `FIN_OPS_HTTP_SLO_BEARER_TOKEN` 和 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` 时会分流；只有 admin token 时保留兼容，允许用 admin token 跑全部 probes；没有 admin token 时 admin-only probe 继续失败，不能把 403 当性能通过。
+- 文档影响：更新本模块 `tests.md`、本实施记录和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `tests.test_http_slo_probe.HttpSloProbeTests.test_admin_scoped_probe_uses_admin_headers_without_overriding_user_probes`，并更新默认 probe 测试断言 dashboard auth scope；新增 `tests.test_runtime_sync_closure_gate.RuntimeSyncClosureGateTests.test_gate_passes_admin_headers_to_http_slo_probe`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe tests.test_runtime_sync_closure_gate tests.test_slo_tool_defaults -v`；`python3 -m py_compile backend/src/fin_ops_platform/tools/http_slo_probe.py backend/src/fin_ops_platform/tools/runtime_sync_closure_gate.py tests/test_http_slo_probe.py tests/test_runtime_sync_closure_gate.py`。
+- 未测风险：生产仍缺真实 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` 或 admin cookie，因此还不能完成 admin-only dashboard authenticated gate；本轮只证明工具能正确分流凭证。
+
+## 2026-06-19 - 生产 authenticated API SLO 复跑只剩 admin 凭证缺口
+
+- 目标：复核 output invoice all-scope hotfix 后的生产 authenticated API-only SLO 当前状态，区分真实性能/read-model 问题和 admin-only 凭证缺口。
+- 影响范围：app-health-operations runtime gate 事实记录、`http_slo_probe` 生产使用方式和全局 testing closure ledger；本轮不改变业务代码、不改变 dashboard 权限。
+- 关键决策：使用现有目标 OA 申请人凭据临时登录，只在内存中作为 Bearer token 调用只读 GET，不输出 token、不落盘、不执行业务写操作。非 admin 登录态访问 `/api/operations/app-health-dashboard` 返回 403 是权限合同，不应通过放宽 dashboard 权限或把 admin-only endpoint 混入普通用户性能通过条件来修复。
+- 生产证据：Workbench 单项 `/api/workbench/groups?month=all&zone=paired&page=1&page_size=50` 使用正式 `http_slo_probe.collect_http_slo` 运行 1 次 warmup + 8 次 measured，全部 `200 fresh`，p95 `274.362ms`。全量 API-only authenticated probe 运行默认 38 个 API、1 次 warmup + 3 次 measured，总 114 个 measured samples，`max_p95_ms=710.177`，无 `>800ms` 慢项；Workbench、成本统计和 ETC 均已通过 1000ms 目标。
+- Read model / worker 证据：生产只读巡检显示当前 release 为 `main-9e9546ac-output-invoice-all-scope-20260619173552`，API、RabbitMQ dispatcher 和 20 个 worker service 共 22 个 fin-ops systemd service running；`job.read_model_dirty_scopes` 非 done 为空，`job.outbox_events` 非 done 为空，recent failed/dead-letter/publish-failed outbox 为空；App Status readiness 中所有登记 read model key 均只有 `fresh`。heartbeat 表仍保留历史旧 worker id 的 stale/stopped 行，但 `/health/ready` 返回 `status=pass`、`elapsed_ms=82.849`、`runtime_blocker_count=0`、`runtime_release.consistent=true`，因此这些历史 heartbeat 行当前不构成 runtime blocker。
+- 当前剩余 gate：唯一失败是 admin-only `/api/operations/app-health-dashboard` 三次 `403`。生产环境存在 `FIN_OPS_ADMIN_USERNAMES`，但没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` 或 cookie；现有 2 个目标 OA 凭据均为 `access_tier=full_access`、`can_mutate_data=true`、`can_admin_access=false`。
+- 文档影响：更新 `docs/dev/testing-closure-state.md` 和本实施记录。
+- 测试覆盖：本轮是生产只读取证，不新增代码测试；既有 `tests/test_http_slo_probe.py` 和 app-health API/权限测试继续覆盖 probe contract 和 admin-only dashboard contract。
+- 验证命令：生产只读 `http_slo_probe.collect_http_slo` Workbench 单项和全量 API-only authenticated probe；本地 `bash scripts/verify.sh docs`、`git diff --check -- docs/dev/testing-closure-state.md`。
+- 未测风险：admin-only dashboard 仍需要真实 admin token/cookie 或目标 OA admin 凭据；真实业务 write-operation apply 仍需要审批 ticket。
+
+## 2026-06-19 - Write-operation E2E apply 审批闸门
+
+- 目标：防止最终 runtime closure 或直接 `write_operation_e2e_smoke --apply` 在只有 auth/scenario 的情况下误触生产 mutating HTTP，把“人工/业务已批准”变成机器可验证的显式输入。
+- 影响范围：`write_operation_e2e_smoke`、`runtime_sync_closure_gate`、`p2p3_gate_result_classifier`、系统状态测试矩阵和长期监控 runbook；不改变业务写接口、operation profile、read model/worker SLO 判断或 scenario schema。
+- 关键决策：直接 write E2E `--apply` 必须提供 `--approval-ticket` 或 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET`；缺失时返回 `status=approval_missing`、`error=write_operation_e2e_requires_approval_ticket`，且在连接 Postgres 或发起 mutating HTTP 前停止。最终 closure gate 的 required args 扩展为 `--write-scenario`、`--apply-write-scenarios`、`--write-approval-ticket`；缺 approval 时 `write_operation_e2e` check 失败并且不调用 write E2E 执行器。
+- 文档影响：更新本模块 `tests.md`、`docs/operations/monitoring.md`、read-models 实施记录和全局 testing closure 状态。
+- 测试覆盖：新增/更新 `tests.test_write_operation_e2e_smoke.WriteOperationE2ESmokeTests.test_cli_apply_requires_approval_before_postgres_configuration`、`test_apply_requires_approval_before_mutating_requests`、`tests.test_runtime_sync_closure_gate.RuntimeSyncClosureGateTests.test_write_scenario_apply_requires_approval_ticket_before_write_e2e_runs`、`tests.test_p2p3_gate_result_classifier.P2P3GateResultClassifierTests.test_classifies_nested_write_approval_missing_as_approval_required`；既有 apply 正路径测试传入测试 approval。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_e2e_smoke tests.test_runtime_sync_closure_gate tests.test_p2p3_gate_result_classifier -v`；`python3 -m py_compile backend/src/fin_ops_platform/tools/write_operation_e2e_smoke.py backend/src/fin_ops_platform/tools/runtime_sync_closure_gate.py backend/src/fin_ops_platform/tools/p2p3_gate_result_classifier.py tests/test_write_operation_e2e_smoke.py tests/test_runtime_sync_closure_gate.py tests/test_p2p3_gate_result_classifier.py`；生产 release `main-33a150e7-write-e2e-approval-gate-20260619151922` 激活后 `/health/ready` 为 ready，缺 approval 的 minimal turnover `--apply` smoke 返回 `approval_missing` / exit code 2；发布后 critical read-model apply 15/15 pass，p95/max 约 4960.071ms，outbox/dirty/readiness 汇总为 done/done/fresh。
+- 未测风险：审批闸门已在生产阻止缺 approval 的 apply；真实 write-operation closure 仍需要业务批准、真实认证和生产 apply smoke 样本。
+
+## 2026-06-19 - 系统状态页面级 Spec-first E2E covered
+
+- 目标：把 `app-health-operations` 从首轮 `documented-risk` 校准为页面级 `spec-first-covered`，明确 Browser 合同、覆盖映射和真实基础设施风险边界。
+- 影响范围：`web/e2e/app-shell.spec.ts`、`docs/modules/app-health-operations/e2e-spec.md`、`docs/modules/app-health-operations/e2e-coverage.md`、系统状态测试矩阵和全局 Spec-first E2E inventory。
+- 关键决策：
+  - 不改产品逻辑；现有 service/API/component/Browser 测试已经覆盖系统状态页面主要业务合同。
+  - 给 App Health Browser smoke 补严格浏览器错误捕获，确保 admin dashboard、read-export admin-only gate、forbidden 和 expired session gate 期间隐藏 `pageerror`、`console.error`、非 abort request failure 或未预期 dialog 会失败。
+  - 真实 PostgreSQL/RabbitMQ/Redis/systemd/Nginx/OA iframe、大库 metrics、authenticated HTTP/SSE 和 controlled write-operation E2E 不用本地 deterministic E2E 伪装覆盖，继续登记为 staging/runtime smoke external-risk。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、本文件和全局 testing closure 文档。
+- 测试覆盖：更新 `web/e2e/app-shell.spec.ts`。
+- 验证命令：`cd web && npx playwright test e2e/app-shell.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker heartbeat、queue backlog、Nginx/OA iframe SSE、真实大库 dashboard metrics、`pg_stat_statements`、authenticated HTTP/SSE/write-operation SLO。
 
 ## 2026-06-19 - Ready 与 Runtime Read Model 闭环边界
 
@@ -137,7 +291,7 @@
 
 - 目标：让无人值守 P2/P3 主控在最终 runtime gate 失败时，能区分缺少受控写 scenario、只 dry-run、缺认证/环境和真实性能失败。
 - 影响范围：`runtime_sync_closure_gate` 的 `write_operation_e2e` check payload、系统状态测试矩阵、运维 monitoring runbook 和 P2/P3 closure ledger；不改变业务写接口、scenario schema 或 SLO 判断。
-- 关键决策：缺少 `--write-scenario` 时保持 gate `fail`，payload 输出 `status=input_required`、`missing_args=["--write-scenario"]` 和完整 `required_args`；提供 scenario 但未显式 `--apply-write-scenarios` 时保留 dry-run report，并附加缺失 apply 参数；scenario 文件存在但为空、JSON 非法或 contract 非法时，`write_operation_audit` 和 `write_operation_e2e` 都返回 `input_error`，且不会退回运行 unscoped write audit。最终闭环仍必须真实 apply 受控写 E2E。
+- 关键决策：缺少 `--write-scenario` 时保持 gate `fail`，payload 输出 `status=input_required`、`missing_args=["--write-scenario"]` 和完整 `required_args`；提供 scenario 但未显式 `--apply-write-scenarios` 时保留 dry-run report，并附加缺失 apply 参数；显式 apply 但缺少 `--write-approval-ticket` 时返回 `approval_missing`，且不调用 write E2E 执行器；scenario 文件存在但为空、JSON 非法或 contract 非法时，`write_operation_audit` 和 `write_operation_e2e` 都返回 `input_error`，且不会退回运行 unscoped write audit。最终闭环仍必须真实 apply 受控写 E2E。
 - 文档影响：更新本模块 `tests.md`、`docs/operations/monitoring.md` 和 `.planning/P2P3-CLOSURE-PLAN.md`。
 - 测试覆盖：更新 `tests.test_runtime_sync_closure_gate.RuntimeSyncClosureGateTests.test_gate_fails_without_authenticated_http_and_write_scenario`、`test_write_scenario_dry_run_does_not_satisfy_closure` 和 `test_invalid_write_scenario_is_reported_as_input_error_without_running_write_checks`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_sync_closure_gate -v`。
@@ -182,6 +336,16 @@
 - 测试覆盖：`tests.test_http_slo_probe.HttpSloProbeTests.test_api_probe_rejects_html_shell_response`、`tests.test_http_slo_probe.HttpSloProbeTests.test_page_probe_allows_html_shell_response`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe -v`。
 - 未测风险：真实生产认证态 API p95/freshness 仍需安全 token/cookie 后运行最终 SLO gate；本地测试只证明工具不会把 HTML fallback 当 API 成功。
+
+## 2026-06-19 - admin-scoped HTTP SLO probe 发布验证
+
+- 目标：修复生产 authenticated HTTP SLO 中 admin-only `/api/operations/app-health-dashboard` 被普通目标 OA bearer 固定采样为 403 的 gate 设计缺口。
+- 影响范围：`http_slo_probe`、`runtime_sync_closure_gate`、App Health admin dashboard SLO gate 和测试闭环状态；不改变 App Health 业务权限、页面路由或 dashboard API 行为。
+- 关键决策：不放宽 dashboard 权限，也不把 403 当性能通过；普通 API probe 继续使用 user bearer/cookie，admin-only dashboard probe 只在提供 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`--admin-token` 或 admin cookie 时使用 admin headers。
+- 发布：hotfix commit `8b5942e4 Support admin-scoped HTTP SLO probes` 已通过 release `main-8b5942e4-http-slo-admin-scope-202606191805` 激活到生产。
+- 发布后验证：发布脚本完成 backend readiness、worker ensure、frontend hash 和 public session route checks；生产只读检查显示 API/dispatcher active、20 个 worker running、`/health/ready` ready，`job.outbox_events` 非 done、`job.read_model_dirty_scopes` 非 done、`read_model.app_status_readiness` 非 fresh 和近 30 分钟 failed/dead-letter/publish-failed outbox 均为空；生产 release `py_compile` 通过，import 断言 `operations_app_health_dashboard_auth_scope=admin`。
+- 测试覆盖：`tests.test_http_slo_probe.HttpSloProbeTests.test_admin_scoped_probe_uses_admin_headers_without_overriding_user_probes`、`tests.test_runtime_sync_closure_gate.RuntimeSyncClosureGateTests.test_gate_passes_admin_headers_to_http_slo_probe`，并复跑 `tests.test_slo_tool_defaults`。
+- 未测风险：生产仍缺真实 admin token/cookie 或目标 OA admin 凭据，因此 full authenticated HTTP gate 不能最终闭合；真实 write-operation apply 仍需审批 ticket。
 
 ## 2026-06-16 - Health readiness API performance payload 上限
 

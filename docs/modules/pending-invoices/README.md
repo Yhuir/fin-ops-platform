@@ -53,6 +53,8 @@ OA/流水/发票配对关系不属于待找发票页面私有状态。读关系�
 
 ## 本目录文件
 
+- `e2e-spec.md`：维护 Spec-first Browser E2E 用户流程和验收合同。
+- `e2e-coverage.md`：维护 Spec ID 到 Playwright/API/integration 覆盖的映射和缺口。
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。

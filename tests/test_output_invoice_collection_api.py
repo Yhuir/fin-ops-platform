@@ -3,12 +3,15 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
 from typing import Any
 import unittest
 from urllib.parse import quote
+
+from openpyxl import load_workbook
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
@@ -88,6 +91,77 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
         self.assertEqual(payload["rows"][0]["invoiceId"], "out-api-1")
         self.assertEqual(payload["rows"][0]["invoice"]["buyerName"], "甲客户")
+
+    def test_export_preview_and_download_use_current_filter_without_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(
+                app,
+                invoices=[
+                    self._invoice("out-export-1", "9001", "甲客户", total_with_tax="300.00"),
+                    self._invoice("out-export-2", "9002", "乙客户", total_with_tax="100.00"),
+                    self._invoice("out-export-3", "9003", "甲客户", total_with_tax="200.00"),
+                ],
+            )
+            filters = quote(json.dumps([{"field": "buyer_name", "operator": "in", "values": ["甲客户"]}]))
+
+            preview_response = app.handle_request(
+                "GET",
+                f"/api/output-invoice-collections/export-preview?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
+            )
+            download_response = app.handle_request(
+                "GET",
+                f"/api/output-invoice-collections/export?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
+            )
+
+        preview = json.loads(preview_response.body)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview["row_count"], 2)
+        self.assertIn("发票号码", preview["columns"])
+        self.assertIn("红蓝票依据", preview["columns"])
+        self.assertEqual(preview["sample_rows"][0]["发票号码"], "9001")
+        self.assertEqual(preview["sample_rows"][0]["购方"], "甲客户")
+
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_response.headers["Content-Type"])
+        self.assertIn("filename*=", download_response.headers["Content-Disposition"])
+        workbook = load_workbook(BytesIO(download_response.body))
+        sheet = workbook.active
+        self.assertEqual(sheet.title, "销项收款")
+        self.assertEqual(sheet.cell(row=1, column=2).value, "发票号码")
+        self.assertEqual(sheet.cell(row=2, column=2).value, "9001")
+        self.assertEqual(sheet.cell(row=2, column=4).value, "甲客户")
+        self.assertEqual(sheet.cell(row=3, column=2).value, "9003")
+        self.assertIsNone(sheet.cell(row=4, column=2).value)
+
+    def test_export_rejects_row_count_over_contract_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[self._invoice("out-limit", "9101", "超量客户")])
+            row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
+
+            def too_many_rows(_query: dict[str, list[str]]) -> dict[str, object]:
+                return {
+                    "rows": [deepcopy(row) for _index in range(20001)],
+                    "pagination": {"page": 1, "pageSize": 200, "total": 20001},
+                    "summary": {},
+                    "read_model_status": "fresh",
+                }
+
+            app._get_output_invoice_collection_all_rows_from_sql_read_model = too_many_rows
+            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
+            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
+
+        self.assertEqual(preview_response.status_code, 400)
+        self.assertEqual(
+            json.loads(preview_response.body)["error"]["code"],
+            "output_invoice_collection_export_row_limit_exceeded",
+        )
+        self.assertEqual(download_response.status_code, 400)
+        self.assertEqual(
+            json.loads(download_response.body)["error"]["details"]["limit"],
+            20000,
+        )
 
     def test_detail_rules_preview_history_and_relation_routes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

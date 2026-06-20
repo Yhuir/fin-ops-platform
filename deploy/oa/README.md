@@ -414,6 +414,10 @@ sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-na
   --apply \
   --reason production_scope_contract_repair \
   --json
+sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
+  --json \
+  --critical-only \
+  --target-ms 5000
 ```
 
 `workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
@@ -422,6 +426,9 @@ sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-na
 `read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
 用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
 由 helper 加载 runtime env，不提供任意 shell 执行能力。
+`read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
+用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
+真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
 
 说明：
 

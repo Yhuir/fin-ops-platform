@@ -84,12 +84,14 @@ read_model_direct_smoke=pass
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --apply-read-model-smoke \
   --write-scenario /tmp/finops-write-e2e-scenarios.json \
   --apply-write-scenarios \
+  --write-approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --http-target-ms 1000 \
   --read-model-target-ms 5000 \
   --write-target-ms 5000 \

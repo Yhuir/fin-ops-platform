@@ -41,6 +41,7 @@
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 大量 group 下筛选、分页、详情抽屉、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |
 | `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并保留读侧诊断。 |
+| `RECON-WB-E2E-013` | 已配对现金流水特殊处理 | P1 | full-access 用户可从已配对银行流水更多菜单执行 `确认为过账`、`确认为买票` 和 `取消现金处理`；买票弹窗必须校验买票成本和项目名称；三个 mutation 都必须携带完整 group row ids、等待 operation barrier，并且成功后不能出现隐藏的错误弹窗、浏览器异常或 stale UI。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
@@ -50,4 +51,3 @@
 - 大数据 P95/P99 性能和生产历史污染 repair。
 
 这些必须在 staging、生产只读 audit 或 runbook smoke 中验证，不能写成本地 CI 已覆盖。
-

@@ -225,7 +225,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
             with patch.dict(os.environ, env, clear=False):
                 exit_code = write_operation_e2e_smoke.main(
-                    ["--scenario", str(path), "--apply", "--json"],
+                    ["--scenario", str(path), "--apply", "--approval-ticket", "TEST-APPROVAL", "--json"],
                     stdout=stdout,
                 )
 
@@ -234,6 +234,84 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(payload["status"], "configuration_missing")
         self.assertEqual(payload["tool"], "write_operation_e2e_smoke")
         self.assertEqual(payload["error"], "postgres_configuration_missing")
+
+    def test_cli_apply_requires_approval_before_postgres_configuration(self) -> None:
+        env = {
+            "FIN_OPS_APP_STORAGE_BACKEND": "postgres",
+            "FIN_OPS_POSTGRES_DATABASE_URL": "",
+            "DATABASE_URL": "",
+            "FIN_OPS_WRITE_E2E_APPROVAL_TICKET": "",
+        }
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "turnover-withdraw",
+                            "operation": "turnover_manual_closure_or_withdraw",
+                            "steps": [
+                                {
+                                    "name": "withdraw",
+                                    "method": "POST",
+                                    "path": "/api/turnover-ledger/relations/REL-1/withdraw",
+                                    "json": {"note": "apply"},
+                                }
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+
+            with patch.dict(os.environ, env, clear=False):
+                exit_code = write_operation_e2e_smoke.main(
+                    ["--scenario", str(path), "--apply", "--json"],
+                    stdout=stdout,
+                )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "approval_missing")
+        self.assertEqual(payload["error"], "write_operation_e2e_requires_approval_ticket")
+        self.assertEqual(payload["required_args"], ["--scenario", "--apply", "--approval-ticket"])
+
+    def test_apply_requires_approval_before_mutating_requests(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="turnover-withdraw",
+            operations=("turnover_manual_closure_or_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/turnover-ledger/relations/REL-1/withdraw",
+                    json_body={"note": "smoke"},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+        calls: list[str] = []
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            calls.append(url)
+            return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection([]),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "approval_missing")
+        self.assertEqual(report["error"], "write_operation_e2e_requires_approval_ticket")
+        self.assertEqual(calls, [])
 
     def test_apply_requires_auth_before_mutating_requests(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -264,6 +342,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             api_prefix="/fin-ops-api",
             tenant_id="default",
             headers={},
+            approval_reference="TEST-APPROVAL",
             request_fn=request_fn,
         )
 
@@ -303,6 +382,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             api_prefix="/fin-ops-api",
             tenant_id="default",
             headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
             request_fn=request_fn,
         )
 
@@ -343,6 +423,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             api_prefix="/fin-ops-api",
             tenant_id="default",
             headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
             request_fn=request_fn,
         )
 
@@ -380,6 +461,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             api_prefix="/wrong-prefix",
             tenant_id="default",
             headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
             request_fn=request_fn,
         )
 

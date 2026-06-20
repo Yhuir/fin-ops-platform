@@ -29,6 +29,174 @@
 
 ## 历史记录
 
+## 2026-06-20 - collection reminder mutation 暂时失败重试恢复
+
+- 目标：补齐销项收款状态保存成功后，`collection-reminder` 暂时失败的本地 `NETWORK-RECOVERY` Browser 负面链路，避免页面提前关闭 drawer、刷新 rows、伪装 `待冲红`，或重试时重复提交已保存的 status payload 触发 expectedVersion/重复写风险。
+- 影响范围：`web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx`、`web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改后端 API 或 lifecycle service contract。
+- 关键决策：`CollectionStatusReminderDrawer` 只在 status/reminder 整体保存成功后通知页面刷新 rows；status 已成功但 reminder 失败时保留 drawer 内错误和用户输入，并记录已成功保存的 status fingerprint。用户重试且 status payload 未改变时，只重新提交 reminder，避免用旧 `expectedVersion` 重复提交 status。
+- 文档影响：`OUT-COLL-E2E-002` 增加 status 200 后 reminder 503 的 drawer 保持、rows 不提前刷新、status 不重复提交和重试成功证据；全局 `NETWORK-RECOVERY` 记录销项收款已覆盖状态/提醒分步失败恢复。
+- 测试覆盖：`web/e2e/output-invoice-collections-flow.spec.ts` 新增真实 Chromium 用例，deterministic mock 支持 `outputInvoiceCollectionReminderFailuresBeforeSuccess`，断言 reminder 503 后错误提示、drawer/提醒草稿保持、rows count 不变、status PUT count 保持 1、reminder 重试成功后 rows refresh 和无浏览器错误残留。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：真实多用户同时修改 expectedVersion、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产网络长时间中断和真实生产历史样本仍需 staging/runtime smoke。
+
+## 2026-06-20 - receipt void/reissue mutation 暂时失败重试恢复
+
+- 目标：补齐正式收据作废/重开的本地 `NETWORK-RECOVERY` Browser 负面链路，避免 `POST /receipts/{id}/void` 或 `POST /receipts/{id}/reissue` 暂时失败时页面丢失用户刚填写的原因、提前刷新 history/rows 或伪装成功。
+- 影响范围：`web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`、`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改后端 API 或 receipt service contract。
+- 关键决策：`ReceiptHistoryDrawer` 的 `handleVoid` / `handleReissue` 改为返回成功布尔值；`handleConfirmAction` 只在成功时关闭原因弹窗和清空原因。失败时保留弹窗、原因输入和 drawer 内错误，便于用户直接重试。
+- 文档影响：`OUT-COLL-E2E-003` 增加 receipt void/reissue 暂时失败后原因弹窗保持、history/rows 不伪刷新和重试成功的证据；全局 `NETWORK-RECOVERY` 记录销项收款已覆盖 receipt create/void/reissue mutation 级负面链路。
+- 测试覆盖：`web/e2e/output-invoice-collections-flow.spec.ts` 新增真实 Chromium 用例，deterministic mock 支持 `outputInvoiceCollectionReceiptVoidFailuresBeforeSuccess` 和 `outputInvoiceCollectionReceiptReissueFailuresBeforeSuccess`，断言作废/重开 503 后原因弹窗和输入值保持、history/rows count 不变、重试成功后 history/rows refresh 和无浏览器错误残留。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：本地 Browser 只覆盖 receipt void/reissue 首次失败；collection-reminder 分步失败已由后续 Browser 覆盖。真实 PostgreSQL 锁等待/唯一约束冲突恢复、真实 RabbitMQ/Redis/systemd worker drain、生产历史样本和真实网络中断仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - receipt create mutation 暂时失败重试恢复
+
+- 目标：补齐正式收据创建的本地 `NETWORK-RECOVERY` Browser 负面链路，避免 `POST /api/output-invoice-collections/rows/{id}/receipts` 暂时失败时页面关闭 preview drawer、伪装已出收据、提前刷新 rows 或读取伪历史。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改产品逻辑或后端 API。
+- 关键决策：页面已有 `ReceiptPreviewDrawer` 本地错误恢复行为；本轮只加固 deterministic mock 和真实 Chromium 断言。第一次创建收据返回 503 时，mock 不推进 receipt state；第二次创建成功后才进入 issued 状态并刷新 rows。
+- 文档影响：`OUT-COLL-E2E-003` 增加 receipt create 暂时失败后可重试、保留 idempotency key、零伪 history 和 rows 不伪刷新的证据；全局 `NETWORK-RECOVERY` 记录销项收款已覆盖第二条 mutation 级负面链路。
+- 测试覆盖：`web/e2e/output-invoice-collections-flow.spec.ts` 新增真实 Chromium 用例，deterministic mock 支持 `outputInvoiceCollectionReceiptCreateFailuresBeforeSuccess`，断言 idempotency key、错误提示、preview drawer 保持、创建按钮恢复、rows count 不变、history 零调用、重试成功后 rows refresh 和无浏览器错误残留。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：本地 Browser 只覆盖 receipt create 首次失败；receipt void/reissue 暂时失败、真实 PostgreSQL 锁等待/唯一约束冲突恢复、真实 RabbitMQ/Redis/systemd worker drain、生产历史样本和真实网络中断仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - collection status mutation 暂时失败重试恢复
+
+- 目标：补齐销项收款状态/提醒保存的本地 `NETWORK-RECOVERY` Browser 负面链路，避免 `collection-status` 暂时失败时页面关闭 drawer、丢草稿、半提交 reminder 或提前刷新 rows 伪成功。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改产品逻辑或后端 API。
+- 关键决策：页面已有 drawer 本地错误恢复行为；本轮只加固 deterministic mock 和真实 Chromium 断言。第一次 `PUT /api/output-invoice-collections/rows/{id}/collection-status` 返回 503 时，不触发 reminder endpoint，不刷新 rows；第二次保存成功后才刷新 rows 并显示 `待冲红`。
+- 文档影响：`OUT-COLL-E2E-002` 增加状态保存暂时失败后可重试、零半提交和 rows 不伪刷新证据；全局 `NETWORK-RECOVERY` 记录销项收款已覆盖一条 mutation 级负面链路。
+- 测试覆盖：`web/e2e/output-invoice-collections-flow.spec.ts` 新增真实 Chromium 用例，deterministic mock 支持 `outputInvoiceCollectionStatusFailuresBeforeSuccess`，断言错误提示、drawer 保持、状态/提醒草稿保持、保存按钮恢复、reminder 零调用、rows count 不变、重试成功后 rows refresh 和无浏览器错误残留。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：本地 Browser 只覆盖 `collection-status` 首次失败；collection-reminder 分步失败和 receipt create/void/reissue 暂时失败已由后续 Browser 覆盖。真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实多用户 expectedVersion 冲突和生产网络中断仍需后续 Browser/staging/runtime smoke。
+
+## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
+
+- 目标：补齐销项收款列表的本地 `NETWORK-RECOVERY` Browser 负面链路，避免 `/api/output-invoice-collections/rows` 暂时失败时页面把错误伪装成正常空态或继续允许导出。
+- 影响范围：`web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`、`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改后端业务逻辑。
+- 关键决策：页面新增显式刷新入口；rows 加载错误时表格空行显示“销项发票收款情况加载失败，请点击刷新重试。”，普通空态不显示，`筛选内容导出` 禁用；刷新拿到 fresh rows 后恢复业务行、分页和导出入口。
+- 文档影响：`OUT-COLL-E2E-001` 和 `OUT-COLL-E2E-005` 增加 rows 临时失败恢复证据；全局 `NETWORK-RECOVERY` 记录销项收款已覆盖该类负面链路。
+- 测试覆盖：`web/e2e/output-invoice-collections-flow.spec.ts` 新增真实 Chromium 用例，deterministic mock 支持 `outputInvoiceCollectionRowsFailuresBeforeSuccess`，断言错误 alert、错误态空行、普通空态消失、导出禁用、刷新后 rows 200、业务行/分页/导出恢复和无浏览器错误残留。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：本地 Browser 只证明 UI 消费失败/恢复 contract；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实大数据和生产网络中断仍需 staging/runtime smoke。
+
+## 2026-06-20 - 正式收据作废/重开 Browser 写流
+
+- 目标：补齐正式收据 lifecycle 的 Browser 主流程缺口，避免只覆盖 create/history 而漏掉作废、重开确认弹窗、reason POST body、history reload 和 rows refresh。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、本模块 `e2e-spec.md`、`e2e-coverage.md`、`tests.md` 和全局 testing closure state；不改产品逻辑。
+- 关键决策：把 deterministic mock 的收据状态从 boolean 扩成 `none -> issued -> voided -> reissued` 小状态机；Browser 在创建正式收据后继续点击 `作废收据`、填写原因、确认作废，再点击 `重开收据`、填写原因、确认重开，并断言 `POST /void`、`POST /reissue` body、history 状态和 rows refresh。
+- 文档影响：`OUT-COLL-E2E-003` 更新为 preview/create/void/reissue/history 的完整正式收据流程。
+- 测试覆盖：更新 `web/e2e/output-invoice-collections-flow.spec.ts`，每个成功点继续复用 `expectNoUnexpectedSuccessUiErrors`，捕捉“写成功但页面仍显示错误”的假成功。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium -g "saves collection status and creates a formal receipt"`。
+- 未测风险：真实 PostgreSQL 锁等待、唯一约束冲突恢复、生产历史样本和真实 worker drain 仍需 staging/production gate。
+
+## 2026-06-19 - 状态/收据成功写流 UI 错误残留 guard
+
+- 目标：继续收敛“业务写入成功但页面仍残留操作失败/同步失败/read model 失败提示”的 Browser 风险，把销项收款状态/提醒保存和正式收据创建/历史纳入统一成功后错误残留检查。
+- 影响范围：`web/e2e/output-invoice-collections-flow.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块 `tests.md` / `e2e-coverage.md` / 本文件和全局 testing closure state；不改产品逻辑。
+- 关键决策：沿用 `web/e2e/fixtures/successAssertions.ts` 的 `expectNoUnexpectedSuccessUiErrors`，在状态/提醒保存 rows refresh 显示 `待冲红` 后、正式收据创建 rows refresh 显示 `已出收据` 后、收据历史打开后各断言一次；同时为该主写流补本地 `browserErrors` 结尾断言。
+- 文档影响：更新本模块测试矩阵和 coverage，记录状态/收据成功点不能残留错误提示。
+- 测试覆盖：更新 `web/e2e/output-invoice-collections-flow.spec.ts`；扩展 `tests.test_playwright_e2e_strict_diagnostics` 的成功写流 guard 清单。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`、`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实 worker drain、真实大文件导出、正式收据真实数据库锁等待和生产审计仍需 staging/production gate。
+
+## 2026-06-19 - 红蓝票成功写流 UI 错误残留 guard
+
+- 目标：继续收敛“业务写入成功但页面仍残留操作失败/同步失败/read model 失败提示”的 Browser 风险，把销项红蓝票关系确认和撤销纳入统一成功后错误残留检查。
+- 影响范围：`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块 `tests.md` / `e2e-coverage.md` / 本文件和全局 testing closure state；不改产品逻辑。
+- 关键决策：沿用 `web/e2e/fixtures/successAssertions.ts` 的 `expectNoUnexpectedSuccessUiErrors`，在红蓝票确认 rows refresh 显示 `待冲红` 后、撤销 rows refresh 恢复原状态后各断言一次；静态 diagnostics guard 会阻止后续从该 spec 移除 helper。
+- 文档影响：更新本模块测试矩阵和 coverage，记录红蓝票 confirm/revoke 成功点不能残留错误提示。
+- 测试覆盖：更新 `web/e2e/output-invoice-red-relation-fanout.spec.ts`；扩展 `tests.test_playwright_e2e_strict_diagnostics` 的成功写流 guard 清单。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`、`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`。
+- 未测风险：真实 worker drain、真实生产 search 外层 UI、真实大文件导出和生产审计仍需 staging/production gate。
+
+## 2026-06-19 - 销项收款本地 Spec-first covered 校准
+
+- 目标：审计 `OUT-COLL-E2E-008` 的 `partial` 是否代表当前页面真实 Browser 缺口，还是未来 search UI/真实基础设施风险。
+- 影响范围：`docs/modules/output-invoice-collections/e2e-coverage.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing-closure-state.md`；不改产品代码。
+- 关键决策：红蓝票关系确认/撤销、本页 rows refresh、人工依据展示/消失、relation 字段导出、税金抵扣和成本统计下游 fresh read model 展示，均已有真实 Chromium 覆盖。search 当前没有独立前端 route；API/runtime 已覆盖 search read model group context，因此不把未来 search UI 当作当前页面本地 Browser 缺口。
+- 文档影响：`OUT-COLL-E2E-008` 从 `partial` 校准为 `covered`，本页状态同步为 `spec-first-covered`。
+- 测试覆盖：沿用 `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`tests/test_search_pending_sql_runtime.py` 和既有 API/Vitest/service tests。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`、`bash scripts/verify.sh docs`。
+- 未测风险：真实 worker drain、真实大数据/下载性能、生产历史样本和未来 search UI。
+- 后续事项：继续按全局队列推进其他 `spec-first-partial` 页面或真实 infra/staging smoke。
+
+## 2026-06-19 - Browser e2e 红蓝票 relation 字段导出
+
+- 目标：补强 `OUT-COLL-E2E-007` 和 `WB-REL-E2E-009`，证明销项红蓝票人工关系确认后，导出链路不会丢失 relation 字段。
+- 影响范围：`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块 E2E 覆盖/测试矩阵文档和 `workbench-relations` 覆盖文档；不改产品组件或业务代码。
+- 关键决策：复用红蓝票确认到 tax/cost 下游的真实 Chromium flow，在 rows refresh 显示 `待冲红` 后先打开 `筛选内容导出`，断言 export-preview 和真实 download event 的文件都包含 `红蓝票关系`、`红蓝票来源`、`红蓝票依据`、`XSFP-E2E-0002`、`manual` 和确认依据，再继续下游 fresh read model 与撤销 recovery。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录、`docs/modules/workbench-relations/e2e-coverage.md` 和 `docs/modules/workbench-relations/implementation-notes.md`。
+- 测试覆盖：更新 `web/e2e/output-invoice-red-relation-fanout.spec.ts`；校准 `web/e2e/fixtures/apiMocks.ts` 中导出依据文案与人工确认依据一致。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`。
+- 未测风险：真实后端 XLSX workbook 打开、真实大文件性能、真实 worker drain 和生产 search 外层 UI 仍需 staging/production smoke。
+- 后续事项：继续补其他页面 relation 字段导出或真实基础设施 worker drain。
+
+## 2026-06-19 - Browser e2e 列表筛选排序和 page-size
+
+- 目标：补齐 `OUT-COLL-E2E-001` 的真实浏览器代表性覆盖，证明销项收款页 fresh rows 不是只显示固定 mock，而能按用户实际 search、表头筛选、排序和 page-size 操作重新请求 rows 并同步表格结果。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts` 的 deterministic rows URL 查询行为、`web/e2e/output-invoice-collections-flow.spec.ts` 和本模块/全局测试闭环文档；不改产品逻辑。
+- 关键决策：Playwright 覆盖 keyword search、发票号码排序、收款状态 enum filter、发票号码 text filter、page-size 切换和零 mutation；money/date 组合继续由 Vitest/API 覆盖，避免把所有字段组合机械搬进 Browser。
+- 文档影响：`OUT-COLL-E2E-001` 从 partial 提升为 covered；真实大数据、PostgreSQL EXPLAIN、RabbitMQ/Redis/systemd worker drain 仍登记为 staging/infra-smoke 风险。
+- 测试覆盖：新增 `web/e2e/output-invoice-collections-flow.spec.ts` Browser 用例，断言 rows URL contract、可见行同步、无 console/pageerror/request failure/dialog 和零 mutation API；覆盖第 5/7 类测试，业务核心/API/read model/worker 由既有后端与 Vitest 继续保护。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：真实生产大数据筛选排序性能、真实 worker drain 后恢复 fresh、真实浏览器视觉/超长文本和所有字段组合仍需 staging/专项 smoke。
+- 后续事项：转入 `input-invoice-usage` stale/refreshing/download，或按全局队列补真实基础设施 worker drain smoke。
+
+## 2026-06-19 - Browser e2e read-export 权限零 mutation
+
+- 目标：补齐 `OUT-COLL-E2E-006`，让销项收款页本身证明 `read_export_only` 只能读和导出，不能从任何页面按钮触发状态、红蓝票、收据或编号设置写入。
+- 影响范围：`OutputInvoiceCollectionsPage` 权限 gate、`OutputInvoiceCollectionsTable` 行级写入口、`ReceiptHistoryDrawer` 作废/重开入口、`ReceiptPreviewDrawer` 创建入口、Playwright deterministic mock 和本模块测试/覆盖文档。
+- 关键决策：复用 session `canMutateData` / `canAdminAccess`，把状态/提醒、红蓝票、待出收据创建、收据作废/重开和收据编号设置挡在 UI 与 workflow 打开入口两层；`read_export_only` 仍可打开收款状态规则、已出收据历史和导出预览。
+- 文档影响：`OUT-COLL-E2E-006` 从 partial 提升为 covered；全角色全页面矩阵仍由 `permissions-and-audit` 模块跟踪。
+- 测试覆盖：新增 `web/e2e/output-invoice-collections-flow.spec.ts` read-export 用例，断言写入口不可见、只读/导出路径可见、全程 mutation API 为 0；覆盖第 5/7 类测试，权限 API contract 沿用既有后端测试。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：真实代理层下载权限、生产角色同步和审计查询仍由 permissions/真实环境 smoke 处理。
+- 后续事项：继续补 `OUT-COLL-E2E-001` 更多真实浏览器筛选/排序/page-size 组合，或转入 `input-invoice-usage` stale/refreshing/download。
+
+## 2026-06-19 - Browser e2e 红蓝票到税金/成本下游 fan-out
+
+- 目标：推进 `OUT-COLL-E2E-008`，证明销项收款页确认红蓝票关系后，下游税金抵扣和成本统计不是读取旧状态或本页局部状态，而是通过各自页面 API/read model 重新读取并展示一致结果。
+- 影响范围：`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块 E2E 覆盖/测试矩阵文档；不改业务代码。
+- 关键决策：复用同一真实 Chromium flow：销项页确认红蓝票关系 -> rows refresh 显示 `待冲红` -> 导航税金抵扣并看到 `智能工厂设备商 / 7,540.00` -> 导航成本统计并看到 `智能工厂项目 / 58,000.00 / 智能工厂设备尾款` -> 回到销项页撤销人工关系并验证恢复。search 没有独立前端 route，本轮只在文档中保留既有 API/runtime fan-out 证据。
+- 文档影响：`OUT-COLL-E2E-008` 从 missing 提升为 partial；剩余缺口收敛为未来 search 外层 UI Browser；本页权限矩阵已在后续 `OUT-COLL-E2E-006` 记录中闭环。
+- 测试覆盖：Playwright 覆盖第 5/6/7 类测试；read model/worker 真实 drain 继续由 infra-smoke/staging 证明，业务核心和 API contract 沿用既有后端测试。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`。
+- 未测风险：真实 RabbitMQ/Redis/systemd worker drain、生产历史半迁移、真实 search 外层 UI、红蓝票撤销后 tax/cost/search 下游恢复仍需后续 smoke 或 staging 验证。
+- 后续事项：优先补未来 search 外层 UI，或转向 `input-invoice-usage` stale/refreshing/download 缺口。
+
+## 2026-06-19 - Browser e2e 当前筛选导出闭环
+
+- 目标：补齐 `OUT-COLL-E2E-007`，让销项发票收款情况页面具备真实导出 contract，并用 Browser E2E 证明当前筛选下载、字段、权限和 row-limit 反馈。
+- 影响范围：`OutputInvoiceCollectionQueryService` 导出预览/xlsx 生成、`OutputInvoiceCollectionApiRoutes` SQL read model fresh gate、`server.py` HTTP 映射、前端 API/导出抽屉/页面入口、Playwright deterministic mocks、API/Vitest/Browser 测试和本模块文档。
+- 关键决策：导出使用当前筛选全集，不带 `page/page_size`；SQL read model 非 fresh 时不下载旧文件；row-limit 为 20000 行；`read_export_only` 可以打开导出但不获得写权限；后端返回真实 xlsx，Browser mock 只验证 download event 和 contract 参数。
+- 文档影响：`OUT-COLL-E2E-007` 从 missing 更新为 covered；后续 fan-out 记录已将 `OUT-COLL-E2E-008` 的 tax/cost 下游提升为 Browser partial 覆盖。
+- 测试覆盖：API 覆盖 export-preview/export、真实 xlsx、筛选全集和 row-limit；Vitest 覆盖页面导出入口和新抽屉源码约束；Playwright 覆盖导出预览、download event、文件名、请求不带分页、样例字段、row-limit 错误且零下载。
+- 验证命令：`pytest tests/test_output_invoice_collection_api.py -q`；`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx`；`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`。
+- 未测风险：真实生产超大 xlsx 性能、真实浏览器保存权限、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 后恢复 fresh、导出内容对生产历史半迁移样本的完整性仍需 staging/生产前 smoke。
+- 后续事项：未来出现独立 search UI 时再补 Browser search fan-out；本页权限零 mutation 已在后续 `OUT-COLL-E2E-006` 记录中闭环。
+
+## 2026-06-19 - Browser e2e 红蓝票撤销 recovery
+
+- 目标：补齐 `OUT-COLL-E2E-004` 的撤销人工红蓝票关系 Browser recovery，防止确认链路可用但撤销后页面继续显示旧人工依据或旧状态。
+- 影响范围：`web/e2e/output-invoice-red-relation-fanout.spec.ts` 和本模块 E2E 覆盖/测试矩阵文档；业务源码和 mock route 已具备撤销 contract，本次不改产品逻辑。
+- 关键决策：在同一真实 Chromium flow 中先确认红蓝票关系，再点击 `撤销人工关系 XSFP-E2E-0002`，断言 DELETE contract、rows 重新读取、drawer 中人工依据消失，主行状态从 `待冲红` 恢复为 `待收款，已收部分款`。
+- 文档影响：`OUT-COLL-E2E-004` 继续保持 covered，但说明从“确认 covered，撤销缺 Browser”更新为“确认/撤销均有 Browser recovery”。
+- 测试覆盖：`web/e2e/output-invoice-red-relation-fanout.spec.ts` 覆盖第 5/6/7 类测试；业务核心、service 和 API contract 继续由既有后端测试保护。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`。
+- 未测风险：撤销后税金抵扣、成本统计和搜索最终页面同步仍需跨模块 Browser fan-out 或真实 infra smoke。
+- 后续事项：继续补 `OUT-COLL-E2E-007` 下载或 `OUT-COLL-E2E-008` tax/cost/search downstream fan-out。
+
+## 2026-06-19 - Browser e2e read model refreshing 防 false-empty
+
+- 目标：补齐 `OUT-COLL-E2E-005` 的 Spec-first Browser 负面场景，防止 stale/missing/source mismatch 公开为 `202 refreshing` 时页面显示普通空态、旧 rows 或可写入口。
+- 影响范围：`OutputInvoiceCollectionsPage` refreshing UI、`OutputInvoiceCollectionsPage.test.tsx`、Playwright deterministic API mocks、`web/e2e/output-invoice-collections-flow.spec.ts` 和本模块测试/覆盖文档。
+- 关键决策：页面把 `readModelStatus=refreshing` 显示为用户可理解的刷新诊断，并从普通 empty state 中排除；Browser mock 以 `outputInvoiceCollectionReadModelStatus` 表达上游非 fresh 条件，但对页面暴露真实 API contract：`read_model_status=refreshing`、`202`、空 rows、`refresh_enqueued=true`。
+- 文档影响：`OUT-COLL-E2E-005` 标记为 covered；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 仍登记为 infra-smoke/staging 风险，不伪装成本地 Browser 已证明。
+- 测试覆盖：Vitest 覆盖 refreshing 不显示普通空态且不暴露技术细节；Playwright 覆盖 stale contract 下页面显示刷新诊断、不显示旧发票行、不显示普通空态、不泄露 stale reason、不出现状态/收据写入口和 runtime error。
+- 验证命令：`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx`；`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts --project=chromium`；`cd web && npm run e2e:smoke`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 worker drain 后恢复 fresh、真实 Redis cache fresh gate、真实 RabbitMQ/systemd backlog 仍需 `bash scripts/verify.sh infra-smoke` 配合 staging env 或生产前 smoke。
+- 后续事项：继续补 `OUT-COLL-E2E-004` 撤销人工红蓝票 Browser recovery、`OUT-COLL-E2E-007` 真实下载、`OUT-COLL-E2E-008` tax/cost/search downstream fan-out。
+
 ## 2026-06-18 - 月份与全部发票单入口筛选
 
 - 目标：把销项发票收款情况页面的月份筛选升级为同一个入口内可选择具体月份或全部发票，并把表格可视高度提高到原先约 2 倍。
@@ -104,5 +272,13 @@
 - 文档影响：更新本模块 `README.md`、`tests.md`、`state-machine.md`，并在 `docs/dev/testing-closure-dependency-map.md` 登记模块细化。
 - 测试覆盖：确认 `tests/test_output_invoice_collection_api.py`、`tests/test_output_invoice_collection_service.py`、`tests/test_output_invoice_collection_lifecycle.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/domainEvents.test.ts`。
 - 验证命令：见 `docs/dev/testing-closure-state.md` 最近验证命令。
-- 未测风险：真实生产 PostgreSQL 大数据/历史半迁移、真实 RabbitMQ/Redis/systemd worker drain、正式收据真实并发编号、红蓝票关系到税金/成本/搜索最终页面 smoke、浏览器大数据视觉性能、全角色权限矩阵。
+- 未测风险：真实生产 PostgreSQL 大数据/历史半迁移、真实 RabbitMQ/Redis/systemd worker drain、正式收据真实并发编号、红蓝票关系到未来 search 外层 UI 的 Browser smoke、浏览器大数据视觉性能、全角色权限矩阵；tax/cost 下游 Browser fan-out 已由 2026-06-19 专项记录覆盖。
 - 后续事项：由 `etc-tickets` 模块继续测试闭环；全角色权限由 `permissions-and-audit` 模块统一审计。
+## 2026-06-19 - 默认 all 读路径历史空 scope freshness 修复
+
+- 目标：修复生产 `/api/output-invoice-collections/rows?page=1&page_size=20` 和 `/api/output-invoice-collections/filter-options` 在 dirty/outbox 已清空、月度 read model fresh 的情况下仍返回 `202 refreshing` 的 authenticated runtime gate blocker。
+- 根因：默认 all scope 的 source version 聚合纳入了历史 `row_count=0` 的 2025 空 scope；这些空 scope 保存旧 `oa_projection_sync_version`，导致 all source versions 缺失当前 `oa_projection_sync_version`，API 误判 stale 并重复 enqueue all。worker fan-out 只刷新当前月份 shard，无法通过刷新当前有行月份来更新历史空 scope，因此形成循环。
+- 关键决策：不改变页面产品逻辑、不绕过 fresh gate。当 all scope 存在非空月份时，all 的 cache/source-version 聚合只使用 `row_count > 0` 的 scope rows；如果没有任何非空月份，仍沿用全部 scope rows 的 all-empty 判定。
+- 测试覆盖：新增 `tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_output_api_all_scope_ignores_stale_empty_month_scope_versions`，覆盖“当前非空月份 fresh + 历史空月份旧 source version”时默认 all rows 返回 `200 fresh`、无 stale reasons、无 refresh enqueue。
+- 发布验证：hotfix release `main-9e9546ac-output-invoice-all-scope-20260619173552` 已激活；两个生产目标 OA 登录态下 rows/filter-options 均返回 `200 fresh`，rows total=22；生产 `output_invoice_collection` current dirty scope 和非 done outbox 均为空。
+- 未测风险：该修复证明默认 all fresh gate；每个销项收款写入口后的真实 mutation -> worker -> rows fresh 仍需要 write-operation approval ticket 后执行 mutating smoke。

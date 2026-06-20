@@ -28,6 +28,69 @@
 
 ## 历史记录
 
+## 2026-06-19 - 银行导入成功路径 UI 错误残留 guard
+
+- 目标：补齐银行流水导入 Browser 成功链路的“假成功”检测，防止 confirm 或下游 fresh 成功后页面仍残留导入失败、后台导入失败、read model 失败等提示。
+- 影响范围：`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/fixtures/successAssertions.ts`、Playwright 严格诊断静态测试和本模块测试文档。
+- 关键决策：只加固 deterministic Browser E2E 和静态 guard，不改产品逻辑；损坏文件 file-level error 仍是可接受的 preview 结果，不纳入成功残留错误模式。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：银行导入 confirm 成功、银行明细账户余额 fresh gate 和成本统计 fresh read model 成功节点都会调用 `expectNoUnexpectedSuccessUiErrors`。
+- 验证命令：`cd web && npx playwright test e2e/imports-bank-transactions-flow.spec.ts e2e/imports-invoices-flow.spec.ts e2e/imports-etc-invoices-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实银行大文件、真实 import worker drain、job retry/crash、真实 Workbench matching、search 最终展示和生产账户余额 API freshness 仍需 staging 或生产只读 smoke。
+- 后续事项：新增导入进度 UI、search Browser route 或银行模板时，把成功后错误残留 guard 加入对应 Browser flow。
+
+## 2026-06-19 - 银行流水导入 Spec-first covered 校准
+
+- 目标：完成 `/imports/bank-transactions` 本地 Spec-first E2E Audit 校准，确认 `IMPORT-BANK-E2E-001..008` 均已由 Browser/组件/API/后端 contract 覆盖，`IMPORT-BANK-E2E-009` 明确归为真实基础设施 external-risk。
+- 影响范围：银行流水导入 Spec-first 覆盖矩阵、全局 Spec-first inventory、testing closure state 和本实施记录；不改产品逻辑。
+- 关键决策：当前页面本地 Browser 已覆盖上传/预览/慢预览锁定、重复明细、损坏文件混合、账户冲突取消/确认、preview stale、confirm 失败、权限 gate、银行明细账户余额 fresh gate 和成本统计 fresh read model 下游证据。真实 PostgreSQL/RabbitMQ/Redis/systemd import worker drain、真实 Workbench matching、真实大文件和真实 search 展示不能作为 deterministic 本地 CI 通过项，继续保留在 `IMPORT-BANK-E2E-009`。
+- 文档影响：全局 inventory 和 testing closure state 可将 `imports-bank-transactions` 从 `partial` 校准为 `covered`，同时继续列出 staging/production smoke 风险。
+- 测试覆盖：未新增测试；基于现有 `web/e2e/imports-bank-transactions-flow.spec.ts`、`permissions-role-matrix`、导入 API/service/read model/lifecycle 和 write-operation SLO audit contract 证据校准。
+- 验证命令：待本轮运行三类导入 Playwright specs、`bash scripts/verify.sh docs` 和 `git diff --check`。
+- 未测风险：真实银行大文件/历史模板、真实 import worker drain、job retry/crash、真实 Workbench matching、search 最终展示和生产账户余额 API freshness 仍需 staging 或生产只读 smoke。
+- 后续事项：新增真实 search Browser route、导入进度 UI 或新银行模板时，按功能追加 Browser E2E；真实 worker 最新性走 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`。
+
+## 2026-06-19 - 银行导入真实 write-operation audit 进入 infra-smoke
+
+- 目标：把银行导入的真实 worker/read model 最新性验证接入统一 `infra-smoke`，避免 staging/服务器验证仍依赖手工拼 `write_operation_slo_audit` 命令。
+- 影响范围：`scripts/verify.sh` 的 `infra-smoke` opt-in 分支、Nightly/测试闭环文档、runtime/read-models/银行导入测试矩阵。
+- 关键决策：默认本地和 CI 不运行真实写链路 audit；只有同时有 `FIN_OPS_TEST_DATABASE_URL` 且显式设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 时，才对最近真实业务写入的 durable outbox events 运行只读 SLO audit。该 gate 不发起写操作，不替代真实导入确认样本。
+- 文档影响：更新全局 `docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing-closure-state.md`，以及 `runtime-workers`、`read-models` 和本模块测试矩阵。
+- 测试覆盖：`tests/test_nightly_ci.py` 锁定 `infra-smoke` 必须包含 write-operation audit opt-in env 和 CLI 调用。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`bash scripts/verify.sh infra-smoke`；`bash scripts/verify.sh docs`。
+- 未测风险：当前本地没有 staging PostgreSQL URL 和真实银行导入样本，因此只验证工具合同和入口 wiring；真实证明仍需在 staging/服务器上先执行银行导入确认，再运行 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`。
+
+## 2026-06-19 - 银行流水导入到账户余额和成本统计 fresh read model Browser fan-out
+
+- 目标：补齐 `IMPORT-BANK-E2E-007` 的下游页面 Browser 证据，避免银行导入只证明 Workbench/银行明细刷新，而没有证明账户余额或成本统计 read model 已 fresh。
+- 影响范围：deterministic Playwright mock、`web/e2e/imports-bank-transactions-flow.spec.ts`、银行流水导入 Spec-first 覆盖矩阵。
+- 关键决策：不改产品逻辑；mock 增加 `bankImportDownstreamFanout`，只有银行导入 confirm 成功后才让成本统计暴露导入流水成本证据；Browser 用例等待 `/api/cost-statistics/explorer` 响应并断言 `read_model_status=fresh`。
+- 文档影响：更新 `e2e-spec.md`、`e2e-coverage.md`、`tests.md`、全局 Spec-first inventory 和测试闭环状态。
+- 测试覆盖：新增/扩展银行导入 Browser flow，覆盖 confirm -> bank details account balance fresh gate -> 导入行，以及 confirm -> cost statistics fresh read model -> 按项目下钻 -> 导入流水成本证据。
+- 验证命令：`cd web && npx playwright test e2e/imports-bank-transactions-flow.spec.ts --project=chromium`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd import worker drain、真实 Workbench matching、账户余额 API fresh gate、真实大文件和 search 最终展示仍需 staging 或生产只读 smoke。
+
+## 2026-06-19 - 银行流水导入真实 write-flow SLO audit profile
+
+- 目标：补齐银行流水导入 Spec-first E2E 闭环中的真实 read model/worker 证据入口，避免只用 deterministic Browser mock 或直接 enqueue smoke 声称真实写链路已闭环。
+- 影响范围：`write_operation_slo_audit`、银行流水导入测试矩阵、`IMPORT-BANK-E2E-009` 真实基础设施 gate。
+- 关键决策：profile 名使用业务规格 `bank_import_confirmed`；通用下游仍匹配真实 `*.read_model.refresh` 事件中的 `import_state_changed` scopes，银行账户余额必须出现 `bank_account_balance.read_model.refresh`，银行明细额外要求 exact `import.fact.changed` event type + `import_facts_changed` reason，并通过 dirty scope join 校验 drain 状态。
+- 覆盖 scope：Workbench、Workbench relation、invoice lifecycle、search、待找发票、进项使用、销项收款、OA 待付款、银行账户余额和成本统计。
+- 测试覆盖：新增 `tests/test_write_operation_slo_audit.py` 回归，验证完整 scope 才通过，缺少成本统计、银行账户余额等下游 scope 时必须失败。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit -v`；`bash scripts/verify.sh docs`；`bash scripts/verify.sh infra-smoke`。
+- 未测风险：本地契约测试不产生真实银行确认 outbox rows；仍需 staging/发布前运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation bank_import_confirmed --lookback-hours 24`，并通过银行明细账户接口或页面 smoke 核对账户余额 API freshness gate 和真实 import worker / read model worker 状态。
+
+## 2026-06-19 - 银行流水导入 Browser 负面路径
+
+- 目标：补齐银行流水导入 Spec-first Browser E2E 基线，覆盖重复明细、`preview_stale` 和 confirm 失败，避免导入页在失败时误报成功或刷新下游页面。
+- 影响范围：`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`docs/modules/imports-bank-transactions/e2e-spec.md`、`e2e-coverage.md`、`tests.md`、本实施记录和全局 Spec-first inventory/closure state。
+- 关键决策：只加固 deterministic Browser E2E 和 mock，不改后端导入业务逻辑；mock 新增无账户冲突模式用于精确模拟 stale/失败，成功流仍保留账户冲突弹窗。
+- 文档影响：新增 `e2e-spec.md` 和 `e2e-coverage.md`，更新 README、tests 和本实施记录，并同步全局 Spec-first 文档。
+- 测试覆盖：`web/e2e/imports-bank-transactions-flow.spec.ts` 从 1 条扩展到 3 条，覆盖成功预览/冲突/下游银行明细、重复项明细、`preview_stale` 无 job/无 Workbench refresh、confirm 失败错误可见且不显示成功。
+- 验证命令：`cd web && npx playwright test e2e/imports-bank-transactions-flow.spec.ts --project=chromium`。
+- 未测风险：真实银行大文件、真实 PostgreSQL/RabbitMQ/Redis/systemd import worker drain、job retry/crash、真实 Workbench matching 和下游 read model fresh 仍需 staging/生产只读 smoke。
+- 后续事项：补真实 worker drain smoke；继续给 `imports-invoices` 和 `imports-etc-invoices` 建立同等 Spec-first E2E coverage。
+
 ## 2026-06-16 - 银行流水导入合成大重复组守护
 
 - 目标：为 P2/P3 大文件导入风险补本地可重复证据，避免银行流水同文件大重复组在 preview audit 中被全部当作可确认行。

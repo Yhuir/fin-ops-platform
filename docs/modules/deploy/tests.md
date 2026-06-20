@@ -22,6 +22,7 @@
 | --- | --- | --- |
 | nightly 支持手动、定时、main push，并运行 `bash scripts/verify.sh all` | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
 | `verify.sh all` 运行 clean app check、全量 unittest、前端 Vitest/build、Playwright browser smoke、docs check，且 clean app check 不读取本地 legacy app Mongo | `tests/test_nightly_ci.py` | 2026-06-17 更新 |
+| `verify.sh docs` 检查 Spec-first E2E 全局文档和每个模块的 `e2e-spec.md` / `e2e-coverage.md`；backend unittest 检查模块索引、inventory 和 Spec ID 映射 | `tests/test_nightly_ci.py`、`tests/test_spec_first_e2e_docs.py` | 2026-06-19 新增 |
 | 当前配置 runtime app check 必须显式使用 `verify.sh runtime-check`，避免把 legacy app Mongo 数据问题混入 clean CI 门禁 | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
 | release remote script 使用 versioned release、deploy-control、worker ensure、storage preflight、cleanup | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | release 激活后先等 `/health/ready`，再检查公网 session API route JSON proxy | `tests/test_deploy_oa_script.py` | 已覆盖 |
@@ -51,6 +52,7 @@
 | --- | --- | --- | --- |
 | 2026-06-11 | nightly workflow 或 `verify.sh all` 被改坏后漏跑后端/前端/docs，导致远端 CI 失去门禁价值 | `tests/test_nightly_ci.py` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v` |
 | 2026-06-17 | nightly workflow 或 `verify.sh all` 被改坏后漏跑 deterministic Playwright browser smoke，导致真实浏览器 gate 失去保护 | `tests/test_nightly_ci.py`、`web/e2e/app-shell.spec.ts` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke` |
+| 2026-06-19 | 新增模块后漏建 `e2e-spec.md` / `e2e-coverage.md`，或 Spec ID 没有 coverage 映射，导致 Spec-first E2E Audit 看似完整但后续 controller 无法追踪缺口 | `tests/test_spec_first_e2e_docs.py`、`tests/test_nightly_ci.py`、`bash scripts/verify.sh docs` | `PYTHONPATH=backend/src python3 -m unittest tests.test_spec_first_e2e_docs tests.test_nightly_ci -v`；`bash scripts/verify.sh docs` |
 | 2026-06-11 | `verify.sh all` 读取本地 `.runtime/fin_ops_platform/app_mongo_config.json`，legacy ETC pickle 因旧字段/slots 变化反序列化失败，导致 clean 代码回归被本地历史状态阻塞 | `test_backend_verification_uses_clean_app_state_by_default`、`test_runtime_check_is_explicit_opt_in_for_current_runtime_state` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v` |
 | 既有 | deploy-control helper 使用旧 `/root` env、未加载 secrets、未 reset EnvironmentFile、未校验 OA env | `test_deploy_control_script_uses_canonical_etc_finops_secret_contract` | 模块后端验证 |
 | 既有 | release 激活后未等待 `/health/ready` 就检查公网 route | `test_release_remote_script_waits_for_backend_before_public_route_smoke` | 模块后端验证 |
@@ -78,6 +80,7 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_runtime_worker_registry \
   tests.test_app \
   tests.test_app_postgres_mode \
+  tests.test_spec_first_e2e_docs \
 -v
 
 cd web && npm run e2e:smoke

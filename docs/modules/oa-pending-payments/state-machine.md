@@ -59,7 +59,7 @@
 | UI 状态 | 来源 | 语义 |
 | --- | --- | --- |
 | loading | rows + filter-options 初始请求 | 展示页面加载骨架；abort 后清理 loading。 |
-| refreshing | rows/filter-options API 返回 `read_model_status=refreshing` 或 202 | 页面当前采用标准空状态隐藏底层刷新细节；不得展示 stale reason 给业务用户。 |
+| refreshing | rows/filter-options API 返回 `read_model_status=refreshing` 或 202 | 页面展示中性刷新诊断，不得把空 rows 当成真实空态，也不得展示 stale reason 给业务用户。 |
 | empty | fresh payload 且 total 为 0 | 表示当前筛选下真实没有记录。 |
 | error | rows/filter-options 请求失败 | 展示业务错误，不暴露 SQL、worker 或 OA adapter internals。 |
 | detail loading | OA/bank/invoice/relation detail 请求中 | drawer 内展示加载态。 |

@@ -24,7 +24,7 @@ function WorkbenchColumnFilterMenu({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number } | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) {
@@ -40,11 +40,21 @@ function WorkbenchColumnFilterMenu({
       const sidebarWidth = shell
         ? Number.parseFloat(getComputedStyle(shell).getPropertyValue("--sidebar-width")) || 0
         : 0;
-      const leftInset = sidebarWidth > 0 ? sidebarWidth + 16 : 8;
-      const maxLeft = Math.max(leftInset, window.innerWidth - popoverWidth - 8);
+      const viewportInset = 8;
+      const viewportMaxLeft = Math.max(viewportInset, window.innerWidth - popoverWidth - viewportInset);
+      const preferredLeftInset = sidebarWidth > 0 ? sidebarWidth + 16 : viewportInset;
+      const leftInset = Math.min(preferredLeftInset, viewportMaxLeft);
+      const maxLeft = Math.max(leftInset, viewportMaxLeft);
+      const belowTop = rect.bottom + 8;
+      const belowAvailable = window.innerHeight - belowTop - viewportInset;
+      const aboveAvailable = rect.top - viewportInset * 2;
+      const shouldOpenAbove = belowAvailable < 180 && aboveAvailable > belowAvailable;
+      const availableHeight = shouldOpenAbove ? aboveAvailable : belowAvailable;
+      const maxHeight = Math.max(160, Math.min(320, availableHeight));
       setPopoverStyle({
-        top: rect.bottom + 8,
+        top: shouldOpenAbove ? Math.max(viewportInset, rect.top - 8 - maxHeight) : belowTop,
         left: Math.min(Math.max(leftInset, rect.right - popoverWidth), maxLeft),
+        maxHeight,
       });
     };
 
@@ -112,7 +122,11 @@ function WorkbenchColumnFilterMenu({
           aria-label={`筛选 ${label}`}
           className="column-filter-popover"
           role="dialog"
-          style={{ top: `${popoverStyle.top}px`, left: `${popoverStyle.left}px` }}
+          style={{
+            top: `${popoverStyle.top}px`,
+            left: `${popoverStyle.left}px`,
+            maxHeight: `${popoverStyle.maxHeight}px`,
+          }}
         >
           <div className="column-filter-actions">
             <button

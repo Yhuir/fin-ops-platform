@@ -1165,7 +1165,7 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "税金抵扣计划与试算" })).toBeInTheDocument();
-    expect(screen.queryByText("税金抵扣读模型正在刷新，页面会自动重试。")).not.toBeInTheDocument();
+    expect(await screen.findByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toBeInTheDocument();
     expect(screen.queryByText(/生成时间：2026-06-01T09:30:00\+08:00/)).not.toBeInTheDocument();
     expect(screen.queryByText(/过期原因：tax_certified_import_source_version/)).not.toBeInTheDocument();
     expect(screen.queryByText("当前月份没有可用于计划与试算的发票数据。")).not.toBeInTheDocument();

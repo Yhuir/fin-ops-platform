@@ -264,8 +264,17 @@ export default function TaxOffsetPage() {
     };
   }, [currentMonth, monthData, selectedInputIds]);
 
-  const readModelStatus = monthData?.readModelStatus;
-  const isReadModelRefreshing = readModelStatus === "refreshing" || readModelStatus === "stale";
+  const readModelStatus = monthData?.readModelStatus?.trim().toLowerCase();
+  const isReadModelRefreshing = readModelStatus === "refreshing" || readModelStatus === "stale" || readModelStatus === "missing";
+  const isReadModelUnavailable = readModelStatus === "failed"
+    || readModelStatus === "unavailable"
+    || readModelStatus === "schema_mismatch";
+  const isReadModelNonFresh = Boolean(readModelStatus && readModelStatus !== "fresh");
+  const readModelStatusMessage = isReadModelRefreshing
+    ? "税金抵扣读模型正在刷新，完成后页面会自动重试。"
+    : isReadModelUnavailable
+      ? "税金抵扣读模型暂不可用，请稍后刷新或检查系统状态。"
+      : null;
 
   useEffect(() => {
     if (!isReadModelRefreshing || isLoading || isRefreshing) {
@@ -343,7 +352,7 @@ export default function TaxOffsetPage() {
     };
   }, [monthData]);
 
-  const isEmpty = !isReadModelRefreshing && !isLoading && !loadError && monthData
+  const isEmpty = !isReadModelNonFresh && !isLoading && !loadError && monthData
     ? monthData.outputInvoices.length === 0
       && monthData.inputPlanInvoices.length === 0
       && monthData.certifiedMatchedInvoices.length === 0
@@ -419,6 +428,9 @@ export default function TaxOffsetPage() {
       {!hasVisibleMonthData && isLoading ? (
         <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
       ) : null}
+      {!isLoading && readModelStatusMessage ? (
+        <StatePanel tone={isReadModelRefreshing ? "loading" : "warning"}>{readModelStatusMessage}</StatePanel>
+      ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
@@ -432,7 +444,7 @@ export default function TaxOffsetPage() {
           resultLabel={summary.resultLabel}
           canSave={canMutateData}
           isSaving={isSavingPlan}
-          saveDisabled={isReadModelRefreshing || isCalculating || isLoading || isRefreshing}
+          saveDisabled={isReadModelNonFresh || isCalculating || isLoading || isRefreshing}
           onSave={handleSavePlan}
         />
       ) : null}

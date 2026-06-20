@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 const workbenchRowIds = [
@@ -77,5 +78,6 @@ test.describe("workbench withdraw browser flow", () => {
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeWithdraw);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

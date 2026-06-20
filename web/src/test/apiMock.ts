@@ -24,6 +24,7 @@ type MockApiOptions = {
   workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
+  costExplorerFailuresBeforeSuccess?: number;
   costRefreshingMonths?: string[];
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
@@ -4456,6 +4457,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 }
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
+  let costExplorerFailuresRemaining = Math.max(0, options.costExplorerFailuresBeforeSuccess ?? 0);
   let latestImportSession = buildImportPreviewPayload(
     options.initialImportPreviewFileNames ?? [],
     options.initialImportPreviewOverrides ?? [],
@@ -5207,6 +5209,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/cost-statistics/explorer": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const projectScope = url.searchParams.get("project_scope") ?? "active";
+      if (costExplorerFailuresRemaining > 0 && month !== "all") {
+        costExplorerFailuresRemaining -= 1;
+        return {
+          status: 503,
+          body: {
+            error: "cost_statistics_explorer_temporarily_unavailable",
+            message: "成本统计数据加载暂时失败，请刷新后重试。",
+          },
+        };
+      }
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }

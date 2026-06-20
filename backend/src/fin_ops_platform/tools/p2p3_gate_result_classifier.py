@@ -83,8 +83,10 @@ def _classification_for(
         return "input-required", ["Fix the referenced input file or scenario contract, then rerun the gate."]
     if status == "no_candidates":
         return "approved-scenario-required", ["Prepare approved, reversible test objects or scenario input before running mutating E2E evidence."]
-    if status == "dry_run":
+    if status in {"approval_missing", "dry_run"}:
         return "approval-required", ["Review the dry-run output, secure approval for apply/mutating steps when needed, then rerun with explicit apply flags."]
+    if _has_write_approval_missing_check(payload):
+        return "approval-required", ["Review the approved scenario, provide the required write approval ticket, then rerun with explicit apply flags."]
     if any(check in failed_checks for check in ("runtime_health", "health_ready_payload")):
         return "runtime-repair-or-deploy-required", [
             "Inspect runtime blockers, release status, dirty/outbox/readiness, worker mismatch, and health-ready payload details.",
@@ -108,6 +110,22 @@ def _classification_for(
     if status == "fail":
         return "gate-failed", ["Inspect the gate JSON errors and failed checks, then fix the narrowest runtime/tooling/config gap before rerunning."]
     return "unknown", ["Inspect the raw gate JSON and add classifier coverage if this status is expected in unattended P2/P3 workflow."]
+
+
+def _has_write_approval_missing_check(payload: Mapping[str, Any]) -> bool:
+    checks = payload.get("checks")
+    if not isinstance(checks, list):
+        return False
+    for check in checks:
+        if not isinstance(check, Mapping) or check.get("name") != "write_operation_e2e":
+            continue
+        check_payload = check.get("payload")
+        if not isinstance(check_payload, Mapping):
+            continue
+        missing_args = _string_list(check_payload.get("missing_args"))
+        if check_payload.get("status") == "approval_missing" or "--write-approval-ticket" in missing_args:
+            return True
+    return False
 
 
 def _merge_actions(value: Any, fallback: Sequence[str]) -> list[str]:

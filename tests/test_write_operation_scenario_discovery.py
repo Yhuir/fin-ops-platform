@@ -24,7 +24,7 @@ class FakeConnection:
                     "relation_id": "turnover_rel_1",
                     "status": "deterministic",
                     "relation_type": "business",
-                    "source": "",
+                    "source": "manual",
                     "scope_month": "2026-06-01",
                     "version": 3,
                     "updated_at": "2026-06-13T10:00:00+08:00",
@@ -85,6 +85,22 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(scenarios[1]["steps"][0]["json"]["row_ids"], ["oa-1", "bank-1"])
         self.assertEqual(scenarios[2]["steps"][0]["path"], "/api/no-oa-bank-batches/BATCH-1/withdraw")
         self.assertTrue(all(scenario["metadata"]["requires_manual_approval_before_apply"] for scenario in scenarios))
+
+    def test_turnover_discovery_matches_withdraw_boundary_source_contract(self) -> None:
+        connection = FakeConnection()
+
+        report = discovery.discover_write_operation_scenarios(connection, limit=5)
+
+        turnover_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from app.turnover_relations" in " ".join(sql.lower().split())
+        )
+        self.assertIn("raw_payload->'normalized_payload'->>'source'", turnover_sql)
+        self.assertIn("= 'manual'", turnover_sql)
+        self.assertNotIn("<> 'system'", turnover_sql)
+        turnover = report["candidates"]["turnover_manual_closure_or_withdraw"][0]
+        self.assertEqual(turnover["source"], "manual")
 
     def test_generated_context_scenarios_are_guarded_by_manual_approval(self) -> None:
         report = discovery.discover_write_operation_scenarios(FakeConnection(), limit=5)

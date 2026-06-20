@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
+import shlex
 import unittest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+E2E_DIR = REPO_ROOT / "web" / "e2e"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "nightly-ci.yml"
 VERIFY_SCRIPT_PATH = REPO_ROOT / "scripts" / "verify.sh"
+WEB_PACKAGE_JSON_PATH = REPO_ROOT / "web" / "package.json"
 
 
 class NightlyCITests(unittest.TestCase):
@@ -37,12 +41,49 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("npm run build", script)
         self.assertIn("npm run e2e:smoke", script)
         self.assertIn("docs/dev/nightly-ci.md", script)
+        self.assertIn("docs/dev/spec-first-e2e-audit.md", script)
+        self.assertIn("docs/dev/spec-first-e2e-inventory.md", script)
         self.assertIn("docs/dev/testing-closure-state.md", script)
         self.assertIn("docs/dev/testing-closure-dependency-map.md", script)
+        self.assertIn("e2e-spec.md", script)
+        self.assertIn("e2e-coverage.md", script)
         self.assertRegex(
             script,
             re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
         )
+
+    def test_e2e_smoke_script_includes_every_non_production_browser_spec(self) -> None:
+        package_json = json.loads(WEB_PACKAGE_JSON_PATH.read_text(encoding="utf-8"))
+        e2e_smoke_script = package_json["scripts"]["e2e:smoke"]
+        production_specs = {
+            "production-admin-app-health.spec.ts",
+            "production-route-shell.spec.ts",
+        }
+
+        expected_specs = {
+            f"e2e/{spec_path.name}"
+            for spec_path in E2E_DIR.glob("*.spec.ts")
+            if spec_path.name not in production_specs
+        }
+        listed_specs = {
+            token
+            for token in shlex.split(e2e_smoke_script)
+            if token.startswith("e2e/") and token.endswith(".spec.ts")
+        }
+
+        self.assertEqual(
+            sorted(expected_specs - listed_specs),
+            [],
+            "Every deterministic non-production Playwright spec must be listed in npm "
+            "run e2e:smoke so verify.sh all and Nightly CI execute new Browser E2E coverage.",
+        )
+        self.assertEqual(
+            sorted(listed_specs - expected_specs),
+            [],
+            "npm run e2e:smoke must not list deleted or production-only Playwright specs.",
+        )
+        for production_spec in production_specs:
+            self.assertNotIn(f"e2e/{production_spec}", listed_specs)
 
     def test_backend_verification_uses_clean_app_state_by_default(self) -> None:
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -73,6 +114,35 @@ class NightlyCITests(unittest.TestCase):
             ),
         )
         self.assertRegex(script, re.compile(r"runtime-check\)\s+run_runtime_check\s+;;", re.MULTILINE))
+
+    def test_infra_smoke_is_explicit_opt_in_and_does_not_run_in_verify_all(self) -> None:
+        script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("infra-smoke", script)
+        self.assertIn("run_infra_smoke", script)
+        self.assertIn("tests.test_read_model_slo_smoke", script)
+        self.assertIn("tests.test_runtime_sync_closure_gate", script)
+        self.assertIn("tests.test_write_operation_slo_audit", script)
+        self.assertIn("tests.test_production_external_gate_preflight", script)
+        self.assertIn("tests.test_rabbitmq_staging_preflight", script)
+        self.assertIn("tests.test_runtime_infrastructure_postgres_integration", script)
+        self.assertIn("tests.test_rabbitmq_integration", script)
+        self.assertIn("python3 -m fin_ops_platform.tools.production_external_gate_preflight --json", script)
+        self.assertIn("FIN_OPS_POSTGRES_DATABASE_URL=\"${FIN_OPS_POSTGRES_DATABASE_URL:-$FIN_OPS_TEST_DATABASE_URL}\"", script)
+        self.assertIn("FIN_OPS_INFRA_SMOKE_APPLY", script)
+        self.assertIn("read_model_slo_args+=(--apply)", script)
+        self.assertIn("set FIN_OPS_INFRA_SMOKE_APPLY=1 to enqueue refresh events and verify worker drain", script)
+        self.assertIn("FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS", script)
+        self.assertIn("FIN_OPS_WRITE_OPERATION_AUDIT_LOOKBACK_HOURS", script)
+        self.assertIn("FIN_OPS_WRITE_OPERATION_AUDIT_TARGET_MS", script)
+        self.assertIn("FIN_OPS_WRITE_OPERATION_AUDIT_SINCE", script)
+        self.assertIn("python3 -m fin_ops_platform.tools.write_operation_slo_audit", script)
+        self.assertIn("set FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS to audit recent real writes", script)
+        self.assertRegex(script, re.compile(r"infra-smoke\)\s+run_infra_smoke\s+;;", re.MULTILINE))
+        self.assertRegex(
+            script,
+            re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
+        )
 
 
 if __name__ == "__main__":

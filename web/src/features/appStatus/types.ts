@@ -59,10 +59,42 @@ export type AppStatusTask = {
   updatedAt: string;
 };
 
+export type AppStatusRuntimeSummaryGroup = {
+  total: number;
+  fresh?: number;
+  ready?: number;
+  idle?: number;
+  working?: number;
+  refreshing?: number;
+  stale?: number;
+  missing?: number;
+  failed?: number;
+  unavailable?: number;
+  mismatched?: number;
+  required?: number;
+  issueCount?: number;
+  scopeIssueCount?: number;
+};
+
+export type AppStatusQueueSummary = {
+  eventTypeCount: number;
+  pending: number;
+  processing: number;
+  failed: number;
+  backlog: number;
+};
+
+export type AppStatusRuntimeSummary = {
+  readModels: AppStatusRuntimeSummaryGroup;
+  workers: AppStatusRuntimeSummaryGroup;
+  queue: AppStatusQueueSummary;
+};
+
 export type AppStatusOverview = {
   version: number;
   generatedAt: string;
   overall: AppStatusOverall;
+  runtimeSummary: AppStatusRuntimeSummary;
   domains: AppStatusDomain[];
   backgroundTasks: AppStatusTask[];
   alerts: Array<Record<string, unknown>>;

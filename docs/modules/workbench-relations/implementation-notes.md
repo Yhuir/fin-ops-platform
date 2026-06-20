@@ -1,5 +1,179 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-19 - Workbench 自身写流 UI 错误残留 guard
+
+目标：补齐 Workbench 自身成功写流的 Browser guard，防止撤回、拆分、异常处理或网络恢复最终成功后，页面仍残留“操作失败”、同步失败、read model 失败或 barrier timeout 文案。
+
+变更：
+
+- `web/e2e/workbench-withdraw-flow.spec.ts`：撤回关联恢复 open group 后检查无成功后的错误残留。
+- `web/e2e/workbench-candidate-split-flow.spec.ts`：拆分自动候选并隐藏候选后检查无成功后的错误残留。
+- `web/e2e/workbench-exception-flow.spec.ts`：异常处理 apply/cancel、ignore/unignore 成功后检查无错误残留。
+- `web/e2e/workbench-network-recovery-flow.spec.ts`：confirm-link transient network retry 成功、confirm/split/withdraw duplicate-submit guard 成功后检查无错误残留；409 stale preview 继续作为 negative path 保留错误断言。
+- `tests/test_playwright_e2e_strict_diagnostics.py`：静态 guard 防止这些 Workbench 成功写流移除 `expectNoUnexpectedSuccessUiErrors`。
+- `docs/dev/testing.md`、`docs/dev/testing-closure-state.md`、`tests.md`：同步本轮 guard 口径。
+
+决策：
+
+- `workbench-stale-error-flow` 中 409、barrier timeout、fresh refetch failed 等用例本来就要展示错误，不接入成功 guard。
+- `workbench-permissions-flow` 和 `workbench-relations-candidate-semantics` 是权限/只读/候选负面语义，不属于成功写流。
+- 本轮不改产品逻辑，只加固测试和文档。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-withdraw-flow.spec.ts e2e/workbench-candidate-split-flow.spec.ts e2e/workbench-exception-flow.spec.ts e2e/workbench-network-recovery-flow.spec.ts --project=chromium` 通过 9 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v` 通过 7 tests。
+- `python3 -m py_compile tests/test_playwright_e2e_strict_diagnostics.py` 通过。
+- `bash scripts/verify.sh docs` 通过。
+- 目标文件 `git diff --check` 通过。
+
+剩余风险：
+
+- 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+- 生产/staging relation display audit。
+- 真实网络抖动和真实认证态写入审批场景。
+
+## 2026-06-19 - Relation fan-out 下游 UI 错误残留 guard
+
+目标：加固 Workbench relation fan-out Browser E2E，确保关系确认、operation barrier 和下游页面 fresh/read-side 业务结果都成功后，页面不能还残留“操作失败”、同步失败、read model 失败或 barrier timeout 文案。
+
+变更：
+
+- `web/e2e/workbench-relation-fanout.spec.ts`：银行明细下游显示 `有oa` / `有发票` 后检查无成功后的错误残留。
+- `web/e2e/pending-invoices-fanout.spec.ts`：待找发票显示 `已支付已开票`、发票号和申请人后检查无成功后的错误残留。
+- `web/e2e/input-invoice-relation-fanout.spec.ts`：进项使用、OA pending、税金抵扣和成本统计下游成功节点都检查无错误残留。
+- `web/e2e/cost-statistics-relation-fanout.spec.ts`、`web/e2e/workbench-relations-oa-pending-fanout.spec.ts`、`web/e2e/workbench-relations-tax-offset-fanout.spec.ts`：目标页面业务结果出现后检查无错误残留。
+- `tests/test_playwright_e2e_strict_diagnostics.py`：静态 guard 防止这些下游 relation fan-out spec 移除 `expectNoUnexpectedSuccessUiErrors`。
+- `docs/dev/testing.md`、`docs/dev/testing-closure-state.md`、`e2e-coverage.md`、`tests.md`：同步本轮 guard 口径。
+
+决策：
+
+- 这是测试和文档加固，不改变产品逻辑。
+- `confirmWorkbenchRelation` 的主链路 guard 仍保留；本轮额外保护的是用户真正回到下游页面后仍看到错误的假成功。
+- deterministic Browser guard 不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实基础设施仍归 `infra-smoke`、staging 或生产只读/审批 smoke。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-relation-fanout.spec.ts e2e/pending-invoices-fanout.spec.ts e2e/input-invoice-relation-fanout.spec.ts e2e/cost-statistics-relation-fanout.spec.ts e2e/workbench-relations-oa-pending-fanout.spec.ts e2e/workbench-relations-tax-offset-fanout.spec.ts --project=chromium` 通过 7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v` 通过 7 tests。
+- `python3 -m py_compile tests/test_playwright_e2e_strict_diagnostics.py` 通过。
+- `bash scripts/verify.sh docs` 通过。
+- 目标文件 `git diff --check` 通过。
+
+剩余风险：
+
+- 生产/staging display audit。
+- 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+- 真实 XLSX 完整解析和代理层下载权限。
+- 未来 Browser search UI 或新 relation 撤销入口。
+
+## 2026-06-19 - 关联台关系事实源本地 Spec-first covered 校准
+
+目标：审计 `workbench-relations` 的剩余 partial 是否仍是本地 deterministic Browser E2E 缺口，避免重复补已经被现有 Playwright/API/runtime 测试覆盖的 relation fan-out 和 relation 字段导出场景。
+
+变更：
+
+- `docs/modules/workbench-relations/e2e-coverage.md`：将 `WB-REL-E2E-008` 和 `WB-REL-E2E-009` 从 `partial` 校准为 `covered`。
+- `docs/dev/spec-first-e2e-inventory.md`：将资源模块 `workbench-relations` 和跨页面 `REL-FANOUT` 状态校准为 `covered`。
+- `docs/dev/testing-closure-state.md`：同步 `workbench-relations` 为 `spec-first-covered`。
+
+决策：
+
+- `WB-REL-E2E-008` 的验收项已经由 output collection、input invoice usage、cost statistics、tax offset、OA pending 的 Browser fan-out，以及 search API/runtime group jump target 共同覆盖。
+- `WB-REL-E2E-009` 的关键 relation 字段导出已经由 bank details、pending invoices、output invoice collections 和 input invoice usage 的真实 Chromium download event 覆盖。
+- Browser 外层 search route 当前不存在，不能作为本地 Browser 缺口；未来新增 search UI 后再补。
+- 真实 XLSX 完整解析、生产 active generation display audit、历史半迁移和真实 worker drain 继续作为 staging/runtime 风险，不标成本地 CI covered。
+
+验证：
+
+- `bash scripts/verify.sh docs`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_workbench_relation_repository.py -q`
+- `cd web && npx playwright test e2e/bank-details-export-download.spec.ts e2e/pending-invoices-export-download.spec.ts e2e/output-invoice-red-relation-fanout.spec.ts e2e/input-invoice-relation-fanout.spec.ts e2e/workbench-relations-oa-pending-fanout.spec.ts e2e/workbench-relations-tax-offset-fanout.spec.ts --project=chromium`
+
+剩余风险：
+
+- 生产/staging display audit。
+- 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+- 真实 XLSX 完整解析和代理层下载权限。
+- 未来 Browser search UI 或新 relation 撤销入口。
+
+## 2026-06-19 - 销项收款红蓝票 relation 字段导出 Browser smoke
+
+目标：继续推进 `WB-REL-E2E-009`，为银行明细和待找发票之外的页面补 relation 字段真实浏览器下载证据。
+
+结论：
+
+- `web/e2e/output-invoice-red-relation-fanout.spec.ts` 现在在红蓝票人工关系确认、rows refresh 后打开销项收款 `筛选内容导出`。
+- Browser 断言 export-preview 样例表和真实 download event 生成的 `output-invoice-collections.xlsx` 都包含 `红蓝票关系`、`红蓝票来源`、`红蓝票依据`、`XSFP-E2E-0002`、`manual` 和确认依据。
+- deterministic mock 中导出依据文案已与人工确认依据 `浏览器 e2e 红蓝票关系确认` 对齐，避免导出链路和 drawer 链路各自伪造不同事实。
+- `WB-REL-E2E-009` 继续保持 `partial`：银行明细、待找发票和销项收款 relation 字段导出已有 Browser 覆盖；其他页面 relation 字段导出和真实 XLSX 完整解析仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts --project=chromium`
+
+后续：
+
+- 继续补其他页面 relation 字段导出，或转真实基础设施 worker drain / production display audit。
+
+## 2026-06-19 - Relation export filter and permission coverage audit
+
+目标：推进 `WB-REL-E2E-009`，审计现有 Browser E2E 是否已经覆盖银行明细 relation 字段导出的筛选、分页和权限组合，避免重复造低价值测试。
+
+结论：
+
+- `web/e2e/bank-details-export-download.spec.ts` 已覆盖 Workbench confirm 后银行明细真实 download event，文件内容包含 linked relation 字段、case id，且不包含 candidate 标签。
+- `web/e2e/bank-details-filtered-export-permissions.spec.ts` 已覆盖当前账户、自定义日期、关键字、分类筛选带入导出请求，page/page_size 不带入导出，`read_export_only` 可下载且银行明细写入口禁用并零 mutation。
+- `WB-REL-E2E-009` 继续保持 `partial`：银行明细 relation 字段、筛选、分页和权限下载已覆盖；pending invoice 等其他 relation 字段导出、真实 XLSX 完整解析仍未闭环。
+
+验证：
+
+- 本轮为覆盖审计和文档映射，无新增执行命令；相关 Browser 用例已在最近完整 `cd web && npm run e2e:smoke` 中 80/80 passed。
+
+后续：
+
+- 下一轮优先选择 pending invoice 等其他 relation 字段导出，或 OA pending linked fan-out。
+
+## 2026-06-19 - Search relation downstream API/runtime fan-out
+
+目标：继续推进 `WB-REL-E2E-008`，为没有独立前端 route 的 search 下游补 API/runtime 证据，证明 Workbench relation 写入后 `search` read model 会高优先级刷新，且 fresh search 结果保留已关联组跳转上下文。
+
+结论：
+
+- `SearchPendingSqlProjectionBuilder._search_rows_for_month()` 从 `read_model.workbench_group_rows` 读取 `group_id`，把 linked/open group context 写入 search index payload 的 `group_id` 与 `jump_target.group_id`。
+- `/api/search` SQL read model hit 继续不回扫 in-memory Workbench 状态，并保留 search index payload 中的 group jump target。
+- `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)` 的 relation-change outbox 断言补齐 `search` high priority，和 dirty scope high priority 一起保护用户写后同步。
+- `WB-REL-E2E-008` 继续保持 `partial`：search API/runtime fan-out 已覆盖；search 没有独立 Browser route，OA pending linked fan-out、更多撤销链路和导出筛选/权限组合仍未闭环。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_projection_reads_unique_workbench_rows_before_python_build tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_reads_sql_index tests/test_workbench_relation_repository.py::test_relation_change_enqueues_relation_read_model_before_relevant_downstream_by_priority -q`
+
+后续：
+
+- 下一轮优先补 `WB-REL-E2E-009` 的导出筛选/权限组合，或补 OA pending linked fan-out / imports bank failure 链路。
+
+## 2026-06-19 - 税金抵扣 relation downstream fan-out Browser smoke
+
+目标：继续推进 `WB-REL-E2E-008`，为税金抵扣补真实 Chromium 证据，证明 Workbench relation 写入后税金页会重新读取 fresh tax offset read model，并展示 relation 影响后的进项计划行。
+
+结论：
+
+- 新增 `web/e2e/workbench-relations-tax-offset-fanout.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `taxOffsetRelationFanout`，只在本 spec 中让 `/api/tax-offset` 随 Workbench `relationConfirmed` 状态返回 relation 影响后的进项计划行；默认税金 mock 数据保持不变。
+- Browser 先进入税金抵扣页确认 `智能工厂设备商` 计划行不可见；Workbench confirm 后回税金抵扣页，断言重新请求 `/api/tax-offset`、显示 `91330108MA27B4011D` 和 `7,540.00`，且不显示读模型错误。
+- `WB-REL-E2E-008` 继续保持 `partial`：销项、进项、成本和税金已有 Browser 覆盖；search 下游 API/runtime fan-out 已由后续测试补齐，更多撤销链路、OA pending linked fan-out 和真实生产 worker drain 仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-relations-tax-offset-fanout.spec.ts --project=chromium`
+- `cd web && npx playwright test e2e/workbench-relations-candidate-semantics.spec.ts e2e/workbench-stale-error-flow.spec.ts --project=chromium`
+- `cd web && npm run e2e:smoke`，80/80 passed
+
+后续：
+
+- 下一轮优先补 `search` 下游 API/runtime fan-out，或扩展 `WB-REL-E2E-009` 的导出筛选/权限组合。
+
 ## 2026-06-18 - 银行明细 relation 字段真实下载 Browser smoke
 
 目标：推进 `WB-REL-E2E-009`，为含 relation 字段的导出补首条真实 Chromium download 证据。
@@ -1880,6 +2054,23 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.p
 剩余风险：
 
 - 该阶段必须发布后重新跑 read model SLO、登录态 HTTP SLO、批准 confirm/withdraw E2E 和 write operation audit；生产 write audit 通过前不能认为全 app 5s 写后收敛已闭合。
+
+## 2026-06-20 - Bank turnover Workbench relation write-operation profile
+
+目标：把生产贾小花 Workbench 完整关系撤回样本的 write-operation SLO 归因从 broad cross-page profile 中拆出，避免把不参与的 invoice-only read model 当成失败，同时继续暴露真实 read model/worker 长尾。
+
+结论：
+
+- 该样本撤回完整 bank+OA relation 后，当前 active relation 恢复为 bank-only `turnover_manual_closure`，后续 fan-out 应覆盖 Workbench、Workbench relation、银行明细、待找发票、成本统计和 search。
+- `invoice_lifecycle`、`input_invoice_usage`、`tax_offset` 适用于 bank+invoice 或 invoice import 等场景；本样本不应要求这些 refresh event。
+- 新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` profile，分别覆盖确认/撤回口径下的 bank/turnover read model fan-out。
+- 该拆分不等于生产写后 5s 收敛闭合；本轮生产证据中的 `workbench:all`、`pending_invoice`、`cost_statistics` 慢尾仍需后续优化或受控复验。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_write_operation_slo_audit.py -q
+```
 
 ## 2026-06-14 - Pending invoice page aggregate scope in SLO smoke
 

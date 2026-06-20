@@ -238,6 +238,51 @@ describe("ETC ticket management page", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
   });
 
+  test("recovers business batches after a transient list failure when refreshed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const baseFetch = fetchMock.getMockImplementation();
+    let businessBatchFailuresRemaining = 1;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (
+        url.pathname === "/api/etc/business-batches"
+        && (init?.method ?? "GET").toUpperCase() === "GET"
+        && businessBatchFailuresRemaining > 0
+      ) {
+        businessBatchFailuresRemaining -= 1;
+        return new Response(JSON.stringify({
+          error: "etc_business_batches_temporarily_unavailable",
+          message: "ETC业务批次加载暂时失败，请刷新后重试。",
+        }), { status: 503, headers: { "Content-Type": "application/json" } });
+      }
+      if (!baseFetch) {
+        throw new Error(`Unhandled fetch ${String(input)}`);
+      }
+      return baseFetch(input, init);
+    });
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByText("ETC业务批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
+
+    await waitFor(() => {
+      expect(within(page).queryByText("ETC业务批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
+      expect(within(page).getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
+      expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
+    });
+    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
+
+    const businessBatchRequests = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/etc/business-batches" && (init?.method ?? "GET").toUpperCase() === "GET";
+    });
+    expect(businessBatchRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("filters business batches, switches submitted tab, and keeps task-only actions out of submitted mode", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -602,6 +647,62 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByText("批次已被他人更新，请刷新后重试。")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "删除批次" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toBeInTheDocument();
+  });
+
+  test("can retry business batch deletion after a transient failure", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const baseFetch = fetchMock.getMockImplementation();
+    let deleteFailuresRemaining = 1;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (
+        String(url).endsWith("/api/etc/business-batches/etc-batch-unsubmitted-01")
+        && init?.method === "DELETE"
+        && deleteFailuresRemaining > 0
+      ) {
+        deleteFailuresRemaining -= 1;
+        return new Response(
+          JSON.stringify({
+            error: "etc_business_batch_delete_temporarily_unavailable",
+            message: "ETC业务批次删除暂时失败，请重试。",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (!baseFetch) {
+        throw new Error(`Unhandled fetch ${String(url)}`);
+      }
+      return baseFetch(input, init);
+    });
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
+    await user.click(within(row).getByRole("button", { name: "删除批次 ETC-2026-03-A" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    expect(await within(page).findByText("ETC业务批次删除暂时失败，请重试。")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "删除批次" })).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      const deleteCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith("/api/etc/business-batches/etc-batch-unsubmitted-01")
+        && (init as RequestInit | undefined)?.method === "DELETE",
+      );
+      expect(deleteCalls).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "删除批次" })).not.toBeInTheDocument();
+    });
+    expect(within(page).queryByText("ETC业务批次删除暂时失败，请重试。")).not.toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-01")).not.toBeInTheDocument();
   });
 
   test("allows business batch deletion when the latest batch only has an unsubmitted OA draft link", async () => {
@@ -1659,6 +1760,66 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByTestId("etc-batch-row-etc-business-manual-fail-001")).toBeInTheDocument();
   });
 
+  test("can retry manual OA status confirmation after a transient failure", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const detectingBatch = businessBatchFixture({
+      businessBatchId: "etc-business-manual-retry-001",
+      status: "oa_confirmation_pending",
+      version: 8,
+    });
+    const submittedBatch = {
+      ...detectingBatch,
+      status: "manually_marked_submitted",
+      version: 9,
+      oaProcessStatus: "manual_without_oa_row",
+      invoiceItems: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
+      items: query.status === "submitted" ? [submittedBatch] : [detectingBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation(() => Promise.resolve({
+      ...detectingBatch,
+      invoiceItems: [],
+    } as never));
+    const manualOaStatus = vi
+      .spyOn(etcApi, "manualEtcBusinessBatchOaStatus")
+      .mockRejectedValueOnce(new Error("人工确认暂时失败，请重试。") as never)
+      .mockResolvedValueOnce(submittedBatch as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA提交确认" });
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
+
+    await waitFor(() => expect(manualOaStatus).toHaveBeenCalledTimes(1));
+    expect(manualOaStatus).toHaveBeenLastCalledWith("etc-business-manual-retry-001", {
+      decision: "submitted",
+      reason: "用户确认 OA 草稿已提交。",
+      expectedVersion: 8,
+    });
+    expect(await within(page).findByText("人工确认暂时失败，请重试。")).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
+    expect(within(oaStatusPanel).getByRole("button", { name: "已提交" })).toBeEnabled();
+
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
+
+    await waitFor(() => expect(manualOaStatus).toHaveBeenCalledTimes(2));
+    expect(manualOaStatus).toHaveBeenLastCalledWith("etc-business-manual-retry-001", {
+      decision: "submitted",
+      reason: "用户确认 OA 草稿已提交。",
+      expectedVersion: 8,
+    });
+    await waitFor(() => expect(within(page).queryByText("人工确认暂时失败，请重试。")).not.toBeInTheDocument());
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
+    expect(within(page).getByTestId("etc-batch-row-etc-business-manual-retry-001")).toHaveTextContent("人工确认已提交");
+  });
+
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -2066,6 +2227,60 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
   });
 
+  test("can retry ticket-root TXT upload after a transient failure", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const baseFetch = fetchMock.getMockImplementation();
+    let uploadFailuresRemaining = 1;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (
+        String(url).endsWith("/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")
+        && init?.method === "POST"
+        && uploadFailuresRemaining > 0
+      ) {
+        uploadFailuresRemaining -= 1;
+        return new Response(
+          JSON.stringify({
+            error: "etc_source_file_upload_temporarily_unavailable",
+            message: "ETC票根网文件上传暂时失败，请重试。",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (!baseFetch) {
+        throw new Error(`Unhandled fetch ${String(url)}`);
+      }
+      return baseFetch(input, init);
+    });
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const txtUploadBox = await within(page).findByLabelText("上传票根网");
+    const txtInput = txtUploadBox.querySelector('input[type="file"]');
+    if (!(txtInput instanceof HTMLInputElement)) {
+      throw new Error("Expected ticket-root TXT upload input to render.");
+    }
+
+    await user.upload(txtInput, new File(["车牌号：云A516HJ\n交易金额：57.95"], "云A516HJ.txt", { type: "text/plain" }));
+
+    expect(await within(page).findByText("ETC票根网文件上传暂时失败，请重试。")).toBeInTheDocument();
+    expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
+
+    await user.upload(txtInput, new File(["车牌号：云A516HJ\n交易金额：57.95"], "云A516HJ.txt", { type: "text/plain" }));
+
+    await waitFor(() => {
+      const uploadCalls = fetchMock.mock.calls.filter(([url, init]) =>
+        String(url).endsWith("/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")
+        && (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(uploadCalls).toHaveLength(2);
+    });
+    expect(within(page).queryByText("ETC票根网文件上传暂时失败，请重试。")).not.toBeInTheDocument();
+    expect(await within(page).findByText("2026-02 ETC批次 / v4")).toBeInTheDocument();
+  });
+
   test("shows source file context, deletes a mutable source file, and fresh tasks do not inherit old issues", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -2278,6 +2493,83 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByText("源文件已变化，请刷新后重试。")).toBeInTheDocument();
     expect(deleteSourceFile).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "删除源文件" })).toBeInTheDocument();
+  });
+
+  test("can retry source file deletion after a transient failure", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const taskWithSourceFile = {
+      taskId: "etc-recon-task-source-retry-001",
+      status: "reviewing",
+      version: 3,
+      title: "2026-04 ETC 对账",
+      periodStart: "2026-04-01",
+      periodEnd: "2026-04-30",
+      statementPeriodStart: "2026-04-01",
+      statementPeriodEnd: "2026-04-30",
+      oaTotalAmount: "80.00",
+      etcInvoiceAmount: "50.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "",
+      importBatchId: "",
+      etcBatchId: "",
+      hasImportedInvoices: false,
+      importedInvoiceCount: 0,
+      importedInvoiceAmount: "0.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [
+        {
+          fileId: "file-ticket-retry",
+          sourceKind: "ticket_root",
+          originalName: "票根网-重试.txt",
+          hasBlockingIssue: false,
+        },
+      ],
+      parseIssues: [],
+    };
+    const taskAfterFileDelete = {
+      ...taskWithSourceFile,
+      version: 4,
+      sourceFiles: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithSourceFile] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFile as never);
+    const deleteSourceFile = vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile")
+      .mockRejectedValueOnce(new Error("ETC源文件删除暂时失败，请重试。") as never)
+      .mockResolvedValueOnce(taskAfterFileDelete as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await openEtcDisclosure(page, user, /已上传文件/);
+    await within(page).findByText("票根网-重试.txt");
+    await user.click(within(page).getByRole("button", { name: "删除源文件 票根网-重试.txt" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除源文件" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    expect(await within(page).findByText("ETC源文件删除暂时失败，请重试。")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "删除源文件" })).toBeInTheDocument();
+    expect(within(page).getByText("票根网-重试.txt")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteSourceFile).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "删除源文件" })).not.toBeInTheDocument();
+    });
+    expect(within(page).queryByText("ETC源文件删除暂时失败，请重试。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("票根网-重试.txt")).not.toBeInTheDocument();
   });
 
   test("removes legacy ticket-root mode controls and keeps only TXT ticket-root upload", async () => {
@@ -4015,6 +4307,65 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByText("OA 草稿创建失败，请检查附件完整性。")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "创建OA草稿" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-business-draft-fail-001")).toBeInTheDocument();
+  });
+
+  test("can retry OA draft creation after a transient failure", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const businessBatch = {
+      ...businessBatchFixture({
+        businessBatchId: "etc-business-draft-retry-001",
+        taskId: "etc-recon-draft-retry-001",
+        status: "imported",
+        version: 7,
+        submissionBatchId: "",
+        oaDraftId: "",
+        oaDraftUrl: "",
+        invoiceItems: [],
+      }),
+    } as const;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [businessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
+    const createDraft = vi
+      .spyOn(etcApi, "createEtcBusinessBatchOaDraft")
+      .mockRejectedValueOnce(new Error("OA 草稿创建暂时失败，请重试。") as never)
+      .mockResolvedValueOnce({
+        ...businessBatch,
+        status: "oa_confirmation_pending",
+        version: 8,
+        submissionBatchId: "etc_batch_retry_001",
+        oaDraftId: "oa_draft_retry_001",
+        oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_retry_001",
+        invoiceItems: [],
+      } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await waitFor(() => expect(within(page).getByRole("button", { name: "提交OA" })).toBeEnabled());
+    await user.click(within(page).getByRole("button", { name: "提交OA" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "创建OA草稿" });
+    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
+
+    await waitFor(() => expect(createDraft).toHaveBeenCalledTimes(1));
+    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", { expectedVersion: 7 });
+    expect(await within(page).findByText("OA 草稿创建暂时失败，请重试。")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "创建OA草稿" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "OA提交确认" })).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
+
+    await waitFor(() => expect(createDraft).toHaveBeenCalledTimes(2));
+    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", { expectedVersion: 7 });
+    const resultDialog = await screen.findByRole("dialog", { name: "OA提交确认" });
+    expect(resultDialog).toHaveTextContent("OA草稿已创建，等待提交确认。");
+    expect(within(page).queryByText("OA 草稿创建暂时失败，请重试。")).not.toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-business-draft-retry-001")).toHaveTextContent("待确认OA状态");
   });
 
   test("hides the OA draft open action when draft creation returns no URL", async () => {

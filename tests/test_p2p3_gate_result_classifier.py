@@ -33,6 +33,7 @@ class P2P3GateResultClassifierTests(unittest.TestCase):
             ({"status": "input_error", "error": "scenario_empty"}, "input-required"),
             ({"status": "no_candidates"}, "approved-scenario-required"),
             ({"status": "dry_run"}, "approval-required"),
+            ({"status": "approval_missing"}, "approval-required"),
         ]
 
         for source, expected in cases:
@@ -41,6 +42,25 @@ class P2P3GateResultClassifierTests(unittest.TestCase):
                     p2p3_gate_result_classifier.classify_gate_result(source)["classification"],
                     expected,
                 )
+
+    def test_classifies_nested_write_approval_missing_as_approval_required(self) -> None:
+        payload = p2p3_gate_result_classifier.classify_gate_result({
+            "status": "fail",
+            "failed_checks": ["write_operation_e2e"],
+            "checks": [
+                {
+                    "name": "write_operation_e2e",
+                    "status": "fail",
+                    "payload": {
+                        "status": "approval_missing",
+                        "missing_args": ["--write-approval-ticket"],
+                    },
+                }
+            ],
+        })
+
+        self.assertEqual(payload["classification"], "approval-required")
+        self.assertIn("approval ticket", payload["next_actions"][0])
 
     def test_classifies_runtime_and_durable_gate_failures(self) -> None:
         runtime = p2p3_gate_result_classifier.classify_gate_result({

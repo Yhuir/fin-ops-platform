@@ -25,7 +25,7 @@ from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_re
 PASS = "pass"
 FAIL = "fail"
 SKIP = "skip"
-WRITE_E2E_REQUIRED_ARGS = ("--write-scenario", "--apply-write-scenarios")
+WRITE_E2E_REQUIRED_ARGS = ("--write-scenario", "--apply-write-scenarios", "--write-approval-ticket")
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
     "dirty_scopes",
@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply-read-model-smoke", action="store_true")
     parser.add_argument("--write-scenario", type=Path)
     parser.add_argument("--apply-write-scenarios", action="store_true")
+    parser.add_argument(
+        "--write-approval-ticket",
+        default=os.getenv("FIN_OPS_WRITE_E2E_APPROVAL_TICKET", ""),
+        help="Required with --apply-write-scenarios. Business approval reference for mutating write-operation smoke.",
+    )
     parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
@@ -91,7 +96,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         write_json_report(report, output=args.output, stdout=stdout)
         return 2
     headers = http_slo_probe._auth_headers(
-        bearer_token=args.bearer_token,
+        bearer_token=args.bearer_token or args.admin_token,
+        admin_token="" if args.bearer_token else args.admin_token,
+        cookie=args.cookie,
+    )
+    admin_headers = http_slo_probe._auth_headers(
+        bearer_token="" if args.bearer_token else args.admin_token,
         admin_token=args.admin_token,
         cookie=args.cookie,
     )
@@ -101,10 +111,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         api_prefix=str(args.api_prefix),
         tenant_id=str(args.tenant_id or "default"),
         headers=headers,
+        admin_headers=admin_headers,
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
         apply_read_model_smoke=bool(args.apply_read_model_smoke),
         write_scenario=args.write_scenario,
         apply_write_scenarios=bool(args.apply_write_scenarios),
+        write_approval_ticket=str(args.write_approval_ticket or ""),
         read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
@@ -132,10 +144,12 @@ def run_closure_gate(
     api_prefix: str = "",
     tenant_id: str = "default",
     headers: Mapping[str, str] | None = None,
+    admin_headers: Mapping[str, str] | None = None,
     allow_unauthenticated_http: bool = False,
     apply_read_model_smoke: bool = False,
     write_scenario: Path | None = None,
     apply_write_scenarios: bool = False,
+    write_approval_ticket: str = "",
     read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
@@ -149,6 +163,11 @@ def run_closure_gate(
     limit: int = 2_000,
 ) -> dict[str, Any]:
     normalized_headers = {str(key): str(value) for key, value in dict(headers or {}).items() if str(value).strip()}
+    normalized_admin_headers = {
+        str(key): str(value)
+        for key, value in dict(admin_headers or {}).items()
+        if str(value).strip()
+    }
     write_scenarios, write_scenario_error = _load_write_scenarios(write_scenario, http_target_ms=http_target_ms)
     write_audit_operations = _write_scenario_operations(write_scenarios)
     checks = [
@@ -165,6 +184,7 @@ def run_closure_gate(
             base_url=base_url,
             api_prefix=api_prefix,
             headers=normalized_headers,
+            admin_headers=normalized_admin_headers,
             target_ms=http_target_ms,
             timeout_seconds=timeout_seconds,
             require_auth=not allow_unauthenticated_http,
@@ -200,6 +220,7 @@ def run_closure_gate(
             scenario_error=write_scenario_error,
             scenarios=write_scenarios,
             apply=apply_write_scenarios,
+            approval_reference=write_approval_ticket,
             base_url=base_url,
             api_prefix=api_prefix,
             tenant_id=tenant_id,
@@ -229,9 +250,10 @@ def run_closure_gate(
                 None,
             ),
         },
-        "auth_configured": _auth_configured(normalized_headers),
+        "auth_configured": _auth_configured(normalized_headers) or _auth_configured(normalized_admin_headers),
         "apply_read_model_smoke": bool(apply_read_model_smoke),
         "apply_write_scenarios": bool(apply_write_scenarios),
+        "write_approval_configured": bool(str(write_approval_ticket or "").strip()),
         "checks": [check.to_payload() for check in checks],
         "failed_checks": [check.name for check in checks if check.status == FAIL],
         "skipped_checks": [check.name for check in checks if check.status == SKIP],
@@ -333,6 +355,7 @@ def _http_slo_check(
     base_url: str,
     api_prefix: str,
     headers: Mapping[str, str],
+    admin_headers: Mapping[str, str],
     target_ms: float,
     timeout_seconds: float,
     require_auth: bool,
@@ -341,6 +364,7 @@ def _http_slo_check(
         base_url=base_url,
         api_prefix=api_prefix,
         headers=headers,
+        admin_headers=admin_headers,
         iterations=3,
         warmup=1,
         timeout_seconds=min(max(1.0, timeout_seconds), 30.0),
@@ -529,6 +553,7 @@ def _write_operation_e2e_check(
     scenario_error: dict[str, Any] | None,
     scenarios: Sequence[Any] | None,
     apply: bool,
+    approval_reference: str,
     base_url: str,
     api_prefix: str,
     tenant_id: str,
@@ -567,6 +592,7 @@ def _write_operation_e2e_check(
             api_prefix=api_prefix,
             tenant_id=tenant_id,
             headers=headers,
+            approval_reference=approval_reference,
             write_target_ms=write_target_ms,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
@@ -582,6 +608,18 @@ def _write_operation_e2e_check(
                 "required_args": list(WRITE_E2E_REQUIRED_ARGS),
             },
         )
+    if not str(approval_reference or "").strip():
+        return ClosureCheck(
+            "write_operation_e2e",
+            FAIL,
+            "Write-operation scenario has --apply-write-scenarios but no business approval reference.",
+            {
+                "status": "approval_missing",
+                "error": "write_operation_e2e_requires_approval_ticket",
+                "missing_args": ["--write-approval-ticket"],
+                "required_args": list(WRITE_E2E_REQUIRED_ARGS),
+            },
+        )
     report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
         connection,
         scenarios=loaded_scenarios,
@@ -590,6 +628,7 @@ def _write_operation_e2e_check(
         api_prefix=api_prefix,
         tenant_id=tenant_id,
         headers=headers,
+        approval_reference=approval_reference,
         write_target_ms=write_target_ms,
         timeout_seconds=timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,

@@ -461,6 +461,7 @@ function RowCells({
 export default function TurnoverLedgerGroupedTable({
   groups,
   loading,
+  showEmptyState = true,
   onEdit,
   selectedFlowRowIds = new Set<string>(),
   onToggleFlowSelection,
@@ -469,6 +470,7 @@ export default function TurnoverLedgerGroupedTable({
 }: {
   groups: TurnoverLedgerGroup[];
   loading: boolean;
+  showEmptyState?: boolean;
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
   selectedFlowRowIds?: Set<string>;
   onToggleFlowSelection?: (group: TurnoverLedgerGroup, row: TurnoverLedgerGroupedRow) => void;
@@ -505,7 +507,7 @@ export default function TurnoverLedgerGroupedTable({
               </td>
             </tr>
           ) : null}
-          {!loading && !hasRows ? (
+          {!loading && showEmptyState && !hasRows ? (
             <tr>
               <td className="turnover-ledger-table__empty" colSpan={11}>
                 暂无往来款台账

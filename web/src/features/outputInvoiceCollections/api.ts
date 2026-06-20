@@ -1,7 +1,9 @@
-import { apiRequestJson } from "../apiClient";
+import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
+  OutputInvoiceCollectionExportDownload,
+  OutputInvoiceCollectionExportPreview,
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterOptionsResponse,
   OutputInvoiceCollectionQuery,
@@ -54,9 +56,16 @@ function encodeFilters(filters: OutputInvoiceCollectionFilter[]) {
   return encodeURIComponent(JSON.stringify(filters));
 }
 
-function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
-  params.set("page", String(request.page));
-  params.set("page_size", String(request.pageSize));
+function objectStringMap(value: unknown): Record<string, string> {
+  const raw = objectValue(value);
+  return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
+}
+
+function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
+  if (includePagination) {
+    params.set("page", String(request.page));
+    params.set("page_size", String(request.pageSize));
+  }
   if (request.keyword.trim()) {
     params.set("keyword", request.keyword.trim());
   }
@@ -76,6 +85,70 @@ function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
     params.set("sort_field", request.sortField);
     params.set("sort_direction", request.sortDirection);
   }
+}
+
+function buildRowsQuery(request: FetchRowsRequest, includePagination = true) {
+  const params = new URLSearchParams();
+  appendRowsQuery(params, request, includePagination);
+  return params.toString();
+}
+
+function parseContentDispositionFileName(contentDisposition: string | null) {
+  if (!contentDisposition) {
+    return null;
+  }
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? null;
+}
+
+async function requestExportBlob(url: string, init: RequestInit = {}): Promise<OutputInvoiceCollectionExportDownload> {
+  const response = await apiFetch(url, init);
+  const contentType = response.headers?.get?.("Content-Type") ?? "";
+  if (!response.ok || response.status === 202) {
+    const rawText = await response.text();
+    let message = rawText || "导出请求失败";
+    try {
+      const payload = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
+      message = payload.error?.message ?? payload.message ?? message;
+    } catch {
+      // Keep raw text.
+    }
+    throw new Error(message);
+  }
+  if (contentType.toLowerCase().includes("json")) {
+    const rawText = await response.text();
+    let message = rawText || "导出接口返回了非 xlsx 响应。";
+    try {
+      const payload = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
+      message = payload.error?.message ?? payload.message ?? "读模型正在刷新，请稍后再导出。";
+    } catch {
+      // Keep raw text.
+    }
+    throw new Error(message);
+  }
+  if (contentType.toLowerCase().includes("text/html")) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error(`接口返回了 HTML 页面：${url}。说明请求没有进入后端 API，请确认后端服务和代理路径已正常配置。`);
+    }
+    throw new Error(rawText || `接口 ${url} 返回的不是 xlsx 文件：${contentType}`);
+  }
+  return {
+    blob: await response.blob(),
+    fileName: parseContentDispositionFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "销项发票收款情况.xlsx",
+  };
 }
 
 function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["invoice"] {
@@ -400,9 +473,7 @@ function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilt
 }
 
 export async function fetchOutputInvoiceCollectionRows(request: FetchRowsRequest): Promise<OutputInvoiceCollectionRowsResponse> {
-  const params = new URLSearchParams();
-  appendRowsQuery(params, request);
-  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows?${params.toString()}`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows?${buildRowsQuery(request)}`, {
     method: "GET",
     signal: request.signal,
   });
@@ -419,6 +490,32 @@ export async function fetchOutputInvoiceCollectionFilterOptions(
     signal: request.signal,
   });
   return mapFilterOptionsResponse(payload);
+}
+
+export async function fetchOutputInvoiceCollectionExportPreview(
+  request: FetchRowsRequest,
+): Promise<OutputInvoiceCollectionExportPreview> {
+  const payload = await apiRequestJson<unknown>(
+    `/api/output-invoice-collections/export-preview?${buildRowsQuery(request, false)}`,
+    { method: "GET", signal: request.signal },
+  );
+  const raw = objectValue(payload);
+  return {
+    fileName: stringValue(camelOrSnake(raw, "fileName", "file_name") ?? "销项发票收款情况.xlsx"),
+    rowCount: numberValue(camelOrSnake(raw, "rowCount", "row_count"), 0),
+    scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
+    columns: arrayValue(raw.columns).map(stringValue),
+    sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
+    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    message: stringValue(raw.message),
+  };
+}
+
+export async function downloadOutputInvoiceCollectionExport(request: FetchRowsRequest): Promise<OutputInvoiceCollectionExportDownload> {
+  return requestExportBlob(`/api/output-invoice-collections/export?${buildRowsQuery(request, false)}`, {
+    method: "GET",
+    signal: request.signal,
+  });
 }
 
 export async function fetchOutputInvoiceCollectionInvoiceDetail(id: string, signal?: AbortSignal) {

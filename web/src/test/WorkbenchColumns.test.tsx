@@ -130,7 +130,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaPane).getByRole("columnheader", { name: "申请事由" })).toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "申请类型" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "OA和流水关联情况" })).not.toBeInTheDocument();
-    expect(within(oaPane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+    expect(within(oaPane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
     expect(within(oaPane).queryByRole("button", { name: "筛选 金额" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("button", { name: "筛选 申请事由" })).not.toBeInTheDocument();
 
@@ -145,7 +145,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(bankPane).queryByRole("columnheader", { name: "交易时间" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "支付/收款时间" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "和发票OA关联情况" })).not.toBeInTheDocument();
-    expect(within(bankPane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+    expect(within(bankPane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
     expect(within(bankPane).queryByRole("button", { name: "筛选 备注" })).not.toBeInTheDocument();
     expect(within(bankPane).getAllByRole("columnheader")[0]).toHaveTextContent("对方户名");
 
@@ -155,7 +155,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票代码/发票号码" })).not.toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "不含税价格/税率（税额）" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票类型" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "销方识别号" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "购方识别号" })).not.toBeInTheDocument();
@@ -282,7 +282,7 @@ describe("Workbench columns and inline actions", () => {
     expect(offsetTag.closest(".compound-cell-secondary")).toBe(pendingStatus.closest(".compound-cell-secondary"));
   });
 
-  test("renders inline detail actions for OA and bank rows while keeping invoice actions in the action column", async () => {
+  test("renders inline detail actions while keeping default row actions in the action column", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -308,11 +308,11 @@ describe("Workbench columns and inline actions", () => {
     expect(openInvoiceRow).toBeDefined();
     expect(within(oaRow as HTMLElement).getByRole("button", { name: "查看OA 赵华 详情" })).toHaveClass("row-action-btn-icon");
     expect(within(bankRow as HTMLElement).getByRole("button", { name: /查看银行流水 .* 详情/ })).toBeInTheDocument();
-    expect(within(bankRow as HTMLElement).queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
+    expect(within(bankRow as HTMLElement).getByRole("button", { name: "更多" })).toBeInTheDocument();
     expect(within(bankRow as HTMLElement).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
     expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
-    expect(within(openInvoiceRow as HTMLElement).queryByRole("button", { name: "忽略" })).not.toBeInTheDocument();
+    expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: "忽略" })).toBeInTheDocument();
   });
 
   test("renders compact two-line datetime tags in bank rows", async () => {

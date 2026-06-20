@@ -11,7 +11,7 @@
   },
   "executed": true,
   "gate_recommendation": "PASS",
-  "generated_at": "2026-06-16T17:31:54+00:00",
+  "generated_at": "2026-06-20T09:30:58+00:00",
   "mirror_backend": "postgres",
   "mode": "execute",
   "plan": {

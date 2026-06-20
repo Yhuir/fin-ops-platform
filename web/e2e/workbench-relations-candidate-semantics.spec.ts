@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
@@ -42,7 +42,7 @@ test.describe("workbench relation candidate semantics", () => {
     await expect(row).toBeVisible();
     await expect(row.getByText("候选")).toHaveCount(3);
     await expect(row.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("支付少了");
-    await expect(row.getByRole("button", { name: "确认已支付" })).toBeVisible();
+    await expect(row.getByRole("button", { name: /确认已支付/ })).toHaveCount(0);
     await expect(row).toContainText("浏览器待付款供应商");
     await expect(row).toContainText("INV-PAY-E2E-001");
     expect(api.count("POST /api/oa-pending-payments/actions/confirm-paid")).toBe(0);

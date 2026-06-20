@@ -16,6 +16,7 @@ import { Link as RouterLink } from "react-router-dom";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
@@ -689,6 +690,7 @@ function ReconciliationDescriptionCell({
 
 export default function EtcTicketManagementPage() {
   const { jobs } = useBackgroundJobProgress();
+  const { canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBatchStatus>("unsubmitted");
   const [month, setMonth] = useState("");
   const [plate, setPlate] = useState("");
@@ -1044,7 +1046,7 @@ export default function EtcTicketManagementPage() {
   function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
     return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
   }
-  const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => "";
+  const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => canMutateData ? "" : "当前账号仅支持查看和导出，不能删除 ETC 批次。";
   const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
   const taskLinkedBusinessBatch = (task: EtcReconciliationTask) => {
     const importBatchId = task.importBatchId?.trim();
@@ -1054,8 +1056,8 @@ export default function EtcTicketManagementPage() {
     ) ?? null;
   };
   const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
-    task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
-  const canDeleteTask = (_task: EtcReconciliationTask) => true;
+    canMutateData && task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
+  const canDeleteTask = (_task: EtcReconciliationTask) => canMutateData;
   const removeImportedInvoicesDisabledReason = (task: EtcReconciliationTask) => {
     if (task.submittedConfirmedAt?.trim()) {
       return "OA已提交，不能移除已导入发票";
@@ -1271,7 +1273,8 @@ export default function EtcTicketManagementPage() {
   const selectedConfirmedCreditCardItemIds = selectedReconciliationSummary.creditCardItemIds;
   const selectedTaskImportBatchSelected = Boolean(selectedTask && selectedTaskImportBatchId);
   const selectedTaskImportBatchCanSubmit = Boolean(
-    selectedTask
+    canMutateData
+    && selectedTask
     && selectedTaskImportBatchId
     && selectedTaskBusinessBatch
     && canCreateOaDraft(selectedTaskBusinessBatch.status)
@@ -1289,6 +1292,7 @@ export default function EtcTicketManagementPage() {
     ? `为当前任务的 ${importedInvoiceCount} 张发票创建 OA 草稿，合计 ${importedInvoiceAmount}。`
     : "为当前批次创建 OA 草稿。";
   const canSubmitCurrentBatch = activeStatus === "unsubmitted"
+    && canMutateData
     && (selectedTaskImportBatchSelected
       ? selectedTaskImportBatchCanSubmit
       : currentBusinessBatch !== null && canCreateOaDraft(currentBusinessBatch.status) && !detailLoading);
@@ -1298,7 +1302,7 @@ export default function EtcTicketManagementPage() {
     }
     return currentBusinessBatch;
   }, [businessBatches, currentBusinessBatch, draftResult?.batchId]);
-  const taskIsMutable = Boolean(selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
+  const taskIsMutable = Boolean(canMutateData && selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
     () => selectedTask?.creditCardItems.find((item) => item.itemId === selectedCardItemId) ?? null,
@@ -1401,6 +1405,10 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleCreateReconciliationTask = async () => {
+    if (!canMutateData) {
+      setActionError("当前账号仅支持查看和导出，不能新建 ETC 批次。");
+      return;
+    }
     setTaskActionLoading(true);
     setActionError(null);
     try {
@@ -1807,7 +1815,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleCreateDraft = async () => {
-    if (!currentBusinessBatch || !currentOaDraftBatchId) {
+    if (!canMutateData || !currentBusinessBatch || !currentOaDraftBatchId) {
       return;
     }
     setActionError(null);
@@ -1854,7 +1862,7 @@ export default function EtcTicketManagementPage() {
     batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null,
   ) => {
     const target = resolveOaActionBatch(batch);
-    if (!target) {
+    if (!canMutateData || !target) {
       return;
     }
     const reason = decision === "submitted" ? MANUAL_OA_SUBMITTED_REASON : MANUAL_OA_NOT_SUBMITTED_REASON;
@@ -1921,7 +1929,7 @@ export default function EtcTicketManagementPage() {
           <button
             type="button"
             className="etc-primary-action"
-            disabled={oaActionLoading}
+            disabled={!canMutateData || oaActionLoading}
             onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
           >
             <CheckCircle2 aria-hidden="true" size={16} />
@@ -1930,7 +1938,7 @@ export default function EtcTicketManagementPage() {
           <button
             type="button"
             className="etc-secondary-action"
-            disabled={oaActionLoading}
+            disabled={!canMutateData || oaActionLoading}
             onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
           >
             <XCircle aria-hidden="true" size={16} />
@@ -2091,14 +2099,37 @@ export default function EtcTicketManagementPage() {
         className="etc-page"
         title="ETC票据"
         actions={
-          <RouterLink className="button button--sm button--outline etc-page-action-link" to="/imports/etc-invoices">
-            导入发票
-            <ArrowRight aria-hidden="true" size={16} />
-          </RouterLink>
+          <>
+            <Button
+              className="etc-secondary-action"
+              isDisabled={loading || taskLoading}
+              isPending={loading}
+              onPress={() => {
+                void loadBatches();
+                if (activeStatus === "unsubmitted") {
+                  void loadReconciliationTasks();
+                }
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden="true" size={16} />
+              刷新
+            </Button>
+            <RouterLink className="button button--sm button--outline etc-page-action-link" to="/imports/etc-invoices">
+              导入发票
+              <ArrowRight aria-hidden="true" size={16} />
+            </RouterLink>
+          </>
         }
       >
         <div className="etc-page-content">
           {actionError ? <StatePanel tone="error">{actionError}</StatePanel> : null}
+          {!canMutateData ? (
+            <StatePanel tone="warning" compact>
+              当前账号仅支持查看和导出，不能创建 OA 草稿、人工确认、上传、删除或新建 ETC 批次。
+            </StatePanel>
+          ) : null}
 
           <div className="etc-filter-bar" aria-label="ETC筛选">
             <ToggleButtonGroup
@@ -2171,7 +2202,7 @@ export default function EtcTicketManagementPage() {
                 {activeStatus === "unsubmitted" ? (
                   <Button
                     className="etc-secondary-action"
-                    isDisabled={taskActionLoading}
+                    isDisabled={!canMutateData || taskActionLoading}
                     isPending={taskActionLoading}
                     onPress={handleCreateReconciliationTask}
                     size="sm"
@@ -3053,7 +3084,7 @@ export default function EtcTicketManagementPage() {
                 <button
                   type="button"
                   className="etc-primary-action"
-                  disabled={oaActionLoading}
+                  disabled={!canMutateData || oaActionLoading}
                   onClick={() => void handleManualBusinessBatchOaStatus("submitted")}
                 >
                   <CheckCircle2 aria-hidden="true" size={16} />
@@ -3062,7 +3093,7 @@ export default function EtcTicketManagementPage() {
                 <button
                   type="button"
                   className="etc-secondary-action"
-                  disabled={oaActionLoading}
+                  disabled={!canMutateData || oaActionLoading}
                   onClick={() => void handleManualBusinessBatchOaStatus("not_submitted")}
                 >
                   <XCircle aria-hidden="true" size={16} />
@@ -3073,7 +3104,7 @@ export default function EtcTicketManagementPage() {
             ) : (
               <>
                 <button type="button" className="etc-secondary-action" onClick={() => setCreateDialogOpen(false)}>取消</button>
-                <button type="button" className="etc-primary-action" onClick={handleCreateDraft} disabled={draftCreating}>
+                <button type="button" className="etc-primary-action" onClick={handleCreateDraft} disabled={!canMutateData || draftCreating}>
                   {draftCreating ? "正在创建..." : "创建草稿"}
                 </button>
               </>

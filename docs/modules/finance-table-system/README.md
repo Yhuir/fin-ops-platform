@@ -61,4 +61,6 @@
 
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
+- `e2e-spec.md`：维护 Finance Table System 的 Spec-first Browser E2E 合同。
+- `e2e-coverage.md`：维护 Spec ID 到 Playwright/Vitest/页面级证据的覆盖矩阵和外部风险。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。

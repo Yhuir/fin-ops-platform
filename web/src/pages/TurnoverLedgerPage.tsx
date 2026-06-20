@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
-import { Download } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
@@ -873,7 +873,7 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleSaveTagSelection = async () => {
-    if (tagSaving) {
+    if (!canMutateData || tagSaving) {
       return;
     }
     const selectedTagCodes = Array.from(draftSelectedTagCodes);
@@ -940,14 +940,25 @@ export default function TurnoverLedgerPage() {
       <PageScaffold
         title="外部往来款管理"
         actions={(
-          <button
-            className="turnover-ledger-button"
-            disabled={tagLoading}
-            onClick={() => setTagDrawerOpen(true)}
-            type="button"
-          >
-            外部往来款标签设置
-          </button>
+          <>
+            <button
+              className="turnover-ledger-button"
+              disabled={loading}
+              onClick={() => loadLedger()}
+              type="button"
+            >
+              <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
+              刷新台账
+            </button>
+            <button
+              className="turnover-ledger-button"
+              disabled={tagLoading}
+              onClick={() => setTagDrawerOpen(true)}
+              type="button"
+            >
+              外部往来款标签设置
+            </button>
+          </>
         )}
       >
         {!canMutateData ? (
@@ -1041,10 +1052,11 @@ export default function TurnoverLedgerPage() {
             <TurnoverLedgerGroupedTable
               groups={groups}
               loading={loading}
+              showEmptyState={!error}
               onEdit={handleOpenEditor}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
-              actionsDisabled={false}
+              actionsDisabled={!canMutateData}
             />
           </div>
         </section>
@@ -1061,10 +1073,15 @@ export default function TurnoverLedgerPage() {
       >
         <div className="turnover-ledger-drawer__content">
           <div className="turnover-ledger-drawer__actions">
-            <button className="turnover-ledger-button" disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} type="button">全选</button>
-            <button className="turnover-ledger-button" disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} type="button">清空</button>
-            <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={tagSaving} onClick={() => void handleSaveTagSelection()} type="button">保存</button>
+            <button className="turnover-ledger-button" disabled={!canMutateData || tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} type="button">全选</button>
+            <button className="turnover-ledger-button" disabled={!canMutateData || tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} type="button">清空</button>
+            <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={!canMutateData || tagSaving} onClick={() => void handleSaveTagSelection()} type="button">保存</button>
           </div>
+          {!canMutateData ? (
+            <div className="turnover-ledger-drawer__notice" role="status">
+              当前账号仅支持查看和导出，不能保存外部往来款标签设置。
+            </div>
+          ) : null}
           {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
             <div className="turnover-ledger-drawer__notice" role="alert">
               已停用或不再属于外部往来款的标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
@@ -1084,6 +1101,7 @@ export default function TurnoverLedgerPage() {
                       aria-checked={checkedCount > 0 && !allChecked ? "mixed" : allChecked}
                       checked={allChecked}
                       className="turnover-ledger-checkbox"
+                      disabled={!canMutateData || tagSaving}
                       type="checkbox"
                         onChange={(event) => {
                           setDraftSelectedTagCodes((current) => {
@@ -1109,6 +1127,7 @@ export default function TurnoverLedgerPage() {
                           <input
                             checked={draftSelectedTagCodes.has(tag.code)}
                             className="turnover-ledger-checkbox"
+                            disabled={!canMutateData || tagSaving}
                             type="checkbox"
                               onChange={(event) => {
                                 setDraftSelectedTagCodes((current) => {

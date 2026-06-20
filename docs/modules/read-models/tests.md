@@ -62,7 +62,7 @@
 | old feature regression | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | 旧业务 shape 由各模块继续覆盖 | P1 |
 | historical bug regression | 适用 | `tests/test_read_model_scope_contract.py`、`tests/test_read_model_refresh_gateway.py` | 生产真实库 dry-run 仍需发布前执行 | P2 |
 | production data / migration risk | 适用 | `scripts/check-read-model-scope-contracts.py`、`tests/test_read_model_scope_contract.py` 覆盖 repair manifest、audit、rollback 和幂等 apply | 未连接真实生产 PostgreSQL 执行 dry-run/`--apply` | P2 documented-risk |
-| performance-sensitive query path | 间接适用 | `tests/test_api_performance_metrics.py`、SQL runtime tests、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_bounds_all_scope_groups_page_query` | 本模块未做性能基准；业务 read model SQL 在对应模块覆盖。Workbench all-scope groups 首屏读取必须保持 page API + `limit/offset` 护栏。 | P2 |
+| performance-sensitive query path | 适用 | `tests/test_api_performance_metrics.py`、SQL runtime tests、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_bounds_all_scope_groups_page_query`、`tests/test_postgres_repositories_boundaries.py::test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated` | Workbench all-scope groups 首屏读取必须保持 page API + `limit/offset` 护栏；invoice lifecycle rows 保存必须保持 batch insert/upsert，避免 critical worker refresh 在真实生产库里被逐行 upsert 放大。 | P2 |
 
 ## 七类测试适用性
 
@@ -72,7 +72,7 @@
 | 2. Service-layer tests | 适用 | `tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_scope_contract.py`、`tests/test_read_model_readiness_reporter.py`、`tests/test_read_model_architecture_guards.py` | gateway 委托 queue、cache hit/miss、missing/stale 入队、scope contract 检查/清理、repair manifest、audit、rollback、readiness 成功/失败记录、query gateway call site 必须声明 freshness contract；direct fresh 与 direct source mismatch 路径必须被静态 guard 分类并证明 expected contract 非空 | 无 P0 缺口 | P1 | 真实 repository/DB 清理需 dry-run |
 | 3. API contract tests | 按需适用 | `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_generic_cost_statistics_enqueue_expands_month_scopes` 和各业务 API tests | API 必须透出 `read_model_status`、`refresh_enqueued`、`stale_reasons` 等关键字段 | 本模块不拥有单一 HTTP contract；需各模块继续补齐 | P1 | 如果业务 route 绕过 gateway，可能只在模块 API tests 暴露 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_*`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_queue.py`、`tests/test_operation_freshness_barrier.py` | dirty scope/outbox durable truth、worker lifecycle 使用 gateway、Redis 只缓存 fresh 且满足 payload contract 的 payload、readiness scope 状态、current uncovered outbox failure 不被清理、barrier 只读 runtime facts | 无 P0 缺口 | P1 | Redis/RabbitMQ 真连接属于 runtime/staging 风险 |
-| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/*Page.test.tsx`、`web/src/test/domainEvents.test.ts`、`web/src/test/OperationBarrierApi.test.ts` | 页面必须正确消费 fresh/refreshing/stale/empty/error；写操作 overlay 必须等待后端 barrier fresh 才消失 | 真实浏览器多页面写操作需生产/Playwright smoke | P1 | 页面可能把 refreshing 空 rows 当真实空结果，需业务模块逐一保护 |
+| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/*Page.test.tsx`、`web/src/test/domainEvents.test.ts`、`web/src/test/OperationBarrierApi.test.ts`、页面级 Playwright specs | 页面必须正确消费 fresh/refreshing/stale/empty/error；写操作 overlay 必须等待后端 barrier fresh 才消失；no-OA Browser 已覆盖 stale list 自动重读期间不显示普通空态；batch accounting Browser 已覆盖 stale relation read model 下保留当前银行/OA rows、防普通空态且零 mutation；turnover Browser 已覆盖 stale grouped ledger 保留 rows 且禁用确认闭环 | 真实浏览器多页面写操作需生产/Playwright smoke | P1 | 页面可能把 refreshing 空 rows 当真实空结果，需业务模块逐一保护 |
 | 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、各业务 integration tests | 写入 -> dirty scope -> worker/readiness -> 页面/API 的关键路径 | 完整导入到 worker 投影端到端不在本模块集中覆盖 | P2 | 生产 worker drain 和历史数据需 dry-run/smoke |
 | 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | runtime 边界不被绕过；service 不 import HTTP/auth；producer 不绕过 gateway；旧非法 scope 可检测/清理 | 无 P0 缺口 | P1 | 新增 producer 时必须同步边界守卫 |
 
@@ -113,10 +113,14 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_platform_runtime_boundary_guards -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_bounds_all_scope_groups_page_query -v
+PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_repositories_boundaries.py tests/test_invoice_lifecycle_read_model_refresh.py tests/test_invoice_lifecycle_read_facade.py tests/test_invoice_lifecycle_page_integration.py -q
 python3 -m pytest tests/test_operation_freshness_barrier.py tests/test_app_health_api.py -q
 cd web && npm test -- --run src/test/OperationBarrierApi.test.ts
 bash scripts/verify.sh docs
+bash scripts/verify.sh infra-smoke
 ```
+
+`infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖
 
@@ -128,6 +132,8 @@ bash scripts/verify.sh docs
 ## 未测风险
 
 - 未在真实生产 PostgreSQL 上执行 `scripts/check-read-model-scope-contracts.py --json` 或 `--apply`；上线前必须先 dry-run 检查 JSON repair manifest，确认 current uncovered failure 的真实原因，再按 runbook 执行受控清理。
+- 生产 critical `read_model_slo_smoke --apply` 已在 release `main-99ea9b35-invoice-lifecycle-batch-20260619145710` 上证明 15/15 个关键 read model scope 达到 `done/fresh` 且 5 秒 SLO 通过：summary p95/max 约 3.52 秒，`invoice_lifecycle` 约 1.29 秒。该证据证明 direct refresh worker drain，不等同于每个真实业务写入口都已完成 write-operation SLO audit。
+- 生产 `write_operation_slo_audit` 在 168 小时窗口内发现历史真实写链路样本仍有 1 秒/3 秒 SLO 超时；以 hotfix release 激活时间为 `--since` 后，高影响业务写操作 profile 仍全为 `missing`。因此真实业务写入口闭环必须继续通过已生成的 scenario 候选和真实认证/审批执行来证明。
 - 本模块不逐个证明所有业务页面对 `refreshing/stale/missing/failed` 的 UI 行为；后续页面模块闭环必须补齐。
-- 本模块不验证真实 Redis/RabbitMQ 网络和 worker drain；runtime-workers 与 operations/staging 覆盖。
+- 本模块默认不验证真实 Redis/RabbitMQ 网络和 worker drain；runtime-workers 与 operations/staging 覆盖。`bash scripts/verify.sh infra-smoke` 只有在 `FIN_OPS_TEST_DATABASE_URL` 和 `FIN_OPS_INFRA_SMOKE_APPLY=1` 同时存在时，才是直接 enqueue worker drain 证据；只有在 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS` 指定 operation 且环境中已有对应真实业务写入样本时，才是该写链路 durable outbox fan-out 证据。
 - `server.py` 仍有 legacy route 分发；每个业务模块需要继续确认 route 是否走 `ReadModelQueryGateway` 或等价 freshness boundary。

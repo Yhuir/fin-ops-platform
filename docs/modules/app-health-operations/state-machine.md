@@ -29,6 +29,7 @@
 
 - outbox pending/publishing/failed、dirty scopes pending/processing/failed、RabbitMQ publish/queue/DLQ、worker heartbeat lag、worker kind/event mismatch 都是 runtime facts。
 - worker `missing` / `stale` / `mismatched` 由 registry 和 heartbeat 推导，不由 systemd active 推导。
+- `/api/app-health.app_status.runtime_summary` 是 App Status hover 的整体状态摘要：read models 统计 `fresh/refreshing/stale/missing/failed/unavailable/issue_count/scope_issue_count`，workers 统计 `required/ready/idle/working/stale/missing/mismatched/unavailable/issue_count`，queue 统计 `pending/processing/failed/backlog`。worker `working/running/processing` 表示正在工作，不计入 issue；warning、stale、missing、mismatch、unavailable 才计入 issue。
 - readiness backfill 只能从真实 projection 计算；禁止把 missing 批量写成 fresh。
 
 ### Dashboard
@@ -64,6 +65,7 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | - | 初始骨架 | 待补充 | - |
+| 2026-06-20 | App Status 增加 runtime summary，并在 hover 与系统状态页展示 read model / worker / queue 整体状态 | 用户不用进入具体表格即可判断 read model 是否 fresh、worker 是否 active/working、queue 是否有 backlog | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppStatusIndicator.test.tsx src/test/AppHealthOperationsPage.test.tsx` |
 | 2026-06-18 | 同一 read model scope 旧 failed 被新 pending/processing 覆盖时展示 refreshing，旧 last_error 只做历史诊断 | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、App Health / App Status current-effective read model 状态 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v` |
 | 2026-06-11 | 补齐 App Health / App Status 测试闭环状态机 | 将 overall/domain/job/runtime/dashboard/readiness 状态纳入统一维护边界 | `tests.test_app_health_api`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-12 | 引入 current-effective blocker 语义 | legacy 成本 scope 与已被后续成功覆盖的 outbox 失败不再污染当前 App Status；历史 scope 通过 `historical_read_model_scopes[]` 暴露 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service tests.test_runtime_monitoring -v` |

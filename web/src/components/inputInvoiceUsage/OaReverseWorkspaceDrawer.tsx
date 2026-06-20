@@ -85,6 +85,7 @@ type OaReverseWorkspaceDrawerProps = {
   loadStagedDrafts?: () => Promise<InputInvoiceUsageOaReverseStagedDraftsResponse>;
   loadSubmittedHistory?: () => Promise<InputInvoiceUsageOaReverseSubmittedHistoryResponse>;
   manualStatus?: (batchId: string, request: ManualInputInvoiceUsageOaReverseStatusRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
+  onBatchChanged?: () => void;
   onClose: () => void;
 };
 
@@ -97,6 +98,7 @@ export default function OaReverseWorkspaceDrawer({
   loadStagedDrafts,
   loadSubmittedHistory,
   manualStatus,
+  onBatchChanged,
   onClose,
 }: OaReverseWorkspaceDrawerProps) {
   const [preview, setPreview] = useState<OaReversePreviewPayload | null>(null);
@@ -225,6 +227,7 @@ export default function OaReverseWorkspaceDrawer({
       .then((nextBatch) => {
         setBatch(nextBatch);
         setFeedback(successMessage);
+        onBatchChanged?.();
         onSuccess?.(nextBatch);
       })
       .catch((reason: unknown) => {
@@ -284,6 +287,7 @@ export default function OaReverseWorkspaceDrawer({
       .then((nextBatch) => {
         setConfirmationOpen(false);
         setStagedDrafts((current) => current.filter((item) => item.batchId !== targetBatch.batchId));
+        onBatchChanged?.();
         if (decision === "submitted") {
           setBatch(nextBatch);
           setFeedback("已进入已提交历史。");

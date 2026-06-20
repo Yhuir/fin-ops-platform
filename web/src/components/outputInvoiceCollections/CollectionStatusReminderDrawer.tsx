@@ -16,6 +16,7 @@ type CollectionStatusReminderDrawerProps = {
   onSaveReminder: (rowId: string, payload: OutputInvoiceCollectionReminderUpdateRequest) => Promise<void>;
   onClearStatus: (rowId: string, expectedVersion: number) => Promise<void>;
   onCancelReminder: (rowId: string, reminderId: string) => Promise<void>;
+  onChanged?: () => void;
   onClose: () => void;
 };
 
@@ -27,6 +28,7 @@ export default function CollectionStatusReminderDrawer({
   onSaveReminder,
   onClearStatus,
   onCancelReminder,
+  onChanged,
   onClose,
 }: CollectionStatusReminderDrawerProps) {
   const [statusCode, setStatusCode] = useState("");
@@ -36,6 +38,7 @@ export default function CollectionStatusReminderDrawer({
   const [reminderNote, setReminderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedStatusFingerprint, setSavedStatusFingerprint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !row) {
@@ -47,6 +50,7 @@ export default function CollectionStatusReminderDrawer({
     setRemindAt(toDatetimeLocal(row.collectionStatus.reminder?.remindAt || ""));
     setReminderNote(row.collectionStatus.reminder?.note || "");
     setError(null);
+    setSavedStatusFingerprint(null);
   }, [open, row]);
 
   const handleSubmit = async () => {
@@ -55,13 +59,18 @@ export default function CollectionStatusReminderDrawer({
     }
     setSubmitting(true);
     setError(null);
+    const statusPayload = {
+      statusCode,
+      expectedCollectionDate: expectedCollectionDate || undefined,
+      note: statusNote,
+      expectedVersion: row.collectionStatus.manualOverride?.version ?? 0,
+    };
+    const statusFingerprint = JSON.stringify(statusPayload);
     try {
-      await onSaveStatus(row.id, {
-        statusCode,
-        expectedCollectionDate: expectedCollectionDate || undefined,
-        note: statusNote,
-        expectedVersion: row.collectionStatus.manualOverride?.version ?? 0,
-      });
+      if (savedStatusFingerprint !== statusFingerprint) {
+        await onSaveStatus(row.id, statusPayload);
+        setSavedStatusFingerprint(statusFingerprint);
+      }
       if (remindAt) {
         await onSaveReminder(row.id, {
           remindAt: new Date(remindAt).toISOString(),
@@ -69,6 +78,7 @@ export default function CollectionStatusReminderDrawer({
           note: reminderNote,
         });
       }
+      onChanged?.();
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存失败");

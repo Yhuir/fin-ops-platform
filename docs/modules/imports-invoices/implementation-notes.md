@@ -26,6 +26,50 @@
 
 ## 历史记录
 
+## 2026-06-19 - 发票导入成功路径 UI 错误残留 guard
+
+- 目标：补齐发票导入 Browser 成功链路的“假成功”检测，防止 confirm 或下游 fresh 成功后页面仍残留导入失败、后台导入失败、read model 失败等提示。
+- 影响范围：`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/fixtures/successAssertions.ts`、Playwright 严格诊断静态测试和本模块测试文档。
+- 关键决策：只加固 deterministic Browser E2E 和静态 guard，不改产品逻辑；损坏文件 file-level error 和未导入项明细仍是合法 preview 结果，不纳入成功残留错误模式。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：发票导入 confirm 成功、草稿清空，以及销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 fresh 成功节点都会调用 `expectNoUnexpectedSuccessUiErrors`。
+- 验证命令：`cd web && npx playwright test e2e/imports-bank-transactions-flow.spec.ts e2e/imports-invoices-flow.spec.ts e2e/imports-etc-invoices-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实发票大文件/历史模板/信息汇总表样本、真实 import/derived lifecycle worker drain、worker crash/retry、search 外层 UI 和真实下载/大表 smoke 仍需 staging 或生产只读 smoke。
+- 后续事项：新增导入进度 UI、search Browser route 或发票模板时，把成功后错误残留 guard 加入对应 Browser flow。
+
+## 2026-06-19 - 发票导入 Spec-first covered 校准
+
+- 目标：完成 `/imports/invoices` 本地 Spec-first E2E Audit 校准，把剩余 `IMPORT-INVOICE-E2E-008` 从 partial 收敛为 covered，并把真实 worker drain 保留在 `IMPORT-INVOICE-E2E-009` external-risk。
+- 影响范围：发票导入 Spec-first 覆盖矩阵、全局 Spec-first inventory、testing closure state 和本实施记录；不改产品逻辑。
+- 关键决策：当前 Browser 已覆盖上传/预览/慢预览锁定、重复与未导入明细、损坏文件混合、preview stale、confirm 失败、权限 gate、Workbench refresh，以及销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 downstream fresh read model 与导入影响行。search 当前无独立前端 route，由 API/runtime 证据覆盖；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实信息汇总表和大文件仍归 `IMPORT-INVOICE-E2E-009`。
+- 文档影响：`IMPORT-INVOICE-E2E-008` 标记为 `covered`；全局 inventory 和 testing closure state 可将 `imports-invoices` 从 `partial` 校准为 `covered`。
+- 测试覆盖：未新增测试；基于现有 `web/e2e/imports-invoices-flow.spec.ts`、`permissions-role-matrix`、导入 API/service/lifecycle/read model 和 write-operation SLO audit contract 证据校准。
+- 验证命令：待本轮运行三类导入 Playwright specs、`bash scripts/verify.sh docs` 和 `git diff --check`。
+- 未测风险：真实发票大文件/历史模板/信息汇总表样本、真实 import/derived lifecycle worker drain、worker crash/retry、search 外层 UI 和真实下载/大表 smoke 仍需 staging 或生产只读 smoke。
+- 后续事项：新增独立 search Browser route、导入进度 UI 或新发票模板时，按功能追加 Browser E2E；真实 worker 最新性走 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=invoice_import_confirmed bash scripts/verify.sh infra-smoke`。
+
+## 2026-06-19 - 发票导入下游 fresh read model Browser fan-out
+
+- 目标：补强 `IMPORT-INVOICE-E2E-008`，让发票导入确认后的 Browser 回归不只验证 Workbench、销项收款、进项使用和税金抵扣，还继续覆盖待找发票、OA 待付款和成本统计的 fresh read model 展示。
+- 影响范围：`web/e2e/imports-invoices-flow.spec.ts`、deterministic API mock、发票导入模块 Spec-first 覆盖文档和全局 testing closure state。
+- 关键决策：不改产品逻辑；新增发票导入专用 deterministic mock 行，不复用 `workbench_relation` 的 confirmed/candidate 语义，避免把导入 lifecycle fan-out 和关联台人工确认语义混在一起。本地 Browser smoke 只证明页面 fresh contract 和 UI 反馈，不替代真实 worker drain。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md`、`docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：`web/e2e/imports-invoices-flow.spec.ts` 的 downstream fresh test 在确认导入后依次打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计，断言对应 API `read_model_status=fresh` 且页面展示导入影响行；同时 strict browser error capture 增加非预期 5xx response 捕获。
+- 验证命令：`cd web && npx playwright test e2e/imports-invoices-flow.spec.ts --project=chromium` 通过 6 tests。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实发票大文件、真实信息汇总表浏览器上传、search 外层 UI、真实下游大表和导出下载仍需后续 real-infra/nightly 或 staging smoke。
+- 后续事项：下一轮优先补真实基础设施 worker drain smoke，或补信息汇总表真实样本/超大文件/上传中断。
+
+## 2026-06-19 - 发票导入 Spec-first Browser 负面路径
+
+- 目标：把 `/imports/invoices` 从单一 happy path Browser smoke 提升为 Spec-first E2E 基线，覆盖重复明细、`preview_stale` 和 confirm failure，防止页面在导入失败或预览过期时仍显示成功或刷新下游。
+- 影响范围：deterministic Playwright mock、`web/e2e/imports-invoices-flow.spec.ts`、发票导入模块 Spec-first E2E 文档和全局测试闭环状态。
+- 关键决策：不改产品逻辑；复用共享导入工作流和现有 API mapper 的 `preview_stale` 文案，只在 mock 中增加发票导入专用失败开关。mock confirm 成功不等同于真实 worker drain，真实 PostgreSQL/RabbitMQ/Redis/systemd worker 和下游 read model freshness 仍作为 `external-risk` 记录。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、全局 Spec-first inventory、测试说明和闭环状态。
+- 测试覆盖：Browser E2E 覆盖真实 file input、每文件进/销项方向、preview audit、重复项明细、confirm 成功刷新 Workbench、`preview_stale` 无 success/无 Workbench refresh、confirm 500 无 success/无 Workbench refresh。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：真实发票 Excel、大文件、真实 import worker drain、derived lifecycle worker、下游 pending invoices/tax/input-output/OA/cost/search read model 最终 fresh 仍需 staging 或生产只读 smoke。
+- 后续事项：继续补真实基础设施 worker drain smoke，或补发票导入后的下游多页面 Browser fan-out。
+
 ## 2026-06-19 - 发票导入后台链路闭环
 
 - 目标：修复发票文件上传/预览/确认后，用户看到导入成功但关联台仍长期刷新中的闭环缺口。
@@ -58,6 +102,16 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service tests.test_import_file_api tests.test_import_api tests.test_import_service tests.test_import_preview_audit -v`；本地还用用户提供的 5 个真实 Excel 跑 `FileImportService.preview_files` smoke，结果均为 `preview_ready` 且 `errors=0`。
 - 未测风险：尚未通过真实浏览器上传和真实 background worker drain 确认完整 confirm -> lifecycle -> 下游 read model 链路；真实业务文件不纳入仓库 fixture。
 - 后续事项：如发票平台继续新增表头口径，优先扩展 alias mapping 并补合成 fixture，不保存真实业务 Excel。
+
+## 2026-06-19 - 发票导入真实 write-flow SLO audit profile
+
+- 目标：补齐发票导入 Spec-first E2E 闭环中的真实 read model/worker 证据入口，避免只用 deterministic Browser mock 或直接 enqueue smoke 声称真实写链路已闭环。
+- 影响范围：`write_operation_slo_audit`、发票导入测试矩阵、`IMPORT-INVOICE-E2E-009` 真实基础设施 gate。
+- 关键决策：profile 名使用业务规格 `invoice_import_confirmed`，但匹配真实 durable queue reason：发票文件确认后的大多数下游 read model refresh 使用 `import_state_changed`，税金抵扣使用 `invoice_file_import_confirm`。
+- 覆盖 scope：Workbench、Workbench relation、invoice lifecycle、search、待找发票、进项使用、销项收款、OA 待付款、成本统计和税金抵扣。
+- 测试覆盖：新增 `tests/test_write_operation_slo_audit.py` 回归，验证完整 scope 才通过，缺少成本统计等下游 scope 时必须失败。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit -v`；`bash scripts/verify.sh docs`；`bash scripts/verify.sh infra-smoke`。
+- 未测风险：本地契约测试不产生真实发票确认 outbox rows；仍需 staging/发布前运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation invoice_import_confirmed --lookback-hours 24`，并配合真实 import worker / read model worker drain 观察。
 
 ## 2026-06-16 - 发票导入合成大重复组守护
 

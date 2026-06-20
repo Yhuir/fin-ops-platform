@@ -40,6 +40,7 @@ type PendingInvoicesTableProps = {
   selectedTransactionIds?: Set<string>;
   onToggleTransactionSelection?: (row: PendingInvoiceRow) => void;
   isTransactionSelectable?: (row: PendingInvoiceRow) => boolean;
+  emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -311,6 +312,7 @@ export default function PendingInvoicesTable({
   selectedTransactionIds,
   onToggleTransactionSelection,
   isTransactionSelectable,
+  emptyStateMessage = "当前条件下没有待找发票流水。",
   tableWrapRef,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
@@ -415,7 +417,7 @@ export default function PendingInvoicesTable({
               {rows.length === 0 ? (
                 <tr id="pending-invoices-empty">
                   <td className="pending-invoices-table-state-cell" colSpan={9}>
-                    当前条件下没有待找发票流水。
+                    {emptyStateMessage}
                   </td>
                 </tr>
               ) : rows.map((row) => (

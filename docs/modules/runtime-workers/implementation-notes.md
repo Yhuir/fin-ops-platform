@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-19 - 生产 worker 只读 runtime gate 复查
+
+- 目标：在不重启、不部署、不写数据库、不触发 read model apply 的前提下，复查当前生产 worker/runtime 外部证据。
+- 影响范围：生产 release `main-8b5942e4-http-slo-admin-scope-202606191805` 的 API、RabbitMQ dispatcher、20 个 runtime worker 和 runtime closure gate；不改变 worker 代码或队列状态。
+- 关键决策：只读证据可以证明当前 worker service 数量、active 状态和 runtime blocker 为 0；不能替代 direct `read_model_slo_smoke --apply` 的 enqueue-to-fresh 证明，也不能替代真实业务 write-operation E2E。
+- 文档影响：同步本实施记录、`docs/modules/app-health-operations/implementation-notes.md`、`docs/modules/read-models/implementation-notes.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：本轮未新增代码测试；既有 runtime worker、runtime queue 和 closure gate 测试继续保护工具合同。
+- 验证命令：SSH 只读 `systemctl is-active fin-ops.service`、`systemctl is-active fin-ops-rabbitmq-dispatcher.service`、`systemctl list-units 'fin-ops-worker@*.service'`、`systemctl show ... WorkingDirectory`；公网 `runtime_sync_closure_gate --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --allow-unauthenticated-http --health-ready-target-ms 1000 --json`。
+- 生产证据：`fin-ops.service` active，RabbitMQ dispatcher active，20/20 `fin-ops-worker@*.service` active/running；API WorkingDirectory 为 `/opt/fin-ops/releases/main-8b5942e4-http-slo-admin-scope-202606191805/src`；公网 closure gate 中 `runtime_health` 通过，`health_ready_payload` 通过。
+- 未测风险：未配置 bearer/admin token，authenticated HTTP/SSE gate 仍未闭合；未配置 write approval ticket 和安全 scenario，mutating write-operation E2E 仍未执行。
+
 ## 2026-06-19 - Runtime Read Model closure repair
 
 - 目标：在发票导入 worker 修复后，把生产遗留的 dead-letter、dirty scope 和非 fresh readiness 收敛到干净状态，并保留可审计的运维证据。
@@ -269,3 +280,22 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`。
 - 未测风险：未运行真实 import worker 到 SQL projection 完成的端到端场景。
 - 后续事项：已由后续 architecture guard 补齐。
+
+## 2026-06-20 - 当前 gzip release runtime health 与 critical drain 复验
+
+- 目标：在唯一 production 环境中验证 runtime worker、durable queue、dirty scope 和 App Status readiness 当前是否健康；只做只读巡检和受控 read model refresh enqueue，不执行业务写接口。
+- 生产运行状态：release `codex-http-slo-gzip-probe-3546e985-20260619210708` 为 API、RabbitMQ dispatcher 和 worker 的 active WorkingDirectory；`fin-ops.service`、`fin-ops-rabbitmq-dispatcher.service` 和 20 个 worker unit 均为 active。
+- Runtime health：本机 `/health` 与 `/health/ready` 返回 ready，`runtime_release.consistent=true`、`production_runtime_guard.consistent=true`、`runtime_blocker_count=0`。`runtime_sync_closure_gate` 的 `runtime_health` check 通过，snapshot 显示 `queue_backlog={}`、`failed_jobs=0`、`missing_required_worker_count=0`、`stale_required_worker_count=0`、`mismatched_required_worker_count=0`、`stale_dirty_scope_count=0`。
+- Direct drain 证据：`read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90` enqueue 15 个 critical read model refresh。首轮全部被 worker 处理为 outbox/dirty `done` 且 readiness `fresh` 或 `dirty_done`，但 5 个 scope 超过 5s target；聚焦复验后只剩 `invoice_lifecycle` 接近阈值，单项复验通过；最终完整 15 scope 复跑 15/15 pass，p95/max 约 `4122.628ms`。
+- 当前结论：本轮没有 worker 卡住、queue 积压、failed job 或 readiness 未 fresh；当前 direct critical worker drain 已闭合。首轮长尾仍需作为性能观察项保留，后续真实业务写场景应继续看 enqueue-to-done p95/p99，而不是只看最终 fresh。
+- Closure gate 外部缺口：未配置真实 user/admin auth 时，authenticated HTTP/SSE gate 会失败；未提供 `--write-scenario`、`--apply-write-scenarios` 和 `--write-approval-ticket` 时，write-operation E2E 必须保持 input_required。生产 route/API base path 的 gate 配置也必须与公网部署路径匹配，不能用本机 API 端口验证 SPA page shell。
+- 验证命令：生产 systemd status；生产本机 `/health`、`/health/ready`；生产 `runtime_sync_closure_gate --base-url http://127.0.0.1:18001 --api-prefix '' --allow-unauthenticated-http --json`；生产 direct `read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 90`；生产 PostgreSQL 只读状态聚合。
+
+## 2026-06-20 - Dependency refresh already-fresh guard
+
+- 目标：修复生产 Workbench bank/turnover withdraw 后 `pending_invoice` read model 慢尾。只读证据显示 pending handler 自身耗时只有约 `25-176ms`，但多个 pending scope 因 `bank_detail_read_model_not_fresh` 反复 defer，并连续补投 `bank_detail:2026-03`，把 source version 从 `44635` bump 到 `44638`，导致下游等待被自身依赖 refresh 放大到约 `9.8s`。
+- 影响范围：`RuntimeWorker._enqueue_dependency_refreshes(...)`；不改变业务写接口、read model scope contract、queue schema 或 handler projection。
+- 关键决策：已有 guard 会在依赖 scope active 时不补投；本轮新增依赖 scope 已 fresh 时也不补投，只在 heartbeat payload 中记录 `already_fresh` 并继续 defer 当前事件。这样多个下游 scope 在依赖已经 fresh 后不会继续 bump 依赖 source version。
+- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_bump_dependency_refresh_when_scope_already_fresh`，并保留 `already_active` 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_write_operation_slo_audit.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/runtime_worker.py tests/test_runtime_worker.py`。
+- 未测风险：该修复尚未发布到生产，也未在真实 Workbench withdraw 场景重跑；`workbench:all` aggregate 约 `20.8s` 和 `cost_statistics` 2026-03 约 `7.2s` 仍需后续独立优化或重新归类为后台追赶 SLO。

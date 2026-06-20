@@ -6,12 +6,39 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import type { SessionPayload } from "../features/session/api";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const batchAccountingSourceFiles = [
   "src/pages/BatchAccountingPage.tsx",
 ] as const;
+
+const defaultSession: SessionPayload = {
+  allowed: true,
+  user: {
+    userId: "1",
+    username: "TESTFULL001",
+    nickname: "测试全权限",
+    displayName: "测试全权限",
+    deptId: null,
+    deptName: null,
+    avatar: null,
+  },
+  roles: ["fin_ops_user"],
+  permissions: ["finops:app:view"],
+  accessTier: "full_access",
+  canAccessApp: true,
+  canMutateData: true,
+  canAdminAccess: false,
+};
+
+const staticSession: SessionContextValue = {
+  status: "authenticated",
+  session: defaultSession,
+  refresh: () => undefined,
+};
 
 const unsubmittedPayload = {
   summary: {
@@ -157,9 +184,11 @@ function cssRule(source: string, selector: string) {
 
 function renderPage() {
   return render(
-    <GlobalOperationOverlayProvider>
-      <BatchAccountingPage />
-    </GlobalOperationOverlayProvider>,
+    <SessionContext.Provider value={staticSession}>
+      <GlobalOperationOverlayProvider>
+        <BatchAccountingPage />
+      </GlobalOperationOverlayProvider>
+    </SessionContext.Provider>,
   );
 }
 
@@ -519,6 +548,37 @@ describe("BatchAccountingPage", () => {
     renderPage();
 
     expect(await screen.findByText("批量账务数据加载失败")).toBeInTheDocument();
+  });
+
+  test("recovers after a transient batch accounting load failure when refreshed", async () => {
+    const user = userEvent.setup();
+    let batchAccountingGetCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
+        batchAccountingGetCount += 1;
+        if (batchAccountingGetCount === 1) {
+          return jsonResponse({
+            error: "batch_accounting_temporarily_unavailable",
+            message: "批量账务数据加载暂时失败，请刷新后重试。",
+          }, 503);
+        }
+        return jsonResponse(withPagination(unsubmittedPayload, url));
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("当前年份暂无批量账务流水")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(await screen.findByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toBeInTheDocument();
+    expect(screen.queryByText("批量账务数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
+    expect(batchAccountingGetCount).toBe(2);
   });
 
   test("updates selected totals, requires notes for mismatches, and submits matching OA rows without a note", async () => {

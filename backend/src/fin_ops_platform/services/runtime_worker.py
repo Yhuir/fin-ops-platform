@@ -271,6 +271,9 @@ class RuntimeWorker:
             if self._dependency_refresh_is_active(event.tenant_id, scope_type, scope_key):
                 enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_active"})
                 continue
+            if self._dependency_refresh_is_fresh(event.tenant_id, scope_type, scope_key):
+                enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_fresh"})
+                continue
             try:
                 normalized_scope_keys = self._read_model_refresh_gateway.enqueue_one(
                     scope_type,
@@ -300,6 +303,12 @@ class RuntimeWorker:
 
     def _dependency_refresh_is_active(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
         checker = getattr(self._queue, "read_model_refresh_is_active", None)
+        if not callable(checker):
+            return False
+        return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
+
+    def _dependency_refresh_is_fresh(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        checker = getattr(self._queue, "read_model_refresh_is_fresh", None)
         if not callable(checker):
             return False
         return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))

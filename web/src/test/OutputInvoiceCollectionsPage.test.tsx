@@ -14,6 +14,7 @@ const outputInvoiceCollectionsSourceFiles = [
   "src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx",
   "src/components/outputInvoiceCollections/ExpandableCellText.tsx",
   "src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx",
+  "src/components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer.tsx",
   "src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx",
   "src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx",
   "src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx",
@@ -428,6 +429,7 @@ describe("Output invoice collections page", () => {
         ? null
         : "OutputInvoiceCollectionsTable.tsx should use a project table primitive or project table class",
       sourceByPath["src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx"].includes("AppDrawer") ? null : "Detail drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer.tsx"].includes("AppDrawer") ? null : "Export drawer should use AppDrawer",
       sourceByPath["src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "Rules drawer should use AppDrawer",
       sourceByPath["src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx"].includes("AppDrawer") ? null : "Status reminder drawer should use AppDrawer",
       sourceByPath["src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx"].includes("AppDrawer") ? null : "Red relation drawer should use AppDrawer",
@@ -505,7 +507,7 @@ describe("Output invoice collections page", () => {
     expect(outputGroupRules).not.toMatch(/#f6fbf8|#f5f9ff|#f8fafc|#fbfdfc|#f1faff|#f8fbff|#fbfcfd|rgba\(14,\s*165,\s*233,\s*0\.10\)/);
   });
 
-  test("uses a standard empty state while read model refresh details stay hidden", async () => {
+  test("shows a refreshing state instead of a true empty state while read model details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -527,7 +529,9 @@ describe("Output invoice collections page", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
   });
 
@@ -552,7 +556,8 @@ describe("Output invoice collections page", () => {
 
     renderAuthenticatedAppAt("/output-invoice-collections");
     const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
@@ -572,7 +577,7 @@ describe("Output invoice collections page", () => {
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
-  test("adds sidebar route and renders grouped project table layout without fake export", async () => {
+  test("adds sidebar route and renders grouped project table layout with real export entry", async () => {
     const user = userEvent.setup();
     const fetchMock = installOutputInvoiceCollectionsFetch();
 
@@ -594,16 +599,21 @@ describe("Output invoice collections page", () => {
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("全部发票");
     expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    const refreshButton = within(page).getByRole("button", { name: "刷新" });
+    expect(refreshButton).toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
     expect(within(page).queryByLabelText("收款状态")).not.toBeInTheDocument();
     for (const label of ["销项发票数", "待收款金额", "已收金额", "待出收据数"]) {
       expect(within(page).queryByText(label)).not.toBeInTheDocument();
     }
-    expect(within(page).queryByRole("button", { name: /导出/ })).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(Array.from((within(page).getByLabelText("每页行数") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
     expect(await within(page).findByText("XSFP-2026-0001")).toBeInTheDocument();
     expect(statusRulesRequests(fetchMock)).toHaveLength(0);
+
+    const rowsBeforeRefresh = rowsRequests(fetchMock).length;
+    await user.click(refreshButton);
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
 
     await user.type(within(page).getByRole("searchbox", { name: "搜索销项发票收款情况" }), "客户科技");
     await user.click(within(page).getByRole("button", { name: "查询" }));

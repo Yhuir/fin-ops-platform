@@ -488,7 +488,29 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: "四月" }));
 
-    expect(await screen.findByText("成本统计数据加载失败，请稍后重试。")).toBeInTheDocument();
+    expect(await screen.findByText("成本统计数据加载失败，请点击刷新重试。")).toBeInTheDocument();
+  });
+
+  test("refreshes explorer data after a transient loading failure", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ costExplorerFailuresBeforeSuccess: 1 });
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(screen.queryByText("成本统计数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      expect.any(Object),
+    );
   });
 
   test("surfaces OA session errors from explorer loading", async () => {
@@ -516,8 +538,11 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(screen.queryByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).not.toBeInTheDocument();
+    expect(screen.getByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
+    expect(screen.getAllByText("待刷新")).toHaveLength(2);
+    expect(screen.getByText("--")).toBeInTheDocument();
     expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
   });
 
   test("opens export center in time view with exact date range and shows export feedback inside the modal", async () => {

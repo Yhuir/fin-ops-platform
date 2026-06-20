@@ -77,7 +77,13 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(queue.refreshes, [("input_invoice_usage", "all", "payment_status_rules_updated")])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("input_invoice_usage", "all", "payment_status_rules_updated"),
+                ("invoice_lifecycle", "all", "payment_status_rules_updated"),
+            ],
+        )
 
     def test_rules_update_persists_audits_and_returns_invalidation_event(self) -> None:
         events: list[dict[str, object]] = []

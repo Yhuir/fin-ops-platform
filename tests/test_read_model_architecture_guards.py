@@ -80,6 +80,16 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "dict read_model_status=fresh",
     ): (1, "export preview first collects pages and rejects non-fresh read-model payloads."),
     (
+        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
+        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
+        "dict readModelStatus=fresh",
+    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
+    (
+        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
+        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
+        "dict read_model_status=fresh",
+    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
+    (
         "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
         "InputInvoiceUsageReadModelDetailService.relation_details",
         "read_model_status=fresh",

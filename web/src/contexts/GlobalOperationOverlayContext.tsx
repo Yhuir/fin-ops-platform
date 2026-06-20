@@ -23,6 +23,7 @@ type GlobalOperationOptions<T> = {
   action: (helpers: GlobalOperationHelpers) => Promise<T> | T;
   errorTitle?: string;
   errorMessage?: (error: unknown) => string;
+  blockOnError?: boolean;
 };
 
 export type GlobalOperationOutcome<T> =
@@ -70,6 +71,7 @@ export function GlobalOperationOverlayProvider({ children }: { children: ReactNo
     action,
     errorTitle = "操作失败",
     errorMessage = defaultErrorMessage,
+    blockOnError = true,
   }: GlobalOperationOptions<T>): Promise<GlobalOperationOutcome<T>> => {
     if (blockingRef.current || stateRef.current) {
       const error = new Error("已有操作正在同步，请稍后再试。");
@@ -99,11 +101,16 @@ export function GlobalOperationOverlayProvider({ children }: { children: ReactNo
       setOverlayState(null);
       return { status: "success", value };
     } catch (error) {
-      setOverlayState({
-        phase: "error",
-        title: errorTitle,
-        message: errorMessage(error),
-      });
+      if (blockOnError) {
+        setOverlayState({
+          phase: "error",
+          title: errorTitle,
+          message: errorMessage(error),
+        });
+      } else {
+        blockingRef.current = false;
+        setOverlayState(null);
+      }
       return { status: "error", error };
     }
   }, [setOverlayState]);

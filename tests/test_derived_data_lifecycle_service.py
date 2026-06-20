@@ -63,6 +63,22 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 ]
                 self.assertTrue(all(lifecycle_index < index for index in downstream_indexes))
 
+    def test_tax_certified_import_confirmed_refreshes_lifecycle_tax_and_search_only(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("tax_certified_import_confirmed", months=["2026-03"])
+
+        self.assertEqual(plan["affected_scopes"], ["2026-03", "all"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "invoice_lifecycle_read_model",
+                "tax_offset_read_model",
+                "tax_offset_month_cache",
+                "search_cache",
+            ],
+        )
+
     def test_bank_import_confirmed_maps_workbench_candidate_cost_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 

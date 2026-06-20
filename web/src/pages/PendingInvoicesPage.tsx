@@ -11,6 +11,7 @@ import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvo
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   confirmAttachExistingInvoices,
   downloadPendingInvoiceExport,
@@ -196,6 +197,7 @@ function displayedPendingInvoiceRange(page: number, pageSize: number, total: num
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
+  const { canMutateData } = useSessionPermissions();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
@@ -364,7 +366,7 @@ export default function PendingInvoicesPage() {
     sortField,
     sortDirection,
   }), [sortDirection, sortField]);
-  const exportDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
+  const exportDisabled = Boolean(error) || Boolean(readModelStatus && readModelStatus !== "fresh");
   const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => {
     if (direction === "expense") {
       return row.availableActions.includes("attach_existing_invoice");
@@ -430,13 +432,17 @@ export default function PendingInvoicesPage() {
   }, [isTransactionSelectable]);
 
   const handleOpenSelectedInvoicePicker = useCallback(() => {
+    if (!canMutateData) {
+      setError("当前账号仅支持查看和导出，不能选择发票或建立关系。");
+      return;
+    }
     const transactionIds = selectedRows.map(transactionIdForRow);
     if (transactionIds.length === 0) {
       return;
     }
     setInvoicePickerTransactionIds(transactionIds);
     setActiveDrawer("invoicePicker");
-  }, [selectedRows]);
+  }, [canMutateData, selectedRows]);
 
   const handleOpenDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => {
     setDetailTarget(target);
@@ -476,6 +482,7 @@ export default function PendingInvoicesPage() {
   const saveRules = useCallback(async (payload: Parameters<typeof savePendingInvoiceRules>[0]) => {
     const result = await runOperation({
       loadingMessage: "正在保存待找发票规则...",
+      blockOnError: false,
       action: async ({ setMessage }) => {
         const savedPayload = await savePendingInvoiceRules(payload, rulesDirection);
         setMessage("正在等待待找发票读模型同步...");
@@ -559,6 +566,10 @@ export default function PendingInvoicesPage() {
   }, []);
 
   const handleMarkSelectedIncomeStatus = useCallback((statusCode: PendingInvoiceIncomeStatusCode) => {
+    if (!canMutateData) {
+      setError("当前账号仅支持查看和导出，不能修改收入流水状态。");
+      return;
+    }
     const transactionIds = selectedRows.map(transactionIdForRow);
     if (transactionIds.length === 0) {
       return;
@@ -591,7 +602,7 @@ export default function PendingInvoicesPage() {
           return next;
         });
       });
-  }, [clearSelectedTransactions, selectedRows]);
+  }, [canMutateData, clearSelectedTransactions, selectedRows]);
 
   const compactStatusText = error
     ? error
@@ -746,6 +757,11 @@ export default function PendingInvoicesPage() {
         <div className="pending-invoices-loading-slot">
           {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
         </div>
+        {!canMutateData ? (
+          <div className="pending-invoices-status-text pending-invoices-status-text--warning" role="status">
+            当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。
+          </div>
+        ) : null}
         {selectedRows.length > 0 ? (
           <div className="pending-invoices-selection-toolbar" role="status">
             <span>已选 {selectedRows.length} 条流水</span>
@@ -754,7 +770,7 @@ export default function PendingInvoicesPage() {
               <>
                 <button
                   className="pending-invoices-button pending-invoices-button--primary"
-                  disabled={pendingIncomeStatusRows.size > 0}
+                  disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
                   onClick={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
                   type="button"
                 >
@@ -762,7 +778,7 @@ export default function PendingInvoicesPage() {
                 </button>
                 <button
                   className="pending-invoices-button pending-invoices-button--primary"
-                  disabled={pendingIncomeStatusRows.size > 0}
+                  disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
                   onClick={() => handleMarkSelectedIncomeStatus("cash_income")}
                   type="button"
                 >
@@ -770,7 +786,7 @@ export default function PendingInvoicesPage() {
                 </button>
               </>
             ) : (
-              <button className="pending-invoices-button pending-invoices-button--primary" onClick={handleOpenSelectedInvoicePicker} type="button">
+              <button className="pending-invoices-button pending-invoices-button--primary" disabled={!canMutateData} onClick={handleOpenSelectedInvoicePicker} type="button">
                 选择发票
               </button>
             )}
@@ -794,6 +810,7 @@ export default function PendingInvoicesPage() {
           selectedTransactionIds={selectedTransactionIds}
           onToggleTransactionSelection={handleToggleTransactionSelection}
           isTransactionSelectable={isTransactionSelectable}
+          emptyStateMessage={error ? "待找发票加载失败，请点击刷新重试。" : undefined}
         />
         <div className="pending-invoices-pagination">
           <label className="pending-invoices-pagination-size">

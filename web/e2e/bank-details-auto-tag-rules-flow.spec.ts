@@ -1,7 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { gotoAndExpectPageReady } from "./fixtures/pageReady";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const SAVE_RULES_PATH = "PUT /api/bank-details/auto-tag-rules";
 const REAPPLY_RULES_PATH = "POST /api/bank-details/auto-tag-rules/reapply";
@@ -64,7 +65,7 @@ test.describe("bank details auto tag rules browser flow", () => {
     ]));
     await expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests);
     await expect(page.getByText("规则已保存，银行明细已刷新。").first()).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "操作失败" })).toHaveCount(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("reapplies existing automatic tag rules without saving a draft and refreshes bank detail rows", async ({ page }) => {
@@ -88,7 +89,7 @@ test.describe("bank details auto tag rules browser flow", () => {
     ]));
     await expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests);
     await expect(page.getByText("重新应用已完成，银行明细已刷新。").first()).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "操作失败" })).toHaveCount(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("keeps a successful save as a warning instead of a failure when the post-save sync is blocked", async ({ page }) => {

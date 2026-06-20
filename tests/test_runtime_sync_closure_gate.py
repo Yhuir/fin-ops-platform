@@ -172,6 +172,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -212,7 +213,10 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         write_check = next(check for check in report["checks"] if check["name"] == "write_operation_e2e")
         self.assertEqual(write_check["payload"]["status"], "input_required")
         self.assertEqual(write_check["payload"]["missing_args"], ["--write-scenario"])
-        self.assertEqual(write_check["payload"]["required_args"], ["--write-scenario", "--apply-write-scenarios"])
+        self.assertEqual(
+            write_check["payload"]["required_args"],
+            ["--write-scenario", "--apply-write-scenarios", "--write-approval-ticket"],
+        )
 
     def test_gate_passes_only_when_all_required_sections_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -257,6 +261,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.PASS)
@@ -266,6 +271,60 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["targets"]["health_ready_payload_ms"], 1_000.0)
         self.assertEqual(report["targets"]["health_ready_max_response_bytes"], 50_000)
         self.assertEqual(report["targets"]["health_ready_max_api_performance_endpoints"], 20)
+
+    def test_gate_passes_admin_headers_to_http_slo_probe(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            scenario_path = Path(temp_dir) / "scenario.json"
+            scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
+            with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
+                gate.read_model_slo_smoke,
+                "run_smoke",
+                return_value=read_model_pass_report(),
+            ), patch.object(
+                gate.http_slo_probe,
+                "collect_http_slo",
+                return_value=http_pass_report(),
+            ) as collect_http, patch.object(
+                gate.sse_smoke_probe,
+                "collect_sse_smoke",
+                return_value=sse_pass_report(),
+            ), patch.object(
+                gate.write_operation_slo_audit,
+                "audit_write_operation_slo",
+                return_value={
+                    "status": "pass",
+                    "event_sample_count": 13,
+                    "expectation_count": 13,
+                    "failed_expectation_count": 0,
+                    "missing_expectation_count": 0,
+                    "results": [],
+                },
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "load_scenarios",
+                return_value=[object()],
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "run_write_operation_e2e_smoke",
+                return_value=write_e2e_pass_report(),
+            ):
+                gate.run_closure_gate(
+                    object(),
+                    base_url="https://example.test",
+                    headers={"Authorization": "Bearer user-token"},
+                    admin_headers={"Authorization": "Bearer admin-token", "Cookie": "Admin-Token=admin-token"},
+                    apply_read_model_smoke=True,
+                    write_scenario=scenario_path,
+                    apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
+                )
+
+        _, kwargs = collect_http.call_args
+        self.assertEqual(kwargs["headers"], {"Authorization": "Bearer user-token"})
+        self.assertEqual(
+            kwargs["admin_headers"],
+            {"Authorization": "Bearer admin-token", "Cookie": "Admin-Token=admin-token"},
+        )
 
     def test_health_ready_payload_failure_prevents_closure_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -328,6 +387,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -380,6 +440,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -430,6 +491,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -480,6 +542,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -530,6 +593,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -580,6 +644,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -633,6 +698,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.PASS)
@@ -688,7 +754,65 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         write_check = next(check for check in report["checks"] if check["name"] == "write_operation_e2e")
         self.assertEqual(write_check["payload"]["status"], "dry_run")
         self.assertEqual(write_check["payload"]["missing_args"], ["--apply-write-scenarios"])
-        self.assertEqual(write_check["payload"]["required_args"], ["--write-scenario", "--apply-write-scenarios"])
+        self.assertEqual(
+            write_check["payload"]["required_args"],
+            ["--write-scenario", "--apply-write-scenarios", "--write-approval-ticket"],
+        )
+
+    def test_write_scenario_apply_requires_approval_ticket_before_write_e2e_runs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            scenario_path = Path(temp_dir) / "scenario.json"
+            scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
+            with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
+                gate.read_model_slo_smoke,
+                "run_smoke",
+                return_value=read_model_pass_report(),
+            ), patch.object(
+                gate.http_slo_probe,
+                "collect_http_slo",
+                return_value=http_pass_report(),
+            ), patch.object(
+                gate.sse_smoke_probe,
+                "collect_sse_smoke",
+                return_value=sse_pass_report(),
+            ), patch.object(
+                gate.write_operation_slo_audit,
+                "audit_write_operation_slo",
+                return_value={
+                    "status": "pass",
+                    "event_sample_count": 13,
+                    "expectation_count": 13,
+                    "failed_expectation_count": 0,
+                    "missing_expectation_count": 0,
+                    "results": [],
+                },
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "load_scenarios",
+                return_value=[object()],
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "run_write_operation_e2e_smoke",
+                side_effect=AssertionError("write E2E should not run without approval"),
+            ):
+                report = gate.run_closure_gate(
+                    object(),
+                    base_url="https://example.test",
+                    headers={"Authorization": "Bearer token"},
+                    apply_read_model_smoke=True,
+                    write_scenario=scenario_path,
+                    apply_write_scenarios=True,
+                )
+
+        self.assertEqual(report["status"], gate.FAIL)
+        self.assertIn("write_operation_e2e", report["failed_checks"])
+        write_check = next(check for check in report["checks"] if check["name"] == "write_operation_e2e")
+        self.assertEqual(write_check["payload"]["status"], "approval_missing")
+        self.assertEqual(write_check["payload"]["missing_args"], ["--write-approval-ticket"])
+        self.assertEqual(
+            write_check["payload"]["required_args"],
+            ["--write-scenario", "--apply-write-scenarios", "--write-approval-ticket"],
+        )
 
     def test_invalid_write_scenario_is_reported_as_input_error_without_running_write_checks(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -722,6 +846,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)
@@ -731,7 +856,10 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             check = next(item for item in report["checks"] if item["name"] == check_name)
             self.assertEqual(check["payload"]["status"], "input_error")
             self.assertEqual(check["payload"]["error"], "scenario_input_error")
-            self.assertEqual(check["payload"]["required_args"], ["--write-scenario", "--apply-write-scenarios"])
+            self.assertEqual(
+                check["payload"]["required_args"],
+                ["--write-scenario", "--apply-write-scenarios", "--write-approval-ticket"],
+            )
 
     def test_sse_smoke_failure_prevents_closure_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -788,6 +916,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
+                    write_approval_ticket="TEST-APPROVAL",
                 )
 
         self.assertEqual(report["status"], gate.FAIL)

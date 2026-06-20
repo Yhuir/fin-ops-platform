@@ -39,6 +39,8 @@ Spec-first 的事实源顺序：
 - 缺口分类。
 - 下一轮补测建议。
 
+`e2e-coverage.md` 和 `docs/dev/spec-first-e2e-inventory.md` 中登记的 `web/e2e/...` Browser 证据必须指向当前文件，或使用至少能匹配一个当前文件的 glob。`tests/test_spec_first_e2e_docs.py` 会校验这些路径，防止 Playwright 文件删除/改名后 coverage 仍引用失效证据。
+
 ## Spec ID 约定
 
 格式：
@@ -127,4 +129,3 @@ Playwright 只证明真实浏览器流程。每个 Spec 仍按仓库七类测试
 | staging/manual smoke | 真实 OA、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、对象存储、Nginx/iframe、真实下载、大数据和生产 runbook。 |
 
 不能把 `external-risk` 写成本地 CI 已覆盖。
-

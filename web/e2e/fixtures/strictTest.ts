@@ -1,0 +1,97 @@
+import {
+  expect,
+  test as base,
+  type ConsoleMessage,
+  type Dialog,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
+
+type BrowserDiagnostic = {
+  category: string;
+  detail: string;
+};
+
+const MAX_BROWSER_DIAGNOSTICS = 30;
+
+function pushDiagnostic(events: BrowserDiagnostic[], event: BrowserDiagnostic) {
+  events.push(event);
+  if (events.length > MAX_BROWSER_DIAGNOSTICS) {
+    events.splice(0, events.length - MAX_BROWSER_DIAGNOSTICS);
+  }
+}
+
+function shortUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return value;
+  }
+}
+
+function relevantFailedRequest(request: Request) {
+  return ["document", "script", "stylesheet", "xhr", "fetch"].includes(request.resourceType());
+}
+
+function isExpectedBrowserNetworkConsole(text: string) {
+  return /Failed to load resource: the server responded with a status of \d{3} \(/.test(text);
+}
+
+function isExpectedLifecycleAbort(request: Request) {
+  return request.failure()?.errorText.includes("net::ERR_ABORTED") ?? false;
+}
+
+export const test = base.extend<{ browserDiagnostics: BrowserDiagnostic[] }>({
+  browserDiagnostics: [async ({ page }, use) => {
+    const diagnostics: BrowserDiagnostic[] = [];
+
+    const onConsole = (message: ConsoleMessage) => {
+      if (message.type() === "error") {
+        const text = message.text();
+        if (!isExpectedBrowserNetworkConsole(text)) {
+          pushDiagnostic(diagnostics, { category: "console.error", detail: text });
+        }
+      }
+    };
+    const onPageError = (error: Error) => {
+      pushDiagnostic(diagnostics, { category: "pageerror", detail: error.stack || error.message });
+    };
+    const onRequestFailed = (request: Request) => {
+      if (!relevantFailedRequest(request) || isExpectedLifecycleAbort(request)) {
+        return;
+      }
+      pushDiagnostic(diagnostics, {
+        category: "requestfailed",
+        detail: `${request.method()} ${shortUrl(request.url())} ${request.failure()?.errorText ?? ""}`.trim(),
+      });
+    };
+    const onDialog = async (dialog: Dialog) => {
+      pushDiagnostic(diagnostics, {
+        category: "dialog",
+        detail: `${dialog.type()} ${dialog.message()}`,
+      });
+      await dialog.dismiss().catch(() => undefined);
+    };
+
+    page.on("console", onConsole);
+    page.on("pageerror", onPageError);
+    page.on("requestfailed", onRequestFailed);
+    page.on("dialog", onDialog);
+
+    await use(diagnostics);
+
+    page.off("console", onConsole);
+    page.off("pageerror", onPageError);
+    page.off("requestfailed", onRequestFailed);
+    page.off("dialog", onDialog);
+
+    expect(diagnostics, [
+      "Unexpected browser diagnostics were captured.",
+      ...diagnostics.map((event) => `- ${event.category}: ${event.detail}`),
+    ].join("\n")).toEqual([]);
+  }, { auto: true }],
+});
+
+export { expect, type Locator, type Page, type Request };

@@ -113,6 +113,7 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert outbox_by_scope_type["workbench"][-3] == "high"
     assert outbox_by_scope_type["bank_detail"][-3] == "high"
     assert outbox_by_scope_type["invoice_lifecycle"][-3] == "high"
+    assert outbox_by_scope_type["search"][-3] == "high"
     workbench_all_outbox_payloads = [
         _json_payload(params[8])
         for sql, params in connection.execute_calls

@@ -462,6 +462,16 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   const raw = objectValue(payload);
   const rawKind = stringValue(raw.kind);
   const kind = rawKind === "bank" ? "银行流水" : rawKind === "invoice" ? "发票" : "OA";
+  const readModelStatus = stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status"));
+  if (readModelStatus && readModelStatus !== "fresh") {
+    return {
+      title: stringValue(raw.title) || `${kind}关联明细`,
+      subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
+      detailAvailable: false,
+      unavailableReason: "进项发票使用情况关联明细正在刷新，完成后请重新打开详情。",
+      sections: [],
+    };
+  }
   const detailSections = mapDetailSections(raw.sections);
   const summaries = arrayValue(raw.summaries);
   const sections: InputInvoiceUsageDetailResponse["sections"] = [

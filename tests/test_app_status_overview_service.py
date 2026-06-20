@@ -212,6 +212,87 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(bank_domain["status"], "missing")
         self.assertEqual(payload["overall"]["color"], "yellow")
 
+    def test_runtime_summary_counts_read_models_workers_and_queue_backlog(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "bank_detail": {"status": "fresh"},
+                "cost_statistics": {
+                    "status": "refreshing",
+                    "scopes": [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                        },
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:2026-05",
+                            "status": "failed",
+                            "last_error": "projection failed",
+                        },
+                    ],
+                },
+                "pending_invoice": {"status": "failed", "last_error": "projection failed"},
+                "turnover_ledger": {"status": "missing"},
+            },
+            worker_statuses={
+                "runtime-worker": {"status": "ready", "required": True},
+                "cost-tax": {"status": "working", "required": True},
+                "bank-detail": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
+                "legacy-worker": {"status": "missing", "required": False, "warning_code": "required_worker_missing"},
+            },
+            outbox_statuses={
+                "bank_detail.read_model.refresh": {"status": "pending", "count": 2},
+                "cost_statistics.read_model.refresh": {"status": "processing", "count": 1},
+                "pending_invoice.read_model.refresh": {"status": "failed", "count": 3},
+            },
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:00:00+00:00",
+                "status": "busy",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        self.assertEqual(
+            payload["runtime_summary"]["read_models"],
+            {
+                "total": 4,
+                "fresh": 1,
+                "refreshing": 1,
+                "stale": 0,
+                "missing": 1,
+                "failed": 1,
+                "unavailable": 0,
+                "issue_count": 3,
+                "scope_issue_count": 1,
+            },
+        )
+        self.assertEqual(payload["runtime_summary"]["workers"]["total"], 4)
+        self.assertEqual(payload["runtime_summary"]["workers"]["required"], 3)
+        self.assertEqual(payload["runtime_summary"]["workers"]["ready"], 1)
+        self.assertEqual(payload["runtime_summary"]["workers"]["working"], 1)
+        self.assertEqual(payload["runtime_summary"]["workers"]["stale"], 1)
+        self.assertEqual(payload["runtime_summary"]["workers"]["missing"], 1)
+        self.assertEqual(payload["runtime_summary"]["workers"]["issue_count"], 2)
+        self.assertEqual(
+            payload["runtime_summary"]["queue"],
+            {
+                "event_type_count": 3,
+                "pending": 2,
+                "processing": 1,
+                "failed": 3,
+                "backlog": 6,
+            },
+        )
+
     def test_cost_statistics_fresh_readiness_restores_domain_after_previous_failure(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
 

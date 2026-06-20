@@ -84,6 +84,57 @@ class OutputInvoiceCollectionApiRoutes:
             tenant_id=tenant_id,
         )
 
+    def export_preview(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
+        tenant_id = _tenant_id(session)
+        sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
+        if _is_response_like(sql_rows_payload):
+            payload = _response_like_payload(sql_rows_payload)
+            payload["readModelStatus"] = payload.get("readModelStatus") or payload.get("read_model_status") or "refreshing"
+            return HTTPStatus.ACCEPTED, payload
+        if isinstance(sql_rows_payload, dict):
+            rows = self._query_service.apply_lifecycle_overlays_to_rows(
+                [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
+                tenant_id=tenant_id,
+            )
+            return HTTPStatus.OK, self._query_service.export_preview_for_rows(rows=rows)
+        return HTTPStatus.OK, self._query_service.export_preview(
+            keyword=query.get("keyword", [None])[0],
+            invoice_date_from=query.get("invoice_date_from", [None])[0],
+            invoice_date_to=query.get("invoice_date_to", [None])[0],
+            month=query.get("month", [None])[0],
+            filters=query.get("filters", [None])[0],
+            sort_field=query.get("sort_field", ["invoice_date"])[0],
+            sort_direction=query.get("sort_direction", ["desc"])[0],
+            tenant_id=tenant_id,
+        )
+
+    def export(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[str, bytes]:
+        tenant_id = _tenant_id(session)
+        sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
+        if _is_response_like(sql_rows_payload):
+            raise OutputInvoiceCollectionError(
+                "output_invoice_collection_read_model_refreshing",
+                "销项发票收款情况数据正在刷新，请稍后重试导出。",
+                status_code=HTTPStatus.CONFLICT,
+                details=_response_like_payload(sql_rows_payload),
+            )
+        if isinstance(sql_rows_payload, dict):
+            rows = self._query_service.apply_lifecycle_overlays_to_rows(
+                [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
+                tenant_id=tenant_id,
+            )
+            return self._query_service.export_for_rows(rows)
+        return self._query_service.export(
+            keyword=query.get("keyword", [None])[0],
+            invoice_date_from=query.get("invoice_date_from", [None])[0],
+            invoice_date_to=query.get("invoice_date_to", [None])[0],
+            month=query.get("month", [None])[0],
+            filters=query.get("filters", [None])[0],
+            sort_field=query.get("sort_field", ["invoice_date"])[0],
+            sort_direction=query.get("sort_direction", ["desc"])[0],
+            tenant_id=tenant_id,
+        )
+
     def status_rules(self, *, session: OARequestSession | None = None) -> dict[str, Any]:
         payload = self._query_service.status_rules()
         payload["permissions"] = {

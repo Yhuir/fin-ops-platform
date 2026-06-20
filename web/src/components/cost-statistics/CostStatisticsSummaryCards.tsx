@@ -1,7 +1,7 @@
 type CostStatisticsSummaryCardsProps = {
   rowLabel: string;
-  rowCount: number;
-  transactionCount: number;
+  rowCount: number | string;
+  transactionCount: number | string;
   totalAmount: string;
 };
 

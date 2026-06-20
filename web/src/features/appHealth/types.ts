@@ -112,6 +112,17 @@ export type ApiOaSyncStatus = {
 };
 
 export type OperationsDashboardAvailability = "available" | "unknown";
+export type OperationsDashboardWorkerStatus =
+  | OperationsDashboardAvailability
+  | "ready"
+  | "idle"
+  | "working"
+  | "running"
+  | "processing"
+  | "missing"
+  | "stale"
+  | "mismatch"
+  | "unavailable";
 
 export type OperationsDashboardPercentiles = {
   p50: number | null;
@@ -162,7 +173,7 @@ export type OperationsDashboardQueueMetric = {
   unacked: number | null;
   consumers: number | null;
   dlq_messages: number | null;
-  status: OperationsDashboardAvailability;
+  status: OperationsDashboardWorkerStatus;
   warning_code?: string;
 };
 
@@ -190,9 +201,19 @@ export type OperationsDashboardReadModelMetric = {
 };
 
 export type OperationsDashboardWorkerMetric = {
+  worker_id?: string;
+  worker_instance?: string;
   worker_kind: string;
+  expected_worker_kind?: string;
+  worker_status?: string;
   heartbeat_lag_seconds: number | null;
-  status: OperationsDashboardAvailability;
+  heartbeat_stale_after_seconds?: number | null;
+  required?: boolean;
+  current_effective?: boolean;
+  expected_transport?: string;
+  expected_event_types?: string[];
+  configured_event_types?: string[];
+  status: OperationsDashboardWorkerStatus;
   warning_code?: string;
 };
 

@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
-
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+import { readXlsxText } from "./fixtures/xlsx";
 
 function bankDetailMutationCalls(calls: string[]) {
   return calls.filter((entry) => /^(POST|PUT|DELETE) \/api\/bank-details/.test(entry));
@@ -61,13 +61,14 @@ test.describe("bank details filtered export and read-export permissions", () => 
     expect(downloaded.suggestedFilename()).toBe("银行明细_当前账户_2026-01-01_2026-12-31.xlsx");
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
-    const content = await readFile(downloadPath, "utf8");
+    const content = await readXlsxText(downloadPath);
 
     expect(content).toContain("bk-o-202603-001");
     expect(content).toContain("智能工厂设备商");
     expect(content).toContain("建设银行 1138");
     expect(content).toContain("设备款");
     await expect(page.getByText("已开始下载")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("exports the current custom date and filters after pagination changes without limiting to the current page", async ({ page }, testInfo) => {
@@ -167,7 +168,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     expect(downloaded.suggestedFilename()).toBe("银行明细_当前账户_2026-03-01_2026-03-31.xlsx");
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
-    const content = await readFile(downloadPath, "utf8");
+    const content = await readXlsxText(downloadPath);
 
     expect(content).toContain("智能工厂设备商");
     expect(content).toContain("建设银行 1138");
@@ -178,6 +179,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     expect(content).toContain("智能工厂");
     expect(content).toContain("equipment_payment");
     await expect(page.getByText("已开始下载")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("allows read-export users to download while keeping bank detail write entries disabled", async ({ page }, testInfo) => {
@@ -199,7 +201,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     const downloaded = await download;
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
-    expect(await readFile(downloadPath, "utf8")).toContain("智能工厂设备商");
+    expect(await readXlsxText(downloadPath)).toContain("智能工厂设备商");
 
     await page.getByRole("button", { name: /自动标签规则/ }).click();
     const drawer = page.getByRole("dialog", { name: "自动标签规则" });
@@ -209,6 +211,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect(drawer.getByRole("button", { name: "保存" })).toBeDisabled();
 
     expect(bankDetailMutationCalls(api.calls)).toEqual([]);
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 
   test("blocks forbidden sessions before bank detail protected APIs load", async ({ page }) => {
@@ -262,5 +265,6 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThanOrEqual(2);
     await expect(row.getByText("成本 / 设备款")).toBeVisible();
     await expect(row.getByRole("button", { name: "撤销" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

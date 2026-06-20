@@ -23,6 +23,7 @@ type OutputInvoiceCollectionsTableProps = {
   filters: OutputInvoiceCollectionFilter[];
   filterConfigs: OutputInvoiceCollectionFilterFieldConfig[];
   filterOptions: Record<string, OutputInvoiceCollectionFilterOption[]>;
+  canMutateData: boolean;
   expandedCells: Set<string>;
   onToggleCellExpand: (rowId: string, cellId: string) => void;
   onOpenDetail: (target: OutputInvoiceCollectionDetailTarget) => void;
@@ -32,6 +33,7 @@ type OutputInvoiceCollectionsTableProps = {
   onSortChange: (field: string, direction?: OutputInvoiceCollectionSortDirection) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -85,6 +87,7 @@ export default function OutputInvoiceCollectionsTable({
   filters,
   filterConfigs,
   filterOptions,
+  canMutateData,
   expandedCells,
   onToggleCellExpand,
   onOpenDetail,
@@ -94,6 +97,7 @@ export default function OutputInvoiceCollectionsTable({
   onSortChange,
   onPageChange,
   onPageSizeChange,
+  emptyStateMessage = "当前条件下没有销项发票收款记录。",
   tableWrapRef,
 }: OutputInvoiceCollectionsTableProps) {
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
@@ -193,12 +197,13 @@ export default function OutputInvoiceCollectionsTable({
             {rows.length === 0 ? (
               <tr>
                 <td className="output-invoice-collections-table-state-cell" colSpan={columns.length}>
-                  当前条件下没有销项发票收款记录。
+                  {emptyStateMessage}
                 </td>
               </tr>
             ) : rows.map((row) => (
               <OutputInvoiceCollectionDataRow
                 key={row.id}
+                canMutateData={canMutateData}
                 expandedCells={expandedCells}
                 onOpenDetail={onOpenDetail}
                 onOpenWorkflow={onOpenWorkflow}
@@ -222,12 +227,14 @@ export default function OutputInvoiceCollectionsTable({
 
 function OutputInvoiceCollectionDataRow({
   row,
+  canMutateData,
   expandedCells,
   onToggleCellExpand,
   onOpenDetail,
   onOpenWorkflow,
 }: {
   row: OutputInvoiceCollectionRow;
+  canMutateData: boolean;
   expandedCells: Set<string>;
   onToggleCellExpand: (rowId: string, cellId: string) => void;
   onOpenDetail: (target: OutputInvoiceCollectionDetailTarget) => void;
@@ -281,12 +288,16 @@ function OutputInvoiceCollectionDataRow({
             已收 {formatMoney(row.collectionStatus.collectedAmount)} / 待收 {formatMoney(row.collectionStatus.pendingAmount)}
           </span>
           <span className="output-invoice-collections-action-row">
-            <ActionButton onClick={() => onOpenWorkflow({ kind: "collectionStatus", rowId: row.id })} tone="outline">
-              状态/提醒
-            </ActionButton>
-            <ActionButton onClick={() => onOpenWorkflow({ kind: "redRelation", rowId: row.id })} tone="plain">
-              红蓝票
-            </ActionButton>
+            {canMutateData ? (
+              <>
+                <ActionButton onClick={() => onOpenWorkflow({ kind: "collectionStatus", rowId: row.id })} tone="outline">
+                  状态/提醒
+                </ActionButton>
+                <ActionButton onClick={() => onOpenWorkflow({ kind: "redRelation", rowId: row.id })} tone="plain">
+                  红蓝票
+                </ActionButton>
+              </>
+            ) : null}
           </span>
         </span>
       </td>
@@ -347,13 +358,15 @@ function OutputInvoiceCollectionDataRow({
           >
             已出收据
           </ActionButton>
-          <ActionButton
-            disabled={!row.receipt.previewAvailable}
-            onClick={() => onOpenWorkflow({ kind: "receiptPreview", rowId: row.id })}
-            tone="primary"
-          >
-            待出收据
-          </ActionButton>
+          {canMutateData ? (
+            <ActionButton
+              disabled={!row.receipt.previewAvailable}
+              onClick={() => onOpenWorkflow({ kind: "receiptPreview", rowId: row.id })}
+              tone="primary"
+            >
+              待出收据
+            </ActionButton>
+          ) : null}
         </span>
       </td>
     </tr>

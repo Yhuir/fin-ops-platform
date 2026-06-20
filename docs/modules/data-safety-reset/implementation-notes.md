@@ -12,6 +12,15 @@
 
 ## 历史记录
 
+## 2026-06-20 - reset 后多页面 fresh Browser contract
+
+- 目标：补齐 data reset Browser 主流程只停留在 Settings 成功反馈的缺口，让同一真实 Chromium flow 继续验证受影响页面会重新读取 fresh read model。
+- 影响范围：`web/e2e/settings-data-reset-flow.spec.ts`、deterministic API mock、`e2e-coverage.md`、`tests.md`、全局 testing/inventory/closure state。
+- 关键决策：只加固测试和 mock，不改产品逻辑；mock 在 reset job 完成后记录 completed action，`reset_bank_transactions` 使银行明细交易列表返回 fresh empty，用来表达“旧银行流水不能继续显示为 fresh”。
+- 测试覆盖：Browser flow 在 job 202、polling、settings reload 后进入银行明细，断言 `bank_detail` rows `read_model_status=fresh` 且旧流水为空；再进入待找发票，断言 `pending_invoice` rows `fresh` 且业务行可见。
+- 验证命令：`cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts --project=chromium` 通过 2 tests。
+- 未测风险：真实 PostgreSQL PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain、大库 reset 后全页面最终 fresh 和真实 OA Mongo/附件仍需 staging/production gate。
+
 ## 2026-06-11 - 首轮 data-safety-reset 测试闭环
 
 - 目标：审计数据重置、备份/导出、protected targets、state store 清理、read model dirty/worker/App Health、OA 密码校验和前端交互测试闭环。

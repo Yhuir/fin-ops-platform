@@ -7,6 +7,7 @@ import MonthPicker from "../components/MonthPicker";
 import CollectionStatusReminderDrawer from "../components/outputInvoiceCollections/CollectionStatusReminderDrawer";
 import CollectionStatusRulesDrawer from "../components/outputInvoiceCollections/CollectionStatusRulesDrawer";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
+import OutputInvoiceCollectionExportDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer";
 import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollections/OutputInvoiceCollectionsTable";
 import RedInvoiceRelationDrawer from "../components/outputInvoiceCollections/RedInvoiceRelationDrawer";
 import ReceiptHistoryDrawer from "../components/outputInvoiceCollections/ReceiptHistoryDrawer";
@@ -17,7 +18,9 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelOutputInvoiceCollectionReminder,
+  downloadOutputInvoiceCollectionExport,
   fetchOutputInvoiceCollectionBankTransactionDetail,
+  fetchOutputInvoiceCollectionExportPreview,
   fetchOutputInvoiceCollectionFilterOptions,
   fetchOutputInvoiceCollectionInvoiceDetail,
   fetchOutputInvoiceCollectionRows,
@@ -98,6 +101,9 @@ function isWorkflow(value: unknown): value is OutputInvoiceCollectionWorkflow {
   if (workflow.kind === "receiptSettings") {
     return true;
   }
+  if (workflow.kind === "export") {
+    return true;
+  }
   if (workflow.kind === "collectionStatus" || workflow.kind === "redRelation" || workflow.kind === "receiptPreview") {
     return typeof workflow.rowId === "string";
   }
@@ -137,6 +143,12 @@ function restoreQuery(raw: unknown): OutputInvoiceCollectionQuery {
   };
 }
 
+function workflowRequiresMutation(workflow: NonNullable<OutputInvoiceCollectionWorkflow>) {
+  return workflow.kind === "collectionStatus"
+    || workflow.kind === "redRelation"
+    || workflow.kind === "receiptPreview";
+}
+
 function filterOptionsByField(fields: Array<OutputInvoiceCollectionFilterFieldConfig & { options?: OutputInvoiceCollectionFilterOption[] }>) {
   return fields.reduce<Record<string, OutputInvoiceCollectionFilterOption[]>>((accumulator, field) => {
     accumulator[field.field] = field.options ?? [];
@@ -174,7 +186,7 @@ function normalizeFilterValue(filter: {
 
 export default function OutputInvoiceCollectionsPage() {
   const { active } = useOptionalPageActivation("output-invoice-collections");
-  const { canAdminAccess } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
     stateKey: "query",
@@ -377,15 +389,33 @@ export default function OutputInvoiceCollectionsPage() {
   }, [statusRulesPayload]);
 
   const handleOpenWorkflow = useCallback(async (target: NonNullable<OutputInvoiceCollectionWorkflow>) => {
+    if (target.kind === "receiptSettings" && !canAdminAccess) {
+      return;
+    }
+    if (workflowRequiresMutation(target) && !canMutateData) {
+      return;
+    }
     if (target.kind === "collectionStatus") {
       await ensureStatusRulesLoaded();
     }
     setQuery((current) => ({ ...current, activeWorkflow: target }));
-  }, [ensureStatusRulesLoaded, setQuery]);
+  }, [canAdminAccess, canMutateData, ensureStatusRulesLoaded, setQuery]);
 
   const handleCloseWorkflow = useCallback(() => {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
   }, [setQuery]);
+
+  useEffect(() => {
+    const workflow = query.activeWorkflow;
+    if (!workflow) {
+      return;
+    }
+    if ((workflow.kind === "receiptSettings" && !canAdminAccess) || (workflowRequiresMutation(workflow) && !canMutateData)) {
+      setQuery((current) => (
+        current.activeWorkflow === workflow ? { ...current, activeWorkflow: null } : current
+      ));
+    }
+  }, [canAdminAccess, canMutateData, query.activeWorkflow, setQuery]);
 
   const loadDetail = useCallback((target: OutputInvoiceCollectionDetailTarget) => {
     if (target.kind === "invoice") {
@@ -431,8 +461,50 @@ export default function OutputInvoiceCollectionsPage() {
     loadRows("refresh");
   }, [loadRows]);
 
+  const exportRequest = useMemo(() => ({
+    page: query.page,
+    pageSize: query.pageSize,
+    keyword: query.keyword,
+    invoiceDateFrom: query.invoiceDateFrom,
+    invoiceDateTo: query.invoiceDateTo,
+    month: query.month,
+    filters: query.filters,
+    sortField: query.sortField,
+    sortDirection: query.sortDirection,
+  }), [
+    query.filters,
+    query.invoiceDateFrom,
+    query.invoiceDateTo,
+    query.keyword,
+    query.month,
+    query.page,
+    query.pageSize,
+    query.sortDirection,
+    query.sortField,
+  ]);
+  const isReadModelRefreshing = readModelStatus === "refreshing";
+  const exportDisabled = Boolean(error) || isReadModelRefreshing;
+  const loadExportPreview = useCallback(() => fetchOutputInvoiceCollectionExportPreview(exportRequest), [exportRequest]);
+  const downloadExport = useCallback(() => downloadOutputInvoiceCollectionExport(exportRequest), [exportRequest]);
+
   const actions = useMemo(() => (
     <div className="output-invoice-collections-actions">
+      <button
+        className="output-invoice-collections-button"
+        disabled={loading || refreshing}
+        onClick={() => loadRows("refresh")}
+        type="button"
+      >
+        刷新
+      </button>
+      <button
+        className="output-invoice-collections-button"
+        disabled={exportDisabled}
+        onClick={() => handleOpenWorkflow({ kind: "export" })}
+        type="button"
+      >
+        筛选内容导出
+      </button>
       <button
         className="output-invoice-collections-button"
         onClick={() => handleOpenWorkflow({ kind: "statusRules" })}
@@ -450,8 +522,8 @@ export default function OutputInvoiceCollectionsPage() {
         </button>
       ) : null}
     </div>
-  ), [canAdminAccess, handleOpenWorkflow]);
-  const isEmpty = !loading && !error && rows.length === 0;
+  ), [canAdminAccess, exportDisabled, handleOpenWorkflow, loadRows, loading, refreshing]);
+  const isEmpty = !loading && !error && !isReadModelRefreshing && rows.length === 0;
 
   return (
     <>
@@ -505,6 +577,11 @@ export default function OutputInvoiceCollectionsPage() {
             </div>
           ) : (
             <>
+              {isReadModelRefreshing ? (
+                <StatePanel tone="loading" compact title="销项发票收款情况数据正在刷新">
+                  当前数据仍在刷新或等待后台任务完成，请稍后重试。
+                </StatePanel>
+              ) : null}
               {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
               <OutputInvoiceCollectionsTable
                 rows={rows}
@@ -516,6 +593,7 @@ export default function OutputInvoiceCollectionsPage() {
                 filters={query.filters}
                 filterConfigs={filterConfigs}
                 filterOptions={filterOptions}
+                canMutateData={canMutateData}
                 expandedCells={expandedCells}
                 onToggleCellExpand={handleToggleCellExpand}
                 onOpenDetail={handleOpenDetail}
@@ -525,6 +603,7 @@ export default function OutputInvoiceCollectionsPage() {
                 onSortChange={handleSortChange}
                 onPageChange={handlePageChange}
                 onPageSizeChange={handlePageSizeChange}
+                emptyStateMessage={error ? "销项发票收款情况加载失败，请点击刷新重试。" : undefined}
               />
             </>
           )}
@@ -542,9 +621,16 @@ export default function OutputInvoiceCollectionsPage() {
       loadRules={fetchOutputInvoiceCollectionStatusRules}
       onClose={handleCloseWorkflow}
     />
+    <OutputInvoiceCollectionExportDrawer
+      open={query.activeWorkflow?.kind === "export"}
+      loadPreview={loadExportPreview}
+      downloadExport={downloadExport}
+      onClose={handleCloseWorkflow}
+    />
     <ReceiptHistoryDrawer
       open={query.activeWorkflow?.kind === "receiptHistory"}
       invoiceId={receiptHistoryInvoiceId}
+      canMutateData={canMutateData}
       loadHistory={fetchOutputInvoiceReceiptHistory}
       onVoidReceipt={(receiptId, reason) => voidOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
       onReissueReceipt={(receiptId, reason) => reissueOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
@@ -555,10 +641,12 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "receiptPreview"}
       row={receiptPreviewRow}
       loadPreview={previewOutputInvoiceReceipt}
-      createReceipt={(rowId, bankTransactionId) => createOutputInvoiceReceipt(rowId, {
-        bankTransactionId,
-        idempotencyKey: `receipt:${rowId}:${bankTransactionId}`,
-      }).then(() => undefined)}
+      createReceipt={canMutateData
+        ? (rowId, bankTransactionId) => createOutputInvoiceReceipt(rowId, {
+          bankTransactionId,
+          idempotencyKey: `receipt:${rowId}:${bankTransactionId}`,
+        }).then(() => undefined)
+        : undefined}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
@@ -566,13 +654,14 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "collectionStatus"}
       row={collectionStatusRow}
       statusOptions={collectionStatusOptions}
-      onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => handleLifecycleChanged())}
-      onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => handleLifecycleChanged())}
+      onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => undefined)}
+      onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => undefined)}
       onClearStatus={(rowId, expectedVersion) => updateOutputInvoiceCollectionStatus(rowId, {
         statusCode: "",
         expectedVersion,
       }).then(() => handleLifecycleChanged())}
       onCancelReminder={(rowId, reminderId) => cancelOutputInvoiceCollectionReminder(rowId, reminderId).then(() => handleLifecycleChanged())}
+      onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
     <RedInvoiceRelationDrawer

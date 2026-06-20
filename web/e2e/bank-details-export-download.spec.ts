@@ -1,10 +1,10 @@
-import { readFile } from "node:fs/promises";
-
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectPageReady, gotoAndExpectPageReady, startPageDiagnostics } from "./fixtures/pageReady";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
+import { readXlsxText } from "./fixtures/xlsx";
 
 test.describe("bank details export browser download", () => {
   test("downloads current filtered bank rows with confirmed relation fields", async ({ page }, testInfo) => {
@@ -48,7 +48,7 @@ test.describe("bank details export browser download", () => {
     expect(downloaded.suggestedFilename()).toBe("银行明细_全部银行_2026-01-01_2026-12-31.xlsx");
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
-    const content = await readFile(downloadPath, "utf8");
+    const content = await readXlsxText(downloadPath);
 
     expect(content).toContain("bk-o-202603-001");
     expect(content).toContain("智能工厂设备商");
@@ -60,5 +60,6 @@ test.describe("bank details export browser download", () => {
     expect(content).not.toContain("候选发票");
     expect(api.count("GET /api/bank-details/transactions/export")).toBe(1);
     await expect(page.getByText("已开始下载")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

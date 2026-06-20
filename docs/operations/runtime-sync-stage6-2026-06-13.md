@@ -9,7 +9,7 @@ outbox/dirty scope 满足写操作 SLO。
 - 新增 `fin_ops_platform.tools.write_operation_e2e_smoke`。
 - scenario JSON 描述受控写操作步骤、对应 operation profile 和可选写后首屏 API probe。
 - 默认 dry-run：只校验 scenario 并输出计划，不发送 mutating HTTP 请求。
-- `--apply` 时必须配置真实认证 header/cookie；没有认证返回 `auth_missing`，不会执行写请求。
+- `--apply` 时必须配置真实认证 header/cookie 和业务审批引用；没有认证返回 `auth_missing`，没有 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 返回 `approval_missing`，都不会执行写请求。
 - 写步骤成功后，工具用数据库 `clock_timestamp()` 作为起点，只审计该时间之后产生的 read model refresh outbox。
 - 写步骤失败时跳过 write SLO 判定，避免把失败操作包装成“已同步”。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body。
@@ -61,9 +61,11 @@ apply：
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
   --scenario /tmp/finops-write-e2e-scenarios.json \
   --apply \
+  --approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --write-target-ms 5000 \

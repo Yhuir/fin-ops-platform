@@ -7,6 +7,7 @@
 | 影响面 | 当前测试入口 | 必须保护的行为 |
 | --- | --- | --- |
 | Shared primitives | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`TableLayoutTokens.test.ts` | 分页摘要/边界、金额/方向/状态/空值 primitive、列角色对齐、密度 token |
+| Shared browser layout | `web/e2e/finance-table-system-flow.spec.ts`、`web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts` | 窄屏/宽表横向滚动、右侧列可见、操作入口不被遮挡、真实浏览器无 console/page error |
 | Table session hook | `useFinanceTableSession.test.tsx`、`PageSessionStateContext.test.tsx` | 分页、排序、选择、滚动恢复；columnsVersion 变化清理；user/page/state 隔离 |
 | Bank details table | `BankDetailsPage.test.tsx`、`BankDetailsApi.test.ts` | HeroUI table migration、列清单、分页、搜索、标签筛选、导出、refreshing/stale |
 | Tax tables | `TaxOffsetPage.test.tsx`、`TaxApi.test.ts` | 发票选择、认证导入预览、税金表格、loading/error、导入反馈 |
@@ -22,6 +23,7 @@
 | shared pagination clamp、summary、上一页/页码 callback | 已覆盖，2026-06-11 新增 | `FinanceTable.test.tsx` |
 | shared Amount/Direction/Status/Empty primitives | 已覆盖，2026-06-11 新增 | `FinanceTable.test.tsx` |
 | CSS token、行高、列角色对齐、tag 稳定尺寸 | 已覆盖 | `TableLayoutTokens.test.ts`、`TableAlignmentStyles.test.ts` |
+| 共享宽表 Browser 横向滚动、右侧列可见、刷新控件不遮挡 | 已覆盖，2026-06-19 新增 | `web/e2e/finance-table-system-flow.spec.ts` |
 | table session 保存/恢复 pagination/sort/selection/scroll | 已覆盖 | `useFinanceTableSession.test.tsx` |
 | columnsVersion 变化丢弃旧 table session | 已覆盖 | `useFinanceTableSession.test.tsx` |
 | page/user/session storage 隔离和 TTL/version/validation | 已覆盖 | `PageSessionStateContext.test.tsx` |
@@ -37,7 +39,7 @@
 | 2. Service-layer tests | 不适用 | N/A | 本模块不触碰后端 service、repository、audit 或状态写入。 |
 | 3. API contract tests | 间接适用 | 各页面 `*Api.test.ts` / `*Page.test.tsx` | 表格 query params、pagination、sort、filters、export contract 由页面/API 模块负责；共享 primitive 不发 HTTP。 |
 | 4. Read model/cache/background job tests | 间接适用 | 页面级 refreshing/stale tests | 表格只展示 read model 状态；freshness 来源仍由页面 API 和 read model 模块负责。 |
-| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`useFinanceTableSession.test.tsx`、页面级 tests | 覆盖共享 primitive、session hook、页面级筛选/排序/分页/导出/状态。 |
+| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`useFinanceTableSession.test.tsx`、页面级 tests、`web/e2e/finance-table-system-flow.spec.ts` | 覆盖共享 primitive、session hook、页面级筛选/排序/分页/导出/状态，并用真实 Chromium 代表性覆盖 AppHealth 宽表窄屏横向滚动、右侧列可见、read model/worker 表格可读和无浏览器错误。 |
 | 6. End-to-end business-flow integration tests | 间接适用 | 具体页面/业务流 tests | 本模块不承载业务链路；端到端链路在导入、关联台、发票、成本、税金等模块保护。 |
 | 7. Existing feature regression tests | 适用，已补 | 同上 | 新增共享 primitive 回归测试；页面级旧表格功能由各模块继续保护。 |
 
@@ -47,6 +49,7 @@
 | --- | --- | --- |
 | 2026-06-11 | 防止共享分页 summary 边界和 disabled next 行为被 HeroUI 迁移破坏 | `FinanceTable.test.tsx` `clamps pagination display to valid ranges and disables unavailable navigation` |
 | 2026-06-11 | 防止共享金额、方向、状态、空值 primitive class/data contract 被重构破坏 | `FinanceTable.test.tsx` `keeps shared finance cell primitives semantically stable` |
+| 2026-06-19 | 防止共享 `FinanceTable` 宽表在窄屏下右侧列不可达、刷新按钮被遮挡或 AppHealth read model/worker 表格在真实浏览器中出现 console/page error。 | `web/e2e/finance-table-system-flow.spec.ts` |
 
 ## 关键 smoke flows
 
@@ -77,15 +80,17 @@ cd web && npm test -- --run \
   src/test/AppHealthOperationsPage.test.tsx \
   src/test/ImportCenterPage.test.tsx
 
+cd web && npx playwright test e2e/finance-table-system-flow.spec.ts --project=chromium
+
 bash scripts/verify.sh docs
 ```
 
 ## Nightly CI 覆盖
 
-`FinanceTable.test.tsx`、table token/style tests、table session tests 和页面级 Vitest tests 应由 nightly frontend test suite 覆盖。若新增业务表格或迁移表格实现，必须把页面级测试加入对应模块和本矩阵。
+`FinanceTable.test.tsx`、table token/style tests、table session tests、页面级 Vitest tests 和 `web/e2e/finance-table-system-flow.spec.ts` 应由 nightly/frontend smoke 覆盖。若新增业务表格或迁移表格实现，必须把页面级测试加入对应模块和本矩阵。
 
 ## 未测风险
 
-- 大数据真实浏览器滚动、超宽列、下载文件名/浏览器保存行为仍需 Playwright 或手工 smoke。
+- AppHealth 代表性宽表已覆盖真实 Chromium 窄屏横向滚动；真实生产大数据、更多页面 wrapper、超宽列、下载文件名/浏览器保存行为仍需 Playwright 或手工 smoke。
 - 页面级表格 wrapper 没有完全统一到 `FinanceTable`，因此共享 primitive 测试不能替代每个页面的筛选/排序/导出/状态测试。
 - `useFinanceTableSession` 当前未被大多数页面直接调用；页面若自建 session，必须在页面模块里单独覆盖恢复和隔离。

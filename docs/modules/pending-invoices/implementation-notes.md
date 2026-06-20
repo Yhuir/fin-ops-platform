@@ -36,6 +36,145 @@
 
 ## 历史记录
 
+## 2026-06-20 - rules save mutation 暂时失败草稿重试恢复
+
+- 目标：补齐待找发票规则保存的 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止保存暂时失败时误触发 freshness barrier/rows refresh、丢失草稿，或留下被抽屉 top-layer 拦截的不可点击全局错误弹窗。
+- 影响范围：`web/src/contexts/GlobalOperationOverlayContext.tsx`、`web/src/pages/PendingInvoicesPage.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/e2e/fixtures/apiMocks.ts`、`web/e2e/pending-invoices-rules-save-flow.spec.ts`、本模块测试/覆盖文档和全局 Spec-first inventory。
+- 关键决策：规则抽屉已经有本地错误提示和草稿状态，保存失败应回到抽屉内联错误并允许用户直接重试；因此 `runOperation` 新增 `blockOnError=false` 选项，待找发票规则保存只使用全局 overlay 表达 loading/progress，不在失败后留下全局阻塞错误层。默认 `runOperation` 失败仍保持阻塞直到用户确认，避免影响其它页面。
+- 文档影响：更新 `e2e-spec.md`、`e2e-coverage.md`、`tests.md`、`docs/dev/testing.md`、`docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：deterministic mock 新增 `pendingInvoiceRulesSaveFailuresBeforeSuccess`，Browser 覆盖第一次 `PUT /api/pending-invoices/rules` 返回 503、抽屉内错误可见、`设备款` 草稿勾选保持、全局操作弹窗不存在、`operation-barrier/status` 和 rows 不触发；第二次保存 200 后才等待 `pending_invoice:expense:requires_invoice` barrier、rows refetch、刷新中反馈和无成功后错误残留。Vitest 覆盖 `GlobalOperationOverlayProvider` 的默认阻塞错误行为不变，以及 `blockOnError=false` 时失败后 overlay 立即清除。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-rules-save-flow.spec.ts --project=chromium`；`cd web && npm test -- --run src/test/GlobalOperationOverlayContext.test.tsx`。
+- 未测风险：本地 mock 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice`、`search`、`invoice-lifecycle` worker drain，也不覆盖 withdraw 等其它 mutation 的真实网络中断恢复。
+- 后续事项：继续把 withdraw 或未来新增待找发票写入口的失败恢复迁入 Browser/staging smoke；真实 worker 最新性仍走 `infra-smoke` / staging gate。
+
+## 2026-06-20 - income status mutation 暂时失败重试恢复
+
+- 目标：补齐待找发票收入批量状态的 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止保存暂时失败时页面清空选择、刷新 rows、显示假成功或形成半写状态。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/pending-invoices-income-status-flow.spec.ts`、本模块测试/覆盖文档和全局 Spec-first inventory。
+- 关键决策：不改产品逻辑；现有页面在 `savePendingInvoiceIncomeStatuses` 失败时保留选中流水、展示后端错误，并在 `finally` 恢复按钮，本轮只加固 deterministic mock 和 Browser 断言，把“失败可见、选中保持、无半写、可重试、成功后才刷新”固定为页面合同。
+- 文档影响：更新 `e2e-spec.md`、`e2e-coverage.md`、`tests.md`、`docs/dev/testing.md`、`docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：deterministic mock 新增 `pendingInvoiceIncomeStatusFailuresBeforeSuccess`，Browser 覆盖第一次 `PUT /api/pending-invoices/income-statuses` 返回 503、错误提示可见、选中 2 条流水保持、rows 请求数不变、原 rows 保持 `未开票`；第二次保存 200 后 rows refetch、两条流水更新为 `现金收入`、选择清空且无成功后错误残留。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-income-status-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice`、`search`、`invoice-lifecycle` worker drain，也不覆盖 withdraw 等其它 mutation 的真实网络中断恢复。
+- 后续事项：rules save 暂时失败草稿重试恢复已由后续 Browser 覆盖；继续把 withdraw 等其它待找发票 mutation 失败恢复迁入 Browser/staging smoke；真实 worker 最新性仍走 `infra-smoke` / staging gate。
+
+## 2026-06-20 - attach existing confirm mutation 暂时失败重试恢复
+
+- 目标：补齐待找发票“选择已有发票”关系确认的 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止 confirm 暂时失败时页面关闭抽屉、刷新 rows、显示假成功或形成半写状态。
+- 影响范围：`web/e2e/fixtures/apiMocks.ts`、`web/e2e/pending-invoices-attach-existing-flow.spec.ts`、本模块测试/覆盖文档和全局 Spec-first inventory。
+- 关键决策：不改产品逻辑；现有抽屉已经在 `confirmAttach` 失败时保留 drawer/preview/选择并展示后端错误，本轮只加固 deterministic mock 和 Browser 断言，把“失败可见、无半写、可重试、成功后才刷新”固定为页面合同。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md`、`docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：deterministic mock 新增 `pendingInvoiceAttachExistingConfirmFailuresBeforeSuccess`，Browser 覆盖第一次 `POST /api/pending-invoices/attach-existing-invoices` 返回 503、错误提示可见、drawer 仍打开、确认按钮可重试、rows 请求数不变、原 rows 保持 `已支付待开票` 且不出现发票号；第二次 confirm 200 后 drawer 关闭、rows refetch、两条流水更新为 `已支付已开票` 且无成功后错误残留。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-attach-existing-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice`、`search`、`invoice-lifecycle` worker drain，也不覆盖 withdraw 等其它 mutation 的真实网络中断恢复。
+- 后续事项：income status 和 rules save 暂时失败重试恢复已由后续 Browser 覆盖；继续把 withdraw 等其它待找发票 mutation 失败恢复迁入 Browser/staging smoke；真实 worker 最新性仍走 `infra-smoke` / staging gate。
+
+## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
+
+- 目标：补齐待找发票页面级 `NETWORK-RECOVERY` 负面链路，防止 rows 首屏请求临时失败时被误看成真实空数据或继续允许导出。
+- 影响范围：`web/src/components/pendingInvoices/PendingInvoicesTable.tsx`、`web/src/pages/PendingInvoicesPage.tsx`、`web/e2e/fixtures/apiMocks.ts`、`web/e2e/pending-invoices-filter-sort-flow.spec.ts`、本模块测试/覆盖文档和全局 Spec-first inventory。
+- 关键决策：保留现有刷新按钮交互，不新增产品流程；表格支持错误态空行文案，`PendingInvoicesPage` 在 `error` 存在时禁用导出并显示“待找发票加载失败，请点击刷新重试。”，避免正常空态和失败态混淆。
+- 测试覆盖：deterministic mock 新增 `pendingInvoiceRowsFailuresBeforeSuccess`，Browser 覆盖首屏 `/api/pending-invoices/rows` 暂时 503、错误提示、非正常空态、导出禁用、点击刷新后 rows 200 恢复、错误消失和导出重新可用。
+- 未测风险：本地 mock 只覆盖 rows 首屏失败恢复；attach existing confirm、income status 保存和 rules save 暂时失败重试恢复已由后续 Browser 覆盖，其它 mutation 的真实网络中断和真实 worker drain 仍需后续 Browser/staging smoke。
+
+## 2026-06-19 - Relation 导出成功路径 UI 错误残留 guard
+
+- 目标：补齐待找发票 relation 字段导出 Browser 成功链路的“假成功”检测，防止 export-preview/download 成功后页面仍残留导出失败、同步失败或 read model 失败提示。
+- 影响范围：`web/e2e/pending-invoices-export-download.spec.ts`、`tests/test_playwright_e2e_strict_diagnostics.py`、本模块测试文档、workbench relation 覆盖矩阵和全局 testing 文档。
+- 关键决策：只加固成功下载路径；row-limit 仍是 negative path，继续断言错误文案可见且不产生 download event。
+- 文档影响：更新 `tests.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 `docs/modules/workbench-relations/e2e-coverage.md`。
+- 测试覆盖：Workbench confirm 后 export-preview/export 带当前筛选和排序、不带分页、真实 download event 内容包含 OA/发票/relation 字段，随后调用 `expectNoUnexpectedSuccessUiErrors`；静态诊断防止后续移除。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-category-flow.spec.ts e2e/bank-details-export-download.spec.ts e2e/bank-details-filtered-export-permissions.spec.ts e2e/pending-invoices-export-download.spec.ts --project=chromium` 通过 11 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v` 通过 8 tests；`python3 -m py_compile tests/test_playwright_e2e_strict_diagnostics.py`、`bash scripts/verify.sh docs` 和目标文件 `git diff --check` 均通过。
+- 未测风险：真实 XLSX workbook 打开、真实代理下载 headers、真实大匹配集查询和真实 worker drain 仍需 staging/runtime smoke。
+
+## 2026-06-19 - 规则保存成功路径 UI 错误残留 guard
+
+- 目标：补齐待找发票规则保存 Browser 成功链路的“假成功”检测，防止规则 PUT、operation barrier 和 rows refresh 成功后页面仍残留保存失败、同步失败或 read model 失败提示。
+- 影响范围：`web/e2e/pending-invoices-rules-save-flow.spec.ts`、共享 `successAssertions` helper、Playwright 严格诊断静态测试和本模块测试文档。
+- 关键决策：只加固 deterministic Browser E2E，不改产品逻辑；barrier timeout 仍由组件测试覆盖“保存成功但刷新中”的合法降级，本 Browser flow 覆盖正常 barrier/rows refresh 成功路径。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：规则保存后等待 `pending_invoice:expense:requires_invoice` operation barrier、rows refresh 和成功反馈，然后调用 `expectNoUnexpectedSuccessUiErrors`。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts e2e/tax-offset-flow.spec.ts e2e/pending-invoices-rules-save-flow.spec.ts --project=chromium`；`PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd pending/search/invoice-lifecycle worker drain、真实 XLSX workbook 打开、生产大数据和真实网络恢复仍需 staging/runtime smoke。
+- 后续事项：新增待找发票写入口、网络恢复 UI 或真实下载解析 gate 时，追加 Browser E2E 并接入同一成功残留 guard。
+
+## 2026-06-19 - 待找发票 Spec-first covered 校准
+
+- 目标：完成 `/pending-invoices` 本地 Spec-first E2E Audit 校准，确认 `PENDING-E2E-001..009` 已由 Browser、组件、API 和后端 contract 覆盖。
+- 影响范围：待找发票 Spec-first 覆盖矩阵、全局 Spec-first inventory、testing closure state 和本实施记录；不改产品逻辑。
+- 关键决策：当前 Browser 已覆盖页面 ready、默认支出 rows、Workbench confirm fan-out、candidate 负面语义、relation-backed refreshing/stale 诊断、当前筛选/排序导出和 row-limit、选择已有发票、收入批量状态、规则保存 freshness barrier；真实 PostgreSQL/RabbitMQ/Redis/systemd pending/search/invoice-lifecycle worker drain、真实 XLSX workbook 打开、生产大数据和真实网络恢复继续作为 staging/runtime 风险。
+- 文档影响：全局 inventory 和 testing closure state 将 `pending-invoices` 从 `partial` 校准为 `covered`。
+- 测试覆盖：未新增测试；基于现有 `web/e2e/pending-invoices-*.spec.ts`、`workbench-relations-candidate-semantics`、`workbench-relations-nonfresh-diagnostics`、PendingInvoices Vitest、pending invoice API/service/SQL runtime/lifecycle tests 校准。
+- 验证命令：本轮运行 pending-invoices 相关 Playwright specs、`bash scripts/verify.sh docs` 和 `git diff --check`。
+- 未测风险：真实 Postgres 大数据/EXPLAIN/锁等待/长分页、真实 RabbitMQ/Redis/systemd worker drain、真实 XLSX workbook 解析/打开、真实网络中断恢复。
+- 后续事项：新增独立 search Browser route、真实下载解析 gate、网络恢复 UI 或新增待找发票写入口时，按功能追加 Browser E2E；真实 worker 最新性走 staging/runtime smoke。
+
+## 2026-06-19 - 列筛选与排序 Browser E2E
+
+- 目标：补齐待找发票 `PENDING-E2E-001` 的列筛选/排序 Browser 保护，证明默认状态过滤、表头列筛选和金额排序会同时保留正确 API query 并改变页面可见行。
+- 影响范围：`web/e2e/pending-invoices-filter-sort-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 覆盖矩阵和测试矩阵。
+- 关键决策：不改产品逻辑；deterministic Browser mock 增加 `pendingInvoiceFilterSortRows`，让 `/api/pending-invoices/rows` 按 `filters`、`sort_field`、`sort_direction` 返回不同顺序/子集，并让 `/api/pending-invoices/filter-options` 提供对方户名、流水标签、银行账户和收支选项。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/pending-invoices-filter-sort-flow.spec.ts`，覆盖金额升/降序、默认 `status_code=paid_pending_invoice` 保留、对方户名列筛选、rows query contract、分页回到 `1-1 / 1` 和前端运行时报错捕获。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-filter-sort-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 不覆盖真实 PostgreSQL filter/sort EXPLAIN、复杂组合索引、长分页和真实 worker drain；这些仍需 staging 或运维 smoke。
+- 后续事项：继续补真实 infra worker drain smoke，或转入 OA pending 进行中写回/关联支出流水 Browser 流。
+
+## 2026-06-19 - 规则保存 Browser E2E
+
+- 目标：补齐待找发票 `PENDING-E2E-009` 的真实浏览器规则保存保护，证明规则 drawer 保存、API contract、operation barrier、rows refresh 和保存反馈在页面中完整连通。
+- 影响范围：`web/e2e/pending-invoices-rules-save-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 覆盖矩阵和测试矩阵。
+- 关键决策：不改产品逻辑；加固 deterministic Browser mock，使 `/api/pending-invoices/rules` 可按测试场景返回 `can_save=true`、支持 `PUT` 后版本递增和 `read_model_status=refreshing`。Browser 断言 `PUT /api/pending-invoices/rules` body、`POST /api/operation-barrier/status` 的 `pending_invoice:expense:requires_invoice` target、rows 重读和“规则已保存，相关数据正在刷新。”反馈。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/pending-invoices-rules-save-flow.spec.ts`，覆盖支出规则保存 Browser smoke、前端运行时报错捕获、read model freshness barrier 请求和 rows refetch。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-rules-save-flow.spec.ts --project=chromium`。
+- 未测风险：本地 mock 证明浏览器流程和 contract，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice` worker drain；真实 infra freshness 仍需 staging 或运维 smoke。
+- 后续事项：继续补更多列筛选/排序 Browser 组合和真实 infra worker drain smoke。
+
+## 2026-06-19 - 导出 row-limit Browser E2E
+
+- 目标：补齐待找发票 `PENDING-E2E-006` 的真实浏览器错误反馈保护，证明后端导出 row-limit 错误不会被导出抽屉吞掉，也不会生成假下载。
+- 影响范围：`web/e2e/pending-invoices-export-download.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块 Spec-first E2E 覆盖矩阵和测试矩阵。
+- 关键决策：不改产品逻辑；deterministic Browser mock 增加 `pendingInvoiceExportRowLimitError`，让 `/api/pending-invoices/export` 返回现有 contract 的 `pending_invoice_export_row_limit_exceeded`。Browser 测试保留预览成功，点击下载后断言后端错误文案可见且没有 download event。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：扩展 `web/e2e/pending-invoices-export-download.spec.ts`，覆盖 row-limit 下载失败、错误提示和零下载文件。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-export-download.spec.ts --project=chromium`。
+- 未测风险：本地 mock download body 和错误 response 不解析真实 XLSX workbook；真实大匹配集查询、真实对象存储/代理下载和大文件耗时仍需 staging 或运维 smoke。
+- 后续事项：补更多列筛选/排序 Browser 组合、规则保存 Browser smoke 和真实 infra worker drain smoke。
+
+## 2026-06-19 - 收入批量状态 Browser E2E
+
+- 目标：补齐待找发票 `PENDING-E2E-008` 的真实浏览器保护，证明收入方向多选、批量标记、后端拒绝和 rows 刷新链路不是只在组件/API 测试中成立。
+- 影响范围：`web/e2e/pending-invoices-income-status-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 覆盖矩阵和测试矩阵。
+- 关键决策：不改产品逻辑；deterministic Browser mock 增加 income direction rows 和 `PUT /api/pending-invoices/income-statuses` 状态机。成功分支返回空 `rows` 以强制页面通过 refresh token 重读 rows；失败分支返回结构化 409，断言页面显示错误、保留选择且没有半写。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/pending-invoices-income-status-flow.spec.ts`，覆盖批量现金收入成功、单次 mutation、无单行 fallback API、rows refetch、后端拒绝错误可见、选中保留和状态不变。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-income-status-flow.spec.ts --project=chromium`。
+- 未测风险：本地 deterministic Browser mock 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice`、`search`、`invoice-lifecycle` worker drain；真实 infra freshness 仍需 staging 或运维 smoke。
+- 后续事项：补导出失败/row-limit Browser 场景和真实 infra worker drain smoke。
+
+## 2026-06-19 - 选择已有发票 Browser E2E
+
+- 目标：补齐待找发票 `PENDING-E2E-007` 的真实浏览器保护，证明多选 eligible 支出流水、选择已有进项发票、preview、confirm、conflict 和 rows 刷新链路不是只在组件测试里成立。
+- 影响范围：`web/e2e/pending-invoices-attach-existing-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 覆盖矩阵和测试矩阵。
+- 关键决策：Browser mock 按现有 API contract 表达 candidates/preview/confirm；confirm response 不返回 `row`，让页面通过 `refreshToken` 重新读取 rows 后显示 `已支付已开票`，从浏览器层证明刷新链路。conflict 分支返回 `can_confirm=false`，断言确认按钮禁用且没有 confirm mutation 或半写。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/pending-invoices-attach-existing-flow.spec.ts`，覆盖多选流水/发票、候选“流水关联”chip、搜索请求、preview/confirm body、rows refetch、conflict 原因展示、零半写和浏览器错误捕获。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-attach-existing-flow.spec.ts --project=chromium`。
+- 未测风险：本地 deterministic Browser mock 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `pending-invoice`、`search`、`invoice-lifecycle` worker drain；真实 infra freshness 仍需 staging 或运维 smoke。
+- 后续事项：补收入批量标记 Browser 流和导出失败/row-limit Browser 场景。
+
+## 2026-06-19 - Spec-first 导出 relation 字段 Browser E2E
+
+- 目标：补齐待找发票在 Workbench confirm 后导出当前筛选内容时必须包含 OA、进项发票和 relation 字段的真实浏览器保护。
+- 影响范围：`web/e2e/pending-invoices-export-download.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块 Spec-first E2E 文档和测试矩阵。
+- 关键决策：导出测试从业务流程出发，先执行 Workbench confirm，再返回待找发票搜索目标对方户名，断言 export-preview/export 请求带方向、状态桶、关键字和排序，且不带 `page/page_size`；下载内容必须包含 OA 申请人、进项发票号、relation case 和 linked 状态。
+- 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、本实施记录及全局 Spec-first inventory/closure state。
+- 测试覆盖：新增 `web/e2e/pending-invoices-export-download.spec.ts`；扩展 deterministic Browser API mock 的 pending invoice export-preview/export。
+- 验证命令：`cd web && npx playwright test e2e/pending-invoices-export-download.spec.ts --project=chromium`。
+- 未测风险：本地 mock download body 是文本化 xlsx payload，尚未解析真实 XLSX workbook；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 仍需 staging 或运维 smoke。
+- 后续事项：补选择已有发票完整 Browser 流、收入批量标记 Browser 流和导出失败/row-limit Browser 场景。
+
 ## 2026-06-17 - 选择已有发票候选关系 chip 与 active case restore
 
 - 目标：修复“选择已有进项发票”预览后确认按钮不可解释地禁用的问题，并把候选表“待支付”列替换为后端事实驱动的“流水关联”chip；同时确保已有 OA+发票关系能与本次选择的流水/发票合并进同一 active case，关联台撤回恢复上一状态。

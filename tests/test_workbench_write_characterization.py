@@ -33,6 +33,9 @@ def _json_response(response) -> dict[str, object]:
     return json.loads(response.body)
 
 
+_DOCUMENTED_MISMATCH_CONFIRM_NOTE = "characterization regression covers documented mismatch confirm path"
+
+
 class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
     def __init__(self, persisted: list[dict[str, object]]) -> None:
         super().__init__()
@@ -95,7 +98,14 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         return str(_flatten_groups(payload["open"]["groups"], "invoice")[0]["id"])
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
+        if path == "/api/workbench/actions/confirm-link":
+            self._ensure_documented_mismatch_confirm_note(payload)
         return app.handle_request("POST", path, json.dumps(payload))
+
+    def _ensure_documented_mismatch_confirm_note(self, payload: dict[str, object]) -> dict[str, object]:
+        if not str(payload.get("note") or payload.get("comment") or "").strip():
+            payload["note"] = _DOCUMENTED_MISMATCH_CONFIRM_NOTE
+        return payload
 
     @contextmanager
     def _suppress_background_persistence(self, app: Application):
@@ -401,6 +411,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "case_id": "CASE-UOW-FAILED",
             "idempotency_key": "confirm:uow-idem-failed",
         }
+        self._ensure_documented_mismatch_confirm_note(request_payload)
         request_fingerprint = workbench_request_fingerprint(
             tenant_id="default",
             actor_id="test-user-id",

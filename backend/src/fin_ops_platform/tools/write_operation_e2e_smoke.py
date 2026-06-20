@@ -66,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bearer-token", default=os.getenv("FIN_OPS_HTTP_SLO_BEARER_TOKEN", ""))
     parser.add_argument("--admin-token", default=os.getenv("FIN_OPS_HTTP_SLO_ADMIN_TOKEN", ""))
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
+    parser.add_argument(
+        "--approval-ticket",
+        default=os.getenv("FIN_OPS_WRITE_E2E_APPROVAL_TICKET", ""),
+        help="Required with --apply. Business approval reference for mutating production write-operation smoke.",
+    )
     parser.add_argument("--write-target-ms", type=float, default=DEFAULT_WRITE_TARGET_MS)
     parser.add_argument("--http-target-ms", type=float, default=DEFAULT_HTTP_TARGET_MS)
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
@@ -114,8 +119,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         admin_token=args.admin_token,
         cookie=args.cookie,
     )
+    approval_ticket = str(args.approval_ticket or "").strip()
     connection = None
     if args.apply:
+        if not approval_ticket:
+            report = _approval_missing_report(
+                base_url=str(args.base_url),
+                api_prefix=str(args.api_prefix),
+                scenario_count=len(scenarios),
+            )
+            write_json_report(report, output=args.output, stdout=stdout)
+            return 2
         try:
             connection = PostgresConnection(PostgresSettings.from_env())
         except PostgresConfigurationError as exc:
@@ -130,6 +144,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         api_prefix=str(args.api_prefix),
         tenant_id=str(args.tenant_id or "default"),
         headers=headers,
+        approval_reference=approval_ticket,
         write_target_ms=write_target_ms,
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
         poll_interval_seconds=max(0.1, float(args.poll_interval_seconds)),
@@ -140,7 +155,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(encoded + "\n", encoding="utf-8")
     print(encoded, file=stdout)
-    if report["status"] == "auth_missing":
+    if report["status"] in {"approval_missing", "auth_missing"}:
         return 2
     if report["status"] == "dry_run":
         return 0
@@ -186,6 +201,7 @@ def run_write_operation_e2e_smoke(
     api_prefix: str,
     tenant_id: str,
     headers: Mapping[str, str],
+    approval_reference: str | None = None,
     write_target_ms: float = DEFAULT_WRITE_TARGET_MS,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
@@ -193,6 +209,7 @@ def run_write_operation_e2e_smoke(
     request_fn: RequestFn | None = None,
 ) -> dict[str, Any]:
     auth_configured = any(str(key).lower() in {"authorization", "cookie"} for key in dict(headers))
+    approval_reference = str(approval_reference or "").strip()
     plan = [_scenario_plan_payload(scenario) for scenario in scenarios]
     if not scenarios:
         return {
@@ -202,6 +219,7 @@ def run_write_operation_e2e_smoke(
             "base_url": http_slo_probe._normalized_base_url(base_url),
             "api_prefix": api_prefix,
             "auth_configured": auth_configured,
+            "approval_configured": bool(approval_reference),
             "scenario_count": 0,
             "error": "scenario_empty",
             "message": "write-operation E2E smoke requires at least one approved scenario.",
@@ -215,9 +233,17 @@ def run_write_operation_e2e_smoke(
             "base_url": http_slo_probe._normalized_base_url(base_url),
             "api_prefix": api_prefix,
             "auth_configured": auth_configured,
+            "approval_configured": bool(approval_reference),
             "scenario_count": len(scenarios),
             "planned_scenarios": plan,
         }
+    if not approval_reference:
+        return _approval_missing_report(
+            base_url=base_url,
+            api_prefix=api_prefix,
+            scenario_count=len(scenarios),
+            planned_scenarios=plan,
+        )
     if not auth_configured:
         return {
             "version": 1,
@@ -226,6 +252,8 @@ def run_write_operation_e2e_smoke(
             "base_url": http_slo_probe._normalized_base_url(base_url),
             "api_prefix": api_prefix,
             "auth_configured": False,
+            "approval_configured": True,
+            "approval_reference": approval_reference,
             "error": "write-operation E2E smoke requires FIN_OPS_HTTP_SLO_BEARER_TOKEN, FIN_OPS_HTTP_SLO_ADMIN_TOKEN, FIN_OPS_HTTP_SLO_COOKIE, or CLI auth options",
             "planned_scenarios": plan,
         }
@@ -254,9 +282,33 @@ def run_write_operation_e2e_smoke(
         "base_url": http_slo_probe._normalized_base_url(base_url),
         "api_prefix": api_prefix,
         "auth_configured": auth_configured,
+        "approval_configured": True,
+        "approval_reference": approval_reference,
         "scenario_count": len(scenarios),
         "failed_scenario_count": len(failed),
         "results": results,
+    }
+
+
+def _approval_missing_report(
+    *,
+    base_url: str,
+    api_prefix: str,
+    scenario_count: int,
+    planned_scenarios: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "status": "approval_missing",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "base_url": http_slo_probe._normalized_base_url(base_url),
+        "api_prefix": api_prefix,
+        "approval_configured": False,
+        "scenario_count": int(scenario_count),
+        "error": "write_operation_e2e_requires_approval_ticket",
+        "message": "Mutating write-operation E2E smoke requires --approval-ticket or FIN_OPS_WRITE_E2E_APPROVAL_TICKET.",
+        "required_args": ["--scenario", "--apply", "--approval-ticket"],
+        "planned_scenarios": list(planned_scenarios or []),
     }
 
 

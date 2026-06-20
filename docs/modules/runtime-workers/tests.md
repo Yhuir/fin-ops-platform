@@ -98,6 +98,14 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 bash scripts/verify.sh docs
 ```
 
+统一真实基础设施 gate：
+
+```bash
+bash scripts/verify.sh infra-smoke
+```
+
+本地没有 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL` 时，该命令验证 read model SLO、runtime sync closure gate、write-operation SLO、RabbitMQ staging preflight 工具合同，并跳过真实连接；配置真实 staging PostgreSQL 后会追加 `read_model_slo_smoke --critical-only` dry-run scope discovery。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时，才会追加 `--apply` 并真正 enqueue refresh events、等待 worker drain；配置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会运行只读 `write_operation_slo_audit` 审计最近真实业务写入产生的 durable refresh events；配置真实 staging PostgreSQL/RabbitMQ 后还会运行 RabbitMQ staging preflight。
+
 有真实基础设施时追加：
 
 ```bash
@@ -105,6 +113,8 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://... PYTHONPATH=backend/src python3 -m uni
 RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_integration -v
 FIN_OPS_TEST_DATABASE_URL=postgresql://... RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight --json --skip-real-tests
+FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_INFRA_SMOKE_APPLY=1 bash scripts/verify.sh infra-smoke
+FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke
 ```
 
 ## Nightly CI 覆盖
@@ -113,7 +123,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_pr
 
 ## 未测风险
 
-- 当前默认 CI 不证明真实 RabbitMQ broker、真实 Postgres migration、systemd unit 和 worker 长时间 drain。
+- 当前默认 CI 不证明真实 RabbitMQ broker、真实 Postgres migration、systemd unit 和 worker 长时间 drain；`infra-smoke` 未设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时也不证明直接 enqueue worker drain，未设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS` 时也不证明真实业务写入后的 durable refresh events。
 - RabbitMQ 作为可选 transport 的端到端 broker 测试需要 `RABBITMQ_TEST_URL`，没有该环境变量时只能依赖 fake channel/consumer 测试。
 - `resolve-dead-letter` 等运维命令的真实生产执行仍需 operator review 和 readiness 事实核对；测试只保护命令前置条件和 SQL 行为。
 - 业务页面层面的 loading/stale/error 展示不在本模块完全覆盖，必须由具体页面模块补前端交互和关键业务流回归。

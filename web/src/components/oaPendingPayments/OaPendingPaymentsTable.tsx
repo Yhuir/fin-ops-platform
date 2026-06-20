@@ -41,6 +41,7 @@ type OaPendingPaymentsTableProps = {
   selectedOaRowIds?: Set<string>;
   onToggleOaSelection?: (row: OaPendingPaymentRow) => void;
   confirmingRowIds?: Set<string>;
+  emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -136,6 +137,7 @@ export default function OaPendingPaymentsTable({
   selectedOaRowIds = new Set(),
   onToggleOaSelection,
   confirmingRowIds = new Set(),
+  emptyStateMessage = "暂无 OA 待付款核对数据",
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
   const configsByField = useMemo(() => new Map(filterConfigs.map((config) => [config.field, config])), [filterConfigs]);
@@ -204,7 +206,7 @@ export default function OaPendingPaymentsTable({
             {rows.length === 0 ? (
               <tr>
                 <td className="oa-pending-payments-table-state-cell" colSpan={columns.length}>
-                  暂无 OA 待付款核对数据
+                  {emptyStateMessage}
                 </td>
               </tr>
             ) : rows.map((row) => {
