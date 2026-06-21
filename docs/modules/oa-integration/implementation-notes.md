@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - OA 附件发票 Promotion 设置化
+
+- 目标：避免用户清空统一发票池并手工重新导入 Excel 时，OA 附件 OCR 结果通过 OA 同步或关联台读路径重新写入 `app.invoices`。
+- 影响范围：`AppSettingsService`、OA attachment invoice cache promotion、Workbench OA payload 构建触发路径、设置页 OA 导入设置。
+- 关键决策：新增 `OA附件发票晋级` 三态设置。`disabled` 完全跳过 promotion；默认 `link_existing_only` 只关联已有统一发票池记录，不创建缺失发票；`create_missing` 才保留受控创建能力。该开关不删除 OA 附件，也不改变 OCR cache，只控制 OCR 结果是否进入统一发票池/关系补充。
+- 文档影响：更新 `oa-integration`、`settings`、`reconciliation-workbench` 模块文档。
+- 测试覆盖：新增/更新 `tests/test_app_settings_service.py`、`tests/test_workbench_v2_api.py`、`web/src/test/SettingsPage.test.tsx`，覆盖设置 round-trip、默认不创建、禁用不调用 promotion、显式创建和设置页保存。
+- 验证命令：见本轮交付说明。
+- 未测风险：真实生产 OA 附件历史 OCR cache 未在本地重放；发票池清空和手工重导入仍应在开关设为 `disabled` 或默认 `link_existing_only` 后用生产备份保护。
+
 ## 2026-06-21 - OA 附件未知证据禁止提升为正式发票
 
 - 目标：避免 OCR 或外部附件缓存只带发票号、金额等字段但缺少正式发票证据类型时，被提升为统一发票池记录。

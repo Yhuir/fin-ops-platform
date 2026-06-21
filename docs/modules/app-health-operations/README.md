@@ -46,6 +46,7 @@
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
+- Dashboard 发票 inventory 的 `OA 解析` 只统计 OCR 缓存中能识别为正式发票的去重数量；它不展示附件总数、OCR 候选项总数或非正式票据数量。
 
 ## 运行事实源
 
@@ -54,6 +55,7 @@
 - Readiness：`read_model.app_status_readiness` 或 Workbench active generation 等价 readiness。
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
+- OA 附件发票 inventory：优先读取 `app.oa_attachment_invoice_cache.invoices`，只保留具备完整发票号码、开票日期、购销方税号、价税合计且 `document_kind` / `invoice_kind` 可判定为正式发票的 OCR 结果，并按强 identity 去重。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
 
 ## 关键 fan-out

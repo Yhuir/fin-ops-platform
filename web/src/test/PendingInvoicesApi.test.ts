@@ -793,7 +793,11 @@ describe("pending invoices and tag settings API mapping", () => {
         access_control: { allowed_usernames: [], readonly_export_usernames: [], admin_usernames: [], full_access_usernames: [] },
         workbench_column_layouts: { oa: [], bank: [], invoice: [] },
         oa_retention: { cutoff_date: "2026-01-01" },
-        oa_import: { form_types: [], statuses: [] },
+        oa_import: {
+          form_types: [],
+          statuses: [],
+          attachment_invoice_promotion_mode: "link_existing_only",
+        },
         oa_invoice_offset: { applicant_names: [] },
         bank_transaction_tags: {
           version: 3,
@@ -850,7 +854,11 @@ describe("pending invoices and tag settings API mapping", () => {
       adminUsernames: [],
       workbenchColumnLayouts: { oa: [], bank: [], invoice: [] },
       oaRetention: { cutoffDate: "2026-01-01" },
-      oaImport: { formTypes: [], statuses: [] },
+      oaImport: {
+        formTypes: [],
+        statuses: [],
+        attachmentInvoicePromotionMode: "link_existing_only",
+      },
       oaInvoiceOffset: { applicantNames: [] },
       bankTransactionTags: settings.bankTransactionTags,
       pendingInvoiceTagGroups: settings.pendingInvoiceTagGroups,

@@ -40,7 +40,7 @@
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
 - `Admin-Token` 只作为会话来源；后端必须二次校验 `finops:app:view` 和 app 内访问等级。
 - OA 同步通过 worker / durable queue 写入本系统投影，再触发 Workbench、Search、Invoice Lifecycle、OA 待付款、进项使用、税金、成本等下游 read model。
-- OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。
+- OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
 - ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。
 - 真实 OA 登录、RSA 加密、OA 草稿页面、生产 Mongo 字段变体和 OA 菜单角色同步必须通过 staging/生产前 smoke 补证，本地测试只能保护 contract 与失败处理。
@@ -50,7 +50,7 @@
 | 入口 | 影响范围 | 关键风险 |
 | --- | --- | --- |
 | `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、只读/全操作/admin 分层错误 |
-| OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity |
+| OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity、附件 promotion 模式误配置 |
 | OA sync worker / projection | Workbench、Search、待找发票、发票生命周期、OA 待付款 | worker 未入队、投影半写入、retention cutoff、旧 relation row id 迁移 |
 | OA 手动搜索/导入 | 设置页、Workbench、Search、历史 OA 补录 | 未完成单据误导入、附件刷新失败、手动 marker 删除后 stale scope |
 | OA applicant credentials | 设置页、进项发票 OA 反提 | 非 admin 修改、password 泄漏、pgcrypto key/配置缺失 |

@@ -146,6 +146,7 @@ export type WorkbenchOaImportOption = {
 export type WorkbenchOaImportSettings = {
   formTypes: string[];
   statuses: string[];
+  attachmentInvoicePromotionMode: "disabled" | "link_existing_only" | "create_missing" | (string & {});
   availableFormTypes: WorkbenchOaImportOption[];
   availableStatuses: WorkbenchOaImportOption[];
 };

@@ -179,15 +179,66 @@ class OperationsDashboardService:
         try:
             row = self._connection.fetch_one(
                 """
-                select
-                  coalesce(sum(jsonb_array_length(
+                with invoice_items as (
+                  select invoice_item.value as invoice
+                  from app.oa_attachment_invoice_cache cache
+                  cross join lateral jsonb_array_elements(
                     case
-                      when jsonb_typeof(invoices) = 'array' then invoices
+                      when jsonb_typeof(cache.invoices) = 'array' then cache.invoices
                       else '[]'::jsonb
                     end
-                  )), 0)::bigint as count,
-                  max(parsed_at) as latest_synced_at
-                from app.oa_attachment_invoice_cache
+                  ) as invoice_item(value)
+                ),
+                formal_invoices as (
+                  select
+                    nullif(trim(coalesce(
+                      invoice->>'invoice_no',
+                      invoice->>'invoice_number',
+                      invoice->>'digital_invoice_no',
+                      invoice->>'发票号码',
+                      invoice->>'数电发票号码',
+                      invoice->>'number'
+                    )), '') as invoice_no,
+                    nullif(trim(coalesce(
+                      invoice->>'issue_date',
+                      invoice->>'invoice_date',
+                      invoice->>'date',
+                      invoice->>'开票日期'
+                    )), '') as issue_date,
+                    nullif(trim(coalesce(
+                      invoice->>'seller_tax_no',
+                      invoice->>'seller_tax_number',
+                      invoice->>'销方识别号'
+                    )), '') as seller_tax_no,
+                    nullif(trim(coalesce(
+                      invoice->>'buyer_tax_no',
+                      invoice->>'buyer_tax_number',
+                      invoice->>'购方识别号'
+                    )), '') as buyer_tax_no,
+                    nullif(trim(coalesce(
+                      invoice->>'total_with_tax',
+                      invoice->>'total_amount',
+                      invoice->>'价税合计',
+                      invoice->>'amount'
+                    )), '') as amount_text,
+                    lower(nullif(trim(coalesce(invoice->>'document_kind', '')), '')) as document_kind,
+                    nullif(trim(coalesce(invoice->>'invoice_kind', invoice->>'invoice_type', '')), '') as invoice_kind
+                  from invoice_items
+                )
+                select
+                  count(distinct concat_ws('|', invoice_no, issue_date, seller_tax_no, buyer_tax_no, amount_text))::bigint as count,
+                  (select max(parsed_at) from app.oa_attachment_invoice_cache) as latest_synced_at
+                from formal_invoices
+                where invoice_no is not null
+                  and issue_date is not null
+                  and seller_tax_no is not null
+                  and buyer_tax_no is not null
+                  and amount_text is not null
+                  and coalesce(document_kind, '') <> 'non_tax_receipt'
+                  and (
+                    coalesce(document_kind, '') in ('digital_invoice', 'yunnan_machine_invoice')
+                    or position('发票' in invoice_kind) > 0
+                  )
                 """
             ) or {}
             return {

@@ -1099,10 +1099,14 @@ class AppSettingsServiceTests(unittest.TestCase):
                 oa_import={
                     "form_types": ["expense_claim", "ticket_type", "payment_request", "payment_request"],
                     "statuses": ["in_progress", "REJECTED", "completed", "0", "completed"],
+                    "attachment_invoice_promotion_mode": "disabled",
                 },
                 workbench_column_layouts={},
             )
             reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+            reloaded_mode = build_application(
+                data_dir=Path(temp_dir)
+            )._app_settings_service.get_oa_attachment_invoice_promotion_mode()
 
         expected_available_form_types = [
             {"id": "payment_request", "label": "支付申请"},
@@ -1117,6 +1121,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             {
                 "form_types": ["payment_request", "expense_claim"],
                 "statuses": ["completed"],
+                "attachment_invoice_promotion_mode": "link_existing_only",
                 "available_form_types": expected_available_form_types,
                 "available_statuses": expected_available_statuses,
             },
@@ -1126,11 +1131,29 @@ class AppSettingsServiceTests(unittest.TestCase):
             {
                 "form_types": ["payment_request", "expense_claim"],
                 "statuses": ["completed", "in_progress"],
+                "attachment_invoice_promotion_mode": "disabled",
                 "available_form_types": expected_available_form_types,
                 "available_statuses": expected_available_statuses,
             },
         )
         self.assertEqual(reloaded_payload["oa_import"], updated_payload["oa_import"])
+        self.assertEqual(reloaded_mode, "disabled")
+
+    def test_invalid_oa_attachment_invoice_promotion_mode_falls_back_to_link_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_import={"attachment_invoice_promotion_mode": "always_create"},
+                workbench_column_layouts={},
+            )
+
+        self.assertEqual(payload["oa_import"]["attachment_invoice_promotion_mode"], "link_existing_only")
 
     def test_update_settings_persists_oa_invoice_offset_applicants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

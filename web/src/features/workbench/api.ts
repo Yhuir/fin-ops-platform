@@ -323,6 +323,7 @@ type ApiWorkbenchSettings = {
     selected_form_types?: string[];
     statuses?: string[];
     selected_statuses?: string[];
+    attachment_invoice_promotion_mode?: string | null;
     available_form_types?: ApiWorkbenchSettingsOption[];
     available_statuses?: ApiWorkbenchSettingsOption[];
   };
@@ -774,6 +775,7 @@ type WorkbenchSettingsUpdatePayload = {
   oaImport: {
     formTypes: string[];
     statuses: string[];
+    attachmentInvoicePromotionMode: string;
   };
   oaInvoiceOffset?: {
     applicantNames: string[];
@@ -2009,6 +2011,11 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
     oaImport: {
       formTypes: cleanStringList(oaImport.form_types ?? oaImport.selected_form_types, defaultFormTypes),
       statuses: cleanStringList(oaImport.statuses ?? oaImport.selected_statuses, defaultStatuses),
+      attachmentInvoicePromotionMode: ["disabled", "link_existing_only", "create_missing"].includes(
+        String(oaImport.attachment_invoice_promotion_mode ?? ""),
+      )
+        ? String(oaImport.attachment_invoice_promotion_mode)
+        : "link_existing_only",
       availableFormTypes: normalizeSettingsOptions(oaImport.available_form_types, defaultAvailableFormTypes),
       availableStatuses: normalizeSettingsOptions(oaImport.available_statuses, defaultAvailableStatuses),
     },
@@ -2772,6 +2779,7 @@ export async function saveWorkbenchSettings(
       oa_import: {
         form_types: settings.oaImport.formTypes,
         statuses: settings.oaImport.statuses,
+        attachment_invoice_promotion_mode: settings.oaImport.attachmentInvoicePromotionMode,
       },
       oa_invoice_offset: {
         applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],

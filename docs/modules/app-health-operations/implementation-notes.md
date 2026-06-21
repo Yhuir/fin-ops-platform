@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - OA 解析发票 inventory 口径收敛
+
+- 目标：修正系统状态 `发票 > OA 解析` 把 OCR 候选项总数展示为发票数的问题，只展示 OCR 缓存中可识别为正式发票的去重数量。
+- 影响范围：`OperationsDashboardService._oa_attachment_invoice_inventory()`、`/api/operations/app-health-dashboard` 的 dashboard data inventory 语义、系统状态和运维监控文档；不改变 `app.invoices`、OA 附件缓存、Workbench read model 或前端 API shape。
+- 关键决策：优先读取 `app.oa_attachment_invoice_cache.invoices`，只保留具备完整发票号码、开票日期、购销方税号、价税合计，且 `document_kind` / `invoice_kind` 可判定为正式发票的 OCR 结果；最终按强 identity 去重。非正式票据、短号码票据、附件总数和 OCR 候选项总数不进入 `OA 解析` 数字。
+- 文档影响：更新本模块 README、测试矩阵和 `docs/operations/monitoring.md`。
+- 测试覆盖：`tests/test_operations_dashboard_service.py::OperationsDashboardServiceTests::test_oa_attachment_inventory_uses_cache_before_workbench_rows` 锁定 cache SQL 使用正式发票去重口径，并保留 cache missing 时回退 `read_model.workbench_rows` 的旧行为。
+- 验证命令：`PYTHONPATH=backend/src pytest -q tests/test_operations_dashboard_service.py`；`PYTHONPATH=backend/src python -m compileall -q backend/src/fin_ops_platform/services/operations_dashboard.py`；生产库只读 SQL 校验当前 OCR 缓存正式发票去重数为 1095，旧候选项总数 1731 不再作为展示口径。
+- 未测风险：本地单测锁定 SQL contract，不启动真实前端；已用真实数据库只读 SQL 校验当前数据口径。运行中的后端进程需要重启或重新加载代码后才会显示新数字。
+
 ## 2026-06-20 - Read Model / Worker 全局状态摘要可见
 
 - 目标：让用户不用进入具体业务页面，也能从左上角 App Status hover 和 `/operations/app-health` 看到 read model 是否 fresh、worker 是否 active/working、queue 是否存在 backlog。

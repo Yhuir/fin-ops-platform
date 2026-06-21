@@ -34,6 +34,15 @@ DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
 DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
 DEFAULT_OA_IMPORT_FORM_TYPES = ["payment_request", "expense_claim"]
 DEFAULT_OA_IMPORT_STATUSES = ["completed"]
+OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED = "disabled"
+OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY = "link_existing_only"
+OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING = "create_missing"
+DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE = OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY
+OA_ATTACHMENT_INVOICE_PROMOTION_MODES = {
+    OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
+    OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+    OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
+}
 OA_IMPORT_FORM_TYPE_OPTIONS = [
     {"id": "payment_request", "label": "支付申请"},
     {"id": "expense_claim", "label": "日常报销"},
@@ -191,6 +200,7 @@ class AppSettingsService:
             "oa_import": {
                 "form_types": list(self._snapshot["oa_import"]["form_types"]),
                 "statuses": list(self._snapshot["oa_import"]["statuses"]),
+                "attachment_invoice_promotion_mode": self._snapshot["oa_import"]["attachment_invoice_promotion_mode"],
                 "available_form_types": oa_import_options["available_form_types"],
                 "available_statuses": oa_import_options["available_statuses"],
             },
@@ -913,6 +923,18 @@ class AppSettingsService:
             "statuses": list(self._snapshot["oa_import"]["statuses"]),
         }
 
+    def get_oa_attachment_invoice_promotion_mode(self) -> str:
+        self._refresh_snapshot_from_state_store()
+        mode = str(
+            self._snapshot.get("oa_import", {}).get(
+                "attachment_invoice_promotion_mode",
+                DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE,
+            )
+        ).strip()
+        if mode not in OA_ATTACHMENT_INVOICE_PROMOTION_MODES:
+            return DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
+        return mode
+
     def _oa_import_available_options(self) -> dict[str, list[dict[str, str]]]:
         default_options = {
             "available_form_types": [dict(item) for item in OA_IMPORT_FORM_TYPE_OPTIONS],
@@ -1056,6 +1078,13 @@ class AppSettingsService:
             default_values=DEFAULT_OA_IMPORT_STATUSES,
             preserve_empty="statuses" in oa_import,
         )
+        attachment_invoice_promotion_mode = str(
+            oa_import.get("attachment_invoice_promotion_mode")
+            or oa_import.get("oa_attachment_invoice_promotion_mode")
+            or DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
+        ).strip()
+        if attachment_invoice_promotion_mode not in OA_ATTACHMENT_INVOICE_PROMOTION_MODES:
+            attachment_invoice_promotion_mode = DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
         raw_oa_invoice_offset = raw_payload.get("oa_invoice_offset")
         oa_invoice_offset = raw_oa_invoice_offset if isinstance(raw_oa_invoice_offset, dict) else {}
         raw_applicant_names = (
@@ -1169,6 +1198,7 @@ class AppSettingsService:
             "oa_import": {
                 "form_types": form_types,
                 "statuses": statuses,
+                "attachment_invoice_promotion_mode": attachment_invoice_promotion_mode,
             },
             "oa_invoice_offset": {"applicant_names": applicant_names},
             "bank_transaction_tags": bank_transaction_tags,

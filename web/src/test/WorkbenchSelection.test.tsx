@@ -1409,7 +1409,7 @@ describe("Workbench row selection and detail modal", () => {
       "/api/workbench/settings",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining("\"oa_import\":{\"form_types\":[\"payment_request\",\"expense_claim\"],\"statuses\":[\"completed\",\"in_progress\"]}"),
+        body: expect.stringContaining("\"oa_import\":{\"form_types\":[\"payment_request\",\"expense_claim\"],\"statuses\":[\"completed\",\"in_progress\"],\"attachment_invoice_promotion_mode\":\"link_existing_only\"}"),
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

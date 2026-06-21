@@ -6610,7 +6610,100 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(status_payload["status"], "refreshing")
         self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
 
-    def test_oa_attachment_invoice_cache_update_promotes_formal_invoice_to_canonical_source(self) -> None:
+    def test_oa_attachment_invoice_cache_update_does_not_create_missing_invoice_by_default(self) -> None:
+        attachment_invoice = {
+            "source_attachment_key": "oa-exp-202603-001:file:1",
+            "source_attachment_name": "发票.pdf",
+            "evidence_type": "tax_invoice",
+            "invoice_type": "进项发票",
+            "seller_name": "云南城建物业运营集团",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-03-06",
+            "invoice_no": "26532000000021026521",
+            "amount": "566.04",
+            "total_with_tax": "600.00",
+        }
+        oa_record = OAApplicationRecord(
+            id="oa-exp-202603-001",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="刘际涛",
+            project_name="冷水机组维护",
+            apply_type="付款申请",
+            amount="600.00",
+            counterparty_name="云南城建物业运营集团",
+            reason="维护费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            attachment_invoices=[attachment_invoice],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
+
+            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+
+            invoices = app._import_service.list_invoices()
+
+        self.assertEqual(invoices, [])
+
+    def test_oa_attachment_invoice_cache_update_disabled_mode_skips_promotion(self) -> None:
+        attachment_invoice = {
+            "source_attachment_key": "oa-exp-202603-001:file:1",
+            "source_attachment_name": "发票.pdf",
+            "evidence_type": "tax_invoice",
+            "invoice_type": "进项发票",
+            "seller_name": "云南城建物业运营集团",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-03-06",
+            "invoice_no": "26532000000021026521",
+            "amount": "566.04",
+            "total_with_tax": "600.00",
+        }
+        oa_record = OAApplicationRecord(
+            id="oa-exp-202603-001",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="刘际涛",
+            project_name="冷水机组维护",
+            apply_type="付款申请",
+            amount="600.00",
+            counterparty_name="云南城建物业运营集团",
+            reason="维护费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            attachment_invoices=[attachment_invoice],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_import={"attachment_invoice_promotion_mode": "disabled"},
+                workbench_column_layouts={},
+            )
+            app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
+
+            with (
+                patch.object(app._import_service, "upsert_oa_attachment_invoice") as upsert_invoice,
+                patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"),
+            ):
+                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+
+            invoices = app._import_service.list_invoices()
+
+        upsert_invoice.assert_not_called()
+        self.assertEqual(invoices, [])
+
+    def test_oa_attachment_invoice_cache_update_create_missing_mode_promotes_formal_invoice(self) -> None:
         attachment_invoice = {
             "source_attachment_key": "oa-exp-202603-001:file:1",
             "source_attachment_name": "发票.pdf",
@@ -6657,6 +6750,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_import={"attachment_invoice_promotion_mode": "create_missing"},
+                workbench_column_layouts={},
+            )
             app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
 
             with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):

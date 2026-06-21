@@ -210,7 +210,7 @@ GET /api/operations/app-health-dashboard
 
 Dashboard 三个区域：
 
-- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源拆为普通导入、OA 解析、ETC、手工导入。
+- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源拆为普通导入、OA 解析、ETC、手工导入；其中 `OA 解析` 只代表 OCR 缓存中可判定为正式发票的去重数量，不代表附件总数、OCR 候选项总数或非正式票据数量。
 - `请求`：当前 API 进程内 rolling window 的 p95/p99，包括完整请求耗时、DB 总耗时、连接获取、SQL execute/fetch 和 SQL 次数。
 - `后台`：`job.outbox_events`、RabbitMQ queue/DLQ、`job.runtime_worker_heartbeats`、read model refresh duration 和 dirty scope 计数。
 
@@ -222,7 +222,7 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - RabbitMQ 指标缺失时仍以 PostgreSQL outbox/dirty scopes 为准。
 - API/DB p95 同时升高，优先看 PostgreSQL、连接池和 top SQL。
 - API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
-- OA 附件发票 inventory 优先读取 `app.oa_attachment_invoice_cache`；`read_model.workbench_rows` 仅作为 fallback，并依赖 `workbench_rows_oa_attachment_inventory_idx` 覆盖索引。
+- OA 附件发票 inventory 优先读取 `app.oa_attachment_invoice_cache`；正式发票必须具备完整发票号码、开票日期、购销方税号、价税合计，并通过 `document_kind` / `invoice_kind` 判定为发票后再按强 identity 去重。`read_model.workbench_rows` 仅作为 fallback，并依赖 `workbench_rows_oa_attachment_inventory_idx` 覆盖索引。
 - Read model refresh 的“历史”指标是 bounded history：最近 7 天或每个 event type 最近 512 条完成事件，不是全库永久历史扫描。
 - `/health/ready` 和 `/metrics` 的 read model refresh / enqueue-to-fresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
 - `read_model_refresh_current_windows` 仍基于每个 event type 最近 512 条 bounded 样本，但按 `created_at` 过滤固定窗口；它用于当前 SLO 判定，历史滞留事件仍由 all-time bounded 指标和 slow events 保留。

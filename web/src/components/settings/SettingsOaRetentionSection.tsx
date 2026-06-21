@@ -1,11 +1,22 @@
 import OaManualSearchImportTable from "./OaManualSearchImportTable";
 import type { SettingsOaRetentionSectionProps } from "./types";
+import type { WorkbenchOaImportSettings } from "../../features/workbench/types";
+
+const attachmentInvoicePromotionOptions: Array<{
+  value: WorkbenchOaImportSettings["attachmentInvoicePromotionMode"];
+  label: string;
+}> = [
+  { value: "disabled", label: "禁用晋级" },
+  { value: "link_existing_only", label: "仅关联已有发票" },
+  { value: "create_missing", label: "允许创建缺失发票" },
+];
 
 export default function SettingsOaRetentionSection({
   controlsDisabled,
   cutoffDate,
   oaImport,
   onChangeCutoffDate,
+  onChangeAttachmentInvoicePromotionMode,
   onToggleFormType,
   onToggleStatus,
 }: SettingsOaRetentionSectionProps) {
@@ -69,6 +80,26 @@ export default function SettingsOaRetentionSection({
             </div>
           </fieldset>
         </div>
+
+        <label className="settings-field">
+          <span>OA附件发票晋级</span>
+          <select
+            className="settings-select-control"
+            disabled={controlsDisabled}
+            value={oaImport.attachmentInvoicePromotionMode}
+            onChange={(event) =>
+              onChangeAttachmentInvoicePromotionMode(
+                event.currentTarget.value as WorkbenchOaImportSettings["attachmentInvoicePromotionMode"],
+              )
+            }
+          >
+            {attachmentInvoicePromotionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="settings-inline-alert settings-inline-alert--info" role="status">
           <strong>保留规则</strong>

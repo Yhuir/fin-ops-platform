@@ -164,6 +164,9 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
         self.assertEqual(invoice_sources["oa_attachment"]["count"], 3)
         self.assertTrue(any("from app.oa_attachment_invoice_cache" in sql for sql in normalized_calls))
+        self.assertTrue(any("count(distinct concat_ws" in sql for sql in normalized_calls))
+        self.assertTrue(any("document_kind, '') <> 'non_tax_receipt'" in sql for sql in normalized_calls))
+        self.assertTrue(any("position('发票' in invoice_kind) > 0" in sql for sql in normalized_calls))
         self.assertFalse(any("from read_model.workbench_rows" in sql for sql in normalized_calls))
 
     def test_oa_attachment_inventory_falls_back_to_workbench_rows_when_cache_missing(self) -> None:

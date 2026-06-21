@@ -98,6 +98,7 @@ export type SettingsOaRetentionSectionProps = {
   cutoffDate: string;
   oaImport: WorkbenchOaImportSettings;
   onChangeCutoffDate: (value: string) => void;
+  onChangeAttachmentInvoicePromotionMode: (value: WorkbenchOaImportSettings["attachmentInvoicePromotionMode"]) => void;
   onToggleFormType: (value: string) => void;
   onToggleStatus: (value: string) => void;
 };

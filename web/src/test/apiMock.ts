@@ -4560,6 +4560,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     oa_import: {
       form_types: ["payment_request", "expense_claim"],
       statuses: ["completed"],
+      attachment_invoice_promotion_mode: "link_existing_only",
       available_form_types: [
         { value: "payment_request", label: "支付申请" },
         { value: "expense_claim", label: "日常报销" },
@@ -4982,6 +4983,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                     .map((item) => String(item).trim())
                     .filter(Boolean)
                   : workbenchSettingsState.oa_import.statuses,
+                attachment_invoice_promotion_mode:
+                  typeof (jsonBody.oa_import as Record<string, unknown>).attachment_invoice_promotion_mode === "string"
+                    ? String((jsonBody.oa_import as Record<string, unknown>).attachment_invoice_promotion_mode).trim()
+                    : workbenchSettingsState.oa_import.attachment_invoice_promotion_mode,
               }
               : workbenchSettingsState.oa_import,
           oa_invoice_offset:

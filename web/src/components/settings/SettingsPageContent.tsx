@@ -283,6 +283,9 @@ export default function SettingsPageContent({
   const [oaRetentionCutoffDate, setOaRetentionCutoffDate] = useState(settings.oaRetention.cutoffDate);
   const [oaImportFormTypes, setOaImportFormTypes] = useState(settings.oaImport.formTypes);
   const [oaImportStatuses, setOaImportStatuses] = useState(settings.oaImport.statuses);
+  const [oaAttachmentInvoicePromotionMode, setOaAttachmentInvoicePromotionMode] = useState(
+    settings.oaImport.attachmentInvoicePromotionMode,
+  );
   const [oaInvoiceOffsetApplicantsText, setOaInvoiceOffsetApplicantsText] = useState(
     settings.oaInvoiceOffset.applicantNames.join("、"),
   );
@@ -392,8 +395,8 @@ export default function SettingsPageContent({
       {
         id: "oa_retention" as const,
         label: "OA导入设置",
-        description: "表单类型与流程状态",
-        count: oaImportFormTypes.length + oaImportStatuses.length,
+        description: "表单类型、流程状态与附件发票",
+        count: oaImportFormTypes.length + oaImportStatuses.length + 1,
         visible: true,
       },
       {
@@ -657,6 +660,7 @@ export default function SettingsPageContent({
         ...settings.oaImport,
         formTypes: oaImportFormTypes,
         statuses: oaImportStatuses,
+        attachmentInvoicePromotionMode: oaAttachmentInvoicePromotionMode,
       },
       oaInvoiceOffset: {
         applicantNames: parseApplicantNames(oaInvoiceOffsetApplicantsText),
@@ -840,8 +844,10 @@ export default function SettingsPageContent({
                     ...settings.oaImport,
                     formTypes: oaImportFormTypes,
                     statuses: oaImportStatuses,
+                    attachmentInvoicePromotionMode: oaAttachmentInvoicePromotionMode,
                   }}
                   onChangeCutoffDate={setOaRetentionCutoffDate}
+                  onChangeAttachmentInvoicePromotionMode={setOaAttachmentInvoicePromotionMode}
                   onToggleFormType={(value) => setOaImportFormTypes((current) => toggleValue(value, current))}
                   onToggleStatus={(value) => setOaImportStatuses((current) => toggleValue(value, current))}
                 />

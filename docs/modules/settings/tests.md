@@ -20,7 +20,7 @@
 
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
-| 保存项目、权限、银行映射和 OA 配置 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 normalize、state store round-trip、OA role sync、项目 sync/create/delete API 权限、只读/管理员 UI |
+| 保存项目、权限、银行映射和 OA 配置 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 normalize、state store round-trip、OA role sync、项目 sync/create/delete API 权限、只读/管理员 UI、OA 附件发票 promotion 模式保存。 |
 | OA 手动导入 mutation 权限 | `tests/test_oa_manual_import_api.py` | 覆盖 refresh attachments、manual import create、manual import delete 在只读 session 下返回 403，且不会调用下游写服务或接受 body actor 伪造。 |
 | 保存待找发票规则且拒绝银行标签回写 | `tests/test_app_settings_service.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`tests/test_derived_data_lifecycle_service.py` | 覆盖 `/api/workbench/settings` 不接受 `bank_transaction_tags`、`AppSettingsService.update_settings(...)` 不暴露银行标签写参数、前端不回传银行标签展示字典、非法映射、audit、规则 version、下游 lifecycle fan-out；银行自动标签保存归属 `bank-details` 模块。 |
 | 数据重置 / 项目范围 | `tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts`、`docs/modules/settings/e2e-spec.md`、`docs/modules/settings/e2e-coverage.md` | 覆盖 admin/password gate、job progress、protected targets、reset OA rebuild、失败不清数据不泄密；Browser e2e 覆盖真实 Chromium 下影响确认、OA 密码复核、job polling、settings reload、严格浏览器错误捕获，也覆盖项目标记完成 -> 保存 settings -> 成本统计 active/all fresh project scope，并在成功后检查没有操作失败/同步失败/read model 失败等可见错误残留。 |
@@ -31,7 +31,7 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_app_settings_service.py`、`tests/test_oa_applicant_credentials_service.py` | 覆盖 settings normalize、访问控制、项目状态、银行标签写入边界、待找发票规则版本、非法映射、版本冲突、凭据必填/admin-only。 |
+| 1. Business core unit tests | 适用 | `tests/test_app_settings_service.py`、`tests/test_oa_applicant_credentials_service.py` | 覆盖 settings normalize、访问控制、项目状态、银行标签写入边界、待找发票规则版本、OA 附件发票 promotion 模式默认值/非法值、非法映射、版本冲突、凭据必填/admin-only。 |
 | 2. Service-layer tests | 适用 | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`tests/test_target_oa_applicant_token_provider.py` | 覆盖 state store、audit、OA role sync、settings 拒绝银行标签回写、data reset、protected targets、PG 加密、目标 OA login provider。 |
 | 3. API contract tests | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py` | 覆盖 `/api/workbench/settings`、`bank_transaction_tags_write_forbidden`、settings project mutation、OA manual import mutation、data reset job、credential routes、权限、错误、job、protected_targets、无密码回显。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py`、`web/e2e/settings-data-reset-flow.spec.ts` | 设置事实本身不是 read model，但规则保存、项目范围和 data reset 会影响 dirty scope、read model、cache、worker readiness；Browser e2e 以 mock fresh boundary 覆盖项目状态保存后成本统计 active/all read model 重新读取，并检查成功后无 read model 失败提示残留。 |
@@ -44,6 +44,7 @@
 - 2026-06-16：settings project sync/create/delete 与 OA manual import mutation routes 曾只依赖页面 UI 隐藏或 settings update 局部权限，缺少统一 `can_mutate_data` 后端校验。回归测试：`tests/test_workbench_settings_sync_api.py::WorkbenchSettingsSyncApiTests::test_project_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor`、`tests/test_oa_manual_import_api.py::OAManualImportApiTests::test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor`。
 - 2026-06-19：设置页已补 Spec-first E2E 合同和覆盖映射，data reset Browser 流已纳入严格浏览器错误捕获；真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储仍归 staging/runtime smoke。回归测试：`web/e2e/settings-data-reset-flow.spec.ts`。
 - 2026-06-17：设置页 data reset 只有组件层测试，缺少真实浏览器覆盖影响确认、OA 密码复核、job polling、完成后 settings reload 和全局反馈的闭环。回归测试：`web/e2e/settings-data-reset-flow.spec.ts`。
+- 2026-06-21：OA 附件发票 promotion 模式纳入设置页。默认 `link_existing_only` 不创建缺失发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许正式发票缺失时创建统一发票池记录。回归测试：`tests/test_app_settings_service.py`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_oa_attachment_invoice_cache_update_does_not_create_missing_invoice_by_default`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_oa_attachment_invoice_cache_update_disabled_mode_skips_promotion`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_oa_attachment_invoice_cache_update_create_missing_mode_promotes_formal_invoice`、`web/src/test/SettingsPage.test.tsx`。
 
 ## 关键 smoke flows
 

@@ -8,7 +8,7 @@
 - `oa_bank_exact_sum` 属于后端自动候选规则，必须同时覆盖 legacy candidate mode 和 decision/free engine mode；不能只在 `server.py` 或前端补展示逻辑。
 - Workbench matching 仍保留 legacy candidate 与 SQL decision 两条生产相关链路。新增规则时先复用现有 service/helper/test 工具，后续再单独规划匹配逻辑收敛。
 - 旧逻辑清理不和业务规则变更混做。`WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、`WorkbenchReconciliationEngine`、工资/内部转账 legacy rule code 仍有 orchestrator、worker、免 OA、分组和异常投影调用或兼容引用，不能无测试删除。
-- OA 附件解析缓存不是正式发票事实源。正式发票必须先 promotion 到 Invoice repository / `app.invoices`，Workbench 发票栏和 relation projection 只读取 canonical invoice/read model；旧 OA query service 只保留 OA detail 附件摘要。
+- OA 附件解析缓存不是正式发票事实源。Workbench 发票栏和 relation projection 只读取 canonical invoice/read model；OA 附件 OCR 结果是否补充到统一发票池由设置页 `OA附件发票晋级` 控制，默认 `link_existing_only` 只关联已有发票，不创建缺失发票，`disabled` 完全跳过，只有 `create_missing` 才允许受控创建。旧 OA query service 只保留 OA detail 附件摘要。
 
 ## 记录模板
 
@@ -26,6 +26,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - OA 附件 Promotion 不再默认读路径建票
+
+- 目标：防止关联台 OA payload 构建或 OA 附件 cache update 在用户手工重导入发票池时，把 OA 附件 OCR 结果重新写入 `app.invoices`。
+- 影响范围：Workbench OA row payload 构建触发的 promotion、OA sync dirty scope、设置页保存链路。
+- 关键决策：promotion 入口统一读取 `OA附件发票晋级` 设置。默认 `link_existing_only` 不创建缺失发票；`disabled` 不调用 promotion upsert；`create_missing` 明确开启时才保留正式发票缺失创建能力。
+- 文档影响：同步 `settings` 与 `oa-integration` 模块文档。
+- 测试覆盖：`tests/test_workbench_v2_api.py` 覆盖默认不创建、禁用不调用、显式创建；`web/src/test/SettingsPage.test.tsx` 覆盖设置页保存。
+- 验证命令：见本轮交付说明。
+- 未测风险：真实生产 active generation 不在本地回放；发布后建议用一条含 OA 附件的月份做只读 smoke，确认设置为 `disabled` 时发票池数量不变。
 
 ## 2026-06-20 - 已配对现金流水特殊处理 Browser E2E
 

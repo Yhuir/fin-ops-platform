@@ -70,6 +70,8 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
     AppSettingsValidationError,
     BankAutoTagRulesPersistenceError,
+    OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
+    OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
 )
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
@@ -8217,6 +8219,9 @@ class Application:
         )
 
     def _promote_oa_attachment_invoices_to_canonical(self, scope_keys: set[str]) -> int:
+        promotion_mode = self._app_settings_service.get_oa_attachment_invoice_promotion_mode()
+        if promotion_mode == OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED:
+            return 0
         adapter = getattr(self._workbench_query_service, "_oa_adapter", None)
         list_application_records = getattr(adapter, "list_application_records", None)
         if not callable(list_application_records):
@@ -8237,12 +8242,20 @@ class Application:
                     decision = recognition_service.decide(attachment_invoice)
                     if decision.action == IGNORE:
                         continue
+                    if (
+                        decision.action == CREATE_INVOICE_AND_LINK
+                        and promotion_mode != OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
+                    ):
+                        continue
                     invoice = self._import_service.upsert_oa_attachment_invoice(
                         attachment_invoice,
                         oa_form_id=record_id,
                         oa_row_id=record_id,
                         source_workbench_row_id=row_id,
-                        allow_create=decision.action == CREATE_INVOICE_AND_LINK,
+                        allow_create=(
+                            decision.action == CREATE_INVOICE_AND_LINK
+                            and promotion_mode == OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
+                        ),
                     )
                     if invoice is not None:
                         promoted_count += 1

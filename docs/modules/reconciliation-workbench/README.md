@@ -41,6 +41,8 @@ OA 附件发票冲抵自动闭环和 OA 附件上下文 repair 也必须通过 `
 
 OA 附件发票解析缓存必须通过 `app.oa_attachment_invoice_cache_sources` 的 indexed source bridge 连接当前 `app.oa_attachments`。`attachment_identity_*` bridge 行用于把历史 parser cache 的 `source_expense_item_id + source_attachment_name` 映射到当前附件 key；Workbench read model 热路径不得回退到全量扫描 `app.oa_attachment_invoice_cache` 才声明 fresh。
 
+OA 附件发票 promotion 不是关联台读路径的无条件副作用。`OA附件发票晋级` 设置为 `disabled` 时必须完全跳过；默认 `link_existing_only` 只允许关联已有统一发票池记录，不创建缺失发票；只有 `create_missing` 才允许正式发票缺失时受控写入 `app.invoices`。
+
 Workbench all-scope publish 的性能边界是 active generation 下的结构化投影写入，不是页面读旧 snapshot。生产 profile 显示 `read_model.workbench_group_rows` 适合走 chunked multi-row VALUES，`read_model.workbench_rows` 和 `read_model.workbench_groups` 在相同优化下会变慢，应继续走事务内 `executemany`。`0070_workbench_unused_write_indexes.sql` 删除生产基线中大且零扫描的 `workbench_rows_payload_gin`、`workbench_groups_searchable_text_trgm`、`workbench_group_rows_column_values_gin`；不要在没有新 query workload 证据时恢复这些写入放大型索引。
 
 Workbench all-scope 聚合还承担跨月分片的展示归属权收敛。统一事实源只保证正式 OA、银行流水、发票事实写入唯一；当 month shard 因补行、standalone row、自动候选或 source-linked 关系把同一事实带入多个 open group 时，all-scope 必须在写 active generation 前选出唯一 visible/operable owner。已配对 group 优先于 open；open 内部保留 source-linked/exception/auto-closed/decision/candidate 等证据更强、跨 pane 更多的 group，standalone 只能保留未被更强 group 认领的事实。发票 open/open 可用强发票 identity 去重；银行流水 open/open 只按 row id 去重，避免把真实重复交易按稳定 business-fields identity 折叠。

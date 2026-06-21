@@ -46,7 +46,11 @@ function installSettingsTagFetch() {
     access_control: { allowed_usernames: [], readonly_export_usernames: [], admin_usernames: [], full_access_usernames: [] },
     workbench_column_layouts: { oa: [], bank: [], invoice: [] },
     oa_retention: { cutoff_date: "2026-01-01" },
-    oa_import: { form_types: ["payment_request"], statuses: ["completed"] },
+    oa_import: {
+      form_types: ["payment_request"],
+      statuses: ["completed"],
+      attachment_invoice_promotion_mode: "link_existing_only",
+    },
     oa_invoice_offset: { applicant_names: [] },
     bank_transaction_tags: {
       version: settingsVersion,
@@ -92,7 +96,11 @@ function installInvalidPendingInvoiceTagFetch() {
     access_control: { allowed_usernames: [], readonly_export_usernames: [], admin_usernames: [], full_access_usernames: [] },
     workbench_column_layouts: { oa: [], bank: [], invoice: [] },
     oa_retention: { cutoff_date: "2026-01-01" },
-    oa_import: { form_types: ["payment_request"], statuses: ["completed"] },
+    oa_import: {
+      form_types: ["payment_request"],
+      statuses: ["completed"],
+      attachment_invoice_promotion_mode: "link_existing_only",
+    },
     oa_invoice_offset: { applicant_names: [] },
     bank_transaction_tags: {
       version: 4,
@@ -397,6 +405,33 @@ describe("Settings page", () => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
         return url.pathname === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST";
       })).toBe(true);
+    });
+  });
+
+  test("saves OA attachment invoice promotion mode from OA retention settings", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+    });
+    renderAppAt("/settings");
+
+    const settingsPage = await screen.findByTestId("settings-page");
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
+    await user.click(within(tree).getByRole("treeitem", { name: /OA导入设置/ }));
+
+    const region = within(settingsPage).getByRole("region", { name: "OA导入设置" });
+    await user.selectOptions(within(region).getByLabelText("OA附件发票晋级"), "disabled");
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/settings",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("\"attachment_invoice_promotion_mode\":\"disabled\""),
+        }),
+      );
     });
   });
 
