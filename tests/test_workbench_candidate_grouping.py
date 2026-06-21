@@ -2049,6 +2049,59 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["group_type"], "candidate")
         self.assertEqual(group["match_confidence"], "medium")
 
+    def test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_paired_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-confirmed-001",
+                    "type": "oa",
+                    "case_id": "CASE-CONFIRMED-OA-BANK",
+                    "relation_mode": "manual_confirmed",
+                    "amount": "260000.00",
+                    "counterparty_name": "房克丽",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-confirmed-001",
+                    "type": "bank",
+                    "case_id": "CASE-CONFIRMED-OA-BANK",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "100000.00",
+                    "credit_amount": "",
+                    "trade_time": "2026-03-09 12:04:29",
+                    "counterparty_name": "房克丽",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                },
+                {
+                    "id": "bk-confirmed-002",
+                    "type": "bank",
+                    "case_id": "CASE-CONFIRMED-OA-BANK",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "160000.00",
+                    "credit_amount": "",
+                    "trade_time": "2026-03-09 12:04:27",
+                    "counterparty_name": "房克丽",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-OA-BANK")
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-confirmed-001"])
+        self.assertCountEqual(
+            [row["id"] for row in group["bank_rows"]],
+            ["bk-confirmed-001", "bk-confirmed-002"],
+        )
+
     def test_demotes_single_type_paired_invoice_group_back_to_open(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

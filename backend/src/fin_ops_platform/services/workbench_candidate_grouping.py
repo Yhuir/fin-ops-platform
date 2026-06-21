@@ -1224,6 +1224,8 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_processed_exception_projection_row(row) for row in rows):
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
+        if row_type_count >= 2 and self._is_confirmed_active_relation_group(group):
+            return True
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
             relation_codes = {
                 str(row.get("invoice_relation", {}).get("code", ""))
@@ -1254,6 +1256,27 @@ class WorkbenchCandidateGroupingService:
             if any(self._is_batch_accounting_relation_row(row) for row in [*group.oa_rows, *group.bank_rows]):
                 return True
         return row_type_count >= 3
+
+    def _is_confirmed_active_relation_group(self, group: CandidateGroup) -> bool:
+        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        if not rows:
+            return False
+        case_ids = {
+            self._string_value(row.get("case_id"))
+            for row in rows
+            if self._string_value(row.get("case_id"))
+        }
+        if len(case_ids) != 1:
+            return False
+        relation_modes = {
+            self._string_value(row.get("relation_mode"))
+            for row in rows
+            if self._string_value(row.get("relation_mode"))
+        }
+        if not relation_modes or "automatic_decision" in relation_modes:
+            return False
+        relation_codes = {self._relation_code(row) for row in rows}
+        return bool(relation_codes) and relation_codes.issubset({"fully_linked"})
 
     @staticmethod
     def _is_batch_accounting_relation_row(row: dict[str, Any]) -> bool:
