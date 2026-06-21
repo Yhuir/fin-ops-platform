@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - 批量账务 active relation 投影归属修复
+
+- 目标：修复关联台未配对区出现带 `完全关联`/`三栏已配对` tag 的行，但没有进入已配对区的问题；同时避免仅凭展示 tag 把没有 canonical active relation 的候选误提升为已配对。
+- 影响范围：Workbench SQL active generation、批量账务写入的 OA+银行 active relation、relation metadata 指定的 ETC summary 同组展示、all/month active generation schema freshness；不改变 relation 写入口、下游 `workbench_relation` 分发合同或前端三栏组件。
+- 关键决策：统一事实源仍是 `app.workbench_pair_relations`。SQL projection 必须在 grouped/open 分区前携带 active relation 的 `special_metadata`、`amount_check`、`display_tags`、`source_versions`；批量账务 relation 中的 `special_metadata.etc_batch_link.external_etc_batch_id` 也是 ETC summary 同组归属证据。UI chip 不是 confirmed fact，自动 decision/candidate 只能保持 open/source-linked 展示。
+- 文档影响：更新本模块 README、测试矩阵和 `workbench-relations` 状态机/实施记录，明确 Workbench active generation 与 `workbench_relation` 都是派生投影，不能互相造事实。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py` 两个回归，覆盖 active `batch_accounting` OA+银行 relation 进入 paired 区，以及 relation metadata 指定 ETC summary 后随同一 case 发布。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q -k 'keeps_active_batch_accounting_oa_bank_relation_paired or attaches_etc_summary_from_relation_metadata_batch_link'`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_sql_projection.py -q`；生产库只读 dry-run 验证 1935.45、2411.25 目标行进入 `paired/case:*`，196 目标行仍保持 open/source-linked。
+- 未测风险：本轮不直接写生产库 active generation；发布后必须让 worker 按新的 Workbench SQL projection schema 重建对应 month/all scope，浏览器刷新后再做页面 smoke。
+
 ## 2026-06-21 - OA 附件发票必须与父 OA 同组
 
 - 目标：修复生产发布后关联台仍显示 `OA附件` 发票行左侧 OA/银行流水为空的问题，确保 OA 附件解析出的正式发票在 Workbench 输出层一定与其 `derived_from_oa_id` 指向的父 OA 落在同一个 group。

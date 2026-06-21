@@ -23,6 +23,8 @@
 
 Workbench active pair relation 是 OA、银行流水、发票跨页面关系的唯一已配对事实。同一 active relation 内的 `row_ids` 必须按 row id 去重并保持 `row_types` 对齐；同一个 row 不能同时属于两个不同 active case。页面展示多 OA/多流水/多发票时应使用 relation summaries 和 `+N` 展开详情，不能把重复 row 当成两条业务事实。
 
+Workbench SQL active generation 必须把 active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 带入三栏投影后再做 grouped/open 分区。`完全关联`、`自动匹配`、`三栏已配对` 等展示 tag 只能作为 UI 证据，不能替代 canonical active relation ownership；没有 `app.workbench_pair_relations.status='active'` 的 row-set 不能被提升为 confirmed paired owner。批量账务等外部 owner 写入的 OA+银行 relation 即使暂时只有两栏，也必须进入已配对区；relation metadata 指定的 ETC summary/invoice summary 必须随同一 case 发布，不能在 open 区留下 standalone 残留。
+
 同一 active relation 内如果存在可证明的子对应关系，页面必须把对应 OA 与发票或银行流水显示在同一横向分段中。OA 附件发票的 `derived_from_oa_id` / `source_oa_id` 可能带 `:item:*` 明细项后缀；前端展示归一时必须折叠到父 OA row id 后再分段，例如 `oa-exp-1968:item:4:*` 对齐到 `oa-exp-1968`。没有确定 source OA 的发票或流水只能作为 group-level 行展示，禁止按金额、顺序或大组位置臆造同排关系。
 
 `GET /api/workbench/rows/{row_id}` 是 row detail 读接口。它必须优先使用当前 live service/cache，miss 后通过 `WorkbenchQueryFacade` 读取 SQL active generation；opaque OA row id 不能仅依赖从 row id 解析月份。该接口不写 relation，不接入 `WorkbenchRelationCommandService`。

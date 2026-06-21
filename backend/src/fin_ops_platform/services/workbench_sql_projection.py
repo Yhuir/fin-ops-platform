@@ -46,7 +46,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-turnover-bank-only-open-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-active-relation-metadata-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -542,7 +542,8 @@ class WorkbenchSqlProjectionBuilder:
             return []
         rows = self._connection.fetch_all(
             """
-            select case_id, relation_mode, month_scope, row_ids, row_types, raw_payload
+            select case_id, relation_mode, month_scope, row_ids, row_types,
+                   amount_check, special_metadata, source_versions, raw_payload
             from app.workbench_pair_relations
             where status = 'active'
               and (month_scope is null or month_scope = %s::date)
@@ -562,6 +563,9 @@ class WorkbenchSqlProjectionBuilder:
                     "relation_mode": row.get("relation_mode") or payload.get("relation_mode"),
                     "row_ids": [str(item) for item in list(row.get("row_ids") or payload.get("row_ids") or [])],
                     "row_types": [str(item) for item in list(row.get("row_types") or payload.get("row_types") or [])],
+                    "amount_check": row_payload(row, "amount_check") or payload.get("amount_check") or {},
+                    "special_metadata": row_payload(row, "special_metadata") or payload.get("special_metadata") or {},
+                    "source_versions": row_payload(row, "source_versions") or payload.get("source_versions") or {},
                 }
             )
         return result
@@ -656,6 +660,7 @@ class WorkbenchSqlProjectionBuilder:
                 row["status"] = "paired"
                 row["case_id"] = case_id
                 row["relation_mode"] = relation.get("relation_mode")
+                self._apply_active_relation_metadata(row, relation)
                 row[self._relation_field_name(str(row.get("type") or ""))] = self._active_relation_payload(relation)
                 if relation_amount_check:
                     row["relation_amount_check"] = deepcopy(relation_amount_check)
@@ -674,6 +679,7 @@ class WorkbenchSqlProjectionBuilder:
                     row["case_id"] = case_id
                     row["status"] = "paired"
                     row["relation_mode"] = relation.get("relation_mode")
+                    self._apply_active_relation_metadata(row, relation)
                     row["invoice_bank_relation"] = {
                         "code": "fully_linked",
                         "label": "已关联ETC发票",
@@ -928,6 +934,30 @@ class WorkbenchSqlProjectionBuilder:
         if relation_mode and relation_mode != "manual_confirmed":
             return {"code": relation_mode, "label": "已关联", "tone": "success"}
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
+
+    @staticmethod
+    def _apply_active_relation_metadata(row: dict[str, Any], relation: dict[str, Any]) -> None:
+        special_metadata = relation.get("special_metadata")
+        metadata_for_tags = special_metadata if isinstance(special_metadata, dict) else {}
+        if isinstance(special_metadata, dict) and special_metadata:
+            existing_metadata = row.get("special_metadata")
+            merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+            merged_metadata.update(deepcopy(special_metadata))
+            row["special_metadata"] = merged_metadata
+
+        display_tags = [
+            str(tag).strip()
+            for tag in list(relation.get("display_tags") or metadata_for_tags.get("display_tags") or [])
+            if str(tag).strip()
+        ]
+        if not display_tags:
+            return
+        existing_tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+        for tag in display_tags:
+            if tag not in existing_tags:
+                existing_tags.append(tag)
+        row["tags"] = existing_tags
+        row["display_tags"] = display_tags
 
     @staticmethod
     def _apply_no_oa_relation_metadata(row: dict[str, Any], relation: dict[str, Any]) -> None:
@@ -1350,9 +1380,26 @@ class WorkbenchSqlProjectionBuilder:
     @staticmethod
     def _relation_external_etc_batch_id(relation: dict[str, Any]) -> str:
         amount_check = relation.get("amount_check")
-        if not isinstance(amount_check, dict):
+        if isinstance(amount_check, dict):
+            value = str(amount_check.get("external_etc_batch_id") or amount_check.get("etc_batch_id") or "").strip()
+            if value:
+                return value
+
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
             return ""
-        return str(amount_check.get("external_etc_batch_id") or amount_check.get("etc_batch_id") or "").strip()
+        for key in ("external_etc_batch_id", "etc_batch_id"):
+            value = str(special_metadata.get(key) or "").strip()
+            if value:
+                return value
+        for nested_key in ("etc_batch_link", "historical_etc_business_batch_migration"):
+            nested = special_metadata.get(nested_key)
+            if not isinstance(nested, dict):
+                continue
+            value = str(nested.get("external_etc_batch_id") or nested.get("etc_batch_id") or "").strip()
+            if value:
+                return value
+        return ""
 
     @staticmethod
     def _etc_invoice_summary_line(row: dict[str, Any]) -> str:

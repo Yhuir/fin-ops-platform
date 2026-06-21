@@ -4,6 +4,8 @@
 
 `app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 可以同时分发 active confirmed relation、paired automatic decision、open/proposed unmatched candidate 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
 
+Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动 decision/candidate 和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
+
 页面和 downstream read model 不能把以下内容当作 confirmed relation：
 
 - 前端 `workbenchRelationUpdated` event。

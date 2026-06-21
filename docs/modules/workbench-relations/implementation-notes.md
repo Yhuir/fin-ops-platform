@@ -1,5 +1,35 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-21 - active relation metadata 投影归属修复
+
+目标：修复 canonical active relation 已存在，但关联台 active generation 因丢失 `special_metadata` / `amount_check` 而把批量账务 OA+银行行留在 open 区的问题；同时防止没有 active relation 的自动候选被展示 tag 误判为 confirmed fact。
+
+变更：
+
+- `WorkbenchSqlProjectionBuilder` 从 `app.workbench_pair_relations` 读取并传播 `special_metadata`、`amount_check`、`source_versions`。
+- grouped/open 分区前把 active relation metadata 合并到 row payload，并把 relation display tags 追加到 row tags。
+- ETC summary 同组归属支持从 `special_metadata.etc_batch_link` 和历史 ETC migration metadata 读取 `external_etc_batch_id`。
+- Workbench SQL projection schema version 提升为 `2026-06-active-relation-metadata-v1`，避免旧 active generation 被误判 fresh。
+
+决策：
+
+- `app.workbench_pair_relations` 仍是唯一 confirmed relation fact；Workbench active generation 和 `workbench_relation` 都是只读派生投影。
+- `workbench_relation.relation_status='linked'` 可供下游页面判断已关联，但不能反向写回或替代 canonical relation fact。
+- `完全关联`、`自动匹配`、`三栏已配对` 等 chip/tag 不是事实源；没有 active relation 的自动 decision/candidate 仍只能作为 open/source-linked 证据展示。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q -k 'keeps_active_batch_accounting_oa_bank_relation_paired or attaches_etc_summary_from_relation_metadata_batch_link'
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_sql_projection.py -q
+```
+
+生产库只读 dry-run 证明：1935.45 与 2411.25 批量账务 active relation 在新投影中进入 `paired/case:*`，对应 ETC summary 随同一 case 发布；196 目标行没有 active relation，仍保持 open/source-linked，不被误提升。
+
+剩余风险：
+
+- 本轮不直接触发生产写刷新；部署后必须由 worker 按新 schema 重建 Workbench month/all active generation。
+
 ## 2026-06-21 - legacy pair runtime dependency 收敛第一批
 
 目标：推进“旧代码、旧逻辑物理清零”，减少业务 service、repair/migration/tool 路径直接持有 `WorkbenchPairRelationService` 作为运行时事实源。

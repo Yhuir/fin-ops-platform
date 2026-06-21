@@ -1430,6 +1430,103 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["total_with_tax"], "144.50")
         self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
 
+    def test_sql_projection_keeps_active_batch_accounting_oa_bank_relation_paired(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-exp-2045": {
+                "id": "oa-exp-2045",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "1935.45",
+                "applicant": "刘树刚",
+                "project_name": "云南溯源科技",
+                "apply_type": "日常报销",
+            },
+            "txn_imported_1386": {
+                "id": "txn_imported_1386",
+                "type": "bank",
+                "source_kind": "bank",
+                "status": "open",
+                "debit_amount": "1935.45",
+                "counterparty_name": "批量账务集中处理",
+                "trade_time": "2026-03-12 10:16:00",
+                "summary": "报销",
+            },
+        }
+        relation = {
+            "case_id": "CASE-BATCH-txn_imported_1386",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["txn_imported_1386", "oa-exp-2045"],
+            "row_types": ["bank", "oa"],
+            "special_metadata": {
+                "source": "batch_accounting",
+                "created_by": "YNSYLP005",
+                "bank_row_id": "txn_imported_1386",
+                "oa_row_ids": ["oa-exp-2045"],
+            },
+        }
+
+        payload = builder._group_payload("2026-03", rows_by_id, [relation])
+
+        self.assertEqual(payload["open"]["groups"], [])
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        group = paired_groups[0]
+        self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1386")
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-2045"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1386"])
+        self.assertEqual(group["bank_rows"][0]["special_metadata"]["source"], "batch_accounting")
+
+    def test_sql_projection_attaches_etc_summary_from_relation_metadata_batch_link(self) -> None:
+        connection = EtcSummaryProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        rows_by_id = {
+            "oa-exp-1994": {
+                "id": "oa-exp-1994",
+                "type": "oa",
+                "applicant": "刘树刚",
+                "project_name": "云南溯源科技",
+                "amount": "1549.00",
+            },
+            "txn_imported_1328": {
+                "id": "txn_imported_1328",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "debit_amount": "1549.00",
+                "counterparty_name": "批量账务集中处理",
+            },
+        }
+        relation = {
+            "case_id": "CASE-BATCH-txn_imported_1328",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["txn_imported_1328", "oa-exp-1994"],
+            "row_types": ["bank", "oa"],
+            "special_metadata": {
+                "source": "batch_accounting",
+                "etc_batch_link": {
+                    "external_etc_batch_id": "ETC-OA-20260215-154900",
+                    "source": "existing_etc_batch_link",
+                },
+            },
+            "amount_check": {"status": "matched"},
+        }
+
+        payload = builder._group_payload("2026-02", rows_by_id, [relation])
+
+        groups = payload["paired"]["groups"]
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+        self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1328")
+        self.assertEqual(len(group["invoice_rows"]), 1)
+        self.assertEqual(group["invoice_rows"][0]["source_kind"], "etc_invoice_summary")
+        self.assertEqual(group["invoice_rows"][0]["case_id"], "CASE-BATCH-txn_imported_1328")
+        self.assertEqual(group["oa_rows"][0]["etc_batch_id"], "ETC-OA-20260215-154900")
+
     def test_sql_projection_creates_open_etc_summary_from_submitted_business_batch(self) -> None:
         connection = EtcBusinessSummaryProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
