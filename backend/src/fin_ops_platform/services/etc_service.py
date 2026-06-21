@@ -1488,7 +1488,7 @@ class EtcService:
                     pdf_entry = self._match_pdf_entry(parsed.invoice_number, xml_entry.path, pdf_entries)
                     if persist:
                         assert import_batch is not None
-                        status, invoice_id = self._upsert_invoice_from_import(
+                        status, invoice_id = self._upsert_attachment_metadata_from_import(
                             upload.file_name,
                             parsed,
                             xml_entry,
@@ -2404,7 +2404,7 @@ class EtcService:
         preview_state[parsed.invoice_number] = (has_xml_after, has_pdf_after)
         return "attachment_completed" if completed else "duplicate_skipped"
 
-    def _upsert_invoice_from_import(
+    def _upsert_attachment_metadata_from_import(
         self,
         zip_source_name: str,
         parsed: ParsedEtcXml,

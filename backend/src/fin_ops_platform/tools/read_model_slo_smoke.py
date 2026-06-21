@@ -271,6 +271,7 @@ def discover_smoke_scopes(
 ) -> list[SmokeScope]:
     selected_keys = _selected_read_model_keys(read_model_keys, critical_only=critical_only)
     overrides = scope_overrides or {}
+    explicit_scope_keys = set(overrides)
     readiness = _fresh_readiness_by_key(connection, tenant_id=tenant_id)
     workbench_generations = _active_workbench_generations(connection, tenant_id=tenant_id)
     scopes: list[SmokeScope] = []
@@ -294,15 +295,16 @@ def discover_smoke_scopes(
         if chosen is None:
             chosen = _default_smoke_scope()
         planned_for_key.append(chosen)
-        planned_for_key.extend(
-            {
-                "scope_key": scope_key,
-                "_source": "page_first_screen_scope",
-                "row_count": None,
-                "updated_at": None,
-            }
-            for scope_key in PAGE_FIRST_SCREEN_SCOPE_KEYS.get(key, ())
-        )
+        if key not in explicit_scope_keys:
+            planned_for_key.extend(
+                {
+                    "scope_key": scope_key,
+                    "_source": "page_first_screen_scope",
+                    "row_count": None,
+                    "updated_at": None,
+                }
+                for scope_key in PAGE_FIRST_SCREEN_SCOPE_KEYS.get(key, ())
+            )
         seen_scope_keys: set[str] = set()
         for planned in planned_for_key:
             scope_key = str(planned.get("scope_key") or "")

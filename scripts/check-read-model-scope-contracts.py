@@ -32,12 +32,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Delete non-canonical cost statistics runtime state rows; current uncovered failures are retained.",
+        help="Apply the selected repair. Without --apply, the command is read-only.",
+    )
+    parser.add_argument(
+        "--repair",
+        choices=("cost-statistics", "orphaned-import-facts", "invalid-read-model-scopes"),
+        default="cost-statistics",
+        help="Repair/check target. Defaults to cost-statistics scope contract.",
     )
     parser.add_argument(
         "--no-enqueue-replacements",
         action="store_true",
-        help="With --apply, delete old rows without enqueueing normalized replacement cost statistics refreshes.",
+        help="With --apply --repair cost-statistics, delete old rows without enqueueing normalized replacement refreshes.",
     )
     parser.add_argument("--reason", default="read_model_scope_contract_repair", help="Reason for audit and replacement refresh events.")
     parser.add_argument("--json", action="store_true", help="Print JSON. This is currently the only output format.")
@@ -46,7 +52,17 @@ def main(argv: list[str] | None = None) -> int:
     connection = PostgresConnection(PostgresSettings.from_env())
     repository = PostgresReadModelScopeContractRepository(connection)
     service = ReadModelScopeContractService(repository)
-    if args.apply:
+    if args.repair == "orphaned-import-facts":
+        report = service.repair_orphaned_import_fact_dirty_scopes(
+            apply=bool(args.apply),
+            reason=args.reason,
+        )
+    elif args.repair == "invalid-read-model-scopes":
+        report = service.repair_invalid_read_model_refresh_scopes(
+            apply=bool(args.apply),
+            reason=args.reason,
+        )
+    elif args.apply:
         refresh_gateway = None
         if not args.no_enqueue_replacements:
             refresh_gateway = ReadModelRefreshGateway(queue_repository=RuntimeQueueRepository(connection))

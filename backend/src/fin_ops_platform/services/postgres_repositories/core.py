@@ -294,6 +294,43 @@ class PostgresCoreRepository:
     ) -> Invoice | None:
         return self.find_invoice_by_identity(canonical_key=source_unique_key, suspected_key=data_fingerprint)
 
+    def find_invoices_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[Invoice]:
+        source_unique_key = canonical_key
+        data_fingerprint = suspected_key
+        if source_unique_key:
+            return self._fetch_invoices_by_clause(
+                "(source_unique_key = %s or digital_invoice_no = %s)",
+                (source_unique_key, source_unique_key),
+            )
+        if data_fingerprint:
+            return self._fetch_invoices_by_clause("data_fingerprint = %s", (data_fingerprint,))
+        return []
+
+    def find_invoices_by_identity_keys(
+        self,
+        *,
+        canonical_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        suspected_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+    ) -> list[Invoice]:
+        normalized_canonical_keys = self._unique_texts(canonical_keys or [])
+        normalized_suspected_keys = self._unique_texts(suspected_keys or [])
+        clauses: list[str] = []
+        params: list[Any] = []
+        if normalized_canonical_keys:
+            clauses.append("(source_unique_key = any(%s) or digital_invoice_no = any(%s))")
+            params.extend([normalized_canonical_keys, normalized_canonical_keys])
+        if normalized_suspected_keys:
+            clauses.append("data_fingerprint = any(%s)")
+            params.append(normalized_suspected_keys)
+        if not clauses:
+            return []
+        return self._fetch_invoices_by_clause(" or ".join(clauses), tuple(params))
+
     def find_invoice_by_identity(
         self,
         *,
@@ -485,12 +522,10 @@ class PostgresCoreRepository:
         if callable(transaction_factory):
             with transaction_factory() as tx:
                 self._save_imports_with_connection(tx, snapshot)
-                self._mark_import_fact_read_models_dirty(tx, snapshot)
         else:
             self._save_imports_with_connection(connection, snapshot)
-            self._mark_import_fact_read_models_dirty(connection, snapshot)
 
-    def save_invoices(self, invoices: list[Any], *, mark_read_models_dirty: bool = True) -> None:
+    def save_invoices(self, invoices: list[Any]) -> None:
         serialized_invoices = self._iter_items(invoices)
         if not serialized_invoices:
             return
@@ -501,13 +536,9 @@ class PostgresCoreRepository:
             with transaction_factory() as tx:
                 for invoice in serialized_invoices:
                     self._save_invoice(tx, invoice)
-                if mark_read_models_dirty:
-                    self._mark_import_fact_read_models_dirty(tx, snapshot)
         else:
             for invoice in serialized_invoices:
                 self._save_invoice(connection, invoice)
-            if mark_read_models_dirty:
-                self._mark_import_fact_read_models_dirty(connection, snapshot)
 
     def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
         serialized_invoices = self._iter_items(invoices)
@@ -664,85 +695,6 @@ class PostgresCoreRepository:
             self._save_invoice(connection, invoice)
         for transaction in self._iter_items(snapshot.get("transactions")):
             self._save_transaction(connection, transaction)
-
-    def _mark_import_fact_read_models_dirty(self, connection: Any, snapshot: dict[str, Any]) -> None:
-        scope_keys = self._changed_import_scope_keys(snapshot)
-        if not scope_keys:
-            return
-        scope_types = (
-            "workbench_relation",
-            "workbench",
-            "bank_detail",
-            "pending_invoice",
-            "invoice_lifecycle",
-            "input_invoice_usage",
-            "output_invoice_collection",
-            "oa_pending_payment",
-            "no_oa_bank_batch",
-            "cost_statistics",
-            "cost",
-            "tax_offset",
-            "tax",
-            "search",
-        )
-        for scope_key in scope_keys:
-            for scope_type in scope_types:
-                payload = {"source": "import_facts", "scope_type": scope_type, "scope_key": scope_key}
-                connection.execute(
-                    """
-                    insert into job.read_model_dirty_scopes(
-                        tenant_id, scope_type, scope_key, reason, payload, raw_payload, next_run_at
-                    )
-                    values ('default', %s, %s, 'import_facts_changed', %s, %s, now())
-                    on conflict (tenant_id, scope_type, scope_key)
-                    where status in ('pending', 'processing')
-                    do update set
-                        reason = excluded.reason,
-                        payload = job.read_model_dirty_scopes.payload || excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        status = 'pending',
-                        next_run_at = now(),
-                        updated_at = now()
-                    """,
-                    (scope_type, scope_key, _jsonb(payload), _jsonb(payload)),
-                )
-                connection.execute(
-                    """
-                    insert into job.outbox_events(
-                        tenant_id, event_type, aggregate_type, aggregate_id,
-                        scope_type, scope_key, dedupe_key, payload
-                    )
-                    values ('default', 'import.fact.changed', 'import_fact', %s, %s, %s, %s, %s)
-                    on conflict (tenant_id, dedupe_key)
-                    where dedupe_key is not null and status = 'pending'
-                    do update set updated_at = job.outbox_events.updated_at
-                    """,
-                    (
-                        scope_key,
-                        scope_type,
-                        scope_key,
-                        f"import.fact.changed:{scope_type}:{scope_key}",
-                        _jsonb(payload),
-                    ),
-                )
-
-    def _changed_import_scope_keys(self, snapshot: dict[str, Any]) -> list[str]:
-        scope_keys: set[str] = set()
-        for invoice in self._iter_items(snapshot.get("invoices")):
-            month = self._month_key(invoice.get("invoice_date"))
-            if month:
-                scope_keys.add(month)
-        for transaction in self._iter_items(snapshot.get("transactions")):
-            month = self._month_key(transaction.get("txn_date") or transaction.get("trade_time"))
-            if month:
-                scope_keys.add(month)
-        if not scope_keys and (
-            self._iter_items(snapshot.get("invoices"))
-            or self._iter_items(snapshot.get("transactions"))
-            or self._iter_previews(snapshot.get("batches"))
-        ):
-            scope_keys.add("global")
-        return sorted(scope_keys)
 
     def _save_batch_rows(self, connection: Any, batch_id: str, row_results: Any, normalized_rows: Any) -> None:
         if not isinstance(row_results, list):
@@ -1207,6 +1159,35 @@ class PostgresCoreRepository:
             params,
         )
         return self._invoice_from_row(row) if row else None
+
+    def _fetch_invoices_by_clause(self, where_clause: str, params: tuple[Any, ...]) -> list[Invoice]:
+        rows = self._connection.fetch_all(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no, source_unique_key,
+                   data_fingerprint, invoice_date, counterparty_id, counterparty_name, seller_name,
+                   seller_tax_no, buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency, legacy_source_batch_id,
+                   oa_form_id, etc_invoice_id, workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            where {where_clause}
+            order by created_at, id
+            """,
+            params,
+        )
+        return [self._invoice_from_row(row) for row in rows or [] if row]
+
+    @staticmethod
+    def _unique_texts(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
 
     @staticmethod
     def _page_bounds(page: int, page_size: int) -> tuple[int, int]:

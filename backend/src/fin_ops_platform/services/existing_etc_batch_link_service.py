@@ -62,9 +62,9 @@ class ExistingEtcBatchLinkService:
         pair_relation_service: Any,
         relation_command_service: Any | None = None,
         object_identity_repository: Any | None = None,
-        sync_import_result_to_canonical_invoices: Callable[[Any], list[str]] | None = None,
-        sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
-        refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
+        link_import_result_to_existing_invoices: Callable[[Any], list[str]] | None = None,
+        link_etc_invoices_to_existing_invoices: Callable[[list[Any]], list[str]] | None = None,
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
         persist_pair_relations: Callable[[list[str]], None] | None = None,
         invalidate_workbench_scopes: Callable[[list[str]], None] | None = None,
         persist_etc_state: Callable[[], None] | None = None,
@@ -74,9 +74,9 @@ class ExistingEtcBatchLinkService:
         self._pair_relation_service = pair_relation_service
         self._relation_command_service = relation_command_service
         self._object_identity_repository = object_identity_repository or import_service
-        self._sync_import_result_to_canonical_invoices = sync_import_result_to_canonical_invoices or (lambda _result: [])
-        self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
-        self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync or (lambda _months, _reason: None)
+        self._link_import_result_to_existing_invoices = link_import_result_to_existing_invoices or (lambda _result: [])
+        self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices or (lambda _invoices: [])
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link or (lambda _months, _reason: None)
         self._persist_pair_relations = persist_pair_relations or (lambda _case_ids: None)
         self._invalidate_workbench_scopes = invalidate_workbench_scopes or (lambda _scopes: None)
         self._persist_etc_state = persist_etc_state or (lambda: None)
@@ -119,8 +119,8 @@ class ExistingEtcBatchLinkService:
                 source_name=f"{spec.external_batch_id}.existing_canonical_invoices",
             )
             imported_count = int(getattr(import_result, "imported", 0) or 0)
-            changed_months = self._sync_import_result_to_canonical_invoices(import_result)
-            self._refresh_after_etc_invoice_sync(changed_months, f"existing_etc_batch_link_import:{spec.external_batch_id}")
+            changed_months = self._link_import_result_to_existing_invoices(import_result)
+            self._refresh_after_etc_invoice_link(changed_months, f"existing_etc_batch_link_import:{spec.external_batch_id}")
 
         batch = self._etc_service.create_historical_submitted_batch(
             case_id=spec.case_id,
@@ -131,8 +131,8 @@ class ExistingEtcBatchLinkService:
             note=spec.note or f"{spec.label} ETC 发票关联到现有 OA-银行配对。",
         )
         batch_invoices = self._etc_service.list_invoices_by_ids(list(batch.invoice_ids))
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(batch_invoices)
-        self._refresh_after_etc_invoice_sync(changed_months, f"existing_etc_batch_link_submit:{spec.external_batch_id}")
+        changed_months = self._link_etc_invoices_to_existing_invoices(batch_invoices)
+        self._refresh_after_etc_invoice_link(changed_months, f"existing_etc_batch_link_submit:{spec.external_batch_id}")
 
         invoice_total = Decimal(batch.total_amount).quantize(Decimal("0.01"))
         settlement_amount = self._quantize(spec.bank_amount if spec.bank_amount is not None else spec.oa_amount)

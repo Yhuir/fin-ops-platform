@@ -10,6 +10,7 @@
 - 目标 OA 申请人凭据只允许 admin 维护，response/log/audit 不得回显 password；创建 OA 草稿前必须先通过目标申请人登录拿 token。
 - 进项 OA 反提和 ETC OA 草稿的本地撤销/删除只处理本系统状态，不删除或撤销真实 OA 草稿/流程。
 - OA source alias / migration identity 修复必须先只读审计再显式建模；不得通过删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache` 或伪造 read model readiness 来消除重复。
+- OA 附件 OCR/parser 输出不是正式发票事实源；进入统一发票池前必须经过 `InvoiceAttachmentRecognitionService`，结果只允许为关联已存在发票、受控创建并关联、忽略；同一强 identity 命中多张 canonical 发票时必须按多义匹配忽略，不得任选一张建立关系。
 
 ## 记录模板
 
@@ -27,6 +28,36 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - OA 附件未知证据禁止提升为正式发票
+
+- 目标：避免 OCR 或外部附件缓存只带发票号、金额等字段但缺少正式发票证据类型时，被提升为统一发票池记录。
+- 影响范围：`InvoiceAttachmentRecognitionService`、`ImportNormalizationService.upsert_oa_attachment_invoice`、OA attachment invoice cache promotion。
+- 关键决策：正式发票候选必须具备 `tax_invoice` / `machine_invoice` evidence type，或在缺少 evidence type 时具备明确正式发票 document kind（如 `digital_invoice`、`yunnan_machine_invoice`、`railway_e_ticket_invoice`、含“发票/电子客票”的正式文档类型）。未知 evidence、缺 evidence 且仅有发票号、付款凭证、非税票据、交通罚没票据均忽略；解析候选层、识别层和底层 `allow_create=True` 都不能绕过该 gate。
+- 文档影响：更新 `tests.md` 历史回归库。
+- 测试覆盖：新增 `tests/test_oa_attachment_invoice_service.py::OAAttachmentInvoiceServiceTests::test_parse_files_does_not_return_unknown_evidence_with_invoice_number`、`tests/test_object_identity_policy.py::FinancialObjectIdentityPolicyTests::test_oa_attachment_invoice_evidence_classification_is_centralized`、`tests/test_invoice_attachment_recognition_service.py` 中未知/缺 evidence 的完整 identity 忽略测试，以及 `tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_allow_create_requires_formal_invoice_evidence`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_invoice_attachment_recognition_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_allow_create_requires_formal_invoice_evidence tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_allow_create_accepts_formal_document_kind_without_evidence_type tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_invoice_upsert_creates_canonical_invoice_with_source_context tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_allow_create_requires_strong_invoice_identity -q`。
+- 未测风险：真实 OCR 模型可能漏填 evidence type；这类结果按当前规则宁可忽略，不自动建票，需要通过 OCR/parser 改进补齐正式 evidence 后再进入发票池判断。
+
+## 2026-06-21 - OA 附件强 identity 多义匹配忽略闭环
+
+- 目标：落实“强 identity 命中多张发票直接忽略”的规则，避免 OCR 在历史污染或重复数电号码下任选一张发票建立错误 OA 关系。
+- 影响范围：`InvoiceAttachmentRecognitionService`、`ImportNormalizationService` identity repository adapter、`PostgresCoreRepository` 发票 identity 查询。
+- 关键决策：保留旧 `find_invoice_by_identity(...) -> Invoice | None` 供普通导入 dedup 使用，新增 `find_invoices_by_identity(...) -> list[Invoice]` 只给附件识别服务判断多义命中；多条命中返回 `ignore/ambiguous_invoice_identity`。
+- 文档影响：本实施记录补充 OA 附件识别不变量；README 已记录“非正式票据、残缺号码、多义匹配或未知证据直接忽略”。
+- 测试覆盖：新增 `tests/test_invoice_attachment_recognition_service.py::InvoiceAttachmentRecognitionServiceTests::test_formal_attachment_with_ambiguous_existing_identity_is_ignored`，以及 `tests/test_postgres_repositories_core.py::test_find_invoices_by_identity_returns_all_digital_invoice_matches`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py tests/test_invoice_attachment_recognition_service.py tests/test_postgres_repositories_core.py tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_paths_do_not_call_legacy_canonical_sync_helpers tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_app_invoice_writes_stay_in_core_repository -q`。
+- 未测风险：真实生产 OCR 准确率和历史污染数据仍需通过备份、只读审计、cleanup preflight 和重导入流程闭环。
+
+## 2026-06-21 - OA 附件发票识别 service 边界
+
+- 目标：防止 OA 附件 OCR 的残缺号码、非税票据、付款凭证或交通罚没票据被旧逻辑误写入统一发票池。
+- 影响范围：OA attachment invoice cache refresh、`ImportNormalizationService.upsert_oa_attachment_invoice`、`object_identity_policy`、tax offset 和 Workbench attachment invoice 链路。
+- 关键决策：新增轻量 `InvoiceAttachmentRecognitionService`，只输出 `link_existing_invoice`、`create_invoice_and_link`、`ignore`。只有强发票身份（数电号码或发票代码+号码）且字段足够完整的正式发票才允许创建；非正式票据、残缺号码、多义匹配、未知 evidence type 和付款类凭证直接忽略。
+- 文档影响：更新 OA 集成 README、ETC 导入/票据模块和产品口径。
+- 测试覆盖：新增 `tests/test_invoice_attachment_recognition_service.py`；更新 import service、tax offset、object identity policy 和 Workbench V2 相关测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py tests/test_invoice_attachment_recognition_service.py tests/test_object_identity_policy.py tests/test_tax_offset_service.py tests/test_tax_offset_api.py -q`。
+- 未测风险：真实 OCR 准确率、真实附件混合包和生产历史污染数据仍需只读审计、备份、受控清理和重导入验证。
 
 ## 2026-06-20 - OA source alias / migration identity 只读审计与修复设计
 

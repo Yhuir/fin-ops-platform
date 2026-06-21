@@ -139,6 +139,56 @@ outbox failure。apply 报告必须包含：
 存在 `current_uncovered_outbox_failures`，先按 App Health/worker log/EXPLAIN 定位并 requeue 或修复
 worker/query；不能通过删除 failed event 或批量写 fresh readiness 达成“已同步”。
 
+### Legacy import fact dirty scope 清理
+
+历史导入路径可能写入 `reason='import_facts_changed'` 的 dirty scope，但对应 `import.fact.changed`
+outbox event 已经 `done`，且没有新的 `pending/processing` 事件可被 worker claim。此时 App Status
+会继续看到 pending dirty scope，用户表现为导入已可见但全局状态长时间“同步中”。
+
+先运行只读 dry-run：
+
+```bash
+scripts/check-read-model-scope-contracts.py --repair orphaned-import-facts --json
+```
+
+报告只列出没有 active `import.fact.changed` outbox 可处理的 legacy dirty scope，并给出 `items[].row`
+用于回滚。确认这些 scope 已被当前真实 read model refresh 取代，且没有正在运行的导入窗口后，才执行：
+
+```bash
+scripts/check-read-model-scope-contracts.py \
+  --repair orphaned-import-facts \
+  --apply \
+  --reason production_orphaned_import_fact_cleanup \
+  --json
+```
+
+该 repair 只删除 orphaned `job.read_model_dirty_scopes` 行并写审计；不会删除 outbox event、不会写
+`read_model.app_status_readiness=fresh`，也不会补投 replacement refresh。清理后必须重新检查
+App Status、`job.read_model_dirty_scopes` 非 done 行和 write-operation SLO audit。
+
+### Invalid read model scope 清理
+
+检查 policy 明确判定无效的 read model dirty/outbox runtime 行，例如旧工具误投的
+`pending_invoice:all`：
+
+```bash
+scripts/check-read-model-scope-contracts.py --repair invalid-read-model-scopes --json
+```
+
+确认 manifest 后才允许 apply：
+
+```bash
+scripts/check-read-model-scope-contracts.py \
+  --repair invalid-read-model-scopes \
+  --apply \
+  --reason production_invalid_read_model_scope_cleanup \
+  --json
+```
+
+该 repair 只删除 registry/policy 无法接受的 dirty/outbox/readiness runtime 行，不补投 replacement，
+不删除合法但 stale 的 dirty scope。合法 stale scope 应由 worker dependency refresh 自动补投，或通过
+对应 read model 的正常 refresh 入口恢复。
+
 ### Workbench generation retention
 
 Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`

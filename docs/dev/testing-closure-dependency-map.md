@@ -266,7 +266,7 @@
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
 | Zip parser/filter | `etc_document_parsers.py`、`etc_reconciliation_zip_filter.py` | corrupted zip、重复发票、组合金额匹配、多 requirement 分配、非 ETC evidence |
 | ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
-| Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、canonical invoice sync |
+| Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
 | Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 刷新 Workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
@@ -277,7 +277,7 @@
 | ready task 查询 | 读取 confirmed reconciliation task，不刷新业务 read model | ETC 导入页 |
 | zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不刷新业务 read model | ETC 导入页 |
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
-| confirm processed | ETC business batch、ETC invoice facts、canonical invoice facts、task imported/failed | ETC 票据管理、关联台、税金抵扣、成本统计、search |
+| confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
 | lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
 | task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset | ETC 票据管理、关联台 summary row、税金/成本、search |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
@@ -334,12 +334,12 @@
 | --- | --- | --- |
 | Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、业务批次筛选计数、workflow detail、delete dialog、OA 草稿、manual OA status、source file 上传 |
 | Frontend API mapper | `web/src/features/etc/api.ts` | business batch envelope、legacy `/api/etc/batches*` fallback、multipart upload、HTML/proxy error、stale preview error |
-| Workbench UI | `CandidateGroupGrid` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、已提交删除后散票恢复 |
+| Workbench UI | `CandidateGroupGrid` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、已提交删除后 summary 释放和已存在 canonical invoice 可见性 |
 | HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、legacy batch、import preview/confirm、source files、manual status、delete/reset 的 contract |
-| Business service | `EtcService` | 业务批次幂等、状态流转、发票占用释放、canonical invoice 同步、历史 batch 迁移、删除 audit |
+| Business service | `EtcService` | 业务批次幂等、状态流转、ETC metadata/附件占用释放、已存在 canonical invoice 关联、历史 batch 迁移、删除 audit |
 | Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService` | task ready/importing/imported/closed/deleted、source files、version、deleted tombstone、重启 hydrate |
-| Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 canonical invoice 同步 |
+| Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存 |
 | Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、delete/reset 不恢复旧二栏 relation |
 | Ops tools | cleanup/migration tools | orphan task 清理显式 allowlist、历史迁移 dry-run/execute 不绕过 service 边界 |
 | App Status | import worker、Workbench read model、App Health | import job、Workbench dirty/readiness、ETC route/API smoke、Nginx HTML/502 风险 |
@@ -349,11 +349,11 @@
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
 | reconciliation task 创建/上传/confirm | task workflow state + source file metadata；对象存储失败不落半写入 | ETC 票据管理、导入页 ready task |
-| ETC ZIP preview/confirm | `etc_invoice_import` background job；成功后同步 ETC invoice/canonical invoice/business batch | ETC 票据管理、导入页、税金抵扣、关联台、App Status/App Health |
+| ETC ZIP preview/confirm | `etc_invoice_import` background job；成功后保存 ETC invoice metadata/PDF/XML、关联已存在 canonical invoice、同步 business batch | ETC 票据管理、导入页、税金抵扣、关联台 summary、App Status/App Health |
 | 创建 OA 草稿 | business batch `oa_confirmation_pending` + audit | ETC 票据管理、真实 OA 系统、App Status |
 | manual `submitted` | business batch submitted + linked task closed + Workbench dirty；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计、search |
 | manual `not_submitted` | 释放本地 ETC 发票占用 + audit；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计 |
-| business batch delete/reset | 本地批次/task/source/import/canonical ETC invoice 清理；submitted summary 释放；可能取消 active relation | ETC 票据管理、关联台、税金抵扣、成本统计、search |
+| business batch delete/reset | 本地批次/task/source/import/ETC metadata 清理；submitted summary 释放；可能取消 active relation | ETC 票据管理、关联台、税金抵扣、成本统计、search |
 | reconciliation task delete | 若绑定 business batch，委托同一 business batch delete；否则写 deleted tombstone | ETC 票据管理、导入页 ready task |
 | 历史迁移 execute | 旧 active relation/ETC 批次转业务批次 + Workbench invalidation | ETC 票据管理、关联台 paired/open 区 |
 
@@ -361,7 +361,7 @@
 
 - `tests/test_etc_backend.py` 保护 business batch API、manual OA status、delete/reset、source file、导入确认、旧 route 兼容和 Workbench summary contract。
 - `tests/test_etc_reconciliation_service.py` 保护 task 状态机、source file、deleted tombstone、重启 hydrate 和 active import recovery。
-- `tests/test_import_service.py`、`tests/test_postgres_core_repository.py`、`tests/test_platform_runtime_boundary_guards.py` 保护 ETC canonical invoice identity、弱 fingerprint、不重新引入自动检测 worker。
+- `tests/test_import_service.py`、`tests/test_postgres_core_repository.py`、`tests/test_platform_runtime_boundary_guards.py` 保护 ETC 导入不创建 canonical invoice、已存在 canonical invoice 关联、弱 fingerprint、不重新引入自动检测 worker。
 - `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_pair_relation_service.py` 保护 `etc_invoice_summary` 投影、active relation 排除和 delete/reset 关系恢复规则。
 - `web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx` 保护页面交互、API mapper、错误反馈和 Workbench summary 展示。
 - `web/e2e/etc-tickets-flow.spec.ts` 用真实 Chromium 保护 ETC 票据管理未提交业务批次首屏、发票明细表、创建 OA 草稿、人工确认已提交和进入已提交 bucket 的可见闭环。

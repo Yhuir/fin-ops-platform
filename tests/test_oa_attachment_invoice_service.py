@@ -596,6 +596,43 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
 
         self.assertEqual(invoices, [])
 
+    def test_parse_files_does_not_return_unknown_evidence_with_invoice_number(self) -> None:
+        service = OAAttachmentInvoiceService()
+        with patch.object(
+            service,
+            "parse_evidences",
+            return_value=[
+                {
+                    "evidence_type": "",
+                    "digital_invoice_no": "26372000000990000001",
+                    "issue_date": "2026-01-27",
+                    "total_with_tax": "400.00",
+                },
+                {
+                    "evidence_type": "unknown",
+                    "document_kind": "unknown",
+                    "invoice_code": "053002200111",
+                    "invoice_no": "40512344",
+                },
+            ],
+        ):
+            invoices = service.parse_files([{"fileName": "unknown.pdf"}])
+
+        self.assertEqual(invoices, [])
+
+    def test_parse_files_accepts_formal_document_kind_without_evidence_type(self) -> None:
+        service = OAAttachmentInvoiceService()
+        evidence = {
+            "document_kind": "digital_invoice",
+            "digital_invoice_no": "26372000000990000001",
+            "issue_date": "2026-01-27",
+            "total_with_tax": "400.00",
+        }
+        with patch.object(service, "parse_evidences", return_value=[evidence]):
+            invoices = service.parse_files([{"fileName": "invoice.pdf"}])
+
+        self.assertEqual(invoices, [evidence])
+
     def test_invoice_evidence_dedupe_key_delegates_to_identity_policy(self) -> None:
         evidence = {
             "evidence_type": "tax_invoice",

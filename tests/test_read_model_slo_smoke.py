@@ -272,6 +272,20 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(scopes["expense:all:2026-01"], "readiness")
         self.assertEqual(scopes["expense:all"], "page_first_screen_scope")
 
+    def test_explicit_pending_invoice_scope_does_not_add_page_first_screen_scope(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            FakeConnection(),
+            apply=False,
+            read_model_keys=["pending_invoice"],
+            scope_overrides={"pending_invoice": "expense:all:2026-01"},
+        )
+
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(
+            [(item["scope_key"], item["source"]) for item in report["planned_scopes"]],
+            [("expense:all:2026-01", "override")],
+        )
+
     def test_missing_fresh_readiness_still_plans_default_scope_for_selected_read_model(self) -> None:
         report = read_model_slo_smoke.run_smoke(
             MissingTurnoverReadinessConnection(),

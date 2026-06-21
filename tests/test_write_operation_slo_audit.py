@@ -472,7 +472,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(missing[0]["scope_type"], "cost_statistics")
         self.assertEqual(missing[0]["reason"], "import_state_changed")
 
-    def test_bank_import_confirmed_profile_requires_import_state_refresh_scopes(self) -> None:
+    def test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
@@ -480,77 +480,23 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
-            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
             _event(scope_type="cost_statistics", reason="import_state_changed"),
-            _event(scope_type="bank_detail", reason="import_facts_changed", event_type="import.fact.changed"),
+            _event(scope_type="tax_offset", reason="invoice_file_import_confirm"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
             FakeConnection(rows),
-            operations=["bank_import_confirmed"],
+            operations=["invoice_import_confirmed"],
             target_ms=5_000,
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 11)
-        bank_detail_result = next(result for result in report["results"] if result["scope_type"] == "bank_detail")
-        self.assertEqual(bank_detail_result["event_type"], "import.fact.changed")
+        skipped = [result for result in report["results"] if result["status"] == "skipped"]
+        self.assertEqual([result["scope_type"] for result in skipped], ["output_invoice_collection"])
+        self.assertEqual(report["missing_expectation_count"], 0)
 
-    def test_bank_import_confirmed_profile_fails_when_cost_scope_is_missing(self) -> None:
-        rows = [
-            _event(scope_type="workbench", reason="import_state_changed"),
-            _event(scope_type="workbench_relation", reason="import_state_changed"),
-            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
-            _event(scope_type="pending_invoice", reason="import_state_changed"),
-            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
-            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
-            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
-            _event(scope_type="bank_detail", reason="import_facts_changed", event_type="import.fact.changed"),
-        ]
-
-        report = write_operation_slo_audit.audit_write_operation_slo(
-            FakeConnection(rows),
-            operations=["bank_import_confirmed"],
-            target_ms=5_000,
-        )
-
-        self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["missing_expectation_count"], 1)
-        missing = [result for result in report["results"] if result["status"] == "missing"]
-        self.assertEqual(missing[0]["scope_type"], "cost_statistics")
-        self.assertEqual(missing[0]["reason"], "import_state_changed")
-
-    def test_bank_import_confirmed_profile_fails_when_account_balance_scope_is_missing(self) -> None:
-        rows = [
-            _event(scope_type="workbench", reason="import_state_changed"),
-            _event(scope_type="workbench_relation", reason="import_state_changed"),
-            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
-            _event(scope_type="pending_invoice", reason="import_state_changed"),
-            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
-            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
-            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="cost_statistics", reason="import_state_changed"),
-            _event(scope_type="bank_detail", reason="import_facts_changed", event_type="import.fact.changed"),
-        ]
-
-        report = write_operation_slo_audit.audit_write_operation_slo(
-            FakeConnection(rows),
-            operations=["bank_import_confirmed"],
-            target_ms=5_000,
-        )
-
-        self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["missing_expectation_count"], 1)
-        missing = [result for result in report["results"] if result["status"] == "missing"]
-        self.assertEqual(missing[0]["scope_type"], "bank_account_balance")
-        self.assertEqual(missing[0]["reason"], "import_state_changed")
-
-    def test_bank_import_confirmed_profile_requires_import_fact_event_type_for_bank_detail(self) -> None:
+    def test_bank_import_confirmed_profile_requires_import_state_refresh_scopes(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
@@ -571,11 +517,116 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             target_ms=5_000,
         )
 
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 11)
+        bank_detail_result = next(result for result in report["results"] if result["scope_type"] == "bank_detail")
+        self.assertEqual(bank_detail_result["event_type"], "bank_detail.read_model.refresh")
+
+    def test_bank_import_confirmed_profile_fails_when_cost_scope_is_missing(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="import_state_changed"),
+            _event(scope_type="workbench_relation", reason="import_state_changed"),
+            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
+            _event(scope_type="search", reason="import_state_changed"),
+            _event(scope_type="pending_invoice", reason="import_state_changed"),
+            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
+            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
+            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
+            _event(scope_type="bank_account_balance", reason="import_state_changed"),
+            _event(scope_type="bank_detail", reason="import_facts_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["bank_import_confirmed"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["missing_expectation_count"], 1)
+        missing = [result for result in report["results"] if result["status"] == "missing"]
+        self.assertEqual(missing[0]["scope_type"], "cost_statistics")
+        self.assertEqual(missing[0]["reason"], "import_state_changed")
+
+    def test_bank_import_confirmed_profile_allows_skipped_invoice_direction_pages(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="import_state_changed"),
+            _event(scope_type="workbench_relation", reason="import_state_changed"),
+            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
+            _event(scope_type="search", reason="import_state_changed"),
+            _event(scope_type="pending_invoice", reason="import_state_changed"),
+            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
+            _event(scope_type="bank_account_balance", reason="import_state_changed"),
+            _event(scope_type="cost_statistics", reason="import_state_changed"),
+            _event(scope_type="bank_detail", reason="import_facts_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["bank_import_confirmed"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        skipped = [result for result in report["results"] if result["status"] == "skipped"]
+        self.assertEqual(
+            [result["scope_type"] for result in skipped],
+            ["input_invoice_usage", "output_invoice_collection"],
+        )
+        self.assertEqual(report["missing_expectation_count"], 0)
+
+    def test_bank_import_confirmed_profile_fails_when_account_balance_scope_is_missing(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="import_state_changed"),
+            _event(scope_type="workbench_relation", reason="import_state_changed"),
+            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
+            _event(scope_type="search", reason="import_state_changed"),
+            _event(scope_type="pending_invoice", reason="import_state_changed"),
+            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
+            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
+            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
+            _event(scope_type="cost_statistics", reason="import_state_changed"),
+            _event(scope_type="bank_detail", reason="import_facts_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["bank_import_confirmed"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["missing_expectation_count"], 1)
+        missing = [result for result in report["results"] if result["status"] == "missing"]
+        self.assertEqual(missing[0]["scope_type"], "bank_account_balance")
+        self.assertEqual(missing[0]["reason"], "import_state_changed")
+
+    def test_bank_import_confirmed_profile_requires_real_bank_detail_refresh_not_import_fact_ack(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="import_state_changed"),
+            _event(scope_type="workbench_relation", reason="import_state_changed"),
+            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
+            _event(scope_type="search", reason="import_state_changed"),
+            _event(scope_type="pending_invoice", reason="import_state_changed"),
+            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
+            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
+            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
+            _event(scope_type="bank_account_balance", reason="import_state_changed"),
+            _event(scope_type="cost_statistics", reason="import_state_changed"),
+            _event(scope_type="bank_detail", reason="import_facts_changed", event_type="import.fact.changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["bank_import_confirmed"],
+            target_ms=5_000,
+        )
+
         self.assertEqual(report["status"], "fail")
         missing = [result for result in report["results"] if result["status"] == "missing"]
         self.assertEqual(len(missing), 1)
         self.assertEqual(missing[0]["scope_type"], "bank_detail")
-        self.assertEqual(missing[0]["event_type"], "import.fact.changed")
+        self.assertEqual(missing[0]["event_type"], "bank_detail.read_model.refresh")
 
     def test_etc_import_confirmed_profile_requires_derived_lifecycle_refresh_scopes(self) -> None:
         rows = [

@@ -56,6 +56,23 @@ def build_multipart_payload(
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def test_preview_files_uses_lightweight_import_preview_persistence(self) -> None:
+        app = build_application()
+        persist_calls: list[str] = []
+        app._persist_state_with_workbench_invalidation = lambda **_kwargs: self.fail(  # type: ignore[attr-defined]
+            "file preview must not persist full workbench state"
+        )
+        app._persist_import_preview_state = lambda: persist_calls.append("preview")  # type: ignore[attr-defined]
+        body, headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[INVOICE_JAN],
+        )
+
+        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(persist_calls, ["preview"])
+
     def test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch(self) -> None:
         app = build_application()
         boundary = "----finops-import-boundary"

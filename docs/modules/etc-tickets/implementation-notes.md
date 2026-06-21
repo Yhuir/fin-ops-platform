@@ -6,6 +6,7 @@
 ## 当前决策
 
 - `etc_business_batches` 继续作为用户可见业务批次事实源，`etc_reconciliation_tasks` 继续作为导入、核对、来源文件和提交闭环的 workflow 状态，不物理合并为单表/单实体。
+- ETC 专用导入和批次管理不得创建新的统一发票池事实；它们只能保存 ETC metadata/PDF/XML 附件关系、关联已存在 canonical invoice，并用 `etc_invoice_summary` 展示批次清单。
 - 历史已在关联台 paired 的 ETC 批次可通过专用 migration service 转入新业务批次模型；迁移必须复用 `EtcService`、pair relation service、现有 state/repository 持久化和 Workbench invalidation，不允许临时 SQL 直接改 read model。
 - `etc_invoice_summary` 在 open 区和 paired 区都必须保留可展开 ETC 发票明细；已存在 active pair relation 的 ETC 外部批次不得继续泄漏到 open 区。
 - 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖业务批次、发票明细、OA 草稿、人工提交、delete/reset、source file、Workbench summary 和 strict Browser 主链路；真实大 ZIP、对象存储、OA、历史迁移和 worker drain 仍需 staging/生产前验证。
@@ -26,6 +27,26 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - ETC existing invoice link service收敛
+
+- 目标：移除 `server.py` 和 runtime worker 中重复的 ETC canonical invoice link 循环，防止旧 ETC 模块代码重新把 metadata 当作发票池写入口。
+- 影响范围：ETC import confirm、业务批次导入/草稿/人工状态、历史 repair/migration/existing link 的 `link_etc_invoices_to_existing_invoices` 委托路径。
+- 关键决策：新增轻量 `EtcExistingInvoiceLinkService`，只负责从 ETC import result 或 ETC metadata 找到发票号、调用 `ImportNormalizationService.upsert_etc_invoice` 的 link-existing 语义并返回影响月份；缺失 canonical invoice 时仍不创建 `app.invoices`。
+- 文档影响：本实施记录补充边界；README 和状态机的统一发票池口径不变。
+- 测试覆盖：新增 boundary guard，要求 `server.py` 和 runtime worker helper 只能委托 `EtcExistingInvoiceLinkService`，不得直接持有 `upsert_etc_invoice` 循环或 import result lookup；新增 service 行为测试并回归 ETC no-create 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_existing_invoice_link_logic_stays_out_of_server_and_worker_helpers tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py::ImportNormalizationServiceTests::test_upsert_etc_invoice_does_not_create_missing_canonical_invoice_by_default tests/test_etc_backend.py::EtcApiTests::test_etc_import_keeps_distinct_invoice_numbers_with_same_amount_without_creating_canonical_invoices -q`。
+- 未测风险：真实生产数据清理和重导仍需按 `docs/operations/invoice-pool-cleanup.md` 的备份、dry-run、input gate 和 final invariant gate 执行。
+
+## 2026-06-21 - ETC metadata 与统一发票池边界收敛
+
+- 目标：把 ETC 发票从“专用发票池双写 canonical invoice”收敛为“ETC metadata/附件关系 + 统一发票池已存在发票关联”，避免同一 ETC 票在 `app.etc_invoices` 与 `app.invoices` 中形成双事实。
+- 影响范围：ETC import confirm、业务批次 manual submitted/delete/reset、Workbench `etc_invoice_summary`、历史 ETC repair/migration、existing batch link。
+- 关键决策：`app.etc_invoices` 只承载 ETC ZIP/XML/PDF、批次、提交和附件元数据，不是正式发票池；删除已提交批次只释放 ETC metadata/summary relation，不再为了恢复散票而创建 canonical invoice。summary 明细必须从 ETC metadata 和已存在 canonical invoice 两侧合并并去重。
+- 文档影响：更新模块 README、ETC 导入模块和产品口径。
+- 测试覆盖：`tests/test_etc_backend.py` 和 `tests/test_historical_etc_business_batch_migration_service.py` 覆盖无 canonical 创建、summary 仍完整展示发票清单、删除/reset 不恢复不存在的散票、历史迁移不写入 `app.invoices`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py tests/test_historical_etc_business_batch_migration_service.py -q`。
+- 未测风险：真实 OA 草稿附件上传和生产历史数据清理需在备份后做 staging/生产 smoke。
 
 ## 2026-06-20 - ETC submitted reset/delete mutation 暂时失败重试恢复
 
@@ -218,12 +239,12 @@
 ## 2026-06-10 - ETC导入/OA草稿本地持久化失败根因修复
 
 - 目标：修复确认 ETC ZIP 导入后前端显示“导入失败”，以及 OA 草稿已在 OA 系统创建且附件已上传但前端仍显示“接口处理失败”的问题。
-- 影响范围：`ImportNormalizationService` canonical invoice identity、PostgreSQL invoice repository、runtime import worker 的 ETC 导入结果同步、PostgreSQL migration、RabbitMQ/worker 部署样例。
-- 关键决策：ETC 发票有稳定发票号/强 canonical identity 时，弱 `invoice:<卖方>:<日期>:<金额>` fingerprint 不得写入 `app.invoices.data_fingerprint`，也不得留在 raw payload 中重新加载；弱 fingerprint 只用于没有强 identity 的历史/异常发票候选。API 路径和 runtime worker 路径都必须按 `EtcImportResult.items[*].invoice_number` 回查 ETC service 并同步 canonical invoice，避免后台导入成功但本地发票同步缺失。导入确认同一 session 只复用 queued/running 或近期 succeeded 的 job，failed/acknowledged/cancelled 旧 job 不得阻塞用户重新点击确认导入。ETC OA 自动检测已废弃，部署样例和 RabbitMQ preflight 不再包含 `etc_business.oa_detection.refresh` 或 `etc-business-oa-detection` worker。
+- 影响范围：`ImportNormalizationService` canonical invoice identity、PostgreSQL invoice repository、runtime import worker 的 ETC 导入结果关联、PostgreSQL migration、RabbitMQ/worker 部署样例。
+- 关键决策：ETC 发票有稳定发票号/强 canonical identity 时，弱 `invoice:<卖方>:<日期>:<金额>` fingerprint 不得写入 `app.invoices.data_fingerprint`，也不得留在 raw payload 中重新加载；弱 fingerprint 只用于没有强 identity 的历史/异常发票候选。API 路径和 runtime worker 路径都必须按 `EtcImportResult.items[*].invoice_number` 回查 ETC service，并且只能关联已存在 canonical invoice、补齐 ETC metadata/source link，不得从 ETC 专用表创建 canonical invoice。导入确认同一 session 只复用 queued/running 或近期 succeeded 的 job，failed/acknowledged/cancelled 旧 job 不得阻塞用户重新点击确认导入。ETC OA 自动检测已废弃，部署样例和 RabbitMQ preflight 不再包含 `etc_business.oa_detection.refresh` 或 `etc-business-oa-detection` worker。
 - 文档影响：更新 ETC 模块测试矩阵、状态机记录和运维检查；产品口径和页面 API shape 不变。
 - 测试覆盖：新增旧 canonical invoice 加载时清理弱 fingerprint 的 business core 回归；新增 Postgres repository 写入边界测试；新增 runtime worker 从 `EtcImportResult.items` 回查发票的 service/boundary 回归；新增同一导入 session 失败后可重试且成功后仍幂等复用 job 的 API 回归；更新 migration discovery 和 RabbitMQ preflight 测试。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_service tests.test_postgres_core_repository -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_rabbitmq_staging_preflight -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend -v`。
-- 未测风险：未在真实浏览器重新上传生产 ZIP；自动化已覆盖触发线上异常的持久化唯一键路径和后台导入同步路径。生产部署后需要执行 migration `0065_invoice_canonical_identity_fingerprint_invariant.sql`，并停用旧 `fin-ops-worker@etc-business-oa-detection.service`。
+- 未测风险：未在真实浏览器重新上传生产 ZIP；自动化已覆盖触发线上异常的持久化唯一键路径和后台导入关联路径。生产部署后需要执行 migration `0065_invoice_canonical_identity_fingerprint_invariant.sql`，并停用旧 `fin-ops-worker@etc-business-oa-detection.service`。
 
 ## 2026-06-10 - ETC任务删除旧阻塞清理与空任务追因
 
@@ -248,7 +269,7 @@
 ## 2026-06-09 - ETC canonical invoice弱指纹冲突修复
 
 - 目标：修复 ETC ZIP 导入显示失败，以及创建 OA 草稿时 OA 系统已成功创建/附件已上传但前端仍显示接口失败的问题。
-- 影响范围：`FinancialObjectIdentityPolicy.identify_etc_invoice_mapping`、`ObjectDedupDecisionService.decide_invoice_import`、ETC 发票同步到 canonical `app.invoices` 的去重语义。
+- 影响范围：`FinancialObjectIdentityPolicy.identify_etc_invoice_mapping`、`ObjectDedupDecisionService.decide_invoice_import`、ETC metadata 关联既有 canonical `app.invoices` 的去重语义。
 - 关键决策：ETC 发票存在强发票号 identity 时，canonical invoice 只使用该强 identity；普通“卖方 + 日期 + 金额”的弱 suspected fingerprint 只保留在审计字段，不写入 `data_fingerprint`，也不参与强 identity 未命中后的 fallback 合并。这样同一批内多张同卖方、同日、同金额但不同发票号的 ETC 发票不会被 `invoices_data_fingerprint_uidx` 误判为重复。
 - 文档影响：更新 ETC 模块测试矩阵；页面口径和 API shape 不变。
 - 测试覆盖：新增 `ImportNormalizationService` 回归，覆盖 ETC 发票号变化时不靠弱 fingerprint 合并旧发票，以及同卖方/同日/同金额/不同发票号的 ETC 发票可保留为两张 canonical invoice；历史 repair parsed seed 幂等用例恢复通过。

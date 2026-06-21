@@ -178,9 +178,26 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
     def test_oa_attachment_invoice_evidence_classification_is_centralized(self) -> None:
         self.assertTrue(self.policy.is_oa_attachment_invoice_evidence({"evidence_type": "tax_invoice"}))
         self.assertTrue(self.policy.is_oa_attachment_invoice_evidence({"evidence_type": "machine_invoice"}))
-        self.assertTrue(self.policy.is_oa_attachment_invoice_evidence({"evidence_type": "non_tax_receipt"}))
-        self.assertTrue(self.policy.is_oa_attachment_invoice_evidence({"digital_invoice_no": "26372000000990000001"}))
-        self.assertTrue(self.policy.is_oa_attachment_invoice_evidence({"invoice_code": "053002200111"}))
+        self.assertFalse(self.policy.is_oa_attachment_invoice_evidence({"evidence_type": "non_tax_receipt"}))
+        self.assertTrue(
+            self.policy.is_oa_attachment_invoice_evidence(
+                {
+                    "document_kind": "digital_invoice",
+                    "digital_invoice_no": "26372000000990000001",
+                }
+            )
+        )
+        self.assertTrue(
+            self.policy.is_oa_attachment_invoice_evidence(
+                {
+                    "document_kind": "云南增值税电子普通发票",
+                    "invoice_code": "053002200111",
+                    "invoice_no": "40512344",
+                }
+            )
+        )
+        self.assertFalse(self.policy.is_oa_attachment_invoice_evidence({"digital_invoice_no": "26372000000990000001"}))
+        self.assertFalse(self.policy.is_oa_attachment_invoice_evidence({"invoice_code": "053002200111"}))
         self.assertFalse(
             self.policy.is_oa_attachment_invoice_evidence(
                 {

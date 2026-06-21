@@ -13,7 +13,7 @@ from fin_ops_platform.services.historical_etc_business_batch_migration_service i
 )
 from fin_ops_platform.tools.link_existing_etc_batches import (
     _build_full_snapshot_application,
-    _sync_etc_invoices_to_canonical_invoices,
+    _link_etc_invoices_to_existing_invoices,
 )
 
 
@@ -34,8 +34,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             etc_service=app._etc_service,
             pair_relation_service=app._workbench_pair_relation_service,
             relation_command_service=app._workbench_relation_command_service(),
-            sync_etc_invoices_to_canonical_invoices=lambda invoices: _sync_etc_invoices_to_canonical_invoices(app, invoices),
-            refresh_after_etc_invoice_sync=lambda months, reason: _refresh_after_historical_migration(app, months, reason),
+            link_etc_invoices_to_existing_invoices=lambda invoices: _link_etc_invoices_to_existing_invoices(app, invoices),
+            refresh_after_etc_invoice_link=lambda months, reason: _refresh_after_historical_migration(app, months, reason),
             persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(changed_case_ids=case_ids),
             invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
             persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),

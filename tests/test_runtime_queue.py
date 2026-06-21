@@ -994,6 +994,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
     def test_defer_event_delays_dependency_retry_without_failure_or_dead_letter(self) -> None:
         locked_at = datetime(2026, 6, 14, 5, 6, tzinfo=timezone.utc)
+        created_at = datetime(2026, 6, 14, 5, 5, tzinfo=timezone.utc)
         transaction = FakeTransaction(
             rows=[
                 {
@@ -1003,6 +1004,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                     "source_version": 197,
                     "locked_by": "worker-1",
                     "locked_at": locked_at,
+                    "created_at": created_at,
                 },
                 None,
                 {"event_id": "event-1"},
@@ -1031,6 +1033,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("for update", normalized_lock_sql)
         self.assertIn("status in ('pending', 'processing', 'done')", normalized_cover_sql)
         self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_cover_sql)
+        self.assertIn("created_at > %s", normalized_cover_sql)
+        self.assertIn("created_at = %s and id > %s::uuid", normalized_cover_sql)
         self.assertIn("order by coalesce(source_version, 0) desc", normalized_cover_sql)
         self.assertIn("status = 'pending'", normalized_sql)
         self.assertIn("available_at = now() + (%s::double precision * interval '1 second')", normalized_sql)
@@ -1050,6 +1054,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
                 "event-1",
                 197,
+                created_at,
+                created_at,
+                "event-1",
             ),
         )
         self.assertEqual(
@@ -1064,8 +1071,62 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             ),
         )
 
+    def test_defer_event_does_not_let_older_done_event_cover_newer_processing_event(self) -> None:
+        locked_at = datetime(2026, 6, 20, 15, 35, tzinfo=timezone.utc)
+        created_at = datetime(2026, 6, 20, 15, 34, tzinfo=timezone.utc)
+        transaction = FakeTransaction(
+            rows=[
+                {
+                    "event_id": "event-1",
+                    "tenant_id": "tenant-a",
+                    "dedupe_key": "bank_detail.read_model.refresh:bank_detail:2026-03",
+                    "source_version": 2,
+                    "locked_by": "worker-1",
+                    "locked_at": locked_at,
+                    "created_at": created_at,
+                },
+                None,
+                {"event_id": "event-1"},
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(
+            repository.defer_event(
+                "event-1",
+                "worker-1",
+                reason="workbench_relation_read_model_not_fresh",
+                delay_seconds=0.25,
+            )
+        )
+
+        self.assertEqual(len(transaction.calls), 3)
+        _, cover_sql, cover_params = transaction.calls[1]
+        _, defer_sql, _ = transaction.calls[2]
+        normalized_cover_sql = " ".join(cover_sql.lower().split())
+        normalized_defer_sql = " ".join(defer_sql.lower().split())
+        self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_cover_sql)
+        self.assertIn("created_at > %s", normalized_cover_sql)
+        self.assertIn("created_at = %s and id > %s::uuid", normalized_cover_sql)
+        self.assertIn("status = 'pending'", normalized_defer_sql)
+        self.assertIn("runtime_defer", normalized_defer_sql)
+        self.assertNotIn("runtime_defer_superseded", normalized_defer_sql)
+        self.assertEqual(
+            cover_params,
+            (
+                "tenant-a",
+                "bank_detail.read_model.refresh:bank_detail:2026-03",
+                "event-1",
+                2,
+                created_at,
+                created_at,
+                "event-1",
+            ),
+        )
+
     def test_defer_event_resolves_current_processing_when_pending_same_dedupe_exists(self) -> None:
         locked_at = datetime(2026, 6, 14, 5, 6, tzinfo=timezone.utc)
+        created_at = datetime(2026, 6, 14, 5, 5, tzinfo=timezone.utc)
         transaction = FakeTransaction(
             rows=[
                 {
@@ -1075,6 +1136,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                     "source_version": 197,
                     "locked_by": "worker-1",
                     "locked_at": locked_at,
+                    "created_at": created_at,
                 },
                 {
                     "event_id": "event-2",
@@ -1106,6 +1168,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("for update", normalized_lock_sql)
         self.assertIn("status in ('pending', 'processing', 'done')", normalized_cover_sql)
         self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_cover_sql)
+        self.assertIn("created_at > %s", normalized_cover_sql)
+        self.assertIn("created_at = %s and id > %s::uuid", normalized_cover_sql)
         self.assertIn("status = 'done'", normalized_resolve_sql)
         self.assertIn("runtime_defer_superseded", normalized_resolve_sql)
         self.assertIn("covered_by_event_id", normalized_resolve_sql)
@@ -1118,6 +1182,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
                 "event-1",
                 197,
+                created_at,
+                created_at,
+                "event-1",
             ),
         )
         self.assertEqual(
@@ -1140,6 +1207,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             sqlstate = "23505"
 
         locked_at = datetime(2026, 6, 14, 5, 26, tzinfo=timezone.utc)
+        created_at = datetime(2026, 6, 14, 5, 25, tzinfo=timezone.utc)
         target = {
             "event_id": "event-1",
             "tenant_id": "tenant-a",
@@ -1147,6 +1215,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             "source_version": 13357,
             "locked_by": "worker-1",
             "locked_at": locked_at,
+            "created_at": created_at,
         }
         transaction = FakeTransaction(
             rows=[
@@ -1185,17 +1254,37 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         normalized_resolve_sql = " ".join(resolve_sql.lower().split())
         self.assertIn("status in ('pending', 'processing', 'done')", normalized_first_cover_sql)
         self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_first_cover_sql)
+        self.assertIn("created_at > %s", normalized_first_cover_sql)
+        self.assertIn("created_at = %s and id > %s::uuid", normalized_first_cover_sql)
         self.assertIn("status = 'pending'", normalized_pending_update_sql)
         self.assertIn("status in ('pending', 'processing', 'done')", normalized_second_cover_sql)
+        self.assertIn("created_at > %s", normalized_second_cover_sql)
+        self.assertIn("created_at = %s and id > %s::uuid", normalized_second_cover_sql)
         self.assertIn("status = 'done'", normalized_resolve_sql)
         self.assertIn("'collision', true", normalized_resolve_sql)
         self.assertEqual(
             first_cover_params,
-            ("tenant-a", "bank_detail.read_model.refresh:bank_detail:2026-02", "event-1", 13357),
+            (
+                "tenant-a",
+                "bank_detail.read_model.refresh:bank_detail:2026-02",
+                "event-1",
+                13357,
+                created_at,
+                created_at,
+                "event-1",
+            ),
         )
         self.assertEqual(
             second_cover_params,
-            ("tenant-a", "bank_detail.read_model.refresh:bank_detail:2026-02", "event-1", 13357),
+            (
+                "tenant-a",
+                "bank_detail.read_model.refresh:bank_detail:2026-02",
+                "event-1",
+                13357,
+                created_at,
+                created_at,
+                "event-1",
+            ),
         )
         self.assertEqual(
             resolve_params,
@@ -1212,7 +1301,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             ),
         )
 
-    def test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope(self) -> None:
+    def test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event(self) -> None:
         class DirectFetchConnection:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, tuple[object, ...]]] = []
@@ -1234,9 +1323,10 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         sql, params = connection.calls[0]
         normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
+        self.assertIn("from job.outbox_events", normalized_sql)
+        self.assertIn("event_type = %s", normalized_sql)
         self.assertIn("status in ('pending', 'processing')", normalized_sql)
-        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
+        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04", "bank_detail.read_model.refresh"))
 
     def test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope(self) -> None:
         class DirectFetchConnection:

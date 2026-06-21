@@ -26,6 +26,26 @@
 
 ## 历史记录
 
+## 2026-06-20 - Orphaned import fact dirty scope repair
+
+- 目标：补齐历史 `import.fact.changed` 兼容事件已完成但 legacy dirty scope 未完成时的运维闭环，避免导入事实已可见而 App Status 继续显示同步中。
+- 影响范围：scope contract repair CLI 和 PostgreSQL repository 只读/受控删除路径；不改变 worker claim event types、不改变 `import.fact.changed` legacy bridge 语义。
+- 关键决策：repair 只识别 `reason=import_facts_changed`、状态非 done、且不存在同 tenant/scope active `import.fact.changed` outbox 的 dirty scope；默认 dry-run，`--apply` 才删除，并记录 audit/rollback manifest。
+- 测试覆盖：`tests/test_read_model_scope_contract.py` 的 orphaned import fact repair 用例。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_scope_contract.py -q`；真实 runtime dry-run `scripts/check-read-model-scope-contracts.py --repair orphaned-import-facts --json`。
+- 未测风险：未对真实 runtime 执行 `--apply`；需要生产窗口或明确批准后操作。
+
+## 2026-06-20 - 发票导入 read model 队列闭环与月级 fan-out
+
+- 目标：修复发票导入后 App Status 长时间显示同步中、关联台逐步可见但 read model 队列不收敛的问题，并减少导入确认后的全量 pending invoice refresh。
+- 影响范围：`RuntimeQueueRepository.defer_event(...)`、import worker 的 legacy `import.fact.changed` bridge、发票/银行导入确认后的 derived lifecycle fan-out；不改变 PostgreSQL durable queue/dirty scope/readiness 的事实源边界。
+- 关键决策：`defer_event` 的 superseded cover 必须同时满足同 dedupe、更高或相等 `source_version`、且创建顺序晚于当前 processing event；旧 `done` event 即使 source_version 更高，也不能覆盖后来创建的新事件。`save_imports` 完整 snapshot 保存不再写 dirty/outbox refresh；当前导入确认路径按本次 rows 投递真实 refresh。导入影响月份已知时，pending invoice refresh 使用 `expense:all:<month>`、`income:all:<month>`、`income:cash_income:<month>`，不再先投递三个全量 aggregate。`import.fact.changed` handler 仅作为 legacy bridge：对 `bank_detail` 投递真实 `bank_detail.read_model.refresh` 后完成兼容 dirty scope。
+- 后续优化：发票导入方向页 read model 由后台 import worker 计算本次确认文件的 batch type 后投递；进项文件只刷新 `input_invoice_usage`，销项文件只刷新 `output_invoice_collection`，混合导入按各自月份分别投递，未命中方向不入队。后台 `tax_offset` helper 同样过滤 batch type，银行流水文件不会再触发税金抵扣刷新。银行导入确认路径在投递 `bank_detail` 月级刷新时同步投递 `bank_account_balance:all`，避免账户余额页只能依赖 API miss 被动补刷。
+- 文档影响：同步 runtime-workers、read-models 与 imports-invoices 模块记录；生产运维仍以 durable queue/readiness 状态为准。
+- 测试覆盖：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_tax_offset_scope_helpers_ignore_bank_transaction_files`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_runtime_monitoring.py tests/test_import_job_queue.py tests/test_runtime_worker_registry.py tests/test_read_model_refresh_gateway.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests/test_write_operation_slo_audit.py -q`。
+- 未测风险：本地测试证明 queue/worker 合同；真实生产仍需发布后观察本次导入相关 `job.outbox_events`、`job.read_model_dirty_scopes`、`read_model.app_status_readiness` 是否自然 drain，并重新导入小批量发票验证用户链路。
+
 ## 2026-06-19 - 生产 worker 只读 runtime gate 复查
 
 - 目标：在不重启、不部署、不写数据库、不触发 read model apply 的前提下，复查当前生产 worker/runtime 外部证据。
@@ -126,11 +146,21 @@
 
 - 目标：修复 v21 真实 confirm/withdraw audit 中 `pending_invoice` 因 `bank_detail_read_model_not_fresh` 多轮 defer 后仍约 5.7s 的长尾。
 - 影响范围：`RuntimeWorker._enqueue_dependency_refreshes(...)`、`RuntimeQueueRepository.read_model_refresh_is_active(...)`、runtime worker/queue 测试。
-- 关键决策：dependency-not-fresh 时只在依赖 read model 没有 active dirty scope 时补投 refresh；如果依赖已经 `pending` 或 `processing`，当前事件只短延迟 defer，不再 bump 依赖 `source_version`。这保持 PostgreSQL dirty scope 为事实源，不写 readiness，也不伪造 fresh。
+- 关键决策：dependency-not-fresh 时只在依赖 read model 没有 active outbox refresh event 时补投 refresh；如果依赖 refresh event 已经 `pending` 或 `processing`，当前事件只短延迟 defer，不再 bump 依赖 `source_version`。dirty scope 继续作为 freshness 事实源，但不能单独代表 active worker work item。
 - 文档影响：更新 runtime worker 实施记录和测试矩阵。
-- 测试覆盖：`RuntimeWorkerTests.test_run_once_does_not_bump_dependency_refresh_when_scope_already_active`、`RuntimeQueueRepositoryTests.test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope`。
+- 测试覆盖：`RuntimeWorkerTests.test_run_once_does_not_bump_dependency_refresh_when_scope_already_active`、`RuntimeQueueRepositoryTests.test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_runtime_queue.py -q`。
 - 未测风险：真实生产仍需发布后用 confirm/withdraw write audit 证明 pending_invoice enqueue-to-done 回到 5s 内。
+
+## 2026-06-21 - Dependency refresh orphan dirty recovery
+
+- 目标：修复 dependency dirty scope 已 pending 但 outbox 已 done/缺失时，worker 仍把依赖当 active，导致 downstream read model 长期 `refreshing` 的生产状态。
+- 影响范围：`RuntimeQueueRepository.read_model_refresh_is_active(...)`、`RuntimeWorker._enqueue_dependency_refreshes(...)`、read model scope contract repair CLI。
+- 关键决策：active gate 只查询 `job.outbox_events` 中同 scope/type 的 `pending`/`processing` read model refresh event；dirty scope 是否阻塞由 `read_model_refresh_is_fresh(...)` 判断。如果 dirty 存在但没有 active outbox，下一次 dependency-not-fresh 会补投依赖 refresh。无效 scope 由 `scripts/check-read-model-scope-contracts.py --repair invalid-read-model-scopes` 清理，不让 worker 无限重试。
+- 文档影响：同步 read-model 实施记录、测试矩阵和运维治理。
+- 测试覆盖：`RuntimeQueueRepositoryTests.test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event`、`ReadModelScopeContractServiceTests.test_apply_deletes_invalid_policy_managed_read_model_scopes_and_records_audit`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_runtime_monitoring.py -q`。
+- 未测风险：生产发布后必须执行 invalid scope repair、runtime closure gate，并观察 dependency refresh backlog 是否 drain。
 
 ## 2026-06-14 - Write SLO tail retry tightening
 

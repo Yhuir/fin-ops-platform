@@ -15,6 +15,10 @@ class ReadModelScopeContractRepository(Protocol):
     def list_cost_statistics_dirty_scopes(self) -> list[dict[str, Any]]: ...
     def list_cost_statistics_outbox_events(self) -> list[dict[str, Any]]: ...
     def list_cost_statistics_readiness(self) -> list[dict[str, Any]]: ...
+    def list_policy_managed_dirty_scopes(self) -> list[dict[str, Any]]: ...
+    def list_policy_managed_outbox_events(self) -> list[dict[str, Any]]: ...
+    def list_policy_managed_readiness(self) -> list[dict[str, Any]]: ...
+    def list_orphaned_import_fact_dirty_scopes(self) -> list[dict[str, Any]]: ...
     def list_read_model_outbox_failures(self) -> list[dict[str, Any]]: ...
     def delete_dirty_scope(self, row_id: str) -> int: ...
     def delete_outbox_event(self, row_id: str) -> int: ...
@@ -54,6 +58,69 @@ class ReadModelScopeContractService:
         violations = self._cost_statistics_violations()
         outbox_failures = self._read_model_outbox_failures(violations)
         return self._report(violations, outbox_failures=outbox_failures, cleanup=None, replacement_enqueue=None)
+
+    def check_orphaned_import_fact_dirty_scopes(self) -> dict[str, Any]:
+        return self.repair_orphaned_import_fact_dirty_scopes(apply=False)
+
+    def check_invalid_read_model_refresh_scopes(self) -> dict[str, Any]:
+        return self.repair_invalid_read_model_refresh_scopes(apply=False)
+
+    def repair_invalid_read_model_refresh_scopes(
+        self,
+        *,
+        apply: bool,
+        reason: str = "invalid_read_model_refresh_scope_repair",
+    ) -> dict[str, Any]:
+        rows = self._invalid_read_model_refresh_scope_rows()
+        cleanup = {
+            "applied": apply,
+            "deleted": {
+                "job.read_model_dirty_scopes": 0,
+                "job.outbox_events": 0,
+                "read_model.app_status_readiness": 0,
+            },
+        }
+        if apply:
+            for item in rows:
+                location = str(item.get("location") or "")
+                row_id = str((item.get("row") or {}).get("id") or "")
+                if location == "job.read_model_dirty_scopes":
+                    cleanup["deleted"][location] += self._repository.delete_dirty_scope(row_id)
+                elif location == "job.outbox_events":
+                    cleanup["deleted"][location] += self._repository.delete_outbox_event(row_id)
+                elif location == "read_model.app_status_readiness":
+                    row = item.get("row") or {}
+                    cleanup["deleted"][location] += self._repository.delete_readiness(
+                        tenant_id=str(row.get("tenant_id") or "default"),
+                        read_model_key=str(row.get("read_model_key") or item.get("scope_type") or ""),
+                        scope_type=str(row.get("scope_type") or item.get("scope_type") or ""),
+                        scope_key=str(row.get("scope_key") or item.get("scope_key") or ""),
+                    )
+        report = _invalid_read_model_refresh_scope_report(rows, cleanup=cleanup)
+        if apply and rows:
+            report["repair_audit"] = self._record_invalid_read_model_scope_repair_audit(
+                report=report,
+                reason=reason,
+            )
+        return report
+
+    def repair_orphaned_import_fact_dirty_scopes(
+        self,
+        *,
+        apply: bool,
+        reason: str = "orphaned_import_fact_dirty_scope_repair",
+    ) -> dict[str, Any]:
+        rows = self._orphaned_import_fact_dirty_scopes()
+        cleanup = {"applied": apply, "deleted": {"job.read_model_dirty_scopes": 0}}
+        if apply:
+            for row in rows:
+                cleanup["deleted"]["job.read_model_dirty_scopes"] += self._repository.delete_dirty_scope(
+                    str(row.get("id") or "")
+                )
+        report = _orphaned_import_fact_report(rows, cleanup=cleanup)
+        if apply and rows:
+            report["repair_audit"] = self._record_orphaned_import_fact_repair_audit(report=report, reason=reason)
+        return report
 
     def repair_cost_statistics_contract(
         self,
@@ -100,6 +167,38 @@ class ReadModelScopeContractService:
                 if violation is not None:
                     violations.append(violation)
         return violations
+
+    def _orphaned_import_fact_dirty_scopes(self) -> list[dict[str, Any]]:
+        list_scopes = getattr(self._repository, "list_orphaned_import_fact_dirty_scopes", None)
+        if not callable(list_scopes):
+            return []
+        return [dict(row) for row in list_scopes()]
+
+    def _invalid_read_model_refresh_scope_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for location, list_rows in (
+            ("job.read_model_dirty_scopes", getattr(self._repository, "list_policy_managed_dirty_scopes", None)),
+            ("job.outbox_events", getattr(self._repository, "list_policy_managed_outbox_events", None)),
+            ("read_model.app_status_readiness", getattr(self._repository, "list_policy_managed_readiness", None)),
+        ):
+            if not callable(list_rows):
+                continue
+            for row in list_rows():
+                scope_type = str(row.get("scope_type") or "").strip()
+                scope_key = str(row.get("scope_key") or "").strip()
+                try:
+                    self._scope_policy_registry.normalize_and_validate(scope_type, [scope_key])
+                except ReadModelScopeError as exc:
+                    rows.append(
+                        {
+                            "location": location,
+                            "scope_type": scope_type,
+                            "scope_key": scope_key,
+                            "error": str(exc),
+                            "row": dict(row),
+                        }
+                    )
+        return rows
 
     def _read_model_outbox_failures(
         self,
@@ -223,6 +322,46 @@ class ReadModelScopeContractService:
         event_id = record_audit(event)
         return {"enabled": True, "recorded": True, "event_id": event_id}
 
+    def _record_orphaned_import_fact_repair_audit(self, *, report: dict[str, Any], reason: str) -> dict[str, Any]:
+        record_audit = getattr(self._repository, "record_repair_audit", None)
+        if not callable(record_audit):
+            return {"enabled": True, "recorded": False, "event_id": "", "reason": "repository_does_not_support_audit"}
+        event = {
+            "event_type": "orphaned_import_fact_dirty_scope_repair",
+            "object_type": "read_model_runtime_repair",
+            "object_id": "import_facts_changed",
+            "reason": reason,
+            "payload": {
+                "reason": reason,
+                "orphaned_dirty_scope_count": report.get("orphaned_dirty_scope_count") or 0,
+                "cleanup": report.get("cleanup") or {},
+                "items": report.get("items") or [],
+                "rollback": report.get("rollback") or {},
+            },
+        }
+        event_id = record_audit(event)
+        return {"enabled": True, "recorded": True, "event_id": event_id}
+
+    def _record_invalid_read_model_scope_repair_audit(self, *, report: dict[str, Any], reason: str) -> dict[str, Any]:
+        record_audit = getattr(self._repository, "record_repair_audit", None)
+        if not callable(record_audit):
+            return {"enabled": True, "recorded": False, "event_id": "", "reason": "repository_does_not_support_audit"}
+        event = {
+            "event_type": "invalid_read_model_refresh_scope_repair",
+            "object_type": "read_model_runtime_repair",
+            "object_id": "invalid_read_model_refresh_scopes",
+            "reason": reason,
+            "payload": {
+                "reason": reason,
+                "invalid_scope_count": report.get("invalid_scope_count") or 0,
+                "cleanup": report.get("cleanup") or {},
+                "items": report.get("items") or [],
+                "rollback": report.get("rollback") or {},
+            },
+        }
+        event_id = record_audit(event)
+        return {"enabled": True, "recorded": True, "event_id": event_id}
+
 
 def _replacement_scope_keys(violations: list[ReadModelScopeContractViolation]) -> list[str]:
     scope_keys: list[str] = []
@@ -250,6 +389,84 @@ def _repair_manifest(
     return {
         "summary": summary,
         "items": items,
+    }
+
+
+def _orphaned_import_fact_report(rows: list[dict[str, Any]], *, cleanup: dict[str, Any]) -> dict[str, Any]:
+    items = [_orphaned_import_fact_manifest_item(row) for row in rows]
+    return {
+        "action": "orphaned_import_fact_dirty_scope_check",
+        "ok": not rows,
+        "orphaned_dirty_scope_count": len(rows),
+        "cleanup": cleanup,
+        "items": items,
+        "rollback": {
+            "strategy": "restore deleted job.read_model_dirty_scopes rows from items[].row if operator cleanup is reverted.",
+            "manifest_item_count": len(items),
+        },
+        "repair_audit": {"enabled": bool(cleanup.get("applied")), "recorded": False, "event_id": ""},
+    }
+
+
+def _invalid_read_model_refresh_scope_report(rows: list[dict[str, Any]], *, cleanup: dict[str, Any]) -> dict[str, Any]:
+    items = [_invalid_read_model_refresh_scope_manifest_item(row) for row in rows]
+    summary = {
+        "job.read_model_dirty_scopes": sum(1 for item in items if item["location"] == "job.read_model_dirty_scopes"),
+        "job.outbox_events": sum(1 for item in items if item["location"] == "job.outbox_events"),
+        "read_model.app_status_readiness": sum(1 for item in items if item["location"] == "read_model.app_status_readiness"),
+    }
+    return {
+        "action": "invalid_read_model_refresh_scope_check",
+        "ok": not rows,
+        "invalid_scope_count": len(rows),
+        "summary": summary,
+        "cleanup": cleanup,
+        "items": items,
+        "rollback": {
+            "strategy": "restore deleted runtime rows from items[].row if operator cleanup is reverted.",
+            "manifest_item_count": len(items),
+        },
+        "repair_audit": {"enabled": bool(cleanup.get("applied")), "recorded": False, "event_id": ""},
+    }
+
+
+def _invalid_read_model_refresh_scope_manifest_item(item: dict[str, Any]) -> dict[str, Any]:
+    row = dict(item.get("row") or {})
+    location = str(item.get("location") or "")
+    return {
+        "category": "invalid_read_model_refresh_scope",
+        "location": location,
+        "row_id": str(row.get("id") or ""),
+        "tenant_id": str(row.get("tenant_id") or "default"),
+        "scope_type": str(item.get("scope_type") or row.get("scope_type") or ""),
+        "scope_key": str(item.get("scope_key") or row.get("scope_key") or ""),
+        "event_type": str(row.get("event_type") or ""),
+        "status": str(row.get("status") or ""),
+        "reason": str(row.get("reason") or ""),
+        "last_error": str(row.get("last_error") or ""),
+        "updated_at": str(row.get("updated_at") or ""),
+        "policy_error": str(item.get("error") or ""),
+        "proposed_action": "delete_invalid_runtime_row_no_replacement",
+        "rollback_hint": f"restore {location} row from item.row before rerun",
+        "row": row,
+    }
+
+
+def _orphaned_import_fact_manifest_item(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "category": "orphaned_import_fact_dirty_scope",
+        "location": "job.read_model_dirty_scopes",
+        "row_id": str(row.get("id") or ""),
+        "tenant_id": str(row.get("tenant_id") or "default"),
+        "scope_type": str(row.get("scope_type") or ""),
+        "scope_key": str(row.get("scope_key") or ""),
+        "status": str(row.get("status") or ""),
+        "reason": str(row.get("reason") or ""),
+        "last_error": str(row.get("last_error") or ""),
+        "updated_at": str(row.get("updated_at") or ""),
+        "proposed_action": "delete_orphaned_legacy_import_fact_dirty_scope",
+        "rollback_hint": "restore dirty scope row from item.row before rerun",
+        "row": dict(row),
     }
 
 

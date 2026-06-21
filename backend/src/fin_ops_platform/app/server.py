@@ -109,6 +109,7 @@ from fin_ops_platform.services.health_payload_compaction import compact_ready_pa
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
     EtcBatchDeleteError,
@@ -153,6 +154,11 @@ from fin_ops_platform.services.import_file_service import FileImportService, Upl
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_attachment_recognition_service import (
+    CREATE_INVOICE_AND_LINK,
+    IGNORE,
+    InvoiceAttachmentRecognitionService,
+)
 from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
@@ -1062,9 +1068,9 @@ class Application:
                 pair_relation_service=self._workbench_pair_relation_service,
                 relation_command_service=self._workbench_relation_command_service(),
                 oa_row_exists=self._historical_etc_oa_row_exists,
-                sync_import_result_to_canonical_invoices=self._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: self._refresh_after_historical_etc_repair_sync(
+                link_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: self._refresh_after_historical_etc_repair_link(
                     months,
                     reason=reason,
                 ),
@@ -1095,7 +1101,7 @@ class Application:
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             schedule_or_run_workbench_auto_matching_for_scopes=self._schedule_or_run_workbench_auto_matching_for_scopes,
             enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
-            persist_state_with_workbench_invalidation=self._persist_state_with_workbench_invalidation,
+            persist_state_with_workbench_invalidation=self._persist_import_state_with_read_model_invalidation,
             invalidate_tax_offset_read_model_scopes=self._invalidate_tax_offset_read_model_scopes,
             workbench_matching_scope_months_for_import_preview=self._workbench_matching_scope_months_for_import_preview,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
@@ -1103,8 +1109,14 @@ class Application:
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_preview=self._cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=self._cost_statistics_scope_keys_for_import_file_session,
-            sync_etc_import_result_to_canonical_invoices=self._sync_etc_import_result_to_canonical_invoices,
-            refresh_after_etc_invoice_sync=self._refresh_after_etc_invoice_sync,
+            bank_detail_scope_keys_for_import_preview=self._bank_detail_scope_keys_for_import_preview,
+            bank_detail_scope_keys_for_import_file_session=self._bank_detail_scope_keys_for_import_file_session,
+            input_invoice_usage_scope_keys_for_import_preview=self._input_invoice_usage_scope_keys_for_import_preview,
+            input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
+            output_invoice_collection_scope_keys_for_import_preview=self._output_invoice_collection_scope_keys_for_import_preview,
+            output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
+            link_etc_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
+            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
             oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
         )
         self._app_health_service = AppHealthService()
@@ -5194,7 +5206,7 @@ class Application:
             )
         except ValueError as error:
             return self._reconciliation_error_response(error)
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_reconciliation_imported_invoices_removed")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_reconciliation_imported_invoices_removed")
         self._persist_state()
         response_payload = self._etc_reconciliation_task_payload(updated_task)
         response_payload["removedImportBatch"] = delete_result
@@ -5245,7 +5257,7 @@ class Application:
         except ValueError as error:
             return self._reconciliation_error_response(error)
         if removed_import_batch is not None:
-            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_reconciliation_task_deleted")
+            self._refresh_after_etc_invoice_link(changed_months, reason="etc_reconciliation_task_deleted")
             self._persist_state()
         return self._json_response(HTTPStatus.OK, result)
 
@@ -5299,8 +5311,8 @@ class Application:
             refreshed_invoices = self._etc_service.release_missing_submission_batch_link(delete_batch_id)
             changed_months = self._etc_invoice_changed_months(refreshed_invoices)
             if refreshed_invoices:
-                sync_changed_months = self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices)
-                changed_months.extend(sync_changed_months)
+                link_changed_months = self._link_etc_invoices_to_existing_invoices(refreshed_invoices)
+                changed_months.extend(link_changed_months)
             task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
                 task_id=str(getattr(task, "task_id", "")),
                 oa_draft_batch_id=oa_draft_batch_id or delete_batch_id,
@@ -5314,8 +5326,8 @@ class Application:
         refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
         changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
         if refreshed_invoices:
-            sync_changed_months = self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices)
-            changed_months.extend(sync_changed_months)
+            link_changed_months = self._link_etc_invoices_to_existing_invoices(refreshed_invoices)
+            changed_months.extend(link_changed_months)
         if delete_result.get("kind") == "submission_batch":
             task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
                 task_id=str(getattr(task, "task_id", "")),
@@ -5388,7 +5400,7 @@ class Application:
             refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
             changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
             if refreshed_invoices:
-                changed_months.extend(self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices))
+                changed_months.extend(self._link_etc_invoices_to_existing_invoices(refreshed_invoices))
         if delete_result.get("kind") != "submitted_business_batch_reset":
             for linked_import_batch_id in import_batch_ids:
                 if self._etc_service.list_invoices_by_import_batch_id(linked_import_batch_id):
@@ -6171,65 +6183,15 @@ class Application:
             total=total,
         )
 
-    def _handle_api_etc_import_confirm_legacy(self, normalized_session_id: str, headers: dict[str, str] | None) -> Response:
-        try:
-            total = self._etc_service.get_import_session_item_total(normalized_session_id)
-            self._etc_service.validate_import_session_preview_fresh(normalized_session_id)
-        except EtcImportPreviewStaleError as error:
-            return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
-        except EtcServiceError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
-
-        owner_user_id = self._resolve_background_job_owner(headers)
-        idempotency_key = f"etc_import_session:{normalized_session_id}"
-        initial_summary = {
-            "created": 0,
-            "imported": 0,
-            "updated": 0,
-            "attachments_completed": 0,
-            "duplicates": 0,
-            "failed": 0,
-            "total": total,
-        }
-        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-            job_type="etc_invoice_import",
-            label="导入 ETC发票",
-            owner_user_id=owner_user_id,
-            idempotency_key=idempotency_key,
-            phase="queued",
-            current=0,
-            total=total,
-            message="ETC发票导入任务已创建。",
-            result_summary=initial_summary,
-            source={"session_id": normalized_session_id},
-            affected_scopes=["etc_invoices", "imports", "workbench"],
-        )
-        if not created:
-            return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
-
-        def run_etc_import(running_job):
-            return self._import_processing_service.execute_legacy_etc_invoice_import_confirm_job(
-                session_id=normalized_session_id,
-                total=total,
-                background_job_id=running_job.job_id,
-            )
-
-        self._background_job_service.run_job(job, run_etc_import)
-        return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
-
     @staticmethod
     def _etc_import_job_summary(result, total: int) -> dict[str, int]:
         return ImportProcessingService.etc_import_job_summary(result, total)
 
-    def _sync_etc_import_result_to_canonical_invoices(self, result: object) -> list[str]:
-        invoice_numbers = [
-            str(getattr(item, "invoice_number", "") or "").strip()
-            for item in list(getattr(result, "items", []) or [])
-            if str(getattr(item, "invoice_number", "") or "").strip()
-        ]
-        return self._sync_etc_invoices_to_canonical_invoices(
-            self._etc_service.list_invoices_by_numbers(invoice_numbers),
-        )
+    def _link_etc_import_result_to_existing_invoices(self, result: object) -> list[str]:
+        return EtcExistingInvoiceLinkService(
+            import_service=self._import_service,
+            etc_service=self._etc_service,
+        ).link_import_result_to_existing_invoices(result)
 
     @staticmethod
     def _etc_invoice_changed_months(etc_invoices: list[object]) -> list[str]:
@@ -6262,21 +6224,13 @@ class Application:
             return False
         return bool(self._import_service.canonical_invoice_key_exists(normalized_key))
 
-    def _sync_etc_invoices_to_canonical_invoices(self, etc_invoices: list[object]) -> list[str]:
-        changed_months: set[str] = set()
-        for etc_invoice in etc_invoices:
-            invoice = self._import_service.upsert_etc_invoice(etc_invoice)
-            for date_value in (
-                getattr(invoice, "invoice_date", None),
-                getattr(etc_invoice, "issue_date", None),
-                getattr(etc_invoice, "passage_start_date", None),
-                getattr(etc_invoice, "passage_end_date", None),
-            ):
-                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
-                    changed_months.add(date_value[:7])
-        return sorted(changed_months)
+    def _link_etc_invoices_to_existing_invoices(self, etc_invoices: list[object]) -> list[str]:
+        return EtcExistingInvoiceLinkService(
+            import_service=self._import_service,
+            etc_service=self._etc_service,
+        ).link_etc_invoices_to_existing_invoices(etc_invoices)
 
-    def _refresh_after_etc_invoice_sync(self, changed_months: list[str], *, reason: str) -> None:
+    def _refresh_after_etc_invoice_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
             month
             for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
@@ -6287,12 +6241,12 @@ class Application:
         self._execute_derived_data_lifecycle_event(
             "etc_import_confirmed",
             months=normalized_months,
-            metadata={"source": "etc_invoice_sync", "reason": reason},
+            metadata={"source": "etc_invoice_link", "reason": reason},
         )
         self._schedule_or_run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
         self._persist_state()
 
-    def _refresh_after_historical_etc_repair_sync(self, changed_months: list[str], *, reason: str) -> None:
+    def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
             month
             for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
@@ -6303,7 +6257,7 @@ class Application:
         self._execute_derived_data_lifecycle_event(
             "etc_business_batch_changed",
             months=normalized_months,
-            metadata={"source": "historical_etc_repair_sync", "reason": reason},
+            metadata={"source": "historical_etc_repair_link", "reason": reason},
         )
         self._persist_state()
 
@@ -6319,8 +6273,8 @@ class Application:
             etc_service=self._etc_service,
             reconciliation_task_service=self._etc_reconciliation_task_service,
             oa_client_factory=self._build_etc_oa_client,
-            sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
-            refresh_after_etc_invoice_sync=self._refresh_after_etc_invoice_sync,
+            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
         )
         self._etc_business_batch_application_service = service
         self._etc_business_batch_dependency_key = dependency_key
@@ -6669,10 +6623,10 @@ class Application:
             )
         except Exception as error:
             return self._etc_business_error_response(error)
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_batch_import_confirm")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_batch_import_confirm")
         return self._etc_business_response(
             HTTPStatus.OK,
             {"businessBatch": self._etc_service.business_batch_payload(batch), "importResult": self._etc_service.import_result_payload(result)},
@@ -6710,10 +6664,10 @@ class Application:
                 )
         except Exception as error:
             return self._etc_business_error_response(error)
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_draft_created")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_oa_draft_created")
         return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
 
     def _handle_api_etc_business_oa_draft_revoke(self, business_batch_id: str, body: str | bytes | None) -> Response:
@@ -6729,10 +6683,10 @@ class Application:
             )
         except Exception as error:
             return self._etc_business_error_response(error)
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_draft_revoked")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_oa_draft_revoked")
         return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
 
     def _handle_api_etc_business_manual_oa_status(self, business_batch_id: str, body: str | bytes | None) -> Response:
@@ -6788,10 +6742,10 @@ class Application:
                 changed_months.extend(self._cancel_etc_summary_relations_for_batch(batch))
                 refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
                 changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
-                changed_months.extend(self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices))
+                changed_months.extend(self._link_etc_invoices_to_existing_invoices(refreshed_invoices))
                 self._delete_reconciliation_task_after_business_batch_delete(task)
                 if changed_months:
-                    self._refresh_after_etc_invoice_sync(
+                    self._refresh_after_etc_invoice_link(
                         sorted(set(changed_months)),
                         reason="etc_submitted_business_batch_reset",
                     )
@@ -6802,7 +6756,7 @@ class Application:
                 canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
             self._delete_reconciliation_task_after_business_batch_delete(task)
             if canonical_deleted or changed_months:
-                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_batch_deleted")
+                self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_batch_deleted")
                 self._persist_state()
         except EtcBusinessBatchNotFoundError:
             try:
@@ -7070,18 +7024,18 @@ class Application:
                     _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
                     changed_months.extend(import_changed_months)
                     task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
-                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_submission_batch_contents_deleted")
+                self._refresh_after_etc_invoice_link(changed_months, reason="etc_submission_batch_contents_deleted")
                 self._persist_state()
             if result.get("kind") == "submission_batch" and submission_invoice_ids and not submission_import_batch_ids:
                 existing_invoices = self._existing_etc_invoices_by_ids(submission_invoice_ids)
                 if existing_invoices:
-                    changed_months = self._sync_etc_invoices_to_canonical_invoices(existing_invoices)
-                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
+                    changed_months = self._link_etc_invoices_to_existing_invoices(existing_invoices)
+                    self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_draft_deleted")
             if result.get("kind") == "import_batch":
                 canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(str(result.get("batchId") or batch_id))
                 task = self._clear_reconciliation_task_import_after_batch_delete(task, str(result.get("batchId") or batch_id))
                 if canonical_deleted or import_batch_changed_months:
-                    self._refresh_after_etc_invoice_sync(import_batch_changed_months, reason="etc_import_batch_deleted")
+                    self._refresh_after_etc_invoice_link(import_batch_changed_months, reason="etc_import_batch_deleted")
                     self._persist_state()
         except EtcBatchNotFoundError as error:
             if task is not None:
@@ -7098,7 +7052,7 @@ class Application:
                         _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
                         changed_months.extend(import_changed_months)
                         task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
-                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_missing_oa_draft_link_repaired")
+                    self._refresh_after_etc_invoice_link(changed_months, reason="etc_missing_oa_draft_link_repaired")
                     self._persist_state()
                     return self._json_response(HTTPStatus.OK, result)
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
@@ -7686,10 +7640,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_invoice_request", "message": str(error)},
             )
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._etc_service.list_invoices_by_ids(invoice_ids),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_revoke_submitted")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_revoke_submitted")
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_etc_batch_draft(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
@@ -7761,10 +7715,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_draft_request", "message": str(error)},
             )
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._etc_service.list_invoices_by_ids(invoice_ids),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_created")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_draft_created")
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -7802,10 +7756,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_batch_request", "message": str(error)},
             )
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_submission_confirmed")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_submission_confirmed")
         return self._json_response(HTTPStatus.OK, {"batch": batch})
 
     def _handle_api_etc_batch_mark_not_submitted(self, batch_id: str) -> Response:
@@ -7813,10 +7767,10 @@ class Application:
             batch = self._etc_service.mark_not_submitted(batch_id)
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+        changed_months = self._link_etc_invoices_to_existing_invoices(
             self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
         )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_submission_reopened")
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_submission_reopened")
         return self._json_response(HTTPStatus.OK, {"batch": batch})
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
@@ -8267,6 +8221,7 @@ class Application:
         list_application_records = getattr(adapter, "list_application_records", None)
         if not callable(list_application_records):
             return 0
+        recognition_service = InvoiceAttachmentRecognitionService(invoice_repository=self._import_service)
         promoted_count = 0
         for month in sorted(scope_keys):
             if not SEARCH_MONTH_RE.match(month):
@@ -8279,11 +8234,15 @@ class Application:
                     if not isinstance(attachment_invoice, dict):
                         continue
                     row_id = self._import_service.oa_attachment_invoice_row_id(record_id, index, attachment_invoice)
+                    decision = recognition_service.decide(attachment_invoice)
+                    if decision.action == IGNORE:
+                        continue
                     invoice = self._import_service.upsert_oa_attachment_invoice(
                         attachment_invoice,
                         oa_form_id=record_id,
                         oa_row_id=record_id,
                         source_workbench_row_id=row_id,
+                        allow_create=decision.action == CREATE_INVOICE_AND_LINK,
                     )
                     if invoice is not None:
                         promoted_count += 1
@@ -15452,7 +15411,7 @@ class Application:
             imported_by=imported_by,
             rows=rows,
         )
-        self._persist_state_with_workbench_invalidation(invalidate_cost_statistics=False)
+        self._persist_import_preview_state()
         return self._json_response(HTTPStatus.OK, self._serialize_preview(preview))
 
     def _handle_import_confirm(self, body: str | bytes | None) -> Response:
@@ -15641,6 +15600,7 @@ class Application:
         )
         self._persist_state_with_workbench_invalidation(
             cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
+            bank_detail_scope_keys=self._bank_detail_scope_keys_for_import_preview(preview),
         )
         return self._json_response(HTTPStatus.OK, {"batch": self._serialize_value(batch)})
 
@@ -15689,7 +15649,7 @@ class Application:
                 for file, override in zip(files, file_overrides)
             ]
         session = self._file_import_service.preview_files(imported_by=imported_by, uploads=files)
-        self._persist_state_with_workbench_invalidation()
+        self._persist_import_preview_state()
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
@@ -15995,6 +15955,85 @@ class Application:
             normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
         return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
 
+    def _bank_detail_scope_keys_for_import_preview(self, preview: object) -> list[str]:
+        return self._bank_detail_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
+
+    def _bank_detail_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        normalized_rows: list[object] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            if str(getattr(item, "status", "")) != "confirmed":
+                continue
+            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
+        return self._bank_detail_scope_keys_for_import_rows(normalized_rows)
+
+    def _input_invoice_usage_scope_keys_for_import_preview(self, preview: object) -> list[str]:
+        return self._invoice_relation_scope_keys_for_import_preview(preview, BatchType.INPUT_INVOICE)
+
+    def _input_invoice_usage_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        return self._invoice_relation_scope_keys_for_import_file_session(
+            session,
+            selected_file_ids,
+            BatchType.INPUT_INVOICE,
+        )
+
+    def _output_invoice_collection_scope_keys_for_import_preview(self, preview: object) -> list[str]:
+        return self._invoice_relation_scope_keys_for_import_preview(preview, BatchType.OUTPUT_INVOICE)
+
+    def _output_invoice_collection_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        return self._invoice_relation_scope_keys_for_import_file_session(
+            session,
+            selected_file_ids,
+            BatchType.OUTPUT_INVOICE,
+        )
+
+    def _invoice_relation_scope_keys_for_import_preview(self, preview: object, batch_type: BatchType) -> list[str]:
+        batch = getattr(preview, "batch", None)
+        if self._normalized_batch_type(getattr(batch, "batch_type", None)) != batch_type:
+            return []
+        return self._cost_statistics_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
+
+    def _invoice_relation_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+        batch_type: BatchType,
+    ) -> list[str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        normalized_rows: list[object] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            if str(getattr(item, "status", "")) != "confirmed":
+                continue
+            if self._normalized_batch_type(getattr(item, "batch_type", None)) != batch_type:
+                continue
+            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
+        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows) if normalized_rows else []
+
+    @staticmethod
+    def _normalized_batch_type(value: object) -> BatchType | None:
+        if isinstance(value, BatchType):
+            return value
+        try:
+            return BatchType(str(value or "").strip())
+        except ValueError:
+            return None
+
     def _workbench_matching_scope_months_for_import_preview(self, preview: object) -> list[str]:
         return self._workbench_matching_scope_months_for_import_rows(getattr(preview, "normalized_rows", []))
 
@@ -16118,6 +16157,24 @@ class Application:
                     months.add(month)
                     break
         return sorted(months) if months else ["all"]
+
+    @staticmethod
+    def _bank_detail_scope_keys_for_import_rows(rows: object) -> list[str]:
+        months: set[str] = set()
+        for row in list(rows or []):
+            if not isinstance(row, dict):
+                continue
+            if not any(str(row.get(key) or "").strip() for key in ("account_no", "bank_serial_no", "txn_direction")):
+                continue
+            for field in ("txn_date", "trade_time", "trade_date", "pay_receive_time"):
+                raw_value = str(row.get(field) or "").strip()
+                if len(raw_value) < 7:
+                    continue
+                month = raw_value[:7]
+                if SEARCH_MONTH_RE.match(month):
+                    months.add(month)
+                    break
+        return sorted(months)
 
     def _mark_workbench_matching_dirty_scopes(
         self,
@@ -16790,16 +16847,41 @@ class Application:
         self,
         *,
         cost_statistics_scope_keys: list[str] | None = None,
+        bank_detail_scope_keys: list[str] | None = None,
+        input_invoice_usage_scope_keys: list[str] | None = None,
+        output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
     ) -> None:
         self._search_service.clear_cache()
         self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
         self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._invalidate_pending_invoice_read_model_scopes(reason="import_state_changed")
+        input_scope_keys = input_invoice_usage_scope_keys
+        if input_scope_keys is None:
+            input_scope_keys = cost_statistics_scope_keys or ["all"]
+        output_scope_keys = output_invoice_collection_scope_keys
+        if output_scope_keys is None:
+            output_scope_keys = cost_statistics_scope_keys or ["all"]
+        if input_scope_keys:
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                input_scope_keys,
+                reason="import_state_changed",
+                scope_types=["input_invoice_usage"],
+            )
+        if output_scope_keys:
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                output_scope_keys,
+                reason="import_state_changed",
+                scope_types=["output_invoice_collection"],
+            )
         self._invalidate_invoice_usage_collection_read_model_scopes(
             cost_statistics_scope_keys or ["all"],
             reason="import_state_changed",
+            scope_types=["oa_pending_payment"],
         )
+        if bank_detail_scope_keys:
+            self._enqueue_bank_detail_read_model_refreshes(bank_detail_scope_keys, reason="import_facts_changed")
+            self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
         if invalidate_cost_statistics:
             if cost_statistics_scope_keys is None:
                 self._invalidate_cost_statistics_read_models()
@@ -16809,6 +16891,121 @@ class Application:
                     reason="import_state_changed",
                 )
         self._persist_state()
+
+    def _persist_import_preview_state(self) -> None:
+        if self._state_store is None:
+            return
+        self._state_store.save(
+            {
+                "imports": self._import_service.snapshot(),
+                "file_imports": self._file_import_service.snapshot(),
+            }
+        )
+
+    def _persist_import_state_with_read_model_invalidation(
+        self,
+        *,
+        cost_statistics_scope_keys: list[str] | None = None,
+        bank_detail_scope_keys: list[str] | None = None,
+        input_invoice_usage_scope_keys: list[str] | None = None,
+        output_invoice_collection_scope_keys: list[str] | None = None,
+        invalidate_cost_statistics: bool = True,
+    ) -> None:
+        self._search_service.clear_cache()
+        if self._state_store is not None:
+            self._state_store.save(
+                {
+                    "imports": self._import_service.snapshot(),
+                    "file_imports": self._file_import_service.snapshot(),
+                }
+            )
+            save_etc_state = getattr(self._state_store, "save_etc_state", None)
+            if callable(save_etc_state):
+                save_etc_state(
+                    {
+                        **self._etc_service.snapshot(),
+                        "reconciliation_tasks": self._etc_reconciliation_task_service.snapshot(),
+                    }
+                )
+            save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
+            if callable(save_tax_certified_imports):
+                save_tax_certified_imports(self._tax_certified_import_service.snapshot())
+
+        for scope_key in self._import_state_workbench_scope_keys(cost_statistics_scope_keys):
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="import_state_changed")
+        self._enqueue_generic_read_model_refreshes(
+            "workbench_relation",
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+        )
+        self._enqueue_generic_read_model_refreshes(
+            "invoice_lifecycle",
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+        )
+        self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._invalidate_pending_invoice_read_model_scopes(
+            scope_keys=self._import_state_pending_invoice_scope_keys(cost_statistics_scope_keys),
+            reason="import_state_changed",
+        )
+
+        if input_invoice_usage_scope_keys is None:
+            input_invoice_usage_scope_keys = cost_statistics_scope_keys or ["all"]
+        if output_invoice_collection_scope_keys is None:
+            output_invoice_collection_scope_keys = cost_statistics_scope_keys or ["all"]
+        if input_invoice_usage_scope_keys:
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                input_invoice_usage_scope_keys,
+                reason="import_state_changed",
+                scope_types=["input_invoice_usage"],
+            )
+        if output_invoice_collection_scope_keys:
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                output_invoice_collection_scope_keys,
+                reason="import_state_changed",
+                scope_types=["output_invoice_collection"],
+            )
+        self._invalidate_invoice_usage_collection_read_model_scopes(
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+            scope_types=["oa_pending_payment"],
+        )
+        if bank_detail_scope_keys:
+            self._enqueue_bank_detail_read_model_refreshes(bank_detail_scope_keys, reason="import_facts_changed")
+            self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
+        if invalidate_cost_statistics:
+            self._invalidate_cost_statistics_read_model_scopes(
+                cost_statistics_scope_keys or ["all"],
+                reason="import_state_changed",
+            )
+
+    @staticmethod
+    def _import_state_workbench_scope_keys(scope_keys: list[str] | None) -> list[str]:
+        month_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in dict.fromkeys(scope_keys or [])
+            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+        ]
+        return month_scope_keys or ["all"]
+
+    @staticmethod
+    def _import_state_pending_invoice_scope_keys(scope_keys: list[str] | None) -> list[str]:
+        month_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in dict.fromkeys(scope_keys or [])
+            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+        ]
+        if not month_scope_keys:
+            return ["expense:all", "income:all", "income:cash_income"]
+        return [
+            scoped_key
+            for month in month_scope_keys
+            for scoped_key in (
+                f"expense:all:{month}",
+                f"income:all:{month}",
+                f"income:cash_income:{month}",
+            )
+        ]
 
     def _persist_workbench_pair_relations(
         self,
@@ -17778,10 +17975,24 @@ class Application:
             if not external_batch_id:
                 continue
             batch_by_external_batch_id[external_batch_id] = self._business_batch_summary_proxy(business_batch)
-            if external_batch_id not in invoices_by_external_batch_id:
-                invoices_by_external_batch_id[external_batch_id] = self._existing_etc_invoices_by_ids(
+            self._append_etc_summary_invoices(
+                invoices_by_external_batch_id.setdefault(external_batch_id, []),
+                self._existing_etc_invoices_by_ids(
                     [str(invoice_id) for invoice_id in list(getattr(business_batch, "invoice_ids", []) or [])]
-                )
+                ),
+            )
+
+        for batch in self._etc_service.list_batches(status="submitted"):
+            external_batch_id = str(getattr(batch, "etc_batch_id", "") or "").strip()
+            if not external_batch_id:
+                continue
+            batch_by_external_batch_id.setdefault(external_batch_id, batch)
+            self._append_etc_summary_invoices(
+                invoices_by_external_batch_id.setdefault(external_batch_id, []),
+                self._existing_etc_invoices_by_ids(
+                    [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
+                ),
+            )
 
         return {
             external_batch_id: self._build_etc_invoice_summary_row(
@@ -17792,6 +18003,26 @@ class Application:
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
+
+    def _append_etc_summary_invoices(self, target: list[object], invoices: list[object]) -> None:
+        seen = {self._etc_invoice_summary_identity(invoice) for invoice in target}
+        for invoice in list(invoices or []):
+            identity = self._etc_invoice_summary_identity(invoice)
+            if identity and identity in seen:
+                continue
+            target.append(invoice)
+            if identity:
+                seen.add(identity)
+
+    @staticmethod
+    def _etc_invoice_summary_identity(invoice: object) -> str:
+        return str(
+            getattr(invoice, "digital_invoice_no", "")
+            or getattr(invoice, "invoice_no", "")
+            or getattr(invoice, "invoice_number", "")
+            or getattr(invoice, "id", "")
+            or ""
+        ).strip()
 
     def _submitted_etc_business_batches(self) -> list[object]:
         submitted_statuses = {

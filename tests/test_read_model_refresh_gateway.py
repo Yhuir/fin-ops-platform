@@ -103,7 +103,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         enqueued = gateway.enqueue_many(
             "pending_invoice",
             [
-                "all",
                 "expense:all",
                 "income:cash_income",
                 "expense:bank_statement_as_invoice:2026-02",
@@ -116,7 +115,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(
             enqueued,
             [
-                "all",
                 "expense:all",
                 "income:cash_income",
                 "expense:bank_statement_as_invoice:2026-02",
@@ -126,7 +124,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(
             queue.refreshes,
             [
-                {"scope_type": "pending_invoice", "scope_key": "all", "reason": "unit_test"},
                 {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "unit_test"},
                 {"scope_type": "pending_invoice", "scope_key": "income:cash_income", "reason": "unit_test"},
                 {
@@ -149,6 +146,17 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             with self.subTest(invalid_scope_key=invalid_scope_key):
                 with self.assertRaises(ReadModelScopeError):
                     gateway.enqueue_many("pending_invoice", [invalid_scope_key], reason="unit_test")
+        self.assertEqual(queue.refreshes, [])
+
+    def test_pending_invoice_policy_rejects_global_all_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        with self.assertRaises(ReadModelScopeError):
+            gateway.enqueue_many("pending_invoice", ["all"], reason="unit_test")
         self.assertEqual(queue.refreshes, [])
 
     def test_metadata_is_passed_to_queue_repository(self) -> None:

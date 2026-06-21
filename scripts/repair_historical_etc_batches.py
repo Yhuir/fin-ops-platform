@@ -142,8 +142,8 @@ def apply_batch(app, spec: HistoricalEtcBatchSpec, upload: UploadedEtcZipFile, i
             invoice_numbers=missing_numbers,
             uploads=[upload],
         )
-        changed_months = app._sync_etc_import_result_to_canonical_invoices(result)
-        app._refresh_after_etc_invoice_sync(changed_months, reason="historical_etc_missing_invoice_import")
+        changed_months = app._link_etc_import_result_to_existing_invoices(result)
+        app._refresh_after_etc_invoice_link(changed_months, reason="historical_etc_missing_invoice_import")
 
     batch = app._etc_service.create_historical_submitted_batch(
         case_id=spec.case_id,
@@ -154,8 +154,8 @@ def apply_batch(app, spec: HistoricalEtcBatchSpec, upload: UploadedEtcZipFile, i
         note=f"{spec.label} ETC 历史 OA 已提交补关联；用户确认金额差异可接受。",
     )
     invoices = app._etc_service.list_invoices_by_ids(list(batch.invoice_ids))
-    changed_months = app._sync_etc_invoices_to_canonical_invoices(invoices)
-    app._refresh_after_etc_invoice_sync(changed_months, reason="historical_etc_batch_link")
+    changed_months = app._link_etc_invoices_to_existing_invoices(invoices)
+    app._refresh_after_etc_invoice_link(changed_months, reason="historical_etc_batch_link")
 
     relation = app._workbench_pair_relation_service.create_active_relation(
         case_id=spec.case_id,

@@ -123,9 +123,9 @@ class HistoricalEtcRepairService:
         relation_command_service: Any | None = None,
         specs: Iterable[HistoricalEtcRepairBatchSpec] = DEFAULT_HISTORICAL_ETC_REPAIR_SPECS,
         oa_row_exists: Callable[[str], bool] | None = None,
-        sync_import_result_to_canonical_invoices: Callable[[Any], list[str]] | None = None,
-        sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
-        refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
+        link_import_result_to_existing_invoices: Callable[[Any], list[str]] | None = None,
+        link_etc_invoices_to_existing_invoices: Callable[[list[Any]], list[str]] | None = None,
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
         persist_pair_relations: Callable[[list[str]], None] | None = None,
         invalidate_workbench_scopes: Callable[[list[str]], None] | None = None,
         persist_etc_state: Callable[[], None] | None = None,
@@ -136,9 +136,9 @@ class HistoricalEtcRepairService:
         self._relation_command_service = relation_command_service
         self._specs = list(specs)
         self._oa_row_exists = oa_row_exists or (lambda _row_id: True)
-        self._sync_import_result_to_canonical_invoices = sync_import_result_to_canonical_invoices or (lambda _result: [])
-        self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
-        self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync or (lambda _months, _reason: None)
+        self._link_import_result_to_existing_invoices = link_import_result_to_existing_invoices or (lambda _result: [])
+        self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices or (lambda _invoices: [])
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link or (lambda _months, _reason: None)
         self._persist_pair_relations = persist_pair_relations or (lambda _case_ids: None)
         self._invalidate_workbench_scopes = invalidate_workbench_scopes or (lambda _scopes: None)
         self._persist_etc_state = persist_etc_state or (lambda: None)
@@ -303,8 +303,8 @@ class HistoricalEtcRepairService:
                 source_name=f"{spec.bundle_id}.parsed_seed",
             )
             imported_count = int(getattr(import_result, "imported", 0) or 0)
-            changed_months = self._sync_import_result_to_canonical_invoices(import_result)
-            self._refresh_after_etc_invoice_sync(changed_months, f"historical_etc_repair_import:{reason}")
+            changed_months = self._link_import_result_to_existing_invoices(import_result)
+            self._refresh_after_etc_invoice_link(changed_months, f"historical_etc_repair_import:{reason}")
 
         batch = self._etc_service.create_historical_submitted_batch(
             case_id=spec.case_id,
@@ -315,8 +315,8 @@ class HistoricalEtcRepairService:
             note=f"{spec.label} ETC 历史 OA 已提交补关联；自动修复原因：{reason}。",
         )
         invoices = self._etc_service.list_invoices_by_ids(list(batch.invoice_ids))
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(invoices)
-        self._refresh_after_etc_invoice_sync(changed_months, f"historical_etc_repair_link:{reason}")
+        changed_months = self._link_etc_invoices_to_existing_invoices(invoices)
+        self._refresh_after_etc_invoice_link(changed_months, f"historical_etc_repair_link:{reason}")
 
         amount_check = {
             "status": "matched" if batch.amount_delta == Decimal("0.00") else "mismatch",

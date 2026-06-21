@@ -28,8 +28,14 @@ class ImportProcessingService:
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         cost_statistics_scope_keys_for_import_preview: Callable[[Any], list[str]],
         cost_statistics_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        sync_etc_import_result_to_canonical_invoices: Callable[[Any], list[str]],
-        refresh_after_etc_invoice_sync: Callable[..., Any],
+        bank_detail_scope_keys_for_import_preview: Callable[[Any], list[str]],
+        bank_detail_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
+        input_invoice_usage_scope_keys_for_import_preview: Callable[[Any], list[str]],
+        input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
+        output_invoice_collection_scope_keys_for_import_preview: Callable[[Any], list[str]],
+        output_invoice_collection_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
+        link_etc_import_result_to_existing_invoices: Callable[[Any], list[str]],
+        refresh_after_etc_invoice_link: Callable[..., Any],
         oa_manual_import_create_processor: Callable[[ImportJob], dict[str, object]] | None = None,
     ) -> None:
         self._import_service = import_service
@@ -50,8 +56,14 @@ class ImportProcessingService:
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
         self._cost_statistics_scope_keys_for_import_preview = cost_statistics_scope_keys_for_import_preview
         self._cost_statistics_scope_keys_for_import_file_session = cost_statistics_scope_keys_for_import_file_session
-        self._sync_etc_import_result_to_canonical_invoices = sync_etc_import_result_to_canonical_invoices
-        self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync
+        self._bank_detail_scope_keys_for_import_preview = bank_detail_scope_keys_for_import_preview
+        self._bank_detail_scope_keys_for_import_file_session = bank_detail_scope_keys_for_import_file_session
+        self._input_invoice_usage_scope_keys_for_import_preview = input_invoice_usage_scope_keys_for_import_preview
+        self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
+        self._output_invoice_collection_scope_keys_for_import_preview = output_invoice_collection_scope_keys_for_import_preview
+        self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
+        self._link_etc_import_result_to_existing_invoices = link_etc_import_result_to_existing_invoices
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
         self._oa_manual_import_create_processor = oa_manual_import_create_processor
 
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
@@ -114,6 +126,9 @@ class ImportProcessingService:
         )
         self._persist_state_with_workbench_invalidation(
             cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
+            bank_detail_scope_keys=self._bank_detail_scope_keys_for_import_preview(preview),
+            input_invoice_usage_scope_keys=self._input_invoice_usage_scope_keys_for_import_preview(preview),
+            output_invoice_collection_scope_keys=self._output_invoice_collection_scope_keys_for_import_preview(preview),
         )
         return {
             "batch": self._serialize_value(batch),
@@ -205,6 +220,18 @@ class ImportProcessingService:
                     confirmed_session,
                     selected_file_ids,
                 ),
+                bank_detail_scope_keys=self._bank_detail_scope_keys_for_import_file_session(
+                    confirmed_session,
+                    selected_file_ids,
+                ),
+                input_invoice_usage_scope_keys=self._input_invoice_usage_scope_keys_for_import_file_session(
+                    confirmed_session,
+                    selected_file_ids,
+                ),
+                output_invoice_collection_scope_keys=self._output_invoice_collection_scope_keys_for_import_file_session(
+                    confirmed_session,
+                    selected_file_ids,
+                ),
             )
             result_summary = {
                 "confirmed": confirmed_count,
@@ -284,8 +311,8 @@ class ImportProcessingService:
             ),
             None,
         )
-        changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
+        changed_months = self._link_etc_import_result_to_existing_invoices(result)
+        self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_import_confirm")
         summary = self.etc_import_job_summary(result, total)
         result_summary = {key: value for key, value in summary.items() if key != "total_current"}
         status = "partial_success" if result.failed > 0 else "succeeded"
@@ -305,47 +332,6 @@ class ImportProcessingService:
                 import_batch_id=getattr(import_batch, "id", None),
                 actor=owner_user_id,
             )
-        message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
-        if running_job is not None:
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                message,
-                result_summary=result_summary,
-                status=status,
-            )
-        return result_summary
-
-    def execute_legacy_etc_invoice_import_confirm_job(
-        self,
-        *,
-        session_id: str,
-        total: int,
-        background_job_id: str,
-    ) -> dict[str, object]:
-        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
-
-        def progress_callback(result: Any) -> None:
-            if running_job is None:
-                return
-            summary = self.etc_import_job_summary(result, total)
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="persist_items",
-                message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
-                current=int(summary["total_current"]),
-                total=total,
-                result_summary={key: value for key, value in summary.items() if key != "total_current"},
-            )
-
-        result = self._etc_service.confirm_import_session_with_progress(
-            session_id,
-            progress_callback=progress_callback,
-        )
-        changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
-        summary = self.etc_import_job_summary(result, total)
-        result_summary = {key: value for key, value in summary.items() if key != "total_current"}
-        status = "partial_success" if result.failed > 0 else "succeeded"
         message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
         if running_job is not None:
             self._background_job_service.succeed_job(

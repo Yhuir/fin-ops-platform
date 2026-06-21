@@ -42,14 +42,14 @@ class EtcBusinessBatchApplicationService:
         etc_service: EtcService,
         reconciliation_task_service: Any,
         oa_client_factory: Callable[[dict[str, str] | None], Any] | None = None,
-        sync_etc_invoices_to_canonical_invoices: Callable[[list[object]], list[str]] | None = None,
-        refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
+        link_etc_invoices_to_existing_invoices: Callable[[list[object]], list[str]] | None = None,
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
     ) -> None:
         self._etc_service = etc_service
         self._reconciliation_task_service = reconciliation_task_service
         self._oa_client_factory = oa_client_factory
-        self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices
-        self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync
+        self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
 
     def list_batches_payload(self, query: dict[str, list[str]], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
         requested_status = str((query.get("status") or [None])[0] or "").strip()
@@ -172,7 +172,7 @@ class EtcBusinessBatchApplicationService:
             expected_version=expected_version,
             idempotency_key=idempotency_key,
         )
-        self._sync_invoices(batch, "etc_business_batch_import_confirm")
+        self._link_existing_canonical_invoices(batch, "etc_business_batch_import_confirm")
         return {
             "businessBatch": self.business_batch_payload(batch),
             "importResult": self._etc_service.import_result_payload(result),
@@ -208,7 +208,7 @@ class EtcBusinessBatchApplicationService:
                 etc_batch_id=batch.external_etc_batch_id,
                 actor=actor.actor_id,
             )
-        self._sync_invoices(batch, "etc_business_oa_draft_created")
+        self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_created")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def manual_oa_status_payload(
@@ -236,7 +236,7 @@ class EtcBusinessBatchApplicationService:
         )
         if str(decision or "").strip().lower() == "submitted":
             self._record_reconciliation_task_submitted(batch, actor=actor)
-        self._sync_invoices(batch, "etc_business_manual_oa_status")
+        self._link_existing_canonical_invoices(batch, "etc_business_manual_oa_status")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def source_files_payload(
@@ -363,13 +363,13 @@ class EtcBusinessBatchApplicationService:
             code="invalid_reconciliation_task_status",
         )
 
-    def _sync_invoices(self, batch: EtcBusinessBatch, reason: str) -> None:
-        if self._sync_etc_invoices_to_canonical_invoices is None:
+    def _link_existing_canonical_invoices(self, batch: EtcBusinessBatch, reason: str) -> None:
+        if self._link_etc_invoices_to_existing_invoices is None:
             return
         invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(invoices)
-        if self._refresh_after_etc_invoice_sync is not None:
-            self._refresh_after_etc_invoice_sync(changed_months, reason=reason)
+        changed_months = self._link_etc_invoices_to_existing_invoices(invoices)
+        if self._refresh_after_etc_invoice_link is not None:
+            self._refresh_after_etc_invoice_link(changed_months, reason=reason)
 
     def _record_reconciliation_task_submitted(self, batch: EtcBusinessBatch, *, actor: EtcBusinessBatchActor) -> None:
         submission_batch_id = str(getattr(batch, "submission_batch_id", "") or "").strip()

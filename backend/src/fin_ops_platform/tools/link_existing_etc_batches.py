@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
@@ -28,14 +29,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     specs = _load_specs(args.spec_file)
     app = _build_full_snapshot_application(args.data_dir)
     if args.execute:
+        link_service = EtcExistingInvoiceLinkService(
+            import_service=app._import_service,
+            etc_service=app._etc_service,
+            persist_linked_invoices=_invoice_etc_metadata_persister(app),
+        )
         service = ExistingEtcBatchLinkService(
             etc_service=app._etc_service,
             import_service=app._import_service,
             pair_relation_service=app._workbench_pair_relation_service,
             relation_command_service=app._workbench_relation_command_service(),
-            sync_import_result_to_canonical_invoices=lambda result: _sync_import_result_to_canonical_invoices(app, result),
-            sync_etc_invoices_to_canonical_invoices=lambda invoices: _sync_etc_invoices_to_canonical_invoices(app, invoices),
-            refresh_after_etc_invoice_sync=lambda _months, _reason: None,
+            link_import_result_to_existing_invoices=link_service.link_import_result_to_existing_invoices,
+            link_etc_invoices_to_existing_invoices=link_service.link_etc_invoices_to_existing_invoices,
+            refresh_after_etc_invoice_link=lambda _months, _reason: None,
             persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                 changed_case_ids=case_ids,
             ),
@@ -150,37 +156,10 @@ def _invoice_total(app: Any, canonical_by_number: dict[str, Any], invoice_number
     return total.quantize(Decimal("0.01"))
 
 
-def _sync_import_result_to_canonical_invoices(app: Any, result: Any) -> list[str]:
-    invoice_numbers = [
-        str(getattr(item, "invoice_number", "") or "").strip()
-        for item in list(getattr(result, "items", []) or [])
-        if str(getattr(item, "invoice_number", "") or "").strip()
-    ]
-    return _sync_etc_invoices_to_canonical_invoices(
-        app,
-        app._etc_service.list_invoices_by_numbers(invoice_numbers),
-    )
-
-
-def _sync_etc_invoices_to_canonical_invoices(app: Any, etc_invoices: list[Any]) -> list[str]:
-    changed_months: set[str] = set()
-    changed_invoices: list[Any] = []
-    for etc_invoice in etc_invoices:
-        invoice = app._import_service.upsert_etc_invoice(etc_invoice)
-        changed_invoices.append(invoice)
-        for date_value in (
-            getattr(invoice, "invoice_date", None),
-            getattr(etc_invoice, "issue_date", None),
-            getattr(etc_invoice, "passage_start_date", None),
-            getattr(etc_invoice, "passage_end_date", None),
-        ):
-            text_value = str(date_value or "").strip()
-            if len(text_value) >= 7 and text_value[4:5] == "-" and text_value[:4].isdigit() and text_value[5:7].isdigit():
-                changed_months.add(text_value[:7])
-    save_invoice_etc_metadata = getattr(app._state_store, "save_invoice_etc_metadata", None)
-    if callable(save_invoice_etc_metadata) and changed_invoices:
-        save_invoice_etc_metadata(changed_invoices)
-    return sorted(changed_months)
+def _invoice_etc_metadata_persister(app: Any) -> Any | None:
+    state_store = getattr(app, "_state_store", None)
+    save_invoice_etc_metadata = getattr(state_store, "save_invoice_etc_metadata", None)
+    return save_invoice_etc_metadata if callable(save_invoice_etc_metadata) else None
 
 
 def _optional_text(value: object) -> str | None:

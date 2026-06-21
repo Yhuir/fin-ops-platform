@@ -344,6 +344,9 @@ def test_core_repository_lists_bank_transaction_accounts_with_sql_aggregation() 
 
 
 class IdentityConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         if "from app.invoices" in normalized:
@@ -383,7 +386,87 @@ class IdentityConnection:
         return None
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from app.invoices" in normalized and "source_unique_key = any(%s)" in normalized:
+            return [
+                {
+                    "legacy_id": "invoice_existing_sql",
+                    "invoice_type": InvoiceType.OUTPUT.value,
+                    "invoice_no": "9001",
+                    "invoice_date": "2026-03-21",
+                    "counterparty_id": "cp_sql",
+                    "counterparty_name": "Acme Supplies",
+                    "amount": "100.00",
+                    "signed_amount": "100.00",
+                    "written_off_amount": "0.00",
+                    "currency": "CNY",
+                    "source_unique_key": params[0][0],
+                    "invoice_status_from_source": "valid",
+                    "workbench_visibility": "visible",
+                    "status": InvoiceStatus.PENDING.value,
+                    "tags": [],
+                    "source_links": [],
+                    "raw_payload": {"normalized_payload": {"id": "invoice_existing_sql", "invoice_status_from_source": "valid"}},
+                }
+            ]
         raise AssertionError(f"identity lookup must not full-scan facts: {sql}")
+
+
+class DuplicateInvoiceIdentityConnection:
+    def __init__(self) -> None:
+        self.fetch_all_sql: list[str] = []
+        self.fetch_all_params: list[tuple] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.fetch_all_sql.append(" ".join(sql.lower().split()))
+        self.fetch_all_params.append(params)
+        return [
+            {
+                "legacy_id": "invoice_duplicate_1",
+                "invoice_type": InvoiceType.INPUT.value,
+                "invoice_no": "26532000000141671581",
+                "digital_invoice_no": "26532000000141671581",
+                "invoice_date": "2026-01-27",
+                "counterparty_id": "cp_sql",
+                "counterparty_name": "云南建筑技术发展中心",
+                "seller_name": "云南建筑技术发展中心",
+                "buyer_name": "云南溯源科技有限公司",
+                "amount": "400.00",
+                "signed_amount": "400.00",
+                "written_off_amount": "0.00",
+                "total_with_tax": "400.00",
+                "currency": "CNY",
+                "source_unique_key": "26532000000141671581",
+                "workbench_visibility": "visible",
+                "status": InvoiceStatus.PENDING.value,
+                "tags": [],
+                "source_links": [],
+                "raw_payload": {"normalized_payload": {"id": "invoice_duplicate_1"}},
+            },
+            {
+                "legacy_id": "invoice_duplicate_2",
+                "invoice_type": InvoiceType.INPUT.value,
+                "invoice_no": "26532000000141671581",
+                "digital_invoice_no": "26532000000141671581",
+                "invoice_date": "2026-01-27",
+                "counterparty_id": "cp_sql",
+                "counterparty_name": "云南建筑技术发展中心",
+                "seller_name": "云南建筑技术发展中心",
+                "buyer_name": "云南溯源科技有限公司",
+                "amount": "400.00",
+                "signed_amount": "400.00",
+                "written_off_amount": "0.00",
+                "total_with_tax": "400.00",
+                "currency": "CNY",
+                "source_unique_key": "duplicate-source-key",
+                "workbench_visibility": "visible",
+                "status": InvoiceStatus.PENDING.value,
+                "tags": [],
+                "source_links": [],
+                "raw_payload": {"normalized_payload": {"id": "invoice_duplicate_2"}},
+            },
+        ]
 
 
 def test_import_service_uses_sql_identity_repository_without_snapshot_facts() -> None:
@@ -410,6 +493,32 @@ def test_import_service_uses_sql_identity_repository_without_snapshot_facts() ->
     assert preview.row_results[0].linked_object_id == "invoice_existing_sql"
 
 
+def test_find_invoices_by_identity_returns_all_digital_invoice_matches() -> None:
+    connection = DuplicateInvoiceIdentityConnection()
+    repository = PostgresCoreRepository(connection)
+
+    matches = repository.find_invoices_by_identity(canonical_key="26532000000141671581")
+
+    assert [invoice.id for invoice in matches] == ["invoice_duplicate_1", "invoice_duplicate_2"]
+    assert connection.fetch_all_params == [("26532000000141671581", "26532000000141671581")]
+    assert "source_unique_key = %s or digital_invoice_no = %s" in connection.fetch_all_sql[0]
+
+
+def test_find_invoices_by_identity_keys_uses_single_bulk_lookup() -> None:
+    connection = DuplicateInvoiceIdentityConnection()
+    repository = PostgresCoreRepository(connection)
+
+    matches = repository.find_invoices_by_identity_keys(
+        canonical_keys=["26532000000141671581", "26532000000141671581", ""],
+        suspected_keys=["suspected-key"],
+    )
+
+    assert [invoice.id for invoice in matches] == ["invoice_duplicate_1", "invoice_duplicate_2"]
+    assert connection.fetch_all_params == [(["26532000000141671581"], ["26532000000141671581"], ["suspected-key"])]
+    assert "source_unique_key = any(%s)" in connection.fetch_all_sql[0]
+    assert "data_fingerprint = any(%s)" in connection.fetch_all_sql[0]
+
+
 class NotificationConnection:
     def __init__(self) -> None:
         self.executed_sql: list[str] = []
@@ -421,7 +530,7 @@ class NotificationConnection:
         return 1
 
 
-def test_save_imports_marks_read_models_dirty_and_outbox_event() -> None:
+def test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot() -> None:
     connection = NotificationConnection()
     repository = PostgresCoreRepository(connection)
     counterparty = Counterparty(id="cp_1", name="供应商A", normalized_name="供应商A", counterparty_type="vendor")
@@ -442,27 +551,27 @@ def test_save_imports_marks_read_models_dirty_and_outbox_event() -> None:
         counterparty_name_raw="供应商A",
         amount=Decimal("100.00"),
         signed_amount=Decimal("-100.00"),
-        txn_date="2026-05-02",
+        txn_date="2026-06-02",
         source_batch_id="batch_import_0001",
     )
 
     repository.save_imports({"invoices": [invoice], "transactions": [transaction]})
 
     joined_sql = "\n".join(connection.executed_sql) + "\n" + repr(connection.executed_params).lower()
-    assert "insert into job.read_model_dirty_scopes" in joined_sql
-    assert "insert into job.outbox_events" in joined_sql
-    assert "workbench_relation" in joined_sql
-    assert "workbench" in joined_sql
-    assert "bank_detail" in joined_sql
-    assert "pending_invoice" in joined_sql
-    assert "input_invoice_usage" in joined_sql
-    assert "output_invoice_collection" in joined_sql
-    assert "oa_pending_payment" in joined_sql
-    assert "no_oa_bank_batch" in joined_sql
-    assert "cost_statistics" in joined_sql
-    assert "cost" in joined_sql
-    assert "tax_offset" in joined_sql
-    assert "tax" in joined_sql
-    assert "search" in joined_sql
-    assert "where dedupe_key is not null and status = 'pending'" in joined_sql
-    assert "where dedupe_key is not null and status in ('pending', 'processing')" not in joined_sql
+    assert "insert into job.read_model_dirty_scopes" not in joined_sql
+    assert "insert into job.outbox_events" not in joined_sql
+    dirty_params = [
+        params
+        for sql, params in zip(connection.executed_sql, connection.executed_params, strict=True)
+        if "insert into job.read_model_dirty_scopes" in sql
+    ]
+    outbox_params = [
+        params
+        for sql, params in zip(connection.executed_sql, connection.executed_params, strict=True)
+        if "insert into job.outbox_events" in sql
+    ]
+    assert dirty_params == []
+    assert outbox_params == []
+    assert "workbench_relation" not in repr(dirty_params).lower()
+    assert "pending_invoice" not in repr(dirty_params).lower()
+    assert "2026-05" not in repr(dirty_params)

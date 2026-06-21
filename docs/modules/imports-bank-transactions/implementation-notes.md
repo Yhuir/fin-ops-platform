@@ -74,8 +74,8 @@
 
 - 目标：补齐银行流水导入 Spec-first E2E 闭环中的真实 read model/worker 证据入口，避免只用 deterministic Browser mock 或直接 enqueue smoke 声称真实写链路已闭环。
 - 影响范围：`write_operation_slo_audit`、银行流水导入测试矩阵、`IMPORT-BANK-E2E-009` 真实基础设施 gate。
-- 关键决策：profile 名使用业务规格 `bank_import_confirmed`；通用下游仍匹配真实 `*.read_model.refresh` 事件中的 `import_state_changed` scopes，银行账户余额必须出现 `bank_account_balance.read_model.refresh`，银行明细额外要求 exact `import.fact.changed` event type + `import_facts_changed` reason，并通过 dirty scope join 校验 drain 状态。
-- 覆盖 scope：Workbench、Workbench relation、invoice lifecycle、search、待找发票、进项使用、销项收款、OA 待付款、银行账户余额和成本统计。
+- 关键决策：profile 名使用业务规格 `bank_import_confirmed`；通用下游仍匹配真实 `*.read_model.refresh` 事件中的 `import_state_changed` scopes，银行账户余额必须出现 `bank_account_balance.read_model.refresh`，银行明细必须出现真实 `bank_detail.read_model.refresh` + `import_facts_changed` reason。`import.fact.changed` 只保留为 legacy bridge，不再作为银行明细闭环验收事件。银行导入不命中进项/销项发票方向页时，`input_invoice_usage` / `output_invoice_collection` 允许在审计中显示 `skipped`，避免无关方向页固定双刷；后台 worker 的税金抵扣 scope helper 也必须忽略银行流水文件，`tax_offset` 只由进项/销项发票导入触发。银行导入持久化路径以本次导入产生的 `bank_detail_scope_keys` 为信号，同步投递 `bank_account_balance:all`，避免账户余额页面只能靠 API miss 被动补刷。
+- 覆盖 scope：Workbench、Workbench relation、invoice lifecycle、search、待找发票、OA 待付款、银行账户余额、银行明细和成本统计；进项使用/销项收款为方向命中项。
 - 测试覆盖：新增 `tests/test_write_operation_slo_audit.py` 回归，验证完整 scope 才通过，缺少成本统计、银行账户余额等下游 scope 时必须失败。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit -v`；`bash scripts/verify.sh docs`；`bash scripts/verify.sh infra-smoke`。
 - 未测风险：本地契约测试不产生真实银行确认 outbox rows；仍需 staging/发布前运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation bank_import_confirmed --lookback-hours 24`，并通过银行明细账户接口或页面 smoke 核对账户余额 API freshness gate 和真实 import worker / read model worker 状态。

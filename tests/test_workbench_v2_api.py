@@ -6674,6 +6674,46 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(invoice.source_links[0]["derived_from_oa_id"], "oa-exp-202603-001")
         self.assertEqual(invoice.source_links[0]["source_attachment_key"], "oa-exp-202603-001:file:1")
 
+    def test_oa_attachment_invoice_cache_update_ignores_incomplete_ocr_identity(self) -> None:
+        partial_invoice = {
+            "source_attachment_key": "oa-exp-202603-001:file:1",
+            "source_attachment_name": "发票.pdf",
+            "evidence_type": "tax_invoice",
+            "invoice_type": "进项发票",
+            "seller_name": "云南城建物业运营集团",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-03-06",
+            "invoice_no": "21026521",
+            "amount": "566.04",
+            "total_with_tax": "600.00",
+        }
+        oa_record = OAApplicationRecord(
+            id="oa-exp-202603-001",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="刘际涛",
+            project_name="冷水机组维护",
+            apply_type="付款申请",
+            amount="600.00",
+            counterparty_name="云南城建物业运营集团",
+            reason="维护费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            attachment_invoices=[partial_invoice],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
+
+            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+
+            invoices = app._import_service.list_invoices()
+
+        self.assertEqual(invoices, [])
+
     def test_oa_sync_change_marks_dirty_without_evicting_hot_read_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -7546,7 +7586,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 oa_amount=Decimal("26.14"),
                 note="历史补关联",
             )
-            app._sync_etc_invoices_to_canonical_invoices(app._etc_service.list_invoices_by_ids(list(batch.invoice_ids)))
+            app._link_etc_invoices_to_existing_invoices(app._etc_service.list_invoices_by_ids(list(batch.invoice_ids)))
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="etc-historical-2026-01",
                 row_ids=["oa-exp-1994"],

@@ -18,7 +18,7 @@
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
-  - 删除未提交批次会清理本地导入批次、ETC 发票和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失并使散票回到未配对区。
+  - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
   - 绑定的 `etc_reconciliation_tasks` 删除后必须落为 `deleted` tombstone，而不是从内存 snapshot 中物理移除；列表、详情、ready-for-import 入口必须过滤 deleted task，但 tombstone 保留 task counter 和重启后的删除事实，防止 Postgres 只追加/更新式持久化在部署后重新加载旧 task-only 行。
   - 已提交 `etc_invoice_summary` 若已经参与关联台 active relation，删除批次时必须取消包含该 summary row 的 active relation；取消后不得恢复历史 OA+银行流水二栏 active relation，OA 和银行流水各自回到未配对。
 - 禁止流转：
@@ -43,7 +43,7 @@
 - `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench open 区投影一条合并行；投影失败时不应把批次回滚成未提交。
 - `etc_invoice_summary` 的展示金额可以保留千分位格式；read model 必须同时持久化结构化金额，用于 `workbench_rows.amount`、分组搜索文本和金额过滤。
 - refresh 触发来源：ETC 导入确认、OA 草稿创建、人工提交确认、人工未提交确认、业务批次本地删除/重置、关联台普通配对关系确认或撤回。
-- canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认必须使用同一 ETC invoice 同步路径，避免后台导入成功但本地发票索引未刷新。
+- canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认只能把 ETC metadata 关联到已存在的 canonical invoice，不得从 ETC 专用表创建 canonical invoice。
 - 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
 - 生产残留清理：若历史部署已留下“业务批次已删除但 reconciliation task 仍存在”的 task-only 行，使用 `fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks` 按显式 `--task-id` dry-run/execute 清理；工具必须走 service 删除边界，不直接 SQL 删除任务行。
 
@@ -60,8 +60,8 @@
 | 2026-06-10 | 修复 ETC 导入/OA 草稿后本地 canonical invoice 持久化弱 fingerprint 冲突，并补齐导入失败 job 的同 session 重试语义，清理旧 ETC OA detection 部署残留 | ImportNormalizationService、Postgres invoice repository、runtime import worker、BackgroundJobService、ETC import confirm API、migration、RabbitMQ 部署样例 | `tests.test_import_service`；`tests.test_postgres_core_repository`；`tests.test_platform_runtime_boundary_guards`；`tests.test_postgres_migrations`；`tests.test_rabbitmq_staging_preflight`；`tests.test_etc_backend` |
 | 2026-06-10 | 清理 ETC 任务删除旧状态阻塞，并确认页面初始化不自动创建空任务 | reconciliation task 删除、旧 batch 删除兼容入口、ETC 页面初始化请求 | `tests.test_etc_backend`；`tests.test_etc_reconciliation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | 彻底移除 ETC 专用 OA 自动检测后端链路，草稿后统一进入 `oa_confirmation_pending` 等待人工确认 | ETC business batch API、worker registry、OA projection/Mongo adapter、前端状态显示、历史状态迁移 | `tests.test_etc_backend`；`tests.test_platform_runtime_boundary_guards`；`tests.test_oa_projection_sql_runtime`；`tests.test_mongo_oa_adapter`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
-| 2026-06-09 | ETC 批次删除入口统一为任意阶段本地清理；绑定 summary 的 active relation 取消且不恢复历史 OA+流水二栏关系 | ETC 任务入口删除、业务批次入口删除、Workbench active relation、open 区散票恢复 | `tests.test_etc_backend`；`tests.test_workbench_pair_relation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
-| 2026-06-09 | 已提交 ETC 业务批次支持本地删除/重置，释放合并发票但保留 OA 和已闭环任务事实 | ETC 页面 submitted bucket、业务批次状态、Workbench open 区散票恢复 | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |
+| 2026-06-09 | ETC 批次删除入口统一为任意阶段本地清理；绑定 summary 的 active relation 取消且不恢复历史 OA+流水二栏关系 | ETC 任务入口删除、业务批次入口删除、Workbench active relation、summary 释放和已存在 canonical invoice 可见性恢复 | `tests.test_etc_backend`；`tests.test_workbench_pair_relation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
+| 2026-06-09 | 已提交 ETC 业务批次支持本地删除/重置，释放合并关系但保留 OA 和已闭环任务事实 | ETC 页面 submitted bucket、业务批次状态、summary 释放和已存在 canonical invoice 可见性恢复 | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | `etc_invoice_summary` 增加结构化金额并写入 workbench numeric/search 字段，同时修复历史已提交批次数据 | 关联台金额搜索、ETC 历史批次闭环、Workbench read model | `tests.test_workbench_sql_runtime`；生产数据 SQL 验证 |
 | 2026-06-09 | Workbench SQL projection 将已提交 ETC 业务批次作为 `etc_invoice_summary` 一等来源，repository 持久化业务批次上报金额和数量 | ETC 人工已提交批次、关联台 open 区 summary、Postgres read model | `tests.test_workbench_sql_runtime`；`tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-08 | ETC 页面统一为单个业务批次链路；人工确认已提交后闭环对账任务并投影 `etc_invoice_summary` | ETC 批次、关联台 open 区、人工确认 API | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |

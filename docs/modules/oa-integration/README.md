@@ -28,6 +28,7 @@
 - OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
 - OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
 - OA 手动搜索/导入：`backend/src/fin_ops_platform/services/oa_manual_import_service.py`、`backend/src/fin_ops_platform/app/server.py`
+- OA 附件发票识别：`backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py`、`backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
 - 目标申请人凭据：`backend/src/fin_ops_platform/services/oa_applicant_credentials.py`、`backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
 - 进项发票 OA 反提：`backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py`
 - ETC OA 草稿/人工确认：`backend/src/fin_ops_platform/services/etc_service.py`、`backend/src/fin_ops_platform/services/etc_business_batch_application_service.py`、`backend/src/fin_ops_platform/app/routes_etc.py`
@@ -39,6 +40,7 @@
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
 - `Admin-Token` 只作为会话来源；后端必须二次校验 `finops:app:view` 和 app 内访问等级。
 - OA 同步通过 worker / durable queue 写入本系统投影，再触发 Workbench、Search、Invoice Lifecycle、OA 待付款、进项使用、税金、成本等下游 read model。
+- OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
 - ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。
 - 真实 OA 登录、RSA 加密、OA 草稿页面、生产 Mongo 字段变体和 OA 菜单角色同步必须通过 staging/生产前 smoke 补证，本地测试只能保护 contract 与失败处理。

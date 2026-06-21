@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
     DEFAULT_OA_IMPORT_FORM_TYPES,
@@ -16,6 +17,7 @@ from fin_ops_platform.services.background_job_service import BackgroundJobServic
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
+from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
 from fin_ops_platform.services.import_file_service import FileImportService
@@ -136,11 +138,17 @@ class ImportRuntimeProcessorFactory:
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_preview=_cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
-            sync_etc_import_result_to_canonical_invoices=_sync_etc_import_result_to_canonical_invoices(
+            bank_detail_scope_keys_for_import_preview=_bank_detail_scope_keys_for_import_preview,
+            bank_detail_scope_keys_for_import_file_session=_bank_detail_scope_keys_for_import_file_session,
+            input_invoice_usage_scope_keys_for_import_preview=_input_invoice_usage_scope_keys_for_import_preview,
+            input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
+            output_invoice_collection_scope_keys_for_import_preview=_output_invoice_collection_scope_keys_for_import_preview,
+            output_invoice_collection_scope_keys_for_import_file_session=_output_invoice_collection_scope_keys_for_import_file_session,
+            link_etc_import_result_to_existing_invoices=_link_etc_import_result_to_existing_invoices(
                 import_service,
                 etc_service,
             ),
-            refresh_after_etc_invoice_sync=lifecycle.refresh_after_etc_invoice_sync,
+            refresh_after_etc_invoice_link=lifecycle.refresh_after_etc_invoice_link,
             oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
         )
         return processing_service.build_import_job_processors()
@@ -208,6 +216,7 @@ def build_import_job_handler_bundle(
     worker_id: str,
     processors: dict[str, Callable[[Any], dict[str, object]]],
     include_import_fact_changed: bool,
+    queue_repository: Any | None = None,
 ) -> RuntimeWorkerHandlerBundle:
     import_job_repository = ImportJobRepository(connection)
     import_job_worker = ImportJobWorker(
@@ -219,7 +228,10 @@ def build_import_job_handler_bundle(
         IMPORT_PROCESS_REQUESTED_EVENT: import_job_worker.handle_runtime_event,
     }
     if include_import_fact_changed:
-        handlers[IMPORT_FACT_CHANGED_EVENT] = handle_import_fact_changed_event
+        handlers[IMPORT_FACT_CHANGED_EVENT] = lambda event: handle_import_fact_changed_event(
+            event,
+            queue_repository=queue_repository,
+        )
     return RuntimeWorkerHandlerBundle(handlers=handlers)
 
 
@@ -319,14 +331,14 @@ class _RuntimeWorkerDerivedLifecycle:
     def invalidate_tax_offset_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
         return self._enqueue_scopes("tax_offset", scope_keys, reason=reason)
 
-    def refresh_after_etc_invoice_sync(self, changed_months: list[str], *, reason: str) -> None:
+    def refresh_after_etc_invoice_link(self, changed_months: list[str], *, reason: str) -> None:
         months = [month for month in _dedupe_text(changed_months) if SEARCH_MONTH_RE.match(month)]
         if not months:
             return
         self.execute_event(
             "etc_import_confirmed",
             months=months,
-            metadata={"source": "etc_invoice_sync", "reason": reason},
+            metadata={"source": "etc_invoice_link", "reason": reason},
         )
         self.schedule_workbench_matching(months, reason=reason)
 
@@ -339,6 +351,9 @@ class _RuntimeWorkerDerivedLifecycle:
         etc_reconciliation_task_service: Any,
         tax_certified_import_service: Any,
         cost_statistics_scope_keys: list[str] | None = None,
+        bank_detail_scope_keys: list[str] | None = None,
+        input_invoice_usage_scope_keys: list[str] | None = None,
+        output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
     ) -> None:
         self._search_service.clear_cache()
@@ -368,18 +383,31 @@ class _RuntimeWorkerDerivedLifecycle:
         self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("search", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes("pending_invoice", ["expense:all", "income:all", "income:cash_income"], reason="import_state_changed")
         self._enqueue_scopes(
-            "input_invoice_usage",
-            cost_statistics_scope_keys or ["all"],
+            "pending_invoice",
+            _pending_invoice_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
             reason="import_state_changed",
         )
-        self._enqueue_scopes(
-            "output_invoice_collection",
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-        )
+        if input_invoice_usage_scope_keys is None:
+            input_invoice_usage_scope_keys = cost_statistics_scope_keys or ["all"]
+        if output_invoice_collection_scope_keys is None:
+            output_invoice_collection_scope_keys = cost_statistics_scope_keys or ["all"]
+        if input_invoice_usage_scope_keys:
+            self._enqueue_scopes(
+                "input_invoice_usage",
+                input_invoice_usage_scope_keys,
+                reason="import_state_changed",
+            )
+        if output_invoice_collection_scope_keys:
+            self._enqueue_scopes(
+                "output_invoice_collection",
+                output_invoice_collection_scope_keys,
+                reason="import_state_changed",
+            )
         self._enqueue_scopes("oa_pending_payment", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        if bank_detail_scope_keys:
+            self._enqueue_scopes("bank_detail", bank_detail_scope_keys, reason="import_facts_changed")
+            self._enqueue_scopes("bank_account_balance", ["all"], reason="import_state_changed")
         if invalidate_cost_statistics:
             self._enqueue_scopes("cost_statistics", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
 
@@ -598,60 +626,22 @@ def _persist_import_state_callback(
     )
 
 
-def _sync_etc_import_result_to_canonical_invoices(import_service: Any, etc_service: Any | None = None) -> Callable[[Any], list[str]]:
-    def sync(result: Any) -> list[str]:
-        changed_months: set[str] = set()
-        for etc_invoice in _etc_invoices_from_import_result(result, etc_service):
-            invoice = import_service.upsert_etc_invoice(etc_invoice)
-            for date_value in (
-                getattr(invoice, "invoice_date", None),
-                getattr(etc_invoice, "issue_date", None),
-                getattr(etc_invoice, "passage_start_date", None),
-                getattr(etc_invoice, "passage_end_date", None),
-            ):
-                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
-                    changed_months.add(date_value[:7])
-        return sorted(changed_months)
+def _link_etc_import_result_to_existing_invoices(import_service: Any, etc_service: Any | None = None) -> Callable[[Any], list[str]]:
+    link_service = EtcExistingInvoiceLinkService(import_service=import_service, etc_service=etc_service)
 
-    return sync
+    def link(result: Any) -> list[str]:
+        return link_service.link_import_result_to_existing_invoices(result)
+
+    return link
 
 
-def _etc_invoices_from_import_result(result: Any, etc_service: Any | None) -> list[Any]:
-    direct_invoices = list(getattr(result, "invoices", None) or getattr(result, "imported_invoices", None) or [])
-    if direct_invoices:
-        return direct_invoices
-    list_invoices_by_numbers = getattr(etc_service, "list_invoices_by_numbers", None)
-    if not callable(list_invoices_by_numbers):
-        return []
-    invoice_numbers: list[str] = []
-    seen: set[str] = set()
-    for item in list(getattr(result, "items", None) or []):
-        invoice_number = str(getattr(item, "invoice_number", "") or "").strip()
-        if not invoice_number or invoice_number in seen:
-            continue
-        invoice_numbers.append(invoice_number)
-        seen.add(invoice_number)
-    if not invoice_numbers:
-        return []
-    return list(list_invoices_by_numbers(invoice_numbers) or [])
+def _link_etc_invoices_to_existing_invoices(import_service: Any) -> Callable[[list[Any]], list[str]]:
+    link_service = EtcExistingInvoiceLinkService(import_service=import_service)
 
+    def link(etc_invoices: list[Any]) -> list[str]:
+        return link_service.link_etc_invoices_to_existing_invoices(etc_invoices)
 
-def _sync_etc_invoices_to_canonical_invoices(import_service: Any) -> Callable[[list[Any]], list[str]]:
-    def sync(etc_invoices: list[Any]) -> list[str]:
-        changed_months: set[str] = set()
-        for etc_invoice in list(etc_invoices or []):
-            invoice = import_service.upsert_etc_invoice(etc_invoice)
-            for date_value in (
-                getattr(invoice, "invoice_date", None),
-                getattr(etc_invoice, "issue_date", None),
-                getattr(etc_invoice, "passage_start_date", None),
-                getattr(etc_invoice, "passage_end_date", None),
-            ):
-                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
-                    changed_months.add(date_value[:7])
-        return sorted(changed_months)
-
-    return sync
+    return link
 
 
 def _oa_manual_import_create_processor(*, state_store: Any) -> Callable[[Any], dict[str, object]]:
@@ -666,10 +656,6 @@ def _oa_manual_import_create_processor(*, state_store: Any) -> Callable[[Any], d
         return add_manual_oa_imports([str(row_id) for row_id in row_ids], actor_id=actor_id)
 
     return process
-
-
-def _unsupported_etc_oa_client_factory(*_args: Any, **_kwargs: Any) -> Any:
-    raise RuntimeError("ETC OA draft HTTP client is not available in the OA detection worker.")
 
 
 def _workbench_matching_scope_months_for_import_preview(preview: Any) -> list[str]:
@@ -697,11 +683,30 @@ def _workbench_matching_scope_months_for_import_rows(rows: Any) -> list[str]:
 
 
 def _tax_offset_scope_keys_for_import_preview(preview: Any) -> list[str]:
+    batch = getattr(preview, "batch", None)
+    if _normalized_batch_type(getattr(batch, "batch_type", None)) not in {
+        BatchType.INPUT_INVOICE,
+        BatchType.OUTPUT_INVOICE,
+    }:
+        return []
     return _tax_offset_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
 
 def _tax_offset_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
-    return _workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
+    selected = {str(file_id) for file_id in list(selected_file_ids or [])}
+    rows: list[Any] = []
+    for file in list(getattr(session, "files", []) or []):
+        if str(getattr(file, "id", "") or "") not in selected:
+            continue
+        if str(getattr(file, "status", "") or "") != "confirmed":
+            continue
+        if _normalized_batch_type(getattr(file, "batch_type", None)) not in {
+            BatchType.INPUT_INVOICE,
+            BatchType.OUTPUT_INVOICE,
+        }:
+            continue
+        rows.extend(list(getattr(file, "normalized_rows", []) or []))
+    return _tax_offset_scope_keys_for_import_rows(rows)
 
 
 def _tax_offset_scope_keys_for_import_rows(rows: Any) -> list[str]:
@@ -721,9 +726,100 @@ def _cost_statistics_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return months or ["all"]
 
 
+def _bank_detail_scope_keys_for_import_preview(preview: Any) -> list[str]:
+    return _bank_detail_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
+
+
+def _bank_detail_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
+    selected = {str(file_id) for file_id in list(selected_file_ids or [])}
+    rows: list[Any] = []
+    for file in list(getattr(session, "files", []) or []):
+        if str(getattr(file, "id", "") or "") in selected:
+            rows.extend(list(getattr(file, "normalized_rows", []) or []))
+    return _bank_detail_scope_keys_for_import_rows(rows)
+
+
+def _bank_detail_scope_keys_for_import_rows(rows: Any) -> list[str]:
+    months: set[str] = set()
+    for row in list(rows or []):
+        payload = row if isinstance(row, dict) else getattr(row, "__dict__", {})
+        if not any(str(payload.get(key) or "").strip() for key in ("account_no", "bank_serial_no", "txn_direction")):
+            continue
+        for key in ("txn_date", "trade_time", "trade_date", "pay_receive_time"):
+            value = str(payload.get(key) or "").strip()
+            if SEARCH_MONTH_RE.match(value[:7]):
+                months.add(value[:7])
+    return sorted(months)
+
+
+def _input_invoice_usage_scope_keys_for_import_preview(preview: Any) -> list[str]:
+    return _invoice_relation_scope_keys_for_import_preview(preview, BatchType.INPUT_INVOICE)
+
+
+def _input_invoice_usage_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
+    return _invoice_relation_scope_keys_for_import_file_session(session, selected_file_ids, BatchType.INPUT_INVOICE)
+
+
+def _output_invoice_collection_scope_keys_for_import_preview(preview: Any) -> list[str]:
+    return _invoice_relation_scope_keys_for_import_preview(preview, BatchType.OUTPUT_INVOICE)
+
+
+def _output_invoice_collection_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
+    return _invoice_relation_scope_keys_for_import_file_session(session, selected_file_ids, BatchType.OUTPUT_INVOICE)
+
+
+def _invoice_relation_scope_keys_for_import_preview(preview: Any, batch_type: BatchType) -> list[str]:
+    batch = getattr(preview, "batch", None)
+    if _normalized_batch_type(getattr(batch, "batch_type", None)) != batch_type:
+        return []
+    return _cost_statistics_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
+
+
+def _invoice_relation_scope_keys_for_import_file_session(
+    session: Any,
+    selected_file_ids: list[str],
+    batch_type: BatchType,
+) -> list[str]:
+    selected = {str(file_id) for file_id in list(selected_file_ids or [])}
+    rows: list[Any] = []
+    for file in list(getattr(session, "files", []) or []):
+        if str(getattr(file, "id", "") or "") not in selected:
+            continue
+        if str(getattr(file, "status", "") or "") != "confirmed":
+            continue
+        if _normalized_batch_type(getattr(file, "batch_type", None)) != batch_type:
+            continue
+        rows.extend(list(getattr(file, "normalized_rows", []) or []))
+    return _cost_statistics_scope_keys_for_import_rows(rows) if rows else []
+
+
+def _normalized_batch_type(value: Any) -> BatchType | None:
+    if isinstance(value, BatchType):
+        return value
+    try:
+        return BatchType(str(value or "").strip())
+    except ValueError:
+        return None
+
+
 def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
     month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
     return month_scope_keys or ["all"]
+
+
+def _pending_invoice_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
+    month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
+    if not month_scope_keys:
+        return ["expense:all", "income:all", "income:cash_income"]
+    return [
+        scoped_key
+        for month in month_scope_keys
+        for scoped_key in (
+            f"expense:all:{month}",
+            f"income:all:{month}",
+            f"income:cash_income:{month}",
+        )
+    ]
 
 
 class _WorkbenchSqlMatchingRowProvider:
@@ -739,14 +835,31 @@ class _WorkbenchSqlMatchingRowProvider:
         }
 
 
-def handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
+def handle_import_fact_changed_event(event: Any, *, queue_repository: Any | None = None) -> dict[str, Any]:
     scope_type = str(getattr(event, "scope_type", None) or event.payload.get("scope_type") or "").strip()
     scope_key = str(getattr(event, "scope_key", None) or event.payload.get("scope_key") or "").strip()
+    refresh_enqueued = False
+    if scope_type == "bank_detail" and scope_key:
+        gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
+        refresh_enqueued = bool(gateway.enqueue_one("bank_detail", scope_key, reason="import_facts_changed"))
+    dirty_scope_completed = False
+    complete = getattr(queue_repository, "complete_read_model_refresh", None)
+    if callable(complete) and scope_type and scope_key:
+        source_version = getattr(event, "source_version", None) or event.payload.get("source_version") or 0
+        complete(
+            tenant_id=str(getattr(event, "tenant_id", None) or "default"),
+            scope_type=scope_type,
+            scope_key=scope_key,
+            source_version=source_version,
+        )
+        dirty_scope_completed = True
     return {
         "status": "acknowledged",
         "event_type": IMPORT_FACT_CHANGED_EVENT,
         "scope_type": scope_type,
         "scope_key": scope_key,
+        "refresh_enqueued": refresh_enqueued,
+        "dirty_scope_completed": dirty_scope_completed,
         "note": "import fact dirty scopes are persisted by the import fact writer",
     }
 

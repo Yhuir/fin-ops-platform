@@ -26,6 +26,28 @@
 
 ## 历史记录
 
+## 2026-06-21 - 导入 preview/confirm 轻量化与批量查重
+
+- 目标：修复发票导入 preview/confirm/read model 链路中的两个性能瓶颈：preview/confirm 每行远程查重，以及 preview 保存整份 workbench 关系快照并触发 read model 刷新。
+- 影响范围：legacy `/imports/preview`、文件 `/imports/files/preview`、导入 confirm job 持久化、PostgreSQL invoice identity repository、下游 read model enqueue；不改变发票 identity 规则、重复判定语义或 confirm 后写入的 canonical invoice facts。
+- 关键决策：preview 只保存 `imports` 与 `file_imports` 的预览/session 状态，不刷新 Workbench、pending invoice、invoice usage、search、cost 等 read model。confirm 前仍会重新校验当前 DB 状态，但同一批次使用一次 bulk identity preload，避免逐行 DB 往返。confirm 后使用轻量 import-state persistence，只保存 import/file/ETC/tax import 状态并通过 read model gateway 投递必要 scopes，不再持久化整份 `workbench_pair_relations` snapshot。
+- 文档影响：本实施记录和 `tests.md` 已同步；长期 API shape 不变。
+- 测试覆盖：新增/更新 `tests/test_import_service.py`、`tests/test_postgres_repositories_core.py`、`tests/test_import_file_api.py`，覆盖批量发票 identity preload、PostgreSQL bulk lookup、文件 preview 不调用重型 workbench persistence。
+- 验证命令：`pytest -q tests/test_import_service.py tests/test_postgres_repositories_core.py tests/test_import_file_api.py tests/test_import_processing_service.py`。
+- 未测风险：本地测试证明代码边界和查询形态，不替代真实生产大文件上传、RabbitMQ/worker drain、Redis cache 或浏览器手工导入 smoke。清空发票池后需要由用户重新手工导入 371+20 文件验证完整链路。
+- 后续事项：真实手工导入后只读观察 `app.invoices` 计数、read model queue drain、下游页面 freshness 和 App Health，确认没有长期 `processing/refreshing`。
+
+## 2026-06-20 - 发票导入 read model 刷新链路收敛
+
+- 目标：针对真实发票导入后“关联台可逐步看到新增/更新发票，但全局状态长期同步中”的问题，修复 runtime queue/worker 闭环并降低导入 fan-out。
+- 影响范围：发票导入确认后的 `import_state_changed` fan-out、下游 pending invoice/workbench read model refresh、银行流水导入兼容的 `bank_detail` refresh bridge；不改变发票解析、重复判定或 canonical invoice 写入语义。
+- 关键决策：用户看到关联台新增发票不等于 read model 链路完成；导入成功必须以后端 dirty/outbox/readiness 全部收敛为准。`save_imports` 只保存完整 facts snapshot，不再从全量 snapshot 推导 `import.fact.changed`；发票导入不应产生 `import_facts_changed` 旁路。pending invoice 在有影响月份时直接投递月级 scope，避免全量 aggregate 先展开再刷新。银行流水导入的银行明细刷新由本次导入行计算月份并投递真实 `bank_detail.read_model.refresh`，兼容 `import.fact.changed` handler 也只作为 legacy bridge 投递真实 refresh 后完成兼容 dirty scope。runtime queue 的 superseded 判定新增创建顺序约束，避免历史高 `source_version` done event 覆盖当前导入产生的新 event。
+- 后续优化：发票导入已进一步支持方向级 fan-out；进项文件只投递 `input_invoice_usage`，销项文件只投递 `output_invoice_collection`，混合导入按各自文件月份分别投递。`write_operation_slo_audit` 中这两个方向页为可选命中项，缺少未命中方向显示 `skipped`，不再误判 input-only/output-only 导入失败。
+- 文档影响：同步 runtime-workers 与 read-models 模块记录；本模块真实基础设施 gate 仍需发布后执行。
+- 测试覆盖：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_runtime_monitoring.py tests/test_import_job_queue.py tests/test_runtime_worker_registry.py tests/test_read_model_refresh_gateway.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests/test_write_operation_slo_audit.py -q`。
+- 未测风险：本地测试不连接真实生产 RabbitMQ/Redis/systemd worker；发布后必须只读观察本次导入相关 outbox/dirty/readiness 是否归零，并用小批量发票重新导入跑 `invoice_import_confirmed` write-operation SLO audit。
+
 ## 2026-06-19 - 发票导入成功路径 UI 错误残留 guard
 
 - 目标：补齐发票导入 Browser 成功链路的“假成功”检测，防止 confirm 或下游 fresh 成功后页面仍残留导入失败、后台导入失败、read model 失败等提示。

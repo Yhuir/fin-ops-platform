@@ -35,6 +35,7 @@
 - `backend/src/fin_ops_platform/services/etc_reconciliation_zip_filter.py`
 - `backend/src/fin_ops_platform/services/etc_document_parsers.py`
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
+- `backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
 - `backend/src/fin_ops_platform/services/import_job_queue.py`
 - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
@@ -47,7 +48,7 @@
 
 ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务。预览阶段会用对账任务的 confirmed item set 过滤 zip 内发票，只允许与任务要求匹配的发票进入 import session；确认阶段会校验 task version、`confirmed_item_set_hash` 和 import session freshness，创建 `etc_invoice_import` 后台 job，并通过 `etc_invoice_import.confirm` processor 完成导入。
 
-ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch 和 ETC invoice facts，随后同步 canonical invoice facts，再触发 `etc_import_confirmed` 派生生命周期。业务批次后续的 OA 草稿创建、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块，但本导入模块必须把这些 fan-out 风险写入测试矩阵。
+ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch 和 ETC invoice metadata / PDF / XML 附件关系，再触发 `etc_import_confirmed` 派生生命周期。ETC ZIP 不再直接创建统一发票池事实；统一发票池 `app.invoices` 只由正式进/销项发票导入，或 OA 附件识别 service 判定为正式发票且池内不存在时受控创建。业务批次后续的 OA 草稿创建、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块，但本导入模块必须把这些 fan-out 风险写入测试矩阵。
 
 核心 fan-out：
 
@@ -57,8 +58,8 @@ ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入
 | zip preview | `preview_etc_zip_for_task(...)` + `EtcService.preview_import_zips(...)` | 当前导入页 preview、missing requirements、duplicate audit |
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
 | confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
-| confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice facts、canonical invoice facts |
-| lifecycle refresh | `etc_import_confirmed` | 关联台、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
+| confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice metadata、PDF/XML 附件关系；只关联已存在 canonical invoice，不创建新 canonical invoice |
+| lifecycle refresh | `etc_import_confirmed` | 关联台、ETC summary row、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
 | 业务批次提交/删除 | `manual-oa-status`、business batch delete | ETC 票据管理、关联台 summary row、税金/成本刷新 |
 
 ## 维护触发器

@@ -1321,7 +1321,8 @@ class RuntimeQueueRepository:
                     dedupe_key,
                     source_version,
                     locked_by,
-                    locked_at
+                    locked_at,
+                    created_at
                 from job.outbox_events
                 where id = %s
                   and status = 'processing'
@@ -1348,10 +1349,22 @@ class RuntimeQueueRepository:
                       and id <> %s
                       and status in ('pending', 'processing', 'done')
                       and coalesce(source_version, 0) >= coalesce(%s, 0)
+                      and (
+                          created_at > %s
+                          or (created_at = %s and id > %s::uuid)
+                      )
                     order by coalesce(source_version, 0) desc, created_at desc, id desc
                     limit 1
                     """,
-                    (target["tenant_id"], dedupe_key, target["event_id"], target.get("source_version")),
+                    (
+                        target["tenant_id"],
+                        dedupe_key,
+                        target["event_id"],
+                        target.get("source_version"),
+                        target.get("created_at"),
+                        target.get("created_at"),
+                        target["event_id"],
+                    ),
                 )
 
             if cover is not None:
@@ -1469,10 +1482,22 @@ class RuntimeQueueRepository:
                   and id <> %s
                   and status in ('pending', 'processing', 'done')
                   and coalesce(source_version, 0) >= coalesce(%s, 0)
+                  and (
+                      created_at > %s
+                      or (created_at = %s and id > %s::uuid)
+                  )
                 order by coalesce(source_version, 0) desc, created_at desc, id desc
                 limit 1
                 """,
-                (target["tenant_id"], dedupe_key, target["event_id"], target.get("source_version")),
+                (
+                    target["tenant_id"],
+                    dedupe_key,
+                    target["event_id"],
+                    target.get("source_version"),
+                    target.get("created_at"),
+                    target.get("created_at"),
+                    target["event_id"],
+                ),
             )
             if cover is None:
                 return False
@@ -1538,7 +1563,8 @@ class RuntimeQueueRepository:
                     dedupe_key,
                     source_version,
                     locked_by,
-                    locked_at
+                    locked_at,
+                    created_at
                 from job.outbox_events
                 where id = %s
                   and status = 'processing'
@@ -1561,10 +1587,22 @@ class RuntimeQueueRepository:
                   and id <> %s
                   and status in ('pending', 'processing', 'done')
                   and coalesce(source_version, 0) >= coalesce(%s, 0)
+                  and (
+                      created_at > %s
+                      or (created_at = %s and id > %s::uuid)
+                  )
                 order by coalesce(source_version, 0) desc, created_at desc, id desc
                 limit 1
                 """,
-                (target["tenant_id"], target["dedupe_key"], target["event_id"], target.get("source_version")),
+                (
+                    target["tenant_id"],
+                    target["dedupe_key"],
+                    target["event_id"],
+                    target.get("source_version"),
+                    target.get("created_at"),
+                    target.get("created_at"),
+                    target["event_id"],
+                ),
             )
             if cover is None:
                 return False
@@ -1718,14 +1756,15 @@ class RuntimeQueueRepository:
         row = self._connection.fetch_one(
             """
             select 1
-            from job.read_model_dirty_scopes
+            from job.outbox_events
             where tenant_id = %s
               and scope_type = %s
               and scope_key = %s
+              and event_type = %s
               and status in ('pending', 'processing')
             limit 1
             """,
-            (tenant_id, scope_type, scope_key),
+            (tenant_id, scope_type, scope_key, f"{scope_type}.read_model.refresh"),
         )
         return row is not None
 

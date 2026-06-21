@@ -504,6 +504,7 @@ class TaxOffsetApiTests(unittest.TestCase):
                 0,
                 attachment_invoice,
             ),
+            allow_create=True,
         )
 
         response = app.handle_request("GET", "/api/tax-offset?month=2026-01")

@@ -116,8 +116,8 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                 etc_service=app._etc_service,
                 pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: refreshes.append((list(months), reason)),
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: refreshes.append((list(months), reason)),
                 persist_pair_relations=lambda case_ids: persisted_relations.append(list(case_ids)),
                 invalidate_workbench_scopes=lambda scopes: invalidations.append(list(scopes)),
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
@@ -169,8 +169,7 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
         self.assertEqual(business_batch.submission_batch_id, submitted_batch.id)
         self.assertEqual(business_batch.external_etc_batch_id, "ETC-OA-20260215-154900")
         self.assertEqual({invoice.business_batch_id for invoice in invoices}, {"etc_business_batch_hist_20260215_154900"})
-        self.assertEqual(canonical_invoices["ETC-HIST-001"].workbench_visibility, "hidden_after_etc_submission")
-        self.assertEqual(canonical_invoices["ETC-HIST-001"].etc_submission_batch_id, submitted_batch.id)
+        self.assertEqual(canonical_invoices, {})
         self.assertEqual(refreshes[-1], (["2026-01", "2026-02"], "historical_etc_business_batch_migration:ETC-OA-20260215-154900"))
         self.assertEqual(invalidations[-1], ["all", "2026-01", "2026-02"])
         self.assertEqual(persisted_relations[-1], ["CASE-HIST-MIGRATION"])
@@ -238,8 +237,8 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
             service = HistoricalEtcBusinessBatchMigrationService(
                 etc_service=app._etc_service,
                 pair_relation_service=app._workbench_pair_relation_service,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),

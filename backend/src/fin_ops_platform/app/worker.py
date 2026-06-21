@@ -468,6 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             worker_id=config.worker_id,
             processors=import_processors,
             include_import_fact_changed=True,
+            queue_repository=queue,
         )
         handlers.update(import_handlers.handlers)
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:

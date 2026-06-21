@@ -63,8 +63,8 @@ class HistoricalEtcBusinessBatchMigrationService:
         etc_service: EtcService,
         pair_relation_service: Any,
         relation_command_service: Any | None = None,
-        sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
-        refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
+        link_etc_invoices_to_existing_invoices: Callable[[list[Any]], list[str]] | None = None,
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
         persist_pair_relations: Callable[[list[str]], None] | None = None,
         invalidate_workbench_scopes: Callable[[list[str]], None] | None = None,
         persist_etc_state: Callable[[], None] | None = None,
@@ -72,8 +72,8 @@ class HistoricalEtcBusinessBatchMigrationService:
         self._etc_service = etc_service
         self._pair_relation_service = pair_relation_service
         self._relation_command_service = relation_command_service
-        self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
-        self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync or (lambda _months, _reason: None)
+        self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices or (lambda _invoices: [])
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link or (lambda _months, _reason: None)
         self._persist_pair_relations = persist_pair_relations or (lambda _case_ids: None)
         self._invalidate_workbench_scopes = invalidate_workbench_scopes or (lambda _scopes: None)
         self._persist_etc_state = persist_etc_state or (lambda: None)
@@ -100,12 +100,12 @@ class HistoricalEtcBusinessBatchMigrationService:
         amount_delta = (reported_amount - invoice_total).quantize(Decimal("0.01"))
         changed_months = self._changed_months(
             [
-                *self._sync_etc_invoices_to_canonical_invoices(invoices),
+                *self._link_etc_invoices_to_existing_invoices(invoices),
                 str(spec.scope_month or "").strip(),
             ]
         )
         if changed_months:
-            self._refresh_after_etc_invoice_sync(changed_months, f"historical_etc_business_batch_migration:{spec.external_batch_id}")
+            self._refresh_after_etc_invoice_link(changed_months, f"historical_etc_business_batch_migration:{spec.external_batch_id}")
         self._update_relation_metadata(
             spec,
             relation,

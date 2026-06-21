@@ -7,6 +7,49 @@ from fin_ops_platform.services.invoice_identity_service import InvoiceIdentitySe
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
+class BulkInvoiceIdentityRepository:
+    def __init__(self, invoices: list[Invoice] | None = None) -> None:
+        self.invoices = list(invoices or [])
+        self.bulk_calls = 0
+        self.single_calls = 0
+        self.many_calls = 0
+
+    def find_invoices_by_identity_keys(
+        self,
+        *,
+        canonical_keys: list[str],
+        suspected_keys: list[str],
+    ) -> list[Invoice]:
+        self.bulk_calls += 1
+        canonical_set = set(canonical_keys)
+        suspected_set = set(suspected_keys)
+        return [
+            invoice
+            for invoice in self.invoices
+            if (invoice.source_unique_key and invoice.source_unique_key in canonical_set)
+            or (invoice.digital_invoice_no and invoice.digital_invoice_no in canonical_set)
+            or (invoice.data_fingerprint and invoice.data_fingerprint in suspected_set)
+        ]
+
+    def find_invoice_identity(
+        self,
+        *,
+        source_unique_key: str | None = None,
+        data_fingerprint: str | None = None,
+    ) -> Invoice | None:
+        self.single_calls += 1
+        return None
+
+    def find_invoices_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[Invoice]:
+        self.many_calls += 1
+        return []
+
+
 class ImportNormalizationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.counterparty = Counterparty(
@@ -84,7 +127,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(weak_identity.canonical_key)
         self.assertEqual(weak_identity.suspected_key, "suspected:云南省交通投资建设集团有限公司:云南溯源科技有限公司:2026-02-05:41.75")
 
-    def test_upsert_etc_invoice_does_not_reuse_weak_fingerprint_when_invoice_number_changed(self) -> None:
+    def test_upsert_etc_invoice_does_not_create_missing_canonical_invoice_by_default(self) -> None:
         existing = Invoice(
             id="inv_existing_etc",
             invoice_type=InvoiceType.INPUT,
@@ -127,16 +170,44 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
         invoice = service.upsert_etc_invoice(etc_invoice)
 
-        self.assertNotEqual(invoice.id, "inv_existing_etc")
-        self.assertEqual(invoice.source_unique_key, "NEW-ETC-NO")
-        self.assertIsNone(invoice.data_fingerprint)
-        self.assertEqual(invoice.etc_invoice_id, "etc_invoice_new")
-        self.assertEqual(invoice.etc_submission_batch_id, "etc_batch_0035")
-        self.assertEqual(invoice.workbench_visibility, "hidden_after_etc_submission")
-        self.assertEqual(len(service.list_invoices()), 2)
+        self.assertIsNone(invoice)
+        self.assertEqual(len(service.list_invoices()), 1)
 
-    def test_upsert_etc_invoice_keeps_same_amount_same_day_invoices_distinct(self) -> None:
-        service = ImportNormalizationService()
+    def test_upsert_etc_invoice_links_same_amount_same_day_existing_invoices_distinctly(self) -> None:
+        counterparty = Counterparty(
+            id="cp_etc_same_day",
+            name="昆明新机场高速公路建设发展有限公司",
+            normalized_name="昆明新机场高速公路建设发展有限公司",
+            counterparty_type="vendor",
+        )
+        service = ImportNormalizationService(
+            existing_invoices=[
+                Invoice(
+                    id="inv_existing_etc_0442",
+                    invoice_type=InvoiceType.INPUT,
+                    invoice_no="26537911470300077680",
+                    digital_invoice_no="26537911470300077680",
+                    counterparty=counterparty,
+                    amount=Decimal("9.23"),
+                    signed_amount=Decimal("9.23"),
+                    invoice_date="2026-03-31",
+                    total_with_tax=Decimal("9.50"),
+                    source_unique_key="26537911470300077680",
+                ),
+                Invoice(
+                    id="inv_existing_etc_0443",
+                    invoice_type=InvoiceType.INPUT,
+                    invoice_no="26537911470300077790",
+                    digital_invoice_no="26537911470300077790",
+                    counterparty=counterparty,
+                    amount=Decimal("9.23"),
+                    signed_amount=Decimal("9.23"),
+                    invoice_date="2026-03-31",
+                    total_with_tax=Decimal("9.50"),
+                    source_unique_key="26537911470300077790",
+                ),
+            ]
+        )
         base_fields = {
             "issue_date": "2026-03-31",
             "seller_name": "昆明新机场高速公路建设发展有限公司",
@@ -157,7 +228,12 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         first_invoice = service.upsert_etc_invoice(first)
         second_invoice = service.upsert_etc_invoice(second)
 
-        self.assertNotEqual(first_invoice.id, second_invoice.id)
+        self.assertIsNotNone(first_invoice)
+        self.assertIsNotNone(second_invoice)
+        assert first_invoice is not None
+        assert second_invoice is not None
+        self.assertEqual(first_invoice.id, "inv_existing_etc_0442")
+        self.assertEqual(second_invoice.id, "inv_existing_etc_0443")
         self.assertEqual(first_invoice.source_unique_key, "26537911470300077680")
         self.assertEqual(second_invoice.source_unique_key, "26537911470300077790")
         self.assertIsNone(first_invoice.data_fingerprint)
@@ -430,6 +506,69 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         created = next(invoice for invoice in self.service.list_invoices() if invoice.invoice_no == "9010")
         self.assertEqual(created.counterparty.normalized_name, "created corp")
 
+    def test_preview_import_preloads_invoice_identity_in_bulk(self) -> None:
+        repository = BulkInvoiceIdentityRepository(invoices=[self.existing_invoice])
+        service = ImportNormalizationService(fact_repository=repository)
+
+        preview = service.preview_import(
+            batch_type=BatchType.OUTPUT_INVOICE,
+            source_name="bulk-preview.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9001",
+                    "counterparty_name": "Acme Supplies",
+                    "amount": "100.00",
+                    "invoice_date": "2026-03-21",
+                },
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9011",
+                    "counterparty_name": "New Supplies",
+                    "amount": "50.00",
+                    "invoice_date": "2026-03-22",
+                },
+            ],
+        )
+
+        self.assertEqual(repository.bulk_calls, 1)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(preview.row_results[1].decision, ImportDecision.CREATED)
+
+    def test_confirm_import_refreshes_invoice_identity_in_bulk(self) -> None:
+        repository = BulkInvoiceIdentityRepository()
+        service = ImportNormalizationService(fact_repository=repository)
+        preview = service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="bulk-confirm.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9012",
+                    "counterparty_name": "Created Corp",
+                    "amount": "200.00",
+                    "invoice_date": "2026-03-25",
+                },
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9013",
+                    "counterparty_name": "Created Corp",
+                    "amount": "201.00",
+                    "invoice_date": "2026-03-26",
+                },
+            ],
+        )
+
+        service.confirm_import(preview.id)
+
+        self.assertEqual(repository.bulk_calls, 2)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
+
     def test_confirm_import_preserves_selected_bank_mapping_fields_on_created_transactions(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -657,6 +796,64 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(created.source_links[0]["source_type"], "manual_invoice_import")
         self.assertEqual(created.source_links[0]["batch_id"], preview.id)
 
+    def test_remove_etc_import_batch_keeps_formal_canonical_invoice_and_removes_etc_source_link(self) -> None:
+        formal_invoice = Invoice(
+            id="inv_formal_etc_001",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="26537911470300077680",
+            digital_invoice_no="26537911470300077680",
+            counterparty=self.counterparty,
+            amount=Decimal("9.23"),
+            signed_amount=Decimal("9.23"),
+            invoice_date="2026-03-31",
+            total_with_tax=Decimal("9.50"),
+            source_unique_key="26537911470300077680",
+            invoice_source="增值税发票综合服务平台",
+            invoice_kind="数电发票",
+            etc_import_batch_id="etc_import_batch_legacy",
+            source_links=[
+                {"source_type": "manual_invoice_import", "batch_id": "formal_excel_batch"},
+                {"source_type": "etc_invoice_import", "batch_id": "etc_import_batch_legacy"},
+            ],
+        )
+        service = ImportNormalizationService(existing_invoices=[formal_invoice])
+
+        affected = service.remove_etc_invoices_by_import_batch_id("etc_import_batch_legacy")
+
+        self.assertEqual(affected, 1)
+        remaining = service.get_invoice("inv_formal_etc_001")
+        self.assertIs(remaining, formal_invoice)
+        self.assertIsNone(remaining.etc_import_batch_id)
+        self.assertEqual(remaining.source_batch_id, None)
+        self.assertEqual(
+            remaining.source_links,
+            [{"source_type": "manual_invoice_import", "batch_id": "formal_excel_batch"}],
+        )
+
+    def test_remove_etc_import_batch_deletes_only_legacy_etc_created_canonical_invoice(self) -> None:
+        polluted_invoice = Invoice(
+            id="inv_legacy_etc_created",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="ETC-LEGACY-001",
+            counterparty=self.counterparty,
+            amount=Decimal("9.23"),
+            signed_amount=Decimal("9.23"),
+            invoice_date="2026-03-31",
+            total_with_tax=Decimal("9.50"),
+            invoice_source="ETC导入",
+            invoice_kind="ETC发票",
+            etc_import_batch_id="etc_import_batch_legacy",
+            source_links=[
+                {"source_type": "etc_invoice_import", "batch_id": "etc_import_batch_legacy"},
+            ],
+        )
+        service = ImportNormalizationService(existing_invoices=[polluted_invoice])
+
+        affected = service.remove_etc_invoices_by_import_batch_id("etc_import_batch_legacy")
+
+        self.assertEqual(affected, 1)
+        self.assertEqual(service.list_invoices(), [])
+
     def test_oa_attachment_invoice_upsert_creates_canonical_invoice_with_source_context(self) -> None:
         invoice = self.service.upsert_oa_attachment_invoice(
             {
@@ -682,6 +879,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             oa_form_id="oa-form-001",
             oa_row_id="oa-exp-001",
             source_workbench_row_id="oa-att-inv-oa-exp-001-stable",
+            allow_create=True,
         )
 
         self.assertIsNotNone(invoice)
@@ -713,6 +911,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             oa_form_id="oa-form-001",
             oa_row_id="oa-exp-001",
             source_workbench_row_id="oa-att-inv-oa-exp-001-first",
+            allow_create=True,
         )
         second = self.service.upsert_oa_attachment_invoice(
             {
@@ -758,6 +957,74 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
         self.assertIsNone(invoice)
         self.assertFalse(any(link.get("source_type") == "oa_attachment_invoice" for inv in self.service.list_invoices() for link in inv.source_links))
+
+    def test_oa_attachment_allow_create_requires_strong_invoice_identity(self) -> None:
+        initial_invoice_ids = {invoice.id for invoice in self.service.list_invoices()}
+
+        invoice = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "tax_invoice",
+                "seller_tax_no": "91530000431200506F",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_tax_no": "915300007194052520",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "attachment-key-without-invoice-no",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-weak",
+            allow_create=True,
+        )
+
+        self.assertIsNone(invoice)
+        self.assertEqual({invoice.id for invoice in self.service.list_invoices()}, initial_invoice_ids)
+
+    def test_oa_attachment_allow_create_requires_formal_invoice_evidence(self) -> None:
+        initial_invoice_ids = {invoice.id for invoice in self.service.list_invoices()}
+
+        invoice = self.service.upsert_oa_attachment_invoice(
+            {
+                "digital_invoice_no": "26532000000141671583",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "attachment-key-without-evidence-type",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-unknown-evidence",
+            allow_create=True,
+        )
+
+        self.assertIsNone(invoice)
+        self.assertEqual({invoice.id for invoice in self.service.list_invoices()}, initial_invoice_ids)
+
+    def test_oa_attachment_allow_create_accepts_formal_document_kind_without_evidence_type(self) -> None:
+        invoice = self.service.upsert_oa_attachment_invoice(
+            {
+                "document_kind": "digital_invoice",
+                "digital_invoice_no": "26532000000141671583",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "attachment-key-formal-document-kind",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-formal-document-kind",
+            allow_create=True,
+        )
+
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice.digital_invoice_no, "26532000000141671583")
 
 
 if __name__ == "__main__":

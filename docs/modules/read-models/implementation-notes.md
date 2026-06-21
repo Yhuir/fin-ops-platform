@@ -28,6 +28,36 @@
 
 ## 历史记录
 
+## 2026-06-21 - Read model dependency active 判定与 invalid scope 清理入口
+
+- 目标：修复 downstream read model 在依赖 dirty scope 已 orphan 但无 active outbox 时长期 `refreshing` 的问题，并阻止/清理无效 `pending_invoice:all` 运行时事件。
+- 影响范围：runtime queue active 判定、dependency-not-fresh 补刷、pending invoice scope policy、read model SLO smoke、scope contract repair CLI 和 PostgreSQL repository。
+- 关键决策：`RuntimeQueueRepository.read_model_refresh_is_active(...)` 只代表“是否存在 pending/processing outbox event”，不再用 dirty scope 伪装 active；dirty scope 是否 stale/fresh 继续由 `read_model_refresh_is_fresh(...)` 判断。`pending_invoice` scope contract 不再接受裸 `all`，合法 aggregate scope 必须带方向，例如 `expense:all` 或 `income:cash_income`。`read_model_slo_smoke --scope ...` 有显式 scope 时不再额外加入页面首屏默认 scope。新增 `scripts/check-read-model-scope-contracts.py --repair invalid-read-model-scopes`，只删除 scope policy 明确判定 invalid 的 policy-managed dirty/outbox/readiness runtime 行，并写入 audit/rollback manifest；不猜测 replacement。
+- 文档影响：同步更新 read-model/runtime-worker 测试矩阵和 worker 治理文档。
+- 测试覆盖：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_pending_invoice_policy_rejects_global_all_scope`、`tests/test_read_model_slo_smoke.py::ReadModelSloSmokeTests::test_explicit_pending_invoice_scope_does_not_add_page_first_screen_scope`、`tests/test_read_model_scope_contract.py` invalid scope repair/audit/idempotency tests。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_scope_contract.py tests/test_read_model_refresh_gateway.py tests/test_runtime_queue.py tests/test_read_model_slo_smoke.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_runtime_monitoring.py tests/test_import_job_queue.py tests/test_import_processing_service.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes -q`。
+- 未测风险：生产 apply 需要在发布后执行 dry-run/apply/post-check，并观察 backlog 是否被补投的依赖 refresh drain 完成；真实 HTTP 写入 smoke 仍需要有效登录态或 bearer/cookie。
+
+## 2026-06-20 - Orphaned import fact dirty scope repair
+
+- 目标：为真实导入后 App Status 长时间同步中的历史状态补受控清理入口。只读审计发现 `import.fact.changed` outbox 已 `done`，但 `reason=import_facts_changed` 的 dirty scope 仍 pending，且没有 active outbox 可 claim。
+- 影响范围：`ReadModelScopeContractService`、`PostgresReadModelScopeContractRepository`、`scripts/check-read-model-scope-contracts.py`；不改变 read model refresh 事实源，不写 fresh readiness。
+- 关键决策：新增 `--repair orphaned-import-facts` 模式，默认 dry-run；`--apply` 只删除没有 active `import.fact.changed` outbox 对应的 orphaned legacy dirty scope，并写入审计和 rollback manifest。当前和未来导入链路仍由真实 `*.read_model.refresh` event 和 dirty scope 证明 freshness。
+- 测试覆盖：`tests/test_read_model_scope_contract.py::ReadModelScopeContractServiceTests::test_postgres_repository_lists_only_orphaned_import_fact_dirty_scopes`、`test_check_reports_orphaned_import_fact_dirty_scopes_without_writes`、`test_apply_deletes_orphaned_import_fact_dirty_scopes_and_records_audit`、`test_orphaned_import_fact_repair_is_idempotent`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_scope_contract.py -q`；真实 runtime dry-run：`scripts/check-read-model-scope-contracts.py --repair orphaned-import-facts --json` 返回 42 条 orphaned dirty scope、`cleanup.applied=false`。
+- 未测风险：未执行生产 `--apply`；清理后仍需重新跑 App Status/dirty scope 只读检查和 write-operation SLO audit。
+
+## 2026-06-20 - Import fan-out source ordering and pending invoice month shards
+
+- 目标：收敛发票导入后的 read model refresh 长尾，避免旧 outbox event 覆盖新 dirty scope，并把待找发票导入后刷新从全量 aggregate 收窄到影响月份。
+- 影响范围：runtime queue superseded cover、import snapshot 保存边界、pending invoice read model refresh scope、银行明细导入 refresh；不改变业务 API payload shape。
+- 关键决策：superseded cover 必须是创建顺序晚于当前 event 的同 dedupe event；仅靠 source_version 高低不能跨历史事件域覆盖当前 dirty scope。`save_imports` 保存完整 snapshot 时不再发 read model refresh，当前写操作 fan-out 由 import processing 根据本次 preview/session rows 投递。导入影响月份已知时，pending invoice 使用 month shard scope，缺月份时才回退到历史全量 aggregate；银行明细必须验收真实 `bank_detail.read_model.refresh`，不能只看兼容 `import.fact.changed` ack。
+- 后续优化：发票导入方向页 fan-out 改为按本次文件方向命中刷新。`input_invoice` 只投递 `input_invoice_usage` scope，`output_invoice` 只投递 `output_invoice_collection` scope；未命中方向不入队，避免同月无关页面被刷新。后台税金抵扣 scope helper 同步过滤 batch type，银行流水导入不再误投 `tax_offset`。银行流水导入现在以本次导入的 `bank_detail_scope_keys` 为信号同步投递 `bank_account_balance:all`，让账户余额 read model 和银行明细一起进入 durable queue。
+- 文档影响：同步 runtime-workers 与 imports-invoices 模块记录；read model durable truth 边界不变。
+- 测试覆盖：`tests/test_runtime_queue.py`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py`、`tests/test_import_job_queue.py`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_runtime_monitoring.py tests/test_import_job_queue.py tests/test_runtime_worker_registry.py tests/test_read_model_refresh_gateway.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests/test_write_operation_slo_audit.py -q`。
+- 未测风险：真实生产数据量下的 enqueue-to-fresh 收益需发布后通过 write-operation SLO audit 和 App Status/dirty scope 只读观察确认。
+
 ## 2026-06-19 - Authenticated HTTP probe 发现成本统计 schema 查询漂移
 
 - 目标：推进生产 authenticated runtime gate，并修复 probe 暴露的成本统计 SQL read model 查询与真实表结构不一致问题。

@@ -215,6 +215,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
             oa_form_id="oa-exp-202602-001",
             oa_row_id="oa-exp-202602-001",
             source_workbench_row_id="oa-att-inv-oa-exp-202602-001-01",
+            allow_create=True,
         )
         self.assertIsNotNone(invoice)
         service = TaxOffsetService(
@@ -245,6 +246,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
                 "source_attachment_name": "高速发票.pdf",
                 "evidence_type": "tax_invoice",
                 "issue_date": "2026-03-04",
+                "invoice_code": "053001",
                 "invoice_no": "53000125",
                 "tax_rate": "0%",
                 "tax_amount": "0.00",
@@ -256,6 +258,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
             oa_form_id="oa-exp-2035",
             oa_row_id="oa-exp-2035",
             source_workbench_row_id="oa-att-inv-2035-001",
+            allow_create=True,
         )
         receipt = import_service.upsert_oa_attachment_invoice(
             {
@@ -303,6 +306,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
                 "source_attachment_key": "oa-exp-202603-001:file:1",
                 "evidence_type": "tax_invoice",
                 "issue_date": "2026-03-24",
+                "invoice_code": "053001",
                 "invoice_no": "15312761",
                 "tax_rate": "13%",
                 "tax_amount": "23.01",
@@ -317,6 +321,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
             oa_form_id="oa-exp-202603-001",
             oa_row_id="oa-exp-202603-001",
             source_workbench_row_id="oa-att-inv-oa-exp-202603-001-01",
+            allow_create=True,
         )
         service = TaxOffsetService(
             import_service=import_service,

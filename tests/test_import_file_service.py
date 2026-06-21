@@ -36,6 +36,20 @@ def repeat_last_xlsx_row(content: bytes, *, total_data_rows: int) -> bytes:
     return buffer.getvalue()
 
 
+def invoice_export_second_sheet_file() -> bytes:
+    source = load_workbook(BytesIO(INVOICE_JAN.content))
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "导出摘要"
+    summary["A1"] = "此工作表不是发票明细。"
+    data_sheet = workbook.create_sheet("合并数据")
+    for row in source.active.iter_rows(values_only=True):
+        data_sheet.append(list(row))
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 class FakeImportIdStore:
     def __init__(self) -> None:
         self._existing_session_ids = {"import_session_0001", "import_session_0002"}
@@ -140,6 +154,27 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.status, "preview_ready")
         self.assertEqual(preview_file.template_code, "invoice_export")
         self.assertEqual(preview_file.batch_type.value, "input_invoice")
+
+    def test_preview_detects_invoice_data_when_summary_sheet_is_first(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name="进项发票合并.xlsx",
+                    content=invoice_export_second_sheet_file(),
+                    batch_type_override="input_invoice",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "invoice_export")
+        self.assertEqual(preview_file.row_count, 1)
+        self.assertEqual(preview_file.normalized_rows[0]["digital_invoice_no"], "25502000000145098656")
 
     def test_preview_skips_existing_session_file_and_batch_ids_when_counters_restart(self) -> None:
         file_store = FakeImportIdStore()

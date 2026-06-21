@@ -11,8 +11,9 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
+from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
-from fin_ops_platform.services.runtime_worker_handlers import _sync_etc_import_result_to_canonical_invoices
+from fin_ops_platform.services.runtime_worker_handlers import _link_etc_import_result_to_existing_invoices
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap
 
 
@@ -915,6 +916,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         etc_tool_source = etc_tool_path.read_text(encoding="utf-8")
         if "list_invoices(" in etc_tool_source:
             violations.append(f"{_relative(etc_tool_path)} dry-run scans canonical invoices with list_invoices()")
+        if "EtcExistingInvoiceLinkService" not in etc_tool_source:
+            violations.append(f"{_relative(etc_tool_path)} does not delegate ETC invoice linking to EtcExistingInvoiceLinkService")
+        if "upsert_etc_invoice" in etc_tool_source:
+            violations.append(f"{_relative(etc_tool_path)} owns ETC canonical invoice link loop")
         audit_tool_path = TOOLS_ROOT / "audit_object_identity.py"
         audit_tool_source = audit_tool_path.read_text(encoding="utf-8")
         if "invoice_evidence_types" in audit_tool_source or "document_kind.endswith" in audit_tool_source:
@@ -931,6 +936,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             ):
                 if f"{constant_name} =" in source:
                     violations.append(f"{rel_path} defines private OA attachment invoice evidence type set {constant_name}")
+
+        self.assertEqual(violations, [])
+
+    def test_oa_attachment_invoice_create_permission_is_gated_by_recognition_service(self) -> None:
+        violations: list[str] = []
+        allowed_path = "backend/src/fin_ops_platform/app/server.py"
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT):
+            rel_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            if "allow_create=" not in source:
+                continue
+            if rel_path != allowed_path:
+                violations.append(f"{rel_path} passes allow_create to OA attachment invoice upsert")
+
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        promote_method = _function_source(_parse(server_path), server_source, "_promote_oa_attachment_invoices_to_canonical")
+        if "InvoiceAttachmentRecognitionService" not in promote_method:
+            violations.append("server.py OA attachment promotion does not use InvoiceAttachmentRecognitionService")
+        if "allow_create=decision.action == CREATE_INVOICE_AND_LINK" not in promote_method:
+            violations.append("server.py OA attachment promotion does not gate allow_create on CREATE_INVOICE_AND_LINK")
 
         self.assertEqual(violations, [])
 
@@ -952,6 +979,85 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{rel_path} directly queries invoice identity SQL")
             if " from app.bank_transactions" in normalized and ("source_unique_key" in normalized or "data_fingerprint" in normalized):
                 violations.append(f"{rel_path} directly queries bank transaction identity SQL")
+
+        self.assertEqual(violations, [])
+
+    def test_app_invoice_writes_stay_in_core_repository(self) -> None:
+        allowed_write_paths = {
+            "backend/src/fin_ops_platform/services/postgres_repositories/core.py",
+        }
+        write_patterns = (
+            "insert into app.invoices",
+            "update app.invoices",
+            "delete from app.invoices",
+        )
+        violations: list[str] = []
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_write_paths:
+                continue
+            normalized = " ".join(path.read_text(encoding="utf-8").lower().split())
+            for pattern in write_patterns:
+                if pattern in normalized:
+                    violations.append(f"{rel_path} contains direct `{pattern}` SQL")
+
+        self.assertEqual(violations, [])
+
+    def test_etc_paths_do_not_call_legacy_canonical_sync_helpers(self) -> None:
+        forbidden_names = {
+            "_sync_etc_import_result_to_canonical_invoices",
+            "_sync_etc_invoices_to_canonical_invoices",
+            "_refresh_after_etc_invoice_sync",
+        }
+        violations: list[str] = []
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT, SCRIPTS_ROOT):
+            rel_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            for name in forbidden_names:
+                if name in source:
+                    violations.append(f"{rel_path} references legacy ETC canonical sync helper `{name}`")
+
+        self.assertEqual(violations, [])
+
+    def test_etc_existing_invoice_link_logic_stays_out_of_server_and_worker_helpers(self) -> None:
+        checks = [
+            (APP_ROOT / "server.py", "_link_etc_import_result_to_existing_invoices"),
+            (APP_ROOT / "server.py", "_link_etc_invoices_to_existing_invoices"),
+            (SERVICES_ROOT / "runtime_worker_handlers.py", "_link_etc_import_result_to_existing_invoices"),
+            (SERVICES_ROOT / "runtime_worker_handlers.py", "_link_etc_invoices_to_existing_invoices"),
+        ]
+        violations: list[str] = []
+
+        for path, function_name in checks:
+            source = path.read_text(encoding="utf-8")
+            function_source = _function_source(_parse(path), source, function_name)
+            rel_path = _relative(path)
+            if "EtcExistingInvoiceLinkService" not in function_source:
+                violations.append(f"{rel_path}.{function_name} does not delegate to EtcExistingInvoiceLinkService")
+            if "upsert_etc_invoice" in function_source:
+                violations.append(f"{rel_path}.{function_name} owns ETC canonical invoice link loop")
+            if "list_invoices_by_numbers" in function_source:
+                violations.append(f"{rel_path}.{function_name} owns ETC import result invoice lookup")
+
+        self.assertEqual(violations, [])
+
+    def test_runtime_code_does_not_reference_legacy_etc_oa_detection_worker(self) -> None:
+        forbidden_terms = {
+            "etc-business-oa-detection",
+            "etc_business.oa_detection.refresh",
+            "OA detection worker",
+        }
+        scanned_roots = (APP_ROOT, SERVICES_ROOT, TOOLS_ROOT, SCRIPTS_ROOT, REPO_ROOT / "deploy")
+        violations: list[str] = []
+
+        for path in _python_files(*[root for root in scanned_roots if root.exists()]):
+            rel_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            for term in forbidden_terms:
+                if term in source:
+                    violations.append(f"{rel_path} references legacy ETC OA detection runtime `{term}`")
 
         self.assertEqual(violations, [])
 
@@ -1230,8 +1336,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
 
-class RuntimeWorkerEtcImportSyncTests(unittest.TestCase):
-    def test_sync_etc_import_result_uses_import_items_to_load_invoices(self) -> None:
+class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
+    def test_existing_invoice_link_service_uses_import_items_to_load_existing_invoices(self) -> None:
         upserted: list[object] = []
 
         class ImportService:
@@ -1258,9 +1364,9 @@ class RuntimeWorkerEtcImportSyncTests(unittest.TestCase):
                 ]
 
         etc_service = EtcService()
-        sync = _sync_etc_import_result_to_canonical_invoices(ImportService(), etc_service)
+        link_service = EtcExistingInvoiceLinkService(import_service=ImportService(), etc_service=etc_service)
 
-        months = sync(
+        months = link_service.link_import_result_to_existing_invoices(
             EtcImportResult(
                 imported=1,
                 items=[
@@ -1276,6 +1382,163 @@ class RuntimeWorkerEtcImportSyncTests(unittest.TestCase):
         self.assertEqual(etc_service.invoice_numbers, ["26537911470300077680"])
         self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537911470300077680"])
         self.assertEqual(months, ["2026-03"])
+
+    def test_existing_invoice_link_service_persists_linked_invoices_when_configured(self) -> None:
+        persisted: list[list[object]] = []
+        linked_invoice = SimpleNamespace(invoice_date="2026-04-28")
+
+        class ImportService:
+            def upsert_etc_invoice(self, etc_invoice: object) -> object:
+                return linked_invoice
+
+        link_service = EtcExistingInvoiceLinkService(
+            import_service=ImportService(),
+            persist_linked_invoices=lambda invoices: persisted.append(list(invoices)),
+        )
+
+        months = link_service.link_etc_invoices_to_existing_invoices(
+            [
+                SimpleNamespace(
+                    invoice_number="26537912210400752259",
+                    issue_date="2026-04-28",
+                    passage_start_date=None,
+                    passage_end_date=None,
+                )
+            ]
+        )
+
+        self.assertEqual(months, ["2026-04"])
+        self.assertEqual(persisted, [[linked_invoice]])
+
+    def test_link_etc_import_result_uses_import_items_to_load_existing_invoices(self) -> None:
+        upserted: list[object] = []
+
+        class ImportService:
+            def upsert_etc_invoice(self, etc_invoice: object) -> object:
+                upserted.append(etc_invoice)
+                return SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None))
+
+        class EtcService:
+            def __init__(self) -> None:
+                self.invoice_numbers: list[str] = []
+
+            def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[object]:
+                self.invoice_numbers = list(invoice_numbers)
+                return [
+                    SimpleNamespace(
+                        id="etc_invoice_0514",
+                        invoice_number="26537911470300077680",
+                        issue_date="2026-03-31",
+                        seller_name="昆明新机场高速公路建设发展有限公司",
+                        total_amount=Decimal("9.22"),
+                        passage_start_date=None,
+                        passage_end_date=None,
+                    )
+                ]
+
+        etc_service = EtcService()
+        link = _link_etc_import_result_to_existing_invoices(ImportService(), etc_service)
+
+        months = link(
+            EtcImportResult(
+                imported=1,
+                items=[
+                    EtcImportItem(
+                        file_name="invoice.xml",
+                        invoice_number="26537911470300077680",
+                        status="imported",
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(etc_service.invoice_numbers, ["26537911470300077680"])
+        self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537911470300077680"])
+        self.assertEqual(months, ["2026-03"])
+
+    def test_link_etc_import_result_tolerates_missing_canonical_invoice_without_creation(self) -> None:
+        upserted: list[object] = []
+
+        class ImportService:
+            def upsert_etc_invoice(self, etc_invoice: object) -> None:
+                upserted.append(etc_invoice)
+                return None
+
+        class EtcService:
+            def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[object]:
+                return [
+                    SimpleNamespace(
+                        id="etc_invoice_9999",
+                        invoice_number=invoice_numbers[0],
+                        issue_date="2026-04-28",
+                        passage_start_date=None,
+                        passage_end_date=None,
+                    )
+                ]
+
+        link = _link_etc_import_result_to_existing_invoices(ImportService(), EtcService())
+
+        months = link(
+            EtcImportResult(
+                imported=1,
+                items=[
+                    EtcImportItem(
+                        file_name="invoice.xml",
+                        invoice_number="26537912210400752259",
+                        status="imported",
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537912210400752259"])
+        self.assertEqual(months, ["2026-04"])
+
+    def test_runtime_etc_import_link_never_calls_canonical_invoice_create_api(self) -> None:
+        forbidden_calls: list[str] = []
+
+        class ImportService:
+            def upsert_etc_invoice(self, etc_invoice: object) -> None:
+                return None
+
+            def upsert_invoice(self, *_args: object, **_kwargs: object) -> None:
+                forbidden_calls.append("upsert_invoice")
+
+            def create_invoice(self, *_args: object, **_kwargs: object) -> None:
+                forbidden_calls.append("create_invoice")
+
+            def register_invoice(self, *_args: object, **_kwargs: object) -> None:
+                forbidden_calls.append("register_invoice")
+
+        class EtcService:
+            def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[object]:
+                return [
+                    SimpleNamespace(
+                        id="etc_invoice_missing_canonical",
+                        invoice_number=invoice_numbers[0],
+                        issue_date="2026-04-28",
+                        passage_start_date=None,
+                        passage_end_date=None,
+                    )
+                ]
+
+        link = _link_etc_import_result_to_existing_invoices(ImportService(), EtcService())
+
+        months = link(
+            EtcImportResult(
+                imported=1,
+                items=[
+                    EtcImportItem(
+                        file_name="invoice.xml",
+                        invoice_number="26537912210400752259",
+                        status="imported",
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(months, ["2026-04"])
+        self.assertEqual(forbidden_calls, [])
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.invoices`：正式发票 canonical key、stored key mismatch、duplicate canonical、missing canonical；其中 blocking 只看数电发票号、发票代码+号码这两类强 identity，税额指纹只作为 warning。
 - `app.bank_transactions`：银行流水 canonical key、stored key mismatch、duplicate canonical、missing canonical。
 - `app.etc_invoices`：ETC 原始票 canonical key、duplicate canonical、missing canonical。该表是原始来源事实，重复只作为 warning；正式发票是否重复以 canonical `app.invoices` 为准。
-- `app.invoices.etc_invoice_id`：已同步到 canonical 发票的 ETC 数量。
+- `app.invoices.etc_invoice_id`：已关联到统一发票池既有 canonical 发票的 ETC metadata 数量。
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
 - `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `open` zone。

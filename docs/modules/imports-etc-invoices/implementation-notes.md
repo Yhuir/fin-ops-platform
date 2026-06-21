@@ -7,7 +7,7 @@
 
 - ETC 发票导入不是通用发票导入的一种 batch type；它走 `/api/etc/import/preview`、`/api/etc/import/confirm`、reconciliation task 和 `etc_invoice_import.confirm` processor。
 - ETC zip preview 的事实源是 confirmed reconciliation task 的版本和 `confirmed_item_set_hash`。task 或 canonical invoice 变化后必须重新预览，不能复用旧 session。
-- ETC import confirm 后的事实源是 ETC business batch + ETC invoice facts + canonical invoice sync + `etc_import_confirmed` lifecycle，不是 confirm API 或 background job 的返回值。
+- ETC import confirm 后的事实源是 ETC business batch + ETC invoice metadata/PDF/XML 附件关系 + `etc_import_confirmed` lifecycle，不是 confirm API 或 background job 的返回值；该链路默认只关联已存在 canonical invoice，不创建新的统一发票池事实。
 - 本模块首轮闭环状态为 `documented-risk`：自动化测试已覆盖核心 contract 和历史 bug，但真实大 zip、对象存储、真实 OA 草稿和真实 worker drain 仍需发布前验证。
 
 ## 记录模板
@@ -26,6 +26,46 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - ETC existing batch link工具收敛到统一链接服务
+
+- 目标：移除 `link_existing_etc_batches.py` 中复制的 ETC 发票到统一发票池链接循环，避免运维工具绕过 `EtcExistingInvoiceLinkService` 后重新引入旧 canonical 同步逻辑。
+- 影响范围：历史 existing ETC batch link 运维工具、`EtcExistingInvoiceLinkService` 和 runtime boundary guard；页面导入 API 口径不变。
+- 关键决策：ETC ZIP/历史工具只允许把 ETC metadata 链接到已存在的 canonical `app.invoices`；工具原有的 `save_invoice_etc_metadata` 落库语义改为服务可选 `persist_linked_invoices` 回调，不在工具内保留本地 `upsert_etc_invoice` 循环。
+- 文档影响：仅更新本实施记录；产品口径、API 契约和用户页面不变。
+- 测试覆盖：新增/更新 runtime boundary guard，禁止运维工具绕过 `EtcExistingInvoiceLinkService`；新增服务测试覆盖已链接 invoice 的持久化回调。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py tests/test_link_existing_etc_batches_tool.py -q`；`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_existing_invoice_link_service.py backend/src/fin_ops_platform/tools/link_existing_etc_batches.py tests/test_platform_runtime_boundary_guards.py`。
+- 未测风险：未执行真实 historical existing ETC batch link 工具 `--execute`；该路径仍需在生产备份后按运维 runbook 单独 dry-run/execute。
+
+## 2026-06-21 - ETC import link-existing服务化
+
+- 目标：让 ETC ZIP 导入完成后的 canonical invoice 关联逻辑只通过统一 service 执行，避免 API route 和 runtime worker 保留两份旧链接代码。
+- 影响范围：`ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` 的 runtime callback、`Application._link_etc_import_result_to_existing_invoices(...)` 和业务批次相关 link callback。
+- 关键决策：`EtcExistingInvoiceLinkService` 是 ETC import result / ETC metadata 到已存在 `app.invoices` 的唯一链接边界；它不暴露 create invoice API，缺失 canonical invoice 时只返回 ETC 月份用于刷新，不创建统一发票池事实。
+- 文档影响：本实施记录补充边界；ETC 导入 README 的“只关联已存在 canonical invoice，不创建新 canonical invoice”口径不变。
+- 测试覆盖：boundary guard 强制 server/runtime helper 委托 service；runtime/service 行为测试覆盖按 `EtcImportResult.items[*].invoice_number` 回查 metadata、缺失 canonical invoice 不调用 create API。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_existing_invoice_link_logic_stays_out_of_server_and_worker_helpers tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests -q`。
+- 未测风险：真实大 ZIP、对象存储、真实 worker drain 和生产 cleanup/reimport 仍需 staging/生产前 smoke。
+
+## 2026-06-21 - ETC ZIP 额外发票 Drop 合同固化
+
+- 目标：固定 ETC ZIP 只保存当前 reconciliation task 命中的 PDF/XML 附件和 metadata，防止 ZIP 内额外发票进入 `EtcService` state 或被误认为第二发票池。
+- 影响范围：`EtcService._process_import_zips` 内部持久化入口、ETC import preview/confirm API 回归测试。
+- 关键决策：route 层 `filter_uploads_by_allowlist` 负责裁剪 ZIP session；`EtcService` 内部持久化方法命名收缩为 `_upsert_attachment_metadata_from_import`，表达它只保存附件 metadata，不创建统一发票池事实。历史 `ImportNormalizationService.remove_etc_invoices_by_import_batch_id` 仍保留为污染数据清理前的兼容逻辑，不代表新链路会创建 ETC canonical invoice。
+- 文档影响：本实施记录补充合同；长期业务口径已在 `README.md`、`docs/product-specs/imports-and-etc.md` 和 `docs/operations/invoice-pool-cleanup.md` 维护。
+- 测试覆盖：新增 `test_etc_import_drops_extra_zip_invoices_not_selected_by_current_task`，证明 task 只要求 `ETC001` 时，混合 ZIP 里的 `ETC999` 只出现在 preview exclusion 中，confirm 后不进入 ETC metadata，也不创建 canonical invoice。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py -k "drops_extra_zip_invoices or partial_success_when_some_items_fail or without_creating_canonical_invoices or confirmed_etc_submission_replaces_scatter_invoice" -q`；`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_service.py tests/test_etc_backend.py`。
+- 未测风险：真实对象存储、真实大 ZIP、真实 OA 草稿和生产 worker drain 仍需 staging/生产前 smoke；数据库内历史污染 canonical invoice 仍需按备份和 cleanup preflight 闭环处理。
+
+## 2026-06-21 - ETC ZIP 不再创建统一发票池事实
+
+- 目标：切断 ETC 专用导入链路向统一发票池自动创建 canonical invoice 的旧行为，避免 ETC ZIP 中的票据污染 `app.invoices`。
+- 影响范围：`ImportNormalizationService.upsert_etc_invoice`、App/worker ETC sync helpers、ETC import confirm job、ETC summary row、历史 ETC repair/migration/link 和相关测试。
+- 关键决策：ETC ZIP 的职责是保存命中当前 OA/业务批次的 PDF/XML 附件和 ETC metadata；只关联已存在的统一发票池记录，不在缺失时创建新发票。`ImportNormalizationService.upsert_etc_invoice` 不再保留 `allow_create` 后门；统一发票池仍由正式进/销项发票导入和受控 OA 附件识别创建。
+- 文档影响：更新 `README.md`、`docs/modules/etc-tickets/README.md`、`docs/product-specs/imports-and-etc.md` 和 OA 集成模块记录。
+- 测试覆盖：更新 ETC backend、historical migration、runtime worker link-existing 和 import service 测试，覆盖 ETC metadata 保留、summary 明细完整、缺失 canonical invoice 不创建、已存在 canonical invoice 仍可关联。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py tests/test_historical_etc_business_batch_migration_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py tests/test_invoice_attachment_recognition_service.py tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests -q`。
+- 未测风险：真实生产 ZIP、对象存储和真实 OA 草稿附件上传仍需 staging/生产前 smoke；生产数据清理和重导入需先备份再执行。
 
 ## 2026-06-19 - ETC 导入成功路径 UI 错误残留 guard
 
@@ -105,10 +145,10 @@
 ## 2026-06-11 - ETC 发票导入测试闭环首轮
 
 - 目标：补齐 `/imports/etc-invoices` 的影响面、七类测试矩阵、状态机、历史 bug 回归库和验证命令。
-- 影响范围：共享 `ImportWorkflowPage`、ETC API mapper、`/api/etc/import*`、reconciliation task、zip parser/filter、ETC service、import worker、business batch、canonical invoice sync、`etc_import_confirmed` lifecycle、关联台、税金抵扣、成本统计、搜索和 App Status。
+- 影响范围：共享 `ImportWorkflowPage`、ETC API mapper、`/api/etc/import*`、reconciliation task、zip parser/filter、ETC service、import worker、business batch、existing canonical invoice link、`etc_import_confirmed` lifecycle、关联台、税金抵扣、成本统计、搜索和 App Status。
 - 关键决策：不新增低价值测试；先把现有 ETC backend/reconciliation/API/frontend/business-batch 测试登记到模块矩阵，并把真实基础设施/真实 OA 风险标记为 `documented-risk`。
 - 文档影响：更新 `README.md`、`tests.md`、`state-machine.md`、`docs/dev/testing-closure-dependency-map.md` 和 `docs/dev/testing-closure-state.md`。
-- 测试覆盖：覆盖七类测试；重点保护 ready task gate、zip preview filter、stale task preview、async confirm job、canonical invoice sync、business batch summary 和下游 read model refresh。
+- 测试覆盖：覆盖七类测试；重点保护 ready task gate、zip preview filter、stale task preview、async confirm job、existing canonical invoice link、business batch summary 和下游 read model refresh。
 - 验证命令：见 `tests.md` 和 `docs/dev/testing-closure-state.md` 最近验证命令。
 - 未测风险：真实大 zip/票根网/PDF/XML 混合包、真实对象存储、真实 OA 草稿、真实 Postgres/RabbitMQ/Redis/systemd import worker drain、Nginx 代理和大数据浏览器 smoke。
 - 后续事项：后续模块处理 `output-invoice-collections`；另行专项校准共享 `import.process.requested` App Status affected domain。

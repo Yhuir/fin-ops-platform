@@ -3355,9 +3355,8 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(task_response.status_code, 404)
         self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
         scattered_etc_rows = [row for row in after_rows if row.get("source_kind") == "etc_invoice"]
-        self.assertEqual(len(scattered_etc_rows), 2)
-        self.assertEqual({invoice.workbench_visibility for invoice in canonical_invoices.values()}, {"visible"})
-        self.assertEqual({invoice.etc_submission_status for invoice in canonical_invoices.values()}, {"unsubmitted"})
+        self.assertEqual(scattered_etc_rows, [])
+        self.assertEqual(canonical_invoices, {})
         self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
@@ -3507,7 +3506,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIsNone(relation_for_summary)
         self.assertIsNone(relation_for_oa)
         self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
-        self.assertEqual(len([row for row in after_rows if row.get("source_kind") == "etc_invoice"]), 2)
+        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice"], [])
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service(self) -> None:
@@ -3743,7 +3742,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIsNone(relation_for_summary)
         self.assertIsNone(relation_for_oa)
         self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
-        self.assertEqual(len([row for row in after_rows if row.get("source_kind") == "etc_invoice"]), 2)
+        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice"], [])
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_reconciliation_task_delete_removes_orphan_submission_metadata_link(self) -> None:
@@ -4490,7 +4489,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["result_summary"]["total"], 2)
         self.assertEqual(json.loads(query_response.body)["total"], 2)
 
-    def test_etc_import_syncs_to_canonical_invoices_and_dedupes_manual_invoice(self) -> None:
+    def test_etc_import_links_existing_canonical_invoices_and_dedupes_manual_invoice(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             manual_preview = app._import_service.preview_import(
@@ -4529,7 +4528,7 @@ class EtcApiTests(unittest.TestCase):
         source_types = {source_link["source_type"] for source_link in invoices[0].source_links}
         self.assertEqual(source_types, {"manual_invoice_import", "etc_invoice_import"})
 
-    def test_etc_import_keeps_distinct_invoice_numbers_with_same_amount_as_separate_canonical_invoices(self) -> None:
+    def test_etc_import_keeps_distinct_invoice_numbers_with_same_amount_without_creating_canonical_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
@@ -4539,10 +4538,58 @@ class EtcApiTests(unittest.TestCase):
             job = json.loads(confirm_response.body)["job"]
             self._wait_for_job(app, job["job_id"])
             invoices = app._import_service.list_invoices()
+            etc_invoices = app._etc_service.list_invoices_by_numbers(["ETC001", "ETC002"])
 
-        self.assertEqual(len(invoices), 2)
-        self.assertCountEqual([invoice.digital_invoice_no for invoice in invoices], ["ETC001", "ETC002"])
-        self.assertEqual({invoice.source_unique_key for invoice in invoices}, {"ETC001", "ETC002"})
+        self.assertEqual(invoices, [])
+        self.assertEqual(len(etc_invoices), 2)
+        self.assertCountEqual([invoice.invoice_number for invoice in etc_invoices], ["ETC001", "ETC002"])
+
+    def test_etc_import_drops_extra_zip_invoices_not_selected_by_current_task(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id = self._create_ready_reconciliation_task(
+                app,
+                amount="13.07",
+                invoice_count=1,
+                invoice_numbers=["ETC001"],
+            )
+            zip_content = zip_bytes(
+                {
+                    "xml/ETC001.xml": etc_xml("ETC001", total_amount="13.07"),
+                    "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                    "xml/ETC999.xml": etc_xml("ETC999", total_amount="99.99"),
+                    "pdf/ETC999.pdf": fake_pdf("ETC999"),
+                }
+            )
+            body, headers = multipart(
+                {"outer.zip": zip_content},
+                fields={"task_id": task_id},
+            )
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_payload = json.loads(preview_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+            canonical_invoices = app._import_service.list_invoices()
+            stored_etc_invoices = app._etc_service.list_invoices_by_numbers(["ETC001", "ETC999"])
+
+        filter_status_by_invoice = {
+            str(item.get("invoiceNumber")): str(item.get("filterStatus"))
+            for item in preview_payload["items"]
+        }
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(filter_status_by_invoice["ETC001"], "included")
+        self.assertEqual(filter_status_by_invoice["ETC999"], "excluded_extra_zip_invoice")
+        self.assertEqual(json.loads(query_response.body)["total"], 1)
+        self.assertEqual([invoice.invoice_number for invoice in stored_etc_invoices], ["ETC001"])
+        self.assertEqual(canonical_invoices, [])
 
     def test_etc_import_confirm_returns_preview_stale_when_canonical_invoice_changes_after_preview(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4602,7 +4649,7 @@ class EtcApiTests(unittest.TestCase):
             draft_payload = json.loads(draft_response.body)
             app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
             after_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            canonical_invoice = app._import_service.list_invoices()[0]
+            canonical_invoices = app._import_service.list_invoices()
 
         before_invoice_rows = [
             row
@@ -4614,15 +4661,13 @@ class EtcApiTests(unittest.TestCase):
             for group in after_payload["open"]["groups"]
             for row in group["invoice_rows"]
         ]
-        self.assertEqual(len(before_invoice_rows), 1)
-        self.assertEqual(before_invoice_rows[0]["source_kind"], "etc_invoice")
-        self.assertIn("ETC", before_invoice_rows[0]["tags"])
+        self.assertEqual(before_invoice_rows, [])
         self.assertEqual(len(after_invoice_rows), 1)
         self.assertEqual(after_invoice_rows[0]["source_kind"], "etc_invoice_summary")
         self.assertEqual(after_invoice_rows[0]["total_with_tax"], "13.07")
         self.assertEqual(after_invoice_rows[0]["invoice_bank_relation"]["code"], "pending_oa_bank_match")
         self.assertIn("ETC批量提交", after_invoice_rows[0]["tags"])
-        self.assertEqual(canonical_invoice.workbench_visibility, "hidden_after_etc_submission")
+        self.assertEqual(canonical_invoices, [])
 
     def test_confirmed_etc_submission_renders_folded_invoice_summary_for_matching_oa(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4711,11 +4756,11 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(
             payload["invoice_inventory"],
             {
-                "system_total": 2,
+                "system_total": 1,
                 "manual_import_total": 1,
                 "workbench_visible_total": 0,
                 "hidden_submitted_etc_total": 1,
-                "extra_etc_total": 1,
+                "extra_etc_total": 0,
                 "etc_summary_batch_count": 1,
                 "oa_attachment_total": 0,
             },
@@ -4810,7 +4855,7 @@ class EtcApiTests(unittest.TestCase):
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
             preview_payload = json.loads(preview_response.body)
             session_id = preview_payload["sessionId"]
-            original_upsert = app._etc_service._upsert_invoice_from_import
+            original_upsert = app._etc_service._upsert_attachment_metadata_from_import
 
             def fail_second_required_invoice(zip_source_name, parsed, xml_entry, pdf_entry, *, import_batch):
                 if parsed.invoice_number == "ETC002":
@@ -4823,7 +4868,7 @@ class EtcApiTests(unittest.TestCase):
                     import_batch=import_batch,
                 )
 
-            app._etc_service._upsert_invoice_from_import = fail_second_required_invoice
+            app._etc_service._upsert_attachment_metadata_from_import = fail_second_required_invoice
 
             confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
             job = json.loads(confirm_response.body)["job"]
@@ -5223,9 +5268,9 @@ class EtcApiTests(unittest.TestCase):
                 relation_command_service=relation_command_service,
                 specs=[spec],
                 oa_row_exists=lambda row_id: row_id == "oa-exp-test",
-                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
@@ -5249,9 +5294,9 @@ class EtcApiTests(unittest.TestCase):
                 side_effect=AssertionError("parsed seed should restore missing invoices without reading audit zip"),
             ):
                 first_result = service.reconcile(reason="test")
-            service._sync_etc_invoices_to_canonical_invoices = (  # noqa: SLF001 - verifies parsed-seed fast path.
+            service._link_etc_invoices_to_existing_invoices = (  # noqa: SLF001 - verifies parsed-seed fast path.
                 lambda _invoices: (_ for _ in ()).throw(
-                    AssertionError("existing historical repair should not resync canonical invoices")
+                    AssertionError("existing historical repair should not relink existing invoices")
                 )
             )
             with patch.object(
@@ -5266,7 +5311,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(first_result.batches[0].imported_count, 2)
         self.assertEqual(second_result.status, "ok")
         self.assertEqual(len(app._etc_service.list_batches(status="submitted")), 1)
-        self.assertEqual(len(app._import_service.list_invoices()), 2)
+        self.assertEqual(app._import_service.list_invoices(), [])
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("etc-historical-test")
         self.assertIsNotNone(relation)
         assert relation is not None
@@ -5297,9 +5342,9 @@ class EtcApiTests(unittest.TestCase):
                 pair_relation_service=app._workbench_pair_relation_service,
                 specs=[spec],
                 oa_row_exists=lambda row_id: row_id == "oa-exp-no-command",
-                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
@@ -5413,9 +5458,9 @@ class EtcApiTests(unittest.TestCase):
                 import_service=app._import_service,
                 pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
-                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
@@ -5553,9 +5598,9 @@ class EtcApiTests(unittest.TestCase):
                 etc_service=app._etc_service,
                 import_service=app._import_service,
                 pair_relation_service=app._workbench_pair_relation_service,
-                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
@@ -5648,9 +5693,9 @@ class EtcApiTests(unittest.TestCase):
                 import_service=app._import_service,
                 pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
-                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
-                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
-                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
+                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
+                refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),

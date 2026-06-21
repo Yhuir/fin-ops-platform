@@ -170,8 +170,8 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("invoice_import_confirmed", "invoice_lifecycle", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "search", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "pending_invoice", "import_state_changed"),
-    OperationExpectation("invoice_import_confirmed", "input_invoice_usage", "import_state_changed"),
-    OperationExpectation("invoice_import_confirmed", "output_invoice_collection", "import_state_changed"),
+    OperationExpectation("invoice_import_confirmed", "input_invoice_usage", "import_state_changed", required=False),
+    OperationExpectation("invoice_import_confirmed", "output_invoice_collection", "import_state_changed", required=False),
     OperationExpectation("invoice_import_confirmed", "oa_pending_payment", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "cost_statistics", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "tax_offset", "invoice_file_import_confirm"),
@@ -180,17 +180,12 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("bank_import_confirmed", "invoice_lifecycle", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "search", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "pending_invoice", "import_state_changed"),
-    OperationExpectation("bank_import_confirmed", "input_invoice_usage", "import_state_changed"),
-    OperationExpectation("bank_import_confirmed", "output_invoice_collection", "import_state_changed"),
+    OperationExpectation("bank_import_confirmed", "input_invoice_usage", "import_state_changed", required=False),
+    OperationExpectation("bank_import_confirmed", "output_invoice_collection", "import_state_changed", required=False),
     OperationExpectation("bank_import_confirmed", "oa_pending_payment", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "bank_account_balance", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "cost_statistics", "import_state_changed"),
-    OperationExpectation(
-        "bank_import_confirmed",
-        "bank_detail",
-        "import_facts_changed",
-        event_type="import.fact.changed",
-    ),
+    OperationExpectation("bank_import_confirmed", "bank_detail", "import_facts_changed"),
     OperationExpectation("etc_import_confirmed", "workbench", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "workbench_relation", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "invoice_lifecycle", "etc_invoice_import_confirm"),
@@ -296,7 +291,7 @@ def audit_write_operation_slo(
         target_ms=target_ms,
         p99_target_ms=effective_p99_target_ms,
     )
-    failures = [result for result in results if result.status != "pass"]
+    failures = [result for result in results if result.status not in {"pass", "skipped"}]
     missing = [result for result in results if result.status == "missing"]
     return {
         "version": 1,

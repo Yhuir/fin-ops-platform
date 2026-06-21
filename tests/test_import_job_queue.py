@@ -16,6 +16,15 @@ from fin_ops_platform.services.import_job_queue import (
     ImportJobRepository,
     ImportJobWorker,
 )
+from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.runtime_worker_handlers import (
+    IMPORT_FACT_CHANGED_EVENT,
+    _input_invoice_usage_scope_keys_for_import_file_session,
+    _output_invoice_collection_scope_keys_for_import_file_session,
+    _tax_offset_scope_keys_for_import_file_session,
+    _tax_offset_scope_keys_for_import_preview,
+    build_import_job_handler_bundle,
+)
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
 
@@ -188,6 +197,70 @@ def import_job(**overrides: object) -> ImportJob:
 
 
 class ImportJobRepositoryTests(unittest.TestCase):
+    def test_invoice_relation_scope_helpers_split_input_and_output_file_months(self) -> None:
+        session = SimpleNamespace(
+            files=[
+                SimpleNamespace(
+                    id="file-input",
+                    status="confirmed",
+                    batch_type="input_invoice",
+                    normalized_rows=[{"invoice_date": "2026-05-02"}],
+                ),
+                SimpleNamespace(
+                    id="file-output",
+                    status="confirmed",
+                    batch_type="output_invoice",
+                    normalized_rows=[{"invoice_date": "2026-06-03"}],
+                ),
+            ]
+        )
+
+        self.assertEqual(
+            _input_invoice_usage_scope_keys_for_import_file_session(
+                session,
+                ["file-input", "file-output"],
+            ),
+            ["2026-05"],
+        )
+        self.assertEqual(
+            _output_invoice_collection_scope_keys_for_import_file_session(
+                session,
+                ["file-input", "file-output"],
+            ),
+            ["2026-06"],
+        )
+
+    def test_tax_offset_scope_helpers_ignore_bank_transaction_files(self) -> None:
+        bank_preview = SimpleNamespace(
+            batch=SimpleNamespace(batch_type="bank_transaction"),
+            normalized_rows=[{"trade_time": "2026-05-02 10:00:00"}],
+        )
+        session = SimpleNamespace(
+            files=[
+                SimpleNamespace(
+                    id="file-bank",
+                    status="confirmed",
+                    batch_type="bank_transaction",
+                    normalized_rows=[{"trade_time": "2026-05-02 10:00:00"}],
+                ),
+                SimpleNamespace(
+                    id="file-input",
+                    status="confirmed",
+                    batch_type="input_invoice",
+                    normalized_rows=[{"invoice_date": "2026-06-03"}],
+                ),
+            ]
+        )
+
+        self.assertEqual(_tax_offset_scope_keys_for_import_preview(bank_preview), [])
+        self.assertEqual(
+            _tax_offset_scope_keys_for_import_file_session(
+                session,
+                ["file-bank", "file-input"],
+            ),
+            ["2026-06"],
+        )
+
     def test_create_or_get_job_uses_idempotency_key_and_returns_job(self) -> None:
         transaction = FakeTransaction(rows=[job_row()])
         repository = ImportJobRepository(FakeConnection(transaction))
@@ -299,6 +372,68 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["worker_kind"], "import-job")
         self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
         self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
+
+    def test_import_fact_changed_handler_completes_matching_dirty_scope(self) -> None:
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.enqueued: list[dict[str, object]] = []
+                self.completed: list[dict[str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                self.enqueued.append(dict(kwargs))
+
+            def complete_read_model_refresh(self, **kwargs: object) -> None:
+                self.completed.append(dict(kwargs))
+
+        queue = FakeQueue()
+        bundle = build_import_job_handler_bundle(
+            connection=SimpleNamespace(),
+            worker_id="worker-1",
+            processors={},
+            include_import_fact_changed=True,
+            queue_repository=queue,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-1",
+            tenant_id="tenant-a",
+            event_type=IMPORT_FACT_CHANGED_EVENT,
+            aggregate_type="import_fact",
+            aggregate_id="2026-03",
+            scope_type="bank_detail",
+            scope_key="2026-03",
+            dedupe_key="import.fact.changed:bank_detail:2026-03",
+            payload={"scope_type": "bank_detail", "scope_key": "2026-03"},
+            attempts=1,
+            status="processing",
+            source_version=0,
+        )
+
+        result = bundle.handlers[IMPORT_FACT_CHANGED_EVENT](event)
+
+        self.assertEqual(result["status"], "acknowledged")
+        self.assertTrue(result["refresh_enqueued"])
+        self.assertTrue(result["dirty_scope_completed"])
+        self.assertEqual(
+            queue.enqueued,
+            [
+                {
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-03",
+                    "reason": "import_facts_changed",
+                }
+            ],
+        )
+        self.assertEqual(
+            queue.completed,
+            [
+                {
+                    "tenant_id": "tenant-a",
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-03",
+                    "source_version": 0,
+                }
+            ],
+        )
 
     def test_general_import_confirm_queues_import_job_in_rabbitmq_mode(self) -> None:
         app = build_application()

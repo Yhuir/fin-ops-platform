@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from contextlib import contextmanager
 import re
-from typing import Any
+from typing import Any, Iterator
 
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import (
@@ -88,6 +89,17 @@ class _ImportObjectIdentityRepository:
             data_fingerprint=suspected_key,
         )
 
+    def find_invoices_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[Invoice]:
+        return self._import_service._find_invoices_by_identity(
+            source_unique_key=canonical_key,
+            data_fingerprint=suspected_key,
+        )
+
     def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
         return self._import_service._find_transaction_by_identity(source_unique_key=canonical_key)
 
@@ -122,6 +134,7 @@ class ImportNormalizationService:
 
         self._invoice_unique_index: dict[str, str] = {}
         self._invoice_fingerprint_index: dict[str, str] = {}
+        self._invoice_identity_cache: dict[tuple[str, str], Invoice] | None = None
         self._transaction_unique_index: dict[str, str] = {}
         self._transaction_fingerprint_index: dict[str, str] = {}
 
@@ -195,23 +208,32 @@ class ImportNormalizationService:
         normalized_rows: list[dict[str, Any]] = []
 
         batch_id = self._next_batch_id()
-        for index, raw_row in enumerate(rows, start=1):
-            if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
-                normalized, row_result = self._preview_invoice_row(
-                    batch_id=batch_id,
-                    row_no=index,
-                    batch_type=batch_type,
-                    raw_row=raw_row,
-                )
-            else:
+        if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            prepared_rows = [
+                (index, raw_row, *self._normalize_invoice_row(batch_type=batch_type, raw_row=raw_row))
+                for index, raw_row in enumerate(rows, start=1)
+            ]
+            with self._invoice_identity_cache_for([normalized for _, _, normalized, _errors in prepared_rows]):
+                for index, raw_row, normalized, errors in prepared_rows:
+                    row_result = self._preview_invoice_row_from_normalized(
+                        batch_id=batch_id,
+                        row_no=index,
+                        raw_row=raw_row,
+                        normalized=normalized,
+                        errors=errors,
+                    )
+                    normalized_rows.append(normalized)
+                    row_results.append(row_result)
+        else:
+            for index, raw_row in enumerate(rows, start=1):
                 normalized, row_result = self._preview_transaction_row(
                     batch_id=batch_id,
                     row_no=index,
                     raw_row=raw_row,
                 )
 
-            normalized_rows.append(normalized)
-            row_results.append(row_result)
+                normalized_rows.append(normalized)
+                row_results.append(row_result)
 
         batch = ImportedBatch(
             id=batch_id,
@@ -234,14 +256,15 @@ class ImportNormalizationService:
         preview = self._batches[batch_id]
         if preview.batch.status != BatchStatus.PENDING:
             return preview.batch
-        for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
-            self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
-            if row_result.decision == ImportDecision.CREATED:
-                self._persist_created_row(preview.batch.batch_type, row_result, normalized)
-            elif row_result.decision == ImportDecision.STATUS_UPDATED:
-                self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
-            elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
-                self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
+        with self._invoice_identity_cache_for(preview.normalized_rows, enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE)):
+            for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
+                self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
+                if row_result.decision == ImportDecision.CREATED:
+                    self._persist_created_row(preview.batch.batch_type, row_result, normalized)
+                elif row_result.decision == ImportDecision.STATUS_UPDATED:
+                    self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
+                elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+                    self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
 
         preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
         preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
@@ -443,6 +466,12 @@ class ImportNormalizationService:
             return self._invoices_by_id[self._invoice_unique_index[source_unique_key]]
         if not source_unique_key and data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
             return self._invoices_by_id[self._invoice_fingerprint_index[data_fingerprint]]
+        cached = self._find_cached_invoice_identity(
+            source_unique_key=source_unique_key,
+            data_fingerprint=data_fingerprint,
+        )
+        if self._invoice_identity_cache is not None:
+            return cached
         finder = getattr(self._fact_repository, "find_invoice_identity", None)
         if not callable(finder):
             return None
@@ -451,6 +480,135 @@ class ImportNormalizationService:
             data_fingerprint=str(data_fingerprint) if not source_unique_key and data_fingerprint else None,
         )
         return invoice if isinstance(invoice, Invoice) else None
+
+    def _find_invoices_by_identity(
+        self,
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None,
+    ) -> list[Invoice]:
+        matches: list[Invoice] = []
+        seen_ids: set[str] = set()
+
+        def add(invoice: Invoice | None) -> None:
+            if invoice is None or invoice.id in seen_ids:
+                return
+            seen_ids.add(invoice.id)
+            matches.append(invoice)
+
+        if source_unique_key:
+            normalized_key = str(source_unique_key)
+            for invoice in self._invoices_by_id.values():
+                if normalized_key in {
+                    str(getattr(invoice, "source_unique_key", "") or ""),
+                    str(getattr(invoice, "digital_invoice_no", "") or ""),
+                }:
+                    add(invoice)
+        elif data_fingerprint:
+            normalized_fingerprint = str(data_fingerprint)
+            for invoice in self._invoices_by_id.values():
+                if str(getattr(invoice, "data_fingerprint", "") or "") == normalized_fingerprint:
+                    add(invoice)
+
+        if self._invoice_identity_cache is not None:
+            add(
+                self._find_cached_invoice_identity(
+                    source_unique_key=source_unique_key,
+                    data_fingerprint=data_fingerprint,
+                )
+            )
+            return matches
+
+        finder_many = getattr(self._fact_repository, "find_invoices_by_identity", None)
+        if callable(finder_many):
+            for invoice in list(
+                finder_many(
+                    canonical_key=str(source_unique_key) if source_unique_key else None,
+                    suspected_key=str(data_fingerprint) if not source_unique_key and data_fingerprint else None,
+                )
+                or []
+            ):
+                if isinstance(invoice, Invoice):
+                    add(invoice)
+            return matches
+
+        finder = getattr(self._fact_repository, "find_invoice_identity", None)
+        if callable(finder):
+            invoice = finder(
+                source_unique_key=str(source_unique_key) if source_unique_key else None,
+                data_fingerprint=str(data_fingerprint) if not source_unique_key and data_fingerprint else None,
+            )
+            if isinstance(invoice, Invoice):
+                add(invoice)
+        return matches
+
+    @contextmanager
+    def _invoice_identity_cache_for(
+        self,
+        normalized_rows: list[dict[str, Any]],
+        *,
+        enabled: bool = True,
+    ) -> Iterator[None]:
+        previous_cache = self._invoice_identity_cache
+        if not enabled:
+            yield
+            return
+        self._invoice_identity_cache = self._build_invoice_identity_cache(normalized_rows)
+        try:
+            yield
+        finally:
+            self._invoice_identity_cache = previous_cache
+
+    def _build_invoice_identity_cache(self, normalized_rows: list[dict[str, Any]]) -> dict[tuple[str, str], Invoice]:
+        canonical_keys = sorted(
+            {
+                str(row.get("source_unique_key") or "").strip()
+                for row in normalized_rows
+                if str(row.get("source_unique_key") or "").strip()
+            }
+        )
+        suspected_keys = sorted(
+            {
+                str(row.get("data_fingerprint") or "").strip()
+                for row in normalized_rows
+                if not str(row.get("source_unique_key") or "").strip()
+                and str(row.get("data_fingerprint") or "").strip()
+            }
+        )
+        cache: dict[tuple[str, str], Invoice] = {}
+        finder_many = getattr(self._fact_repository, "find_invoices_by_identity_keys", None)
+        if callable(finder_many) and (canonical_keys or suspected_keys):
+            for invoice in list(finder_many(canonical_keys=canonical_keys, suspected_keys=suspected_keys) or []):
+                if isinstance(invoice, Invoice):
+                    self._add_invoice_to_identity_cache(cache, invoice)
+        for invoice in self._invoices_by_id.values():
+            self._add_invoice_to_identity_cache(cache, invoice)
+        return cache
+
+    def _add_invoice_to_identity_cache(self, cache: dict[tuple[str, str], Invoice], invoice: Invoice) -> None:
+        for key_type, value in (
+            ("canonical", getattr(invoice, "source_unique_key", None)),
+            ("canonical", getattr(invoice, "digital_invoice_no", None)),
+            ("suspected", getattr(invoice, "data_fingerprint", None)),
+        ):
+            text = str(value or "").strip()
+            if text:
+                cache.setdefault((key_type, text), invoice)
+
+    def _find_cached_invoice_identity(
+        self,
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None,
+    ) -> Invoice | None:
+        cache = self._invoice_identity_cache
+        if cache is None:
+            return None
+        if source_unique_key:
+            return cache.get(("canonical", str(source_unique_key)))
+        if data_fingerprint:
+            return cache.get(("suspected", str(data_fingerprint)))
+        return None
 
     def _find_transaction_by_identity(self, *, source_unique_key: str | None) -> BankTransaction | None:
         if source_unique_key and source_unique_key in self._transaction_unique_index:
@@ -504,10 +662,21 @@ class ImportNormalizationService:
             suspected_key=suspected_key,
         )
 
+    def find_invoices_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[Invoice]:
+        return self._object_identity_repository.find_invoices_by_identity(
+            canonical_key=canonical_key,
+            suspected_key=suspected_key,
+        )
+
     def has_imported_records(self) -> bool:
         return bool(self._invoices_by_id or self._transactions_by_id)
 
-    def upsert_etc_invoice(self, etc_invoice: Any) -> Invoice:
+    def upsert_etc_invoice(self, etc_invoice: Any) -> Invoice | None:
         normalized = self._normalize_etc_invoice(etc_invoice)
         decision = self._dedup_decision_service.decide_invoice_import(normalized)
         linked_invoice_id = decision.linked_object_id
@@ -522,9 +691,7 @@ class ImportNormalizationService:
             self._merge_invoice_from_etc_normalized(invoice, normalized)
             return invoice
 
-        invoice = self._build_etc_invoice_from_normalized(normalized)
-        self._register_invoice(invoice)
-        return invoice
+        return None
 
     def upsert_oa_attachment_invoice(
         self,
@@ -533,6 +700,7 @@ class ImportNormalizationService:
         oa_form_id: str | None = None,
         oa_row_id: str | None = None,
         source_workbench_row_id: str | None = None,
+        allow_create: bool = False,
     ) -> Invoice | None:
         normalized = self._normalize_oa_attachment_invoice(
             attachment_invoice,
@@ -555,7 +723,7 @@ class ImportNormalizationService:
             self._merge_invoice_from_oa_attachment_normalized(invoice, normalized)
             return invoice
 
-        if not decision.identity.canonical_key:
+        if not allow_create or not decision.identity.canonical_key:
             return None
         normalized["source_unique_key"] = decision.identity.canonical_key
         normalized["data_fingerprint"] = decision.identity.suspected_key
@@ -564,6 +732,12 @@ class ImportNormalizationService:
         return invoice
 
     def remove_etc_invoices_by_import_batch_id(self, import_batch_id: str) -> int:
+        """Remove legacy ETC-import source links without deleting formal invoices.
+
+        Older ETC ZIP flows could create canonical ETC invoices directly. New ETC
+        ZIP imports only save attachment metadata, so this method is retained as
+        cleanup compatibility for historical polluted rows.
+        """
         normalized_batch_id = str(import_batch_id or "").strip()
         if not normalized_batch_id:
             return 0
@@ -628,6 +802,21 @@ class ImportNormalizationService:
         batch_type: BatchType,
         raw_row: dict[str, Any],
     ) -> tuple[dict[str, Any], ImportedBatchRowResult]:
+        normalized, errors = self._normalize_invoice_row(batch_type=batch_type, raw_row=raw_row)
+        return normalized, self._preview_invoice_row_from_normalized(
+            batch_id=batch_id,
+            row_no=row_no,
+            raw_row=raw_row,
+            normalized=normalized,
+            errors=errors,
+        )
+
+    def _normalize_invoice_row(
+        self,
+        *,
+        batch_type: BatchType,
+        raw_row: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[str]]:
         normalized_name = normalize_name(raw_row.get("counterparty_name", ""))
         normalized: dict[str, Any] = {
             "counterparty_name": raw_row.get("counterparty_name", ""),
@@ -689,9 +878,21 @@ class ImportNormalizationService:
         normalized["invoice_type"] = InvoiceType.OUTPUT.value if batch_type == BatchType.OUTPUT_INVOICE else InvoiceType.INPUT.value
         if self._row_indicates_etc(normalized):
             self._append_unique_tag(normalized["tags"], "ETC")
+        return normalized, errors
 
+    def _preview_invoice_row_from_normalized(
+        self,
+        *,
+        batch_id: str,
+        row_no: int,
+        raw_row: dict[str, Any],
+        normalized: dict[str, Any],
+        errors: list[str],
+    ) -> ImportedBatchRowResult:
+        source_unique_key = normalized.get("source_unique_key")
+        data_fingerprint = normalized.get("data_fingerprint")
         if errors:
-            return normalized, ImportedBatchRowResult(
+            return ImportedBatchRowResult(
                 id=self._next_row_id(),
                 batch_id=batch_id,
                 row_no=row_no,
@@ -712,7 +913,7 @@ class ImportNormalizationService:
             normalized["previous_invoice_status_from_source"] = existing.invoice_status_from_source
             normalized["previous_source_batch_id"] = existing.source_batch_id
 
-        return normalized, ImportedBatchRowResult(
+        return ImportedBatchRowResult(
             id=self._next_row_id(),
             batch_id=batch_id,
             row_no=row_no,
@@ -1114,12 +1315,16 @@ class ImportNormalizationService:
             if invoice_type == InvoiceType.INPUT
             else buyer_name
         ) or seller_name or buyer_name or self._string_or_none(attachment_invoice.get("counterparty_name")) or "OA附件发票"
+        raw_invoice_no = self._string_or_none(attachment_invoice.get("invoice_no"))
+        raw_digital_invoice_no = self._string_or_none(attachment_invoice.get("digital_invoice_no"))
+        if not raw_digital_invoice_no and raw_invoice_no and raw_invoice_no.isdigit() and len(raw_invoice_no) == 20:
+            raw_digital_invoice_no = raw_invoice_no
         normalized: dict[str, Any] = {
             "counterparty_name": counterparty_name,
             "normalized_counterparty_name": normalize_name(counterparty_name),
             "invoice_code": self._string_or_none(attachment_invoice.get("invoice_code")),
-            "invoice_no": self._string_or_none(attachment_invoice.get("invoice_no")),
-            "digital_invoice_no": self._string_or_none(attachment_invoice.get("digital_invoice_no")),
+            "invoice_no": raw_invoice_no,
+            "digital_invoice_no": raw_digital_invoice_no,
             "invoice_date": issue_date,
             "amount": self._format_decimal(amount),
             "signed_amount": self._format_decimal(amount),
@@ -1169,7 +1374,7 @@ class ImportNormalizationService:
             normalized,
             source_row_id=normalized.get("source_workbench_row_id") or normalized.get("source_attachment_key"),
         )
-        if not identity.canonical_key:
+        if identity.canonical_key_kind not in {"digital_invoice_no", "invoice_code_no"} or not identity.canonical_key:
             return None
         normalized["source_unique_key"] = identity.canonical_key
         normalized["data_fingerprint"] = identity.suspected_key
@@ -1300,40 +1505,6 @@ class ImportNormalizationService:
         if "销" in text or text == InvoiceType.OUTPUT.value or "output" in text:
             return InvoiceType.OUTPUT
         return InvoiceType.INPUT
-
-    def _build_etc_invoice_from_normalized(self, normalized: dict[str, Any]) -> Invoice:
-        counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
-        invoice_id = self._next_invoice_id()
-        amount = Decimal(normalized["amount"])
-        return Invoice(
-            id=invoice_id,
-            invoice_type=InvoiceType.INPUT,
-            invoice_no=normalized.get("digital_invoice_no") or normalized.get("invoice_no") or f"generated-{invoice_id.rsplit('_', 1)[-1]}",
-            digital_invoice_no=normalized.get("digital_invoice_no"),
-            counterparty=counterparty,
-            amount=amount,
-            signed_amount=Decimal(normalized["signed_amount"]),
-            invoice_date=normalized.get("invoice_date"),
-            seller_tax_no=normalized.get("seller_tax_no"),
-            seller_name=normalized.get("seller_name"),
-            buyer_tax_no=normalized.get("buyer_tax_no"),
-            buyer_name=normalized.get("buyer_name"),
-            tax_rate=normalized.get("tax_rate"),
-            tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
-            total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
-            invoice_source=normalized.get("invoice_source"),
-            invoice_kind=normalized.get("invoice_kind"),
-            source_unique_key=normalized.get("source_unique_key"),
-            data_fingerprint=normalized.get("data_fingerprint"),
-            source_batch_id=normalized.get("source_batch_id"),
-            tags=list(normalized.get("tags") or []),
-            source_links=[self._build_etc_invoice_source_link(normalized)],
-            etc_invoice_id=normalized.get("etc_invoice_id"),
-            etc_import_batch_id=normalized.get("etc_import_batch_id"),
-            etc_submission_batch_id=normalized.get("etc_submission_batch_id"),
-            etc_submission_status=normalized.get("etc_submission_status"),
-            workbench_visibility=normalized.get("workbench_visibility") or "visible",
-        )
 
     def _merge_invoice_from_etc_normalized(self, invoice: Invoice, normalized: dict[str, Any]) -> None:
         self._ensure_invoice_metadata_fields(invoice)

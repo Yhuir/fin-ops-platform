@@ -782,8 +782,8 @@ class PostgresStateStore:
     def list_submitted_etc_invoices(self) -> list[Any]:
         return self._core_repository.list_submitted_etc_invoices()
 
-    def save_invoices(self, invoices: list[Any], *, mark_read_models_dirty: bool = True) -> None:
-        self._core_repository.save_invoices(invoices, mark_read_models_dirty=mark_read_models_dirty)
+    def save_invoices(self, invoices: list[Any]) -> None:
+        self._core_repository.save_invoices(invoices)
 
     def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
         self._core_repository.save_invoice_etc_metadata(invoices)

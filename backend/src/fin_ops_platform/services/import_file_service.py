@@ -811,7 +811,23 @@ def read_xlsx_rows(content: bytes) -> list[list[str]]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         workbook = load_workbook(BytesIO(content), data_only=True)
-    sheet = workbook[workbook.sheetnames[0]]
+    sheet = _select_template_sheet(workbook)
+    return _worksheet_rows(sheet)
+
+
+def _select_template_sheet(workbook: Any) -> Any:
+    first_sheet = workbook[workbook.sheetnames[0]]
+    for sheet in workbook.worksheets:
+        rows = _worksheet_rows(sheet)
+        try:
+            TemplateDetector(rows).detect()
+            return sheet
+        except ValueError:
+            continue
+    return first_sheet
+
+
+def _worksheet_rows(sheet: Any) -> list[list[str]]:
     rows: list[list[str]] = []
     for excel_row in sheet.iter_rows(values_only=True):
         rows.append([stringify_cell(value) for value in excel_row])

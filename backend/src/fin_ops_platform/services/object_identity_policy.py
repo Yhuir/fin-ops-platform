@@ -13,7 +13,14 @@ from fin_ops_platform.services.invoice_identity_service import InvoiceIdentitySe
 
 OBJECT_IDENTITY_POLICY_SCHEMA_VERSION = "2026-06-object-identity-policy-v1"
 CENT = Decimal("0.01")
-OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES = frozenset({"tax_invoice", "machine_invoice", "non_tax_receipt"})
+OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES = frozenset({"tax_invoice", "machine_invoice"})
+OA_ATTACHMENT_FORMAL_DOCUMENT_KINDS = frozenset(
+    {
+        "digital_invoice",
+        "railway_e_ticket_invoice",
+        "yunnan_machine_invoice",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,7 +268,18 @@ class FinancialObjectIdentityPolicy:
             return True
         if evidence_type:
             return False
-        return bool(evidence.get("invoice_no") or evidence.get("digital_invoice_no") or evidence.get("invoice_code"))
+        document_kind = self._clean_identity_part(evidence.get("document_kind"))
+        return self._is_formal_oa_attachment_document_kind(document_kind) and bool(
+            evidence.get("invoice_no") or evidence.get("digital_invoice_no") or evidence.get("invoice_code")
+        )
+
+    @staticmethod
+    def _is_formal_oa_attachment_document_kind(document_kind: str | None) -> bool:
+        if not document_kind:
+            return False
+        if document_kind in OA_ATTACHMENT_FORMAL_DOCUMENT_KINDS:
+            return True
+        return "发票" in document_kind or "电子客票" in document_kind
 
     def identify_etc_invoice_mapping(
         self,
