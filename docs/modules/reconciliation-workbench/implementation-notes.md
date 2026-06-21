@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - OA 附件 item id 三方自动闭合修复
+
+- 目标：修复未配对区仍出现“OA+银行自动匹配 + 发票同组展示”的 196 等三栏闭合场景；这些发票来自 OA 附件且 `derived_from_oa_id` 为 `oa-exp-*:item:*`，含税合计已闭合，但 free matching engine 没有生成三方 decision。
+- 影响范围：`WorkbenchFreeMatchingEngine` 的 OA 附件发票父 OA 判断、matching dirty scope 重跑后的 `workbench_reconciliation_decisions`、Workbench month/all active generation 分区；不改变 `app.workbench_pair_relations` confirmed fact 语义，也不把页面展示 group 直接写成 active relation。
+- 关键决策：OA 附件父 OA 归一必须复用 `oa_attachment_matches_oa` 统一 helper，禁止 matching engine 继续保留只比较父 OA row id 的旧逻辑。`display_state=paired` 的真实三方 automatic decision 可进入关联台已配对展示区，但仍不是 `app.workbench_pair_relations.status='active'` 的 confirmed fact；两栏 automatic decision 加 open 发票附着仍留 open。
+- 文档影响：更新本模块 README、测试矩阵和 `workbench-relations` 状态机，明确 automatic paired display 与 confirmed active relation 的边界。
+- 测试覆盖：新增 `tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_oa_attachment_invoice_item_ids_close_three_way_candidate`，覆盖 `oa-exp-*:item:*` 明细项发票含税合计闭合生成 `oa_attachment_invoice_with_bank` 三方 paired decision。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_oa_attachment_invoice_item_ids_close_three_way_candidate -q`。
+- 未测风险：本地测试覆盖 matching root cause；发布后必须重跑 matching dirty scope 和 Workbench month/all scope，并用生产 SQL 验证目标 group 从 open 三栏附着变成 paired 三方 decision。
+
 ## 2026-06-21 - 已确认 active relation 两栏分区修复
 
 - 目标：修复关联台未配对区仍残留已确认 OA+银行 relation 的问题；这些行带 `完全关联`/`手动确认` 等事实字段，但因为缺少发票栏被分组层按“两栏不完整”降回 open。

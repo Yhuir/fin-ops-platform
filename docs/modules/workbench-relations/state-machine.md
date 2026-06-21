@@ -30,7 +30,7 @@ Workbench active generation 是面向关联台页面的派生投影；`workbench
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
 | `etc_batch_invoice_link` | ETC repair/link | 是 | 历史 ETC 批次补关联或 existing batch link 兼容关系；新增写入必须通过 command service，不允许页面 service 直接写 pair snapshot。 |
 | `input_invoice_oa_reverse` | 进项发票使用 | 是 | 以发票反提 OA 后的本地确认关系。 |
-| `automatic_decision` | workbench relation read model | 否 | 只能用于 distribution 展示上下文，不能写 active fact。 |
+| `automatic_decision` | workbench relation read model | 否 | 只能用于 distribution 展示上下文，不能写 active fact。`display_state=paired` 的三栏 decision 可进入关联台已配对展示区；`display_state=open`、两栏 decision 或只由 open 发票附着形成的展示 group 仍是候选。 |
 
 新增 mode 必须同时定义：
 

@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_matches_oa
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_OPEN,
     DECISION_STATUS_PAIRED,
@@ -1486,16 +1487,7 @@ class WorkbenchFreeMatchingEngine:
 
     @staticmethod
     def _is_attachment_for_oa(invoice: _Row, oa: _Row) -> bool:
-        parent_id = str(
-            invoice.data.get("source_oa_row_id")
-            or invoice.data.get("oa_row_id")
-            or invoice.data.get("derived_from_oa_id")
-            or invoice.data.get("derived_from_oa_row_id")
-            or ""
-        ).strip()
-        if parent_id == oa.row_id:
-            return True
-        return invoice.row_id.startswith(f"oa-att-inv-{oa.row_id}-")
+        return oa_attachment_matches_oa({"id": invoice.row_id, **invoice.data}, oa.row_id)
 
     def _evidence_payload(
         self,

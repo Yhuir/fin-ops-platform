@@ -1065,6 +1065,57 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
             ("oa-att-inv-oa-exp-1994-1", "oa-att-inv-oa-exp-1994-2"),
         )
 
+    def test_oa_attachment_invoice_item_ids_close_three_way_candidate(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-01",
+            [
+                {
+                    "row_id": "oa-exp-1970",
+                    "amount": "196.00",
+                    "direction": "expenditure",
+                    "month": "2026-01",
+                    "applicant": "田孟维",
+                    "project_name": "云南溯源科技",
+                    "reason": "前期租用云服务器费用；餐费用",
+                }
+            ],
+            [bank("txn-imported-1241", "196.00", month="2026-01", counterparty="田孟维")],
+            [
+                {
+                    "row_id": "inv-imported-0263",
+                    "amount": "124.75",
+                    "total_with_tax": "126.00",
+                    "direction": "expenditure",
+                    "invoice_month": "2026-01",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-1970:item:1:981052addf95",
+                    "seller_name": "南华县沙桥镇润华清真饭店",
+                },
+                {
+                    "row_id": "inv-imported-0264",
+                    "amount": "66.04",
+                    "total_with_tax": "70.00",
+                    "direction": "expenditure",
+                    "invoice_month": "2026-01",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-1970:item:0:023680a8a661",
+                    "seller_name": "中科视拓（南京）科技有限公司",
+                },
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
+        self.assertEqual(decision.match_shape, "oa_bank_invoice")
+        self.assertEqual(decision.rule_code, "oa_attachment_invoice_with_bank")
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertTrue(decision.invoice_amount_closed)
+        self.assertEqual(decision.oa_row_ids, ("oa-exp-1970",))
+        self.assertEqual(decision.bank_row_ids, ("txn-imported-1241",))
+        self.assertEqual(decision.invoice_row_ids, ("inv-imported-0263", "inv-imported-0264"))
+
     def test_generate_decisions_only_returns_decisions_owned_by_dirty_scope(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-02",

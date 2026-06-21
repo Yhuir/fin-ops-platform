@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-21 - automatic decision 三方展示边界修复
+
+目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
+
+决策：
+
+- `automatic_decision` 仍不是 `app.workbench_pair_relations` confirmed fact，不能进入 active relation history 或作为可恢复 relation。
+- `display_state=paired` 且 row set 覆盖 OA、银行流水、发票的三方 decision 可作为关联台 paired display group；这类展示事实来自 `read_model.workbench_reconciliation_decisions`，不是页面本地拼接。
+- matching engine 必须复用统一 OA 附件父 OA helper，禁止保留只比较父 OA row id 的旧判断。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_oa_attachment_invoice_item_ids_close_three_way_candidate -q
+```
+
 ## 2026-06-21 - active relation metadata 投影归属修复
 
 目标：修复 canonical active relation 已存在，但关联台 active generation 因丢失 `special_metadata` / `amount_check` 而把批量账务 OA+银行行留在 open 区的问题；同时防止没有 active relation 的自动候选被展示 tag 误判为 confirmed fact。
