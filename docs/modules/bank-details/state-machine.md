@@ -94,7 +94,7 @@ Refresh 触发来源：
 | 2026-06-18 | 补银行明细真实浏览器导出下载验收 | 不改变状态机；明确导出应消费当前筛选和 relation tag 投影，Browser smoke 覆盖 Workbench confirm 后文件包含 linked relation 字段 | `web/e2e/bank-details-export-download.spec.ts` |
 | 2026-06-18 | 补银行明细非 fresh 浏览器诊断验收 | 不改变后端状态机；页面在 transaction read model `refreshing/stale` 时显示业务诊断，非 fresh 空 rows 不进入真实空态，导出返回业务错误 | `web/e2e/bank-details-stale-refreshing.spec.ts` |
 | 2026-06-18 | 补筛选导出和只读权限浏览器验收 | 不改变后端状态机；当前账户/关键字/分类筛选必须进入导出请求，`read_export_only` 只能读和导出，分类确认/人工分类/自动标签规则写入口按 session 权限禁用且零 mutation | `web/e2e/bank-details-filtered-export-permissions.spec.ts` |
-| 2026-06-18 | 补自定义日期和分页后导出浏览器验收 | 不改变后端状态机；自定义日期、账户、关键字、分类、page size 和翻页会刷新交易列表，导出沿用业务筛选但不携带当前分页，避免只导出当前页 | `web/e2e/bank-details-filtered-export-permissions.spec.ts` |
+| 2026-06-21 | 时间选择器简化为年份/月度/全部 | 不改变后端状态机；年份、月份、全部、账户、关键字、分类、page size 和翻页会刷新交易列表，导出沿用业务筛选但不携带当前分页，避免只导出当前页 | `web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-filtered-export-permissions.spec.ts` |
 | 2026-06-18 | 补分类确认和人工补分类浏览器验收 | 不改变后端状态机；`needs_confirmation` 只能确认当前候选并可撤销，`unmatched` 才能人工补外部往来三层分类并可清除，保存/撤销后页面 refetch 回正确状态 | `web/e2e/bank-details-category-flow.spec.ts` |
 | 2026-06-18 | 补自动标签规则 drawer 浏览器验收 | 不改变后端状态机；自动标签规则保存/重应用成功后必须等待当前可见月份 `bank_detail` freshness，后置同步 blocked 只能降级为 warning，不能变成保存失败 | `web/e2e/bank-details-auto-tag-rules-flow.spec.ts` |
 | 2026-06-18 | 补账户/交易非 fresh 恢复浏览器验收 | 不改变后端状态机；accounts read model 非 fresh 必须能独立 retry 到 fresh，transaction `missing` 空 rows 不能进入真实空态，交易请求短暂失败后用户重新筛选可恢复 rows | `web/e2e/bank-details-stale-refreshing.spec.ts` |

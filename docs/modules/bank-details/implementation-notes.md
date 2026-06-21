@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - 时间选择器简化为年/月与全部
+
+- 目标：简化银行明细右上角时间筛选，移除“本月 / 上月 / 近7天 / 近30天 / 今年”和任意起止日期范围输入，改为一个支持按年或按月选择的时间选择器，以及一个“全部”按钮。
+- 影响范围：`BankDetailsPage` 的日期筛选状态、右上角控件、交易/账户/导出请求参数生成、对应 Vitest 和 Browser e2e；不改变 `/api/bank-details*` 后端 contract、read model/worker、导出服务或自动标签规则写入 contract。
+- 关键决策：默认仍使用业务当前年 `2026-01-01` 到 `2026-12-31`；按年选择发送整年 `date_from/date_to`；按月选择发送该月首尾日期；“全部”清空日期筛选并不发送 `date_from/date_to`。弹层内用“按年 / 按月”切换，按月时年份仅切换月份网格，避免选其它年份月份时需要关闭再打开。
+- 文档影响：更新 bank-details 实施记录与测试矩阵；长期 API/架构/业务事实源不变。
+- 测试覆盖：更新 `web/src/test/BankDetailsPage.test.tsx` 覆盖年份、月份、全部和分页重置；更新 `web/e2e/bank-details-filtered-export-permissions.spec.ts` 覆盖月度筛选、账户/关键字/分类/分页后的导出参数一致性。
+- 验证命令：`cd web && npm test -- --run src/test/BankDetailsPage.test.tsx`；`cd web && npx playwright test e2e/bank-details-filtered-export-permissions.spec.ts`；`cd web && npm run build`。
+- 未测风险：真实生产历史多年份、多账户数据分布和真实 XLSX 完整解析仍按 staging/专项风险处理；本轮没有运行后端测试，因为未改后端 contract、service、read model 或 worker。
+
 ## 2026-06-19 - 分类与导出成功路径 UI 错误残留 guard
 
 - 目标：补齐银行明细分类和导出 Browser 成功链路的“假成功”检测，防止分类/撤销/下载成功后页面仍残留保存失败、撤回失败、导出失败、同步失败或 read model 失败提示。

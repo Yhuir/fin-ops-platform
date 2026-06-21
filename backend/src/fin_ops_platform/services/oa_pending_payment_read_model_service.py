@@ -66,7 +66,7 @@ class OaPendingPaymentReadModelService:
             return self.refreshing_rows_payload(scope_key=scope_key)
 
         stale_reasons = source_version_mismatch_reasons(
-            expected=self.expected_source_versions(),
+            expected=self.expected_source_versions(scope_key=scope_key),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -182,11 +182,11 @@ class OaPendingPaymentReadModelService:
             title=title,
         )
 
-    def expected_source_versions(self) -> dict[str, Any]:
+    def expected_source_versions(self, *, scope_key: str | None = None) -> dict[str, Any]:
         if not callable(self._source_versions_provider):
             return require_expected_source_versions({}, context="oa_pending_payment_read_model")
         return require_expected_source_versions(
-            self._source_versions_provider() or {},
+            _source_versions_from_provider(self._source_versions_provider, scope_key=scope_key) or {},
             context="oa_pending_payment_read_model",
         )
 
@@ -228,7 +228,7 @@ class OaPendingPaymentReadModelService:
             self._enqueue_refresh(scope_key, reason="api_detail_stale")
             return self._refreshing_detail_payload(title=title, scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
-            expected=self.expected_source_versions(),
+            expected=self.expected_source_versions(scope_key=scope_key),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -280,3 +280,10 @@ class OaPendingPaymentReadModelService:
         if not refresh_gateway.can_enqueue():
             return False
         return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason))
+
+
+def _source_versions_from_provider(provider: SourceVersionsProvider, *, scope_key: str | None) -> dict[str, Any]:
+    try:
+        return dict(provider(scope_key=scope_key) or {})  # type: ignore[misc]
+    except TypeError:
+        return dict(provider() or {})

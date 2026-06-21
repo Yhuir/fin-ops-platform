@@ -3800,6 +3800,75 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows_by_group_id["scope:2026-05:temp:0001"], (["oa-may"], ["oa-att-inv-may"]))
         self.assertEqual(rows_by_group_id["scope:2026-04:temp:0001"], (["oa-apr"], ["oa-att-inv-apr"]))
 
+    def test_repository_all_scope_moves_cross_month_attachment_invoice_to_parent_oa_group(self) -> None:
+        class AggregateAllCrossMonthAttachmentConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "source:oa_attachment:oa-exp-952",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "source:oa_attachment:oa-exp-952",
+                            "zone": "open",
+                            "group_type": "source_linked",
+                            "match_confidence": "high",
+                            "reason": "oa_attachment_source_relation",
+                            "oa_rows": [{"id": "oa-exp-952", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "open",
+                        "group_id": "temp:invoice-952",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:invoice-952",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "match_confidence": "low",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "inv-oa-attachment-952",
+                                    "type": "invoice",
+                                    "source_kind": "oa_attachment_invoice",
+                                    "derived_from_oa_id": "oa-exp-952:item:1:hash",
+                                }
+                            ],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllCrossMonthAttachmentConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        self.assertEqual(len(aggregate_group_payloads), 1)
+        group = aggregate_group_payloads[0]
+        self.assertEqual(group["group_id"], "source:oa_attachment:oa-exp-952")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-952"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["inv-oa-attachment-952"])
+
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()

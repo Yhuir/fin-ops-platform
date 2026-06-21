@@ -1011,7 +1011,8 @@ class Application:
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=oa_pending_payment_projection,
+            oa_projection=oa_adapter,
+            in_progress_oa_projection=oa_pending_payment_projection,
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -9412,7 +9413,8 @@ class Application:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=self._oa_pending_payment_projection(),
+            oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
+            in_progress_oa_projection=self._oa_pending_payment_projection(),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -10131,7 +10133,7 @@ class Application:
             return self._invoice_relation_refreshing_payload(scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
-                self._input_invoice_usage_expected_source_versions(),
+                self._input_invoice_usage_expected_source_versions(scope_key=scope_key),
                 context="input_invoice_usage_read_model",
             ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
@@ -10185,7 +10187,7 @@ class Application:
             return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
-                self._output_invoice_collection_expected_source_versions(),
+                self._output_invoice_collection_expected_source_versions(scope_key=scope_key),
                 context="output_invoice_collection_read_model",
             ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
@@ -10251,16 +10253,44 @@ class Application:
             return month[:7]
         return "all"
 
-    def _input_invoice_usage_expected_source_versions(self) -> dict[str, object]:
-        return input_invoice_usage_source_versions(
+    def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
+        source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._input_invoice_usage_payment_rules_provider().rules_source_version(),
         )
+        relation_source_versions = self._workbench_relation_source_versions_from_repository(
+            getattr(self, "_input_invoice_usage_sql_read_repository", None),
+            scope_key=scope_key,
+        )
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        return source_versions
 
-    def _output_invoice_collection_expected_source_versions(self) -> dict[str, object]:
-        return output_invoice_collection_source_versions()
+    def _output_invoice_collection_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
+        source_versions = output_invoice_collection_source_versions()
+        relation_source_versions = self._workbench_relation_source_versions_from_repository(
+            getattr(self, "_output_invoice_collection_sql_read_repository", None),
+            scope_key=scope_key,
+        )
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        return source_versions
 
-    def _oa_pending_payment_expected_source_versions(self) -> dict[str, object]:
-        return oa_pending_payment_source_versions()
+    def _oa_pending_payment_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
+        source_versions = oa_pending_payment_source_versions()
+        relation_source_versions = self._workbench_relation_source_versions_from_repository(
+            getattr(self, "_oa_pending_payment_sql_read_repository", None),
+            scope_key=scope_key,
+        )
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        return source_versions
+
+    @staticmethod
+    def _workbench_relation_source_versions_from_repository(repository: object | None, *, scope_key: str | None) -> dict[str, object]:
+        source_versions_loader = getattr(repository, "workbench_relation_source_versions", None)
+        if not callable(source_versions_loader):
+            return {}
+        return dict(source_versions_loader(scope_key=scope_key or "all") or {})
 
     @staticmethod
     def _invoice_relation_refreshing_payload(

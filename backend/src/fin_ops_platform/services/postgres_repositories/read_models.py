@@ -2989,6 +2989,28 @@ class PostgresReadModelRepository:
             (tenant_id, scope_key),
         )
 
+    def workbench_relation_source_versions(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        normalized_scope_key = text(scope_key) or "all"
+        if normalized_scope_key == "all":
+            rows = self._connection.fetch_all(
+                """
+                select scope_key, source_versions
+                from read_model.workbench_relation_scopes
+                where tenant_id = %s
+                order by scope_key
+                """,
+                (tenant_id,),
+            )
+            return self._common_source_versions([dict(row) for row in rows if isinstance(row, dict)])
+        scope_row = self._workbench_relation_scope_row(scope_key=normalized_scope_key, tenant_id=tenant_id)
+        source_versions = scope_row.get("source_versions") if isinstance(scope_row, dict) else None
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
     def _workbench_relation_groups_for_scope_group_ids(
         self,
         *,
@@ -8980,6 +9002,7 @@ def _aggregate_workbench_all_scope_payload(
     for (zone, _group_id), group in grouped.items():
         _finalize_all_scope_group(group, zone=zone)
         finalized_by_zone[zone].append(group)
+    _co_locate_all_scope_oa_attachment_invoices_with_parent_groups(finalized_by_zone)
     _suppress_all_scope_open_rows_claimed_by_paired(
         finalized_by_zone["paired"],
         finalized_by_zone["open"],
@@ -8997,6 +9020,94 @@ def _aggregate_workbench_all_scope_payload(
         aggregate[zone]["groups"].sort(key=lambda item: text(item.get("group_id")) or "")
     aggregate["summary"] = _summarize_workbench_payload_groups(aggregate)
     return aggregate
+
+
+def _co_locate_all_scope_oa_attachment_invoices_with_parent_groups(
+    finalized_by_zone: dict[str, list[dict[str, Any]]],
+) -> None:
+    all_groups = [group for zone in ("paired", "open") for group in finalized_by_zone.get(zone, [])]
+    parent_groups_by_oa_id: dict[str, dict[str, Any]] = {}
+    for group in all_groups:
+        for row in _as_workbench_row_list(group.get("oa_rows")):
+            row_id = _workbench_row_id(row)
+            if row_id:
+                parent_groups_by_oa_id.setdefault(row_id, group)
+    if not parent_groups_by_oa_id:
+        return
+
+    changed_groups: set[int] = set()
+    for group in all_groups:
+        invoice_rows = _as_workbench_row_list(group.get("invoice_rows"))
+        if not invoice_rows:
+            continue
+        retained_rows: list[dict[str, Any]] = []
+        for row in invoice_rows:
+            parent_oa_id = _all_scope_oa_attachment_parent_oa_id(row)
+            target_group = parent_groups_by_oa_id.get(parent_oa_id or "")
+            if target_group is None or target_group is group:
+                retained_rows.append(row)
+                continue
+            target_group["invoice_rows"] = _merge_workbench_rows(target_group.get("invoice_rows"), [row])
+            _mark_all_scope_oa_attachment_source_group(target_group)
+            changed_groups.add(id(target_group))
+            changed_groups.add(id(group))
+        if len(retained_rows) != len(invoice_rows):
+            group["invoice_rows"] = retained_rows
+
+    if not changed_groups:
+        return
+    for zone, groups in finalized_by_zone.items():
+        for group in groups:
+            if id(group) in changed_groups:
+                _finalize_all_scope_group(group, zone=zone)
+
+
+def _all_scope_oa_attachment_parent_oa_id(row: dict[str, Any]) -> str | None:
+    if text(row.get("source_kind")) != "oa_attachment_invoice":
+        return None
+    candidates = [
+        row.get("derived_from_oa_id"),
+        row.get("source_oa_row_id"),
+        row.get("source_expense_item_id"),
+        row.get("source_id"),
+    ]
+    source_links = row.get("source_links")
+    if isinstance(source_links, list):
+        for source_link in source_links:
+            if not isinstance(source_link, dict):
+                continue
+            if text(source_link.get("source_type")) != "oa_attachment_invoice":
+                continue
+            candidates.extend(
+                [
+                    source_link.get("derived_from_oa_id"),
+                    source_link.get("source_oa_row_id"),
+                    source_link.get("source_expense_item_id"),
+                    source_link.get("source_id"),
+                ]
+            )
+    for candidate in candidates:
+        parent_oa_id = _normalize_all_scope_oa_attachment_parent_oa_id(candidate)
+        if parent_oa_id:
+            return parent_oa_id
+    return None
+
+
+def _normalize_all_scope_oa_attachment_parent_oa_id(value: Any) -> str | None:
+    normalized = text(value)
+    if normalized is None:
+        return None
+    return re.sub(r":item:.*$", "", normalized)
+
+
+def _mark_all_scope_oa_attachment_source_group(group: dict[str, Any]) -> None:
+    if text(group.get("zone") or group.get("status")) == "paired":
+        return
+    if text(group.get("group_type")) in {"manual_confirmed", "auto_closed", "open_exception", "processed_exception", "ignored", "legacy_exception"}:
+        return
+    group["group_type"] = "source_linked"
+    group["match_confidence"] = "high"
+    group["reason"] = "oa_attachment_source_relation"
 
 
 def _suppress_all_scope_open_rows_claimed_by_paired(

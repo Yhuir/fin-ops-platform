@@ -205,7 +205,8 @@ class InvoiceLifecycleSqlProjectionBuilder:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
-            oa_projection=self._oa_pending_payment_projection(),
+            oa_projection=self._oa_projection_repository,
+            in_progress_oa_projection=self._oa_pending_payment_projection(),
             payment_status_repository=self._payment_status_repository,
             lifecycle_policy=self._policy,
             require_fresh_relations=True,
@@ -274,7 +275,16 @@ class InvoiceLifecycleSqlProjectionBuilder:
         return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
 
     def _oa_month_shards(self) -> list[str]:
-        return [month for month in self._oa_pending_payment_projection().list_available_months() if MONTH_SCOPE_RE.match(month)]
+        months: set[str] = set()
+        list_completed_months = getattr(self._oa_projection_repository, "list_available_months", None)
+        if callable(list_completed_months):
+            months.update(str(month).strip() for month in list_completed_months() if MONTH_SCOPE_RE.match(str(month or "")))
+        months.update(
+            str(month).strip()
+            for month in self._oa_pending_payment_projection().list_available_months()
+            if MONTH_SCOPE_RE.match(str(month or ""))
+        )
+        return sorted(months, reverse=True)
 
     def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
         return PaymentAdmittedOAProjectionAdapter(

@@ -138,14 +138,17 @@ class PostgresWorkbenchRelationRepository:
                 )
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
             self._replace_workbench_pair_relation_history(connection, history, changed_case_ids=changed_ids)
-            for scope_key in sorted(dirty_scope_keys or {"all"}):
-                _enqueue_read_model_refresh_in_transaction(
-                    connection,
-                    scope_type="workbench_relation",
-                    scope_key=scope_key,
-                    reason="workbench_pair_relation_changed",
-                    priority="high",
-                )
+            relation_refresh_scope_keys = set(dirty_scope_keys or {"all"})
+            downstream_refresh_scope_keys = relation_refresh_scope_keys | set(downstream_by_scope_key.keys())
+            for scope_key in sorted(downstream_refresh_scope_keys or {"all"}):
+                if scope_key in relation_refresh_scope_keys:
+                    _enqueue_read_model_refresh_in_transaction(
+                        connection,
+                        scope_type="workbench_relation",
+                        scope_key=scope_key,
+                        reason="workbench_pair_relation_changed",
+                        priority="high",
+                    )
                 downstream_scope_types = downstream_by_scope_key.get(scope_key, set())
                 for downstream_scope_type in WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES:
                     if downstream_scope_type not in downstream_scope_types:
@@ -293,6 +296,8 @@ def _workbench_relation_downstream_scope_map(
     invoice_directions = _workbench_relation_invoice_directions(connection, row_ids) if has_invoice else set()
     unknown_invoice_direction = has_invoice and not invoice_directions
 
+    actual_invoice_scope_keys = set(domain_scope_keys.get("invoice", set()))
+    actual_oa_scope_keys = set(domain_scope_keys.get("oa", set()))
     bank_scope_keys = _domain_scope_keys(domain_scope_keys, "bank", dirty_scope_keys)
     invoice_scope_keys = _domain_scope_keys(domain_scope_keys, "invoice", dirty_scope_keys)
     oa_scope_keys = _domain_scope_keys(domain_scope_keys, "oa", dirty_scope_keys)
@@ -314,14 +319,14 @@ def _workbench_relation_downstream_scope_map(
             lifecycle_scope_keys.update(oa_scope_keys)
         add("invoice_lifecycle", lifecycle_scope_keys or broad_scope_keys)
     if has_invoice or unknown_row_types:
-        invoice_downstream_scope_keys = broad_scope_keys if unknown_row_types else invoice_scope_keys
+        invoice_downstream_scope_keys = broad_scope_keys if unknown_row_types else (actual_invoice_scope_keys or {"all"})
         if "input" in invoice_directions or unknown_invoice_direction or unknown_row_types:
             add("input_invoice_usage", invoice_downstream_scope_keys)
         if "output" in invoice_directions or unknown_invoice_direction or unknown_row_types:
             add("output_invoice_collection", invoice_downstream_scope_keys)
         add("tax_offset", invoice_downstream_scope_keys)
     if has_oa:
-        add("oa_pending_payment", oa_scope_keys)
+        add("oa_pending_payment", actual_oa_scope_keys or {"all"})
     cost_scope_keys: set[str] = set()
     if unknown_row_types:
         cost_scope_keys = broad_scope_keys

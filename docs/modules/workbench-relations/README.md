@@ -116,6 +116,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - `require_fresh=True` 时，missing/stale/source mismatch 返回非 fresh 状态并入队刷新。
 - 读结果必须包含 `status`、`read_model_scope_keys`、`stale_reasons`、`refresh_enqueued`、`source_versions`。
 - 业务写 API 不能把 facade 返回的空 rows 当成真实无关系。
+- 下游 SQL read model 的 expected source versions 必须包含当前 `workbench_relation_scopes.source_versions`；relation distribution 变化后，进项发票使用、销项发票收款和 OA 待付款不能继续把旧 payload 标为 fresh。
 - 读结果必须保留 `linked` / `candidate` / `unlinked` 语义。进项发票使用、OA 待付款、待找发票等下游页面可以展示 candidate 作为关联台候选证据，但只有 linked 能参与已支付、已关联、已占用等业务判断。
 
 ### `WorkbenchPairRelationService`
@@ -263,6 +264,8 @@ blocking issue 的修复原则是重新触发现有 relation mutation fan-out co
 - 事务内 confirm 由 `PostgresWorkbenchRelationRepository` 基于 canonical row 表推导 scope，不得从 `read_model.workbench_rows` 反推写侧 affected scope。
 - `app.invoices.invoice_type` 为进项时只刷新 `input_invoice_usage` 与税金相关 scope；销项时只刷新 `output_invoice_collection` 与税金相关 scope；方向未知时才保守刷新两侧。
 - `app.bank_transactions.txn_direction` 为支出时只刷新 expense pending invoice 父 scopes；收入时只刷新 income pending invoice 父 scopes；方向未知时才保守刷新两侧。
+- 下游页面 scope 必须按目标事实源自己的月份推导：发票页面按 `app.invoices.invoice_month`，OA 待付款按 OA 准入投影月份/应用日期，待找发票按银行流水方向和月份。若目标事实源月份无法解析，必须刷新该下游 read model 的 `all` scope 触发 worker fan-out，不能把 bank/relation `month_scope` 伪装成目标页面月份。
+- 事务内入队必须遍历 relation dirty scope 与 downstream scope 的并集；`downstream_by_scope_key` 中计算出的 `all` 或其他 scope 不能因为不在 relation dirty scope 中而丢失。
 - 生产 `withdraw-link` 必须和 `confirm-link` / `cancel-link` 一样走 transaction-bound Workbench UoW 与 `PostgresWorkbenchRelationRepository`，由同一事务写 canonical relation、history 和 durable dirty/outbox；不得在成功写入后再同步调用 legacy pair persist/read-model lifecycle 作为响应前置条件。
 - 非 UoW legacy `withdraw-link` 兼容路径的 service 层 lifecycle 必须传 `include_all=False`，并携带 `downstream_scope_types`、`invoice_usage_scope_types`、`pending_invoice_scope_keys` metadata，让普通 read model 非相关失败不拖慢或污染本次操作链路。
 - 以上收敛只减少不相关 read model refresh；页面 `已同步` 仍必须来自 durable queue/readiness 的真实 fresh gate。

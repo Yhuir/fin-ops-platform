@@ -298,6 +298,60 @@ def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -
     assert "aggregate_only" not in workbench_all_outbox_payloads[-1]
 
 
+def test_relation_downstream_refresh_enqueues_all_scope_when_oa_month_is_unresolved() -> None:
+    connection = RecordingConnection(
+        bank_scope_keys=["2026-04"],
+        invoice_scope_keys=[],
+        oa_scope_keys=[],
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _snapshot(row_types=["bank", "oa"], month_scope="2026-04"),
+        changed_case_ids={"CASE-1"},
+    )
+
+    dirty_params = [
+        params
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+    ]
+    scope_keys_by_type: dict[str, set[str]] = {}
+    for params in dirty_params:
+        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+
+    assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
+    assert scope_keys_by_type["oa_pending_payment"] == {"all"}
+
+
+def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_unresolved() -> None:
+    connection = RecordingConnection(
+        invoice_types=["input"],
+        bank_directions=["outflow"],
+        bank_scope_keys=["2026-04"],
+        invoice_scope_keys=[],
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _snapshot(row_types=["bank", "invoice"], month_scope="2026-04"),
+        changed_case_ids={"CASE-1"},
+    )
+
+    dirty_params = [
+        params
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+    ]
+    scope_keys_by_type: dict[str, set[str]] = {}
+    for params in dirty_params:
+        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+
+    assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
+    assert scope_keys_by_type["input_invoice_usage"] == {"all"}
+    assert scope_keys_by_type["tax_offset"] == {"all"}
+
+
 def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_cost_bearing_relation() -> None:
     connection = RecordingConnection(
         bank_scope_keys=["2026-02"],

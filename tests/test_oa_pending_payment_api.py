@@ -473,6 +473,48 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertIn("oa_pending_payment_source_version_missing", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_source_versions_stale")])
 
+    def test_production_rows_relation_source_version_stale_enqueues_refresh_without_stale_rows(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        old_relation_versions = {"source_version": "1"}
+        current_relation_versions = {"source_version": "2"}
+        app._oa_pending_payment_sql_read_repository = type(
+            "OaRepo",
+            (),
+            {
+                "list_oa_pending_payment_rows": lambda *_args, **_kwargs: {
+                    "rows": [{"id": "stale-row", "oa": {}, "paymentStatus": {}, "bankTransaction": {}, "invoice": {}}],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "summary": {"rowCount": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        **oa_pending_payment_source_versions(),
+                        "workbench_relation_source_versions": old_relation_versions,
+                    },
+                }
+            },
+        )()
+        app._oa_pending_payment_api_routes = _read_model_routes(
+            repository=app._oa_pending_payment_sql_read_repository,
+            queue=queue,
+            source_versions_provider=lambda: {
+                **oa_pending_payment_source_versions(),
+                "workbench_relation_source_versions": current_relation_versions,
+            },
+        )
+
+        response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_source_versions_stale")])
+
     def test_production_filter_options_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -810,6 +852,7 @@ def _read_model_routes(
     repository: object | None,
     queue: QueueRecorder,
     query_service: object | None = None,
+    source_versions_provider: object | None = None,
 ) -> OaPendingPaymentApiRoutes:
     query_service = query_service or ExplodingOaPendingPaymentService()
     return OaPendingPaymentApiRoutes(
@@ -818,7 +861,7 @@ def _read_model_routes(
             repository=repository,
             queue_repository=queue,
             query_service=query_service,  # type: ignore[arg-type]
-            source_versions_provider=oa_pending_payment_source_versions,
+            source_versions_provider=source_versions_provider or oa_pending_payment_source_versions,  # type: ignore[arg-type]
         ),
     )
 

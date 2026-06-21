@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - OA 附件发票必须与父 OA 同组
+
+- 目标：修复生产发布后关联台仍显示 `OA附件` 发票行左侧 OA/银行流水为空的问题，确保 OA 附件解析出的正式发票在 Workbench 输出层一定与其 `derived_from_oa_id` 指向的父 OA 落在同一个 group。
+- 影响范围：`WorkbenchCandidateGroupingService` 的最终分组输出、`workbench:all` 聚合发布、月份 read model 重建结果、关联台三栏展示；不改变统一发票池事实源、OA 附件 promotion 建票规则或 OCR 解析规则。
+- 关键决策：之前的清理验收只证明 “父 OA 存在于同一个 active generation”，不足以证明 UI 同行展示。新增分组层不变量：只要 `source_kind=oa_attachment_invoice` 且父 OA 存在，输出前必须把该发票行移动到父 OA 所在 group；父 OA 已在普通候选、已有 case、已配对或跨月补投影 group 中时均适用。人工确认、已关闭、异常/忽略 group 不改 group 类型；普通 open/candidate group 被标记为 `source_linked`，避免附件发票继续以 invoice-only group 污染未配对区。`workbench:all` 不能只拼接 month shards，因为 OA 附件发票可能按发票月份进入 2026-01，而父 OA 按申请月份进入 2026-02/2026-03；all-scope 聚合必须再次执行同组归并，确保全局视图中 `parent_elsewhere=0`。
+- 文档影响：本实施记录同步；长期业务口径不变，OA 附件发票仍是统一发票池里的进项发票，OA 附件 source link 是 OA 与发票的配对来源。
+- 测试覆盖：更新 `tests/test_workbench_candidate_grouping.py`，覆盖父 OA 已在已有 case group 时附件发票回并父 OA group，以及父 OA 已在 paired group 时额外 OA 附件发票不再留在 open invoice-only group；更新 `tests/test_workbench_sql_runtime.py`，覆盖 all-scope 跨月聚合把附件发票移动到父 OA group。
+- 验证命令：`PYTHONPATH=backend/src python -m pytest tests/test_workbench_candidate_grouping.py`；`PYTHONPATH=backend/src python -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_all_scope_moves_cross_month_attachment_invoice_to_parent_oa_group tests/test_workbench_candidate_grouping.py`；`PYTHONPATH=backend/src python -m pytest tests/test_workbench_candidate_grouping.py tests/test_workbench_matching_rules.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_all_scope_moves_cross_month_attachment_invoice_to_parent_oa_group tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_keeps_synthetic_all_scope_groups_separate_by_month_shard tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_oa_projection_rows_exclude_attachment_invoice_rows tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_supplements_source_oa_for_attachment_invoice_rows tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_supplements_in_progress_source_oa_from_sql tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_materialized_attachment_rows_by_source_oa_relation tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_materialized_attachment_item_rows_by_parent_oa_relation tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_invoice_row_preserves_canonical_oa_attachment_source_metadata tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_invoice_row_prefers_oa_attachment_source_link_with_context tests/test_oa_attachment_invoice_promotion_tool.py tests/test_workbench_pair_relation_integrity_repair.py`。
+- 未测风险：本地自动测试覆盖分组/投影/聚合规则；真实浏览器截图仍需要发布后刷新确认三栏同行显示。真实库需重建 Workbench all-scope 并用 SQL 验证 `OA附件发票 parent_elsewhere=0`。
+
 ## 2026-06-21 - OA 附件发票父 OA 回连与关系完整性修复
 
 - 目标：修复 OA 附件解析出的正式发票已进入统一发票池，但因 `derived_from_oa_id` 使用 `oa-exp-*:item:*` 明细项 ID 而没有回挂到父 OA 行的问题；同时清理清空重导发票后遗留的 active relation 旧发票 row id。

@@ -137,6 +137,10 @@ class WorkbenchCandidateGroupingService:
             *candidate_groups,
         ]
         paired_output = [*valid_paired_groups, *promoted_open_case_groups, *promoted_groups]
+        paired_output, open_groups = self._co_locate_oa_attachment_invoices_with_parent_oa_groups(
+            paired_output,
+            open_groups,
+        )
 
         return {
             "month": month,
@@ -151,6 +155,78 @@ class WorkbenchCandidateGroupingService:
             "paired": {"groups": [self._serialize_group(group, section="paired") for group in paired_output]},
             "open": {"groups": [self._serialize_group(group, section="open") for group in open_groups]},
         }
+
+    def _co_locate_oa_attachment_invoices_with_parent_oa_groups(
+        self,
+        paired_groups: list[CandidateGroup],
+        open_groups: list[CandidateGroup],
+    ) -> tuple[list[CandidateGroup], list[CandidateGroup]]:
+        parent_groups_by_oa_id: dict[str, CandidateGroup] = {}
+        for group in [*paired_groups, *open_groups]:
+            for row in group.oa_rows:
+                row_id = self._string_value(row.get("id"))
+                if row_id:
+                    parent_groups_by_oa_id.setdefault(row_id, group)
+
+        if not parent_groups_by_oa_id:
+            return paired_groups, open_groups
+
+        changed = False
+        for group in [*paired_groups, *open_groups]:
+            retained_invoice_rows: list[dict[str, Any]] = []
+            for row in group.invoice_rows:
+                target_group = self._oa_attachment_parent_group(row, parent_groups_by_oa_id)
+                if target_group is None or target_group is group:
+                    retained_invoice_rows.append(row)
+                    continue
+                self._append_unique_invoice_row(target_group, row)
+                self._mark_oa_attachment_source_group(target_group)
+                changed = True
+            group.invoice_rows = retained_invoice_rows
+
+        if not changed:
+            return paired_groups, open_groups
+        return self._non_empty_groups(paired_groups), self._non_empty_groups(open_groups)
+
+    def _oa_attachment_parent_group(
+        self,
+        row: dict[str, Any],
+        parent_groups_by_oa_id: dict[str, CandidateGroup],
+    ) -> CandidateGroup | None:
+        source_id = self._oa_attachment_evidence_source_id(row)
+        if source_id is None:
+            return None
+        return parent_groups_by_oa_id.get(source_id)
+
+    @staticmethod
+    def _append_unique_invoice_row(group: CandidateGroup, row: dict[str, Any]) -> None:
+        row_id = str(row.get("id") or "").strip()
+        if row_id and any(str(existing.get("id") or "").strip() == row_id for existing in group.invoice_rows):
+            return
+        group.invoice_rows.append(row)
+
+    @staticmethod
+    def _mark_oa_attachment_source_group(group: CandidateGroup) -> None:
+        if group.group_type in {
+            "manual_confirmed",
+            "auto_closed",
+            "open_exception",
+            "processed_exception",
+            "ignored",
+            "legacy_exception",
+        }:
+            return
+        group.group_type = "source_linked"
+        group.match_confidence = "high"
+        group.reason = "oa_attachment_source_relation"
+
+    @staticmethod
+    def _non_empty_groups(groups: list[CandidateGroup]) -> list[CandidateGroup]:
+        return [
+            group
+            for group in groups
+            if group.oa_rows or group.bank_rows or group.invoice_rows
+        ]
 
     def _extract_turnover_relation_groups_from_candidate_context(
         self,

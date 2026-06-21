@@ -1066,20 +1066,24 @@ describe("Bank details page", () => {
     expect(within(page).getByLabelText(/交通银行 3847 余额/)).toHaveTextContent("余额为空");
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
 
-    await user.click(within(page).getByRole("button", { name: "上月" }));
+    await user.click(within(page).getByRole("button", { name: /时间选择 2026年/ }));
+    let datePicker = screen.getByRole("dialog", { name: "银行明细时间选择面板" });
+    await user.click(within(datePicker).getByRole("button", { name: "2025年" }));
     await waitFor(() => {
       const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(accountRequest?.searchParams.get("date_from")).toBe("2026-04-01");
-      expect(accountRequest?.searchParams.get("date_to")).toBe("2026-04-30");
-      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-04-01");
-      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-04-30");
+      expect(accountRequest?.searchParams.get("date_from")).toBe("2025-01-01");
+      expect(accountRequest?.searchParams.get("date_to")).toBe("2025-12-31");
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2025-01-01");
+      expect(transactionRequest?.searchParams.get("date_to")).toBe("2025-12-31");
     });
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
 
-    await user.click(within(page).getByRole("button", { name: /2026-04-01 - 2026-04-30/ }));
-    await user.clear(screen.getByLabelText("年月筛选"));
-    await user.type(screen.getByLabelText("年月筛选"), "2026-03");
+    await user.click(within(page).getByRole("button", { name: /时间选择 2025年/ }));
+    datePicker = screen.getByRole("dialog", { name: "银行明细时间选择面板" });
+    await user.click(within(datePicker).getByRole("button", { name: "按月" }));
+    await user.click(within(datePicker).getByRole("button", { name: "2026年" }));
+    await user.click(within(datePicker).getByRole("button", { name: "3月" }));
     await waitFor(() => {
       const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
@@ -1089,19 +1093,14 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-03-31");
     });
 
-    const startDateInput = screen.getByLabelText("开始日期");
-    const endDateInput = screen.getByLabelText("结束日期");
-    fireEvent.input(startDateInput, { target: { value: "2026-02-01" } });
-    fireEvent.blur(startDateInput);
-    fireEvent.input(endDateInput, { target: { value: "2026-02-15" } });
-    fireEvent.blur(endDateInput);
+    await user.click(within(page).getByRole("button", { name: "全部" }));
     await waitFor(() => {
       const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(accountRequest?.searchParams.get("date_from")).toBe("2026-02-01");
-      expect(accountRequest?.searchParams.get("date_to")).toBe("2026-02-15");
-      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-02-01");
-      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-02-15");
+      expect(accountRequest?.searchParams.get("date_from")).toBeNull();
+      expect(accountRequest?.searchParams.get("date_to")).toBeNull();
+      expect(transactionRequest?.searchParams.get("date_from")).toBeNull();
+      expect(transactionRequest?.searchParams.get("date_to")).toBeNull();
     });
   });
 
@@ -1125,7 +1124,10 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
     });
 
-    await user.click(within(page).getByRole("button", { name: "上月" }));
+    await user.click(within(page).getByRole("button", { name: /时间选择 2026年/ }));
+    const datePicker = screen.getByRole("dialog", { name: "银行明细时间选择面板" });
+    await user.click(within(datePicker).getByRole("button", { name: "按月" }));
+    await user.click(within(datePicker).getByRole("button", { name: "4月" }));
 
     await waitFor(() => {
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);

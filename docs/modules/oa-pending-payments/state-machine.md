@@ -6,7 +6,7 @@
 
 | 状态域 | 状态 | 事实源 | 允许流转 |
 | --- | --- | --- | --- |
-| 主行 | `oa_application` | OA MySQL `t_payment_simple.flow_id` + payment-admitted OA projection / OA Mongo | 每个已进入支付状态管理准入表并能匹配 OA Mongo `_id` 的 OA 申请是一行；银行流水和发票只是 relation evidence，不能替代主行。 |
+| 主行 | `oa_application` | completed: 普通 `app.oa_applications` / OA completed projection；in_progress: OA MySQL `t_payment_simple.flow_id` + payment-admitted OA projection / OA Mongo | completed 每个统一 OA projection 中已完成/历史未知 OA 是一行；in_progress 每个已进入支付状态管理准入表并能匹配 OA Mongo `_id` 的进行中 OA 是一行；银行流水和发票只是 relation evidence，不能替代主行。 |
 | 流程视图 | `completed` | `oa_application.workflow_status` | 默认视图；只包含已完成 OA，历史未带 workflow status 的 OA 兼容归入此视图。 |
 | 流程视图 | `in_progress` | `oa_application.workflow_status` | 进行中 OA 视图；下一次 OA sync/read model refresh 发现 OA 已完成后必须从该视图移除。 |
 | 付款状态 | `unpaid` | `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` | 没有有效支出流水付款证据时保持未付。 |
@@ -22,8 +22,8 @@
 关键规则：
 
 - 列表以 OA application 为主行，不能因为没有银行流水或发票而隐藏 OA。
-- OA 待付款核对的主行准入事实源是 `t_payment_simple.flow_id`；该字段必须匹配 OA Mongo `form_data._id`。未进入 `t_payment_simple` 的 OA，即使 OA 系统显示为进行中或已完成，也不进入本页面正常表格。
-- 普通 `app.oa_applications` 投影只承载已完成/历史未知 OA；OA 待付款 read model 使用专用 payment-admitted projection，从 `t_payment_simple.flow_id` 精确读取 OA Mongo 当前记录，再用 `view_mode` 分流。设置页手工搜索/导入状态筛选只影响手工导入行为，不能把已准入的进行中 OA 从本页面 read model 源头过滤掉。
+- OA 待付款核对只有 `in_progress` 视图使用 `t_payment_simple.flow_id` 作为主行准入事实源；该字段必须匹配 OA Mongo `form_data._id`。未进入 `t_payment_simple` 的进行中 OA，即使 OA 系统显示为进行中，也不进入本页面进行中表格。
+- 普通 `app.oa_applications` 投影承载已完成/历史未知 OA，并作为 `completed` 视图的统一事实源；OA 待付款 read model 同时接入普通 completed projection 和专用 payment-admitted projection。设置页手工搜索/导入状态筛选只影响手工导入行为，不能把已准入的进行中 OA 从本页面 read model 源头过滤掉。
 - `t_payment_simple.id` 不得当作 OA ID；页面可以携带它作为支付状态记录诊断字段，但 OA 匹配和写回只使用 `flow_id`。
 - `oa.sync` 完成后必须入队 `oa_pending_payment.read_model.refresh` 月份 scope 和 `all` scope；页面不直接 live scan Mongo。
 - 当 Workbench active relation 明确包含多条 OA、支出流水或进项发票时，OA 待付款只能按该 relation 生成一条核对行；OA 金额、支出流水已付金额和发票价税合计使用该 relation 下各自事实的合计。
@@ -115,7 +115,7 @@ Worker 流程：
 2. `invoice-usage-collection` worker 消费事件。
 3. refresh handler 先通过 durable queue 检查 event source_version 是否仍为当前 dirty scope；旧 event 返回 `skipped/stale_source_version`，不 rebuild、不 fan-out、不 complete dirty scope。
 4. `scope_key=all` 先由 `InvoiceUsageCollectionSqlProjectionBuilder.list_oa_pending_payment_scope_shards` 展开月份 shard。
-5. 月份 shard 调 `rebuild_oa_pending_payment_read_model_scope`，基于 `t_payment_simple.flow_id` 准入后的 OA Mongo 当前记录、bank/import facts、input invoices 和 Workbench relation 构建 rows。
+5. 月份 shard 调 `rebuild_oa_pending_payment_read_model_scope`，基于普通 completed OA projection、`t_payment_simple.flow_id` 准入后的进行中 OA Mongo 当前记录、bank/import facts、input invoices 和 Workbench relation 构建 rows。
 6. projection 保存 `read_model.oa_pending_payment_rows` 和 `read_model.oa_pending_payment_scopes`，写入 source versions 和 row count。
 7. App Status 读取 readiness/dirty/outbox/worker heartbeat，展示 `oa_pending_payments` domain 状态。
 
@@ -135,12 +135,12 @@ Worker 流程：
 | 2026-06-17 | 补 OA pending read model stale event guard 和 all scope rows source-version 聚合 | 防止旧 worker/event 覆盖新 v3 投影，防止历史空 scope 污染默认 `all` 视图 freshness | `tests.test_invoice_usage_collection_sql_runtime`、HTTP smoke、Playwright 页面 smoke |
 | 2026-06-17 | 新增 `completed/in_progress` OA 流程视图和进行中 OA 确认写回 | OA workflow status 投影、`view_mode` rows/filter-options、`confirm-paid` command、OA MySQL `t_payment_simple` 写回、前端三列表格与确认按钮 | `tests.test_oa_payment_status_service`、`tests.test_mongo_oa_adapter`、`tests.test_oa_pending_payment_service`、`tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-17 | 补充 OA 待付款 Browser e2e，覆盖 rows 首屏、搜索、支付状态筛选、交易时间排序、OA/流水/发票详情抽屉和支出流水无需开票规则抽屉 | OA 待付款 UI 状态、rows/filter/detail/rules endpoint、Playwright smoke | `cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
-| 2026-06-18 | `oa.sync` 增加 OA 待付款 read model fan-out | 进行中 OA 进入 OA projection 后，`oa_pending_payment` 月份和 all scope 必须自动刷新，避免页面空数据 | `PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service -v` |
+| 2026-06-18 | `oa.sync` 增加 OA 待付款 read model fan-out | 进行中 OA 当前记录进入 payment-admitted projection 后，`oa_pending_payment` 月份和 all scope 必须自动刷新，避免页面空数据 | `PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service -v` |
 | 2026-06-18 | completed 视图恢复发票证据列，in-progress 继续隐藏发票列 | 真实浏览器首屏必须看到发票号并可打开发票详情；进行中 OA 仍只展示候选流水确认主链路 | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`、`cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
 | 2026-06-18 | OA/状态/流水主体表格改为内部三栏布局 | OA 单元格按申请人/项目/金额三栏展示，流水单元格按对方户名/金额/摘要三栏展示，支付状态列收窄并只显示未写回/已写回 | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-18 | completed/in-progress 统一四分组表格 UI | 两种流程视图都显示 OA、支付状态、流水、发票四个大分组；发票列纵向展示并移除价税合计 chip | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-18 | OA pending 四分组表格取消横向滚动 | 表格改为 100% 自适应百分比列宽，局部缩小字号/chip/按钮并允许换行 | `cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
-| 2026-06-18 | OA 待付款准入事实源改为 `t_payment_simple.flow_id` 并在视图切换展示数量 | 页面/read model 先按支付状态管理表 flow_id 准入，再按 OA 当前 workflow status 进入 completed/in-progress；重复 OA 未入表不展示；tab 数量来自 `summary.viewCounts` | `tests.test_oa_payment_status_service`、`tests.test_oa_pending_payment_service`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
+| 2026-06-18 | OA 待付款拆分 completed 统一 OA projection 与 in-progress `t_payment_simple.flow_id` 准入源 | completed/read model 读取普通 completed projection；in-progress 先按支付状态管理表 flow_id 准入再读取 OA Mongo 当前记录；重复进行中 OA 未入表不展示；tab 数量来自 `summary.viewCounts` | `tests.test_oa_payment_status_service`、`tests.test_oa_pending_payment_service`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-18 | 拆分普通 completed OA projection 与 OA 待付款专用准入 projection | `app.oa_applications` 和其他页面只消费 completed/legacy OA；OA 待付款 read model 使用 `PaymentAdmittedOAProjectionAdapter` 根据 `t_payment_simple.flow_id` 精确读取 OA Mongo，`oa.sync` 只写 completed projection 并清理旧 in-progress 投影残留 | `tests.test_oa_payment_status_service`、`tests.test_oa_projection_sync_service`、`tests.test_oa_projection_sql_runtime`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_workbench_relation_sql_projection` |
 | 2026-06-18 | 进行中 OA 增加人工写回与右侧支出流水关联抽屉 | 自动候选、自动决策和已有 active relation 只能点击确认后写回；抽屉默认展示全部支出流水但只允许选择未配对流水，提交只创建 Workbench relation、不写 MySQL；关联台显示“已关联进行中OA”chip | `tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-11 | 关联台分组关系收敛 | 移除 `overpaid`/`merged_paid` 展示口径；多 OA/流水/发票 relation 合并为一条核对行；详情支持 `kind=oa` | `tests.test_oa_pending_payment_service`、`tests.test_invoice_lifecycle_policy`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` 通过 |

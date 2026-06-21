@@ -71,7 +71,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("exports the current custom date and filters after pagination changes without limiting to the current page", async ({ page }, testInfo) => {
+  test("exports the selected month and filters after pagination changes without limiting to the current page", async ({ page }, testInfo) => {
     await installDeterministicApiMocks(page, {
       bankDetailsTransactionsTotal: 299,
       sessionMode: "full_access",
@@ -81,9 +81,10 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByText("1-100 / 299")).toBeVisible();
 
-    await page.getByRole("button", { name: /2026-01-01 - 2026-12-31/ }).click();
-    await page.getByLabel("开始日期").fill("2026-03-01");
-    const customDateRowsRequest = page.waitForRequest((request) => {
+    await page.getByRole("button", { name: /时间选择 2026年/ }).click();
+    const datePicker = page.getByRole("dialog", { name: "银行明细时间选择面板" });
+    await datePicker.getByRole("button", { name: "按月" }).click();
+    const monthRowsRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return request.method() === "GET"
         && url.pathname.endsWith("/api/bank-details/transactions")
@@ -92,10 +93,9 @@ test.describe("bank details filtered export and read-export permissions", () => 
         && url.searchParams.get("page") === "1"
         && url.searchParams.get("page_size") === "100";
     });
-    await page.getByLabel("结束日期").fill("2026-03-31");
-    await customDateRowsRequest;
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("button", { name: /2026-03-01 - 2026-03-31/ })).toBeVisible();
+    await datePicker.getByRole("button", { name: "3月" }).click();
+    await monthRowsRequest;
+    await expect(page.getByRole("button", { name: /时间选择 2026年3月/ })).toBeVisible();
 
     await page.getByRole("button", { name: /建设银行 1138/ }).click();
     await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");

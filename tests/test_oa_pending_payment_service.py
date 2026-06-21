@@ -269,18 +269,19 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             service.list_rows(view_mode="bad")
         self.assertEqual(context.exception.error_code, "invalid_view_mode")
 
-    def test_payment_status_table_admits_oa_rows_before_view_mode_filtering(self) -> None:
+    def test_only_in_progress_view_uses_payment_status_admission_projection(self) -> None:
         payment_repository = FakeAdmissionPaymentStatusRepository(
             flow_ids={
-                "oa-completed-admitted": "mongo-completed",
                 "oa-progress-admitted": "mongo-progress",
                 "oa-progress-duplicate": "mongo-duplicate",
             },
-            admitted_flow_ids={"mongo-completed", "mongo-progress"},
+            admitted_flow_ids={"mongo-progress"},
         )
         service = self._service(
             oa_records=[
-                self._oa("oa-completed-admitted", "张三", "30.00", workflow_status="completed"),
+                self._oa("oa-completed-unified", "张三", "30.00", workflow_status="completed"),
+            ],
+            in_progress_oa_records=[
                 self._oa("oa-progress-admitted", "李四", "40.00", workflow_status="in_progress"),
                 self._oa("oa-progress-duplicate", "李四", "40.00", workflow_status="in_progress"),
             ],
@@ -290,7 +291,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         completed_payload = service.list_rows(page_size=20)
         progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
 
-        self.assertEqual([row["oa"]["id"] for row in completed_payload["rows"]], ["oa-completed-admitted"])
+        self.assertEqual([row["oa"]["id"] for row in completed_payload["rows"]], ["oa-completed-unified"])
         self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-admitted"])
         self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
@@ -404,6 +405,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self,
         *,
         oa_records: list[OAApplicationRecord],
+        in_progress_oa_records: list[OAApplicationRecord] | None = None,
         transactions: list[BankTransaction] | None = None,
         invoices: list[Invoice] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
@@ -422,6 +424,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
                 oa_projection=projection,
             ),
             oa_projection=projection,
+            in_progress_oa_projection=StaticOAProjection(in_progress_oa_records or oa_records),
             payment_status_repository=payment_repository,
         )
 

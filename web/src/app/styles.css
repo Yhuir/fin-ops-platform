@@ -20494,7 +20494,8 @@ body.column-layout-dragging {
 }
 
 .bank-auto-rules-button,
-.bank-date-range-button {
+.bank-date-range-button,
+.bank-date-all-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -20517,9 +20518,18 @@ body.column-layout-dragging {
 .bank-auto-rules-button:hover,
 .bank-auto-rules-button:focus-visible,
 .bank-date-range-button:hover,
-.bank-date-range-button:focus-visible {
+.bank-date-range-button:focus-visible,
+.bank-date-all-button:hover,
+.bank-date-all-button:focus-visible {
   background: var(--bank-hover);
   outline: none;
+}
+
+.bank-date-all-button.active,
+.bank-date-all-button[aria-pressed="true"] {
+  border-color: var(--bank-blue);
+  background: #dbe7ff;
+  color: #1d4ed8;
 }
 
 .bank-date-filter-popover {
@@ -20527,86 +20537,47 @@ body.column-layout-dragging {
   top: 168px;
   right: 36px;
   z-index: 45;
-  width: 260px;
-  padding: 12px;
+  width: 300px;
+  padding: 14px;
   border: 1px solid var(--bank-border);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
 }
 
-.bank-date-presets {
-  display: flex;
-  flex-wrap: nowrap;
+.bank-date-filter {
+  display: grid;
+  gap: 12px;
 }
 
-.bank-date-presets button {
-  min-width: 52px;
+.bank-date-filter-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bank-date-filter-mode-button {
   height: 32px;
-  padding: 0 10px;
   border: 1px solid var(--bank-border-subtle);
+  border-radius: 8px;
   background: var(--bank-surface-muted);
   color: var(--bank-text);
   font-size: 12px;
   font-weight: 760;
-  text-transform: none;
   cursor: pointer;
 }
 
-.bank-date-presets button + button {
-  margin-left: -1px;
-}
-
-.bank-date-presets button:first-child {
-  border-radius: 8px 0 0 8px;
-}
-
-.bank-date-presets button:last-child {
-  border-radius: 0 8px 8px 0;
-}
-
-.bank-date-presets button:hover,
-.bank-date-presets button:focus-visible {
+.bank-date-filter-mode-button:hover,
+.bank-date-filter-mode-button:focus-visible {
   background: var(--bank-hover);
   outline: none;
 }
 
-.bank-date-presets button.active,
-.bank-date-presets button[aria-pressed="true"] {
+.bank-date-filter-mode-button.active,
+.bank-date-filter-mode-button[aria-pressed="true"] {
   border-color: var(--bank-blue);
-  background: #dbe7ff;
+  background: #dbeafe;
   color: #1d4ed8;
-  z-index: 1;
-}
-
-.bank-date-presets button.active:hover,
-.bank-date-presets button[aria-pressed="true"]:hover {
-  background: #d0e2ff;
-}
-
-.bank-date-filter {
-  display: grid;
-  gap: 10px;
-}
-
-.bank-date-filter-field {
-  display: grid;
-  gap: 4px;
-  color: var(--bank-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.bank-date-filter-field input {
-  width: 100%;
-  min-width: 0;
-  min-height: 34px;
-  padding: 5px 8px;
-  border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
-  background: #ffffff;
-  color: var(--bank-text);
-  font-size: 12px;
 }
 
 .bank-transaction-grid {

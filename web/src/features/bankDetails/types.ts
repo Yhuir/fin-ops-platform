@@ -290,16 +290,25 @@ export type SaveBankAutoTagRulesRequest = {
 };
 
 export type BankDatePreset =
-  | "current_month"
-  | "previous_month"
-  | "last_7_days"
-  | "last_30_days"
-  | "current_year"
-  | "month"
-  | "custom";
+  | "all"
+  | "year"
+  | "month";
 
-export type BankDateFilter = {
-  preset: BankDatePreset;
-  dateFrom: string;
-  dateTo: string;
-};
+export type BankDateFilter =
+  | {
+    preset: "all";
+    dateFrom: null;
+    dateTo: null;
+  }
+  | {
+    preset: "year";
+    year: string;
+    dateFrom: string;
+    dateTo: string;
+  }
+  | {
+    preset: "month";
+    month: string;
+    dateFrom: string;
+    dateTo: string;
+  };

@@ -875,6 +875,54 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["oa_rows"], [])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-orphan-001"])
 
+    def test_oa_attachment_invoice_joins_parent_oa_group_after_candidate_grouping(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-parent-952",
+                    "type": "oa",
+                    "case_id": "CASE-PARENT-952",
+                    "apply_type": "日常报销",
+                    "amount": "952.00",
+                    "counterparty_name": "云南溯源科技",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-parent-952",
+                    "type": "bank",
+                    "case_id": "CASE-PARENT-952",
+                    "trade_time": "2026-03-25 14:22",
+                    "debit_amount": "952.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云南溯源科技",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-parent-952",
+                    derived_from_oa_id="oa-parent-952",
+                    amount="215.00",
+                    total_with_tax="215.00",
+                    seller_name="玉溪卷烟厂",
+                )
+            ],
+        )
+
+        source_group = next(
+            group
+            for group in payload["open"]["groups"]
+            if "iv-parent-952" in [row["id"] for row in group["invoice_rows"]]
+        )
+        self.assertEqual(source_group["reason"], "oa_attachment_source_relation")
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-parent-952"])
+        self.assertEqual([row["id"] for row in source_group["bank_rows"]], ["bk-parent-952"])
+        self.assertEqual([row["id"] for row in source_group["invoice_rows"]], ["iv-parent-952"])
+
     def test_oa_attachment_invoice_with_manual_case_id_is_not_taken_by_source_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -1222,8 +1270,11 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["paired_count"], 1)
         paired_group = payload["paired"]["groups"][0]
         self.assertEqual([row["id"] for row in paired_group["oa_rows"]], ["oa-zhou-offset"])
-        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["iv-offset-selected"])
-        self.assertIn(
+        self.assertCountEqual(
+            [row["id"] for row in paired_group["invoice_rows"]],
+            ["iv-offset-selected", "iv-offset-extra"],
+        )
+        self.assertNotIn(
             "iv-offset-extra",
             [row["id"] for row in flatten_groups(payload["open"]["groups"], "invoice")],
         )

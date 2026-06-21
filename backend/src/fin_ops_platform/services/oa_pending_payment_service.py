@@ -103,6 +103,7 @@ class OaPendingPaymentQueryService:
         import_service: ImportNormalizationService,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
+        in_progress_oa_projection: Any | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
         lifecycle_policy: Any | None = None,
         require_fresh_relations: bool = True,
@@ -110,6 +111,7 @@ class OaPendingPaymentQueryService:
         self._import_service = import_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
+        self._in_progress_oa_projection = in_progress_oa_projection or oa_projection
         self._payment_status_repository = payment_status_repository
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
         self._require_fresh_relations = require_fresh_relations
@@ -246,7 +248,7 @@ class OaPendingPaymentQueryService:
         return self._row_by_id(row_id, context=self._query_context())
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
-        record = self._oa_records_by_id(month=None).get(str(oa_id))
+        record = self._all_view_oa_records_by_id(month=None).get(str(oa_id))
         if record is None:
             raise OaPendingPaymentError("oa_not_found", f"OA detail not found: {oa_id}", status_code=HTTPStatus.NOT_FOUND)
         return {
@@ -654,7 +656,7 @@ class OaPendingPaymentQueryService:
         month: str | None,
         view_mode: str = VIEW_MODE_COMPLETED,
     ) -> list[OAApplicationRecord]:
-        records = list(self._oa_records_by_id(month=month).values())
+        records = list(self._oa_records_by_id(month=month, view_mode=view_mode).values())
         normalized_month = str(month or "").strip()
         if normalized_month and normalized_month != "all":
             records = [record for record in records if str(record.month or "").startswith(normalized_month[:7])]
@@ -662,18 +664,35 @@ class OaPendingPaymentQueryService:
         records.sort(key=lambda record: (record.month or "", record.applicant or "", record.id))
         return records
 
-    def _oa_records_by_id(self, *, month: str | None) -> dict[str, OAApplicationRecord]:
-        if self._oa_projection is None:
+    def _oa_records_by_id(
+        self,
+        *,
+        month: str | None,
+        view_mode: str = VIEW_MODE_COMPLETED,
+    ) -> dict[str, OAApplicationRecord]:
+        projection = self._projection_for_view_mode(view_mode)
+        if projection is None:
             return {}
-        list_all = getattr(self._oa_projection, "list_all_application_records", None)
+        list_all = getattr(projection, "list_all_application_records", None)
         if callable(list_all):
             records = list_all()
         else:
             records = []
-        records = self._filter_records_by_payment_status_admission(
-            [record for record in records if isinstance(record, OAApplicationRecord)]
-        )
+        records = [record for record in records if isinstance(record, OAApplicationRecord)]
+        if view_mode == VIEW_MODE_IN_PROGRESS:
+            records = self._filter_records_by_payment_status_admission(records)
         return {record.id: record for record in records if isinstance(record, OAApplicationRecord)}
+
+    def _all_view_oa_records_by_id(self, *, month: str | None) -> dict[str, OAApplicationRecord]:
+        records = self._oa_records_by_id(month=month, view_mode=VIEW_MODE_COMPLETED)
+        for record_id, record in self._oa_records_by_id(month=month, view_mode=VIEW_MODE_IN_PROGRESS).items():
+            records.setdefault(record_id, record)
+        return records
+
+    def _projection_for_view_mode(self, view_mode: str) -> Any | None:
+        if view_mode == VIEW_MODE_IN_PROGRESS:
+            return self._in_progress_oa_projection
+        return self._oa_projection
 
     def _filter_records_by_payment_status_admission(
         self,
@@ -1076,9 +1095,10 @@ class OaPendingPaymentQueryService:
 
     def _row_by_id(self, row_id: str, *, context: DistributedInvoiceRelationContext) -> dict[str, Any] | None:
         normalized_row_id = str(row_id or "").strip()
-        for row in self._build_rows(month=None, context=context):
-            if row["id"] == normalized_row_id:
-                return row
+        for view_mode in (VIEW_MODE_COMPLETED, VIEW_MODE_IN_PROGRESS):
+            for row in self._build_rows(month=None, context=context, view_mode=view_mode):
+                if row["id"] == normalized_row_id:
+                    return row
         return None
 
 
