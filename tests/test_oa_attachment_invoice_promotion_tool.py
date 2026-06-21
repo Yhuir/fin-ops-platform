@@ -6,6 +6,7 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
 from fin_ops_platform.tools.oa_attachment_invoice_promotion import (
     OAAttachmentInvoiceCandidate,
+    _load_candidates,
     audit_oa_attachment_invoice_promotion,
     main,
 )
@@ -105,6 +106,38 @@ class OAAttachmentInvoicePromotionToolTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 2)
         self.assertIn("--confirm-apply-oa-attachment-invoices", stdout.getvalue())
+
+    def test_load_candidates_does_not_infer_missing_parent_oa_from_item_id(self) -> None:
+        class FakeConnection:
+            def fetch_all(self, sql: str) -> list[dict[str, object]]:
+                return [
+                    {
+                        "cache_source_attachment_key": "cache-key-1",
+                        "invoices": [
+                            {
+                                "evidence_type": "tax_invoice",
+                                "digital_invoice_no": "26532000000141671582",
+                                "seller_name": "云南建筑技术发展中心",
+                                "buyer_name": "云南溯源科技有限公司",
+                                "issue_date": "2026-01-28",
+                                "total_with_tax": "500.00",
+                            }
+                        ],
+                        "oa_application_id": None,
+                        "oa_source_id": "oa-exp-orphan",
+                        "oa_row_id": None,
+                        "source_expense_item_id": "oa-exp-orphan:item:2:abcdef",
+                        "source_expense_row_index": "2",
+                        "source_attachment_key": "attachment-orphan",
+                        "source_attachment_name": "orphan.pdf",
+                    }
+                ]
+
+        candidates = _load_candidates(FakeConnection())
+
+        self.assertEqual(len(candidates), 1)
+        self.assertIsNone(candidates[0].oa_row_id)
+        self.assertIsNone(candidates[0].source_workbench_row_id)
 
     @staticmethod
     def _candidate(index: int, attachment_invoice: dict[str, object]) -> OAAttachmentInvoiceCandidate:

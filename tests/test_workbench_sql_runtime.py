@@ -1275,6 +1275,105 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], ["oa-exp-1"])
         self.assertEqual(missing_rows, [])
 
+    def test_sql_projection_supplements_source_oa_for_attachment_invoice_rows(self) -> None:
+        class FakeOAQueryService:
+            def __init__(self) -> None:
+                self.synced_row_ids: list[list[str]] = []
+
+            def get_workbench(self, month: str) -> dict[str, object]:
+                return {"month": month}
+
+            def sync_oa_row_ids(self, row_ids: list[str]) -> None:
+                self.synced_row_ids.append(list(row_ids))
+
+            def list_record_snapshots(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "id": "oa-exp-cross-month",
+                        "type": "oa",
+                        "_month": "2026-01",
+                        "_section": "open",
+                        "amount": "178.00",
+                    },
+                ]
+
+            def serialize_row(self, row: dict[str, object]) -> dict[str, object]:
+                return {key: value for key, value in row.items() if not key.startswith("_")}
+
+        fake_oa = FakeOAQueryService()
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            oa_query_service=fake_oa,
+        )
+        rows: dict[str, dict[str, object]] = {}
+        invoice_rows = [
+            {
+                "id": "oa-att-inv-cross-month",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-exp-cross-month:item:2:0b1b85793f3d",
+            }
+        ]
+
+        builder._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
+
+        self.assertEqual(fake_oa.synced_row_ids, [["oa-exp-cross-month"]])
+        self.assertIn("oa-exp-cross-month", rows)
+        self.assertEqual(rows["oa-exp-cross-month"]["source_kind"], "oa")
+
+    def test_sql_projection_supplements_in_progress_source_oa_from_sql(self) -> None:
+        class EmptyOAQueryService:
+            def get_workbench(self, month: str) -> dict[str, object]:
+                return {"month": month}
+
+            def sync_oa_row_ids(self, row_ids: list[str]) -> None:
+                return None
+
+            def list_record_snapshots(self) -> list[dict[str, object]]:
+                return []
+
+            def serialize_row(self, row: dict[str, object]) -> dict[str, object]:
+                return dict(row)
+
+        class SourceOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_applications" in normalized and "where row_id = any" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-exp-in-progress",
+                            "applicant": "马涛",
+                            "application_date": "2026-05-01",
+                            "project_name": "差旅",
+                            "amount": "833.25",
+                            "status": "open",
+                            "workflow_status": "in_progress",
+                            "normalized_payload": {"reason": "出差"},
+                            "raw_payload": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=SourceOAConnection(),
+            oa_query_service=EmptyOAQueryService(),
+        )
+        rows: dict[str, dict[str, object]] = {}
+        invoice_rows = [
+            {
+                "id": "oa-att-inv-in-progress",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-exp-in-progress:item:2:abc",
+            }
+        ]
+
+        builder._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
+
+        self.assertIn("oa-exp-in-progress", rows)
+        self.assertEqual(rows["oa-exp-in-progress"]["workflow_status"], "in_progress")
+        self.assertEqual(rows["oa-exp-in-progress"]["source_kind"], "oa")
+
     def test_sql_projection_attaches_existing_etc_summary_to_active_relation(self) -> None:
         connection = EtcSummaryProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)

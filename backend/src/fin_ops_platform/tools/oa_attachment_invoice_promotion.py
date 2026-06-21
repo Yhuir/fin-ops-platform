@@ -4,7 +4,6 @@ import argparse
 from collections import Counter
 from dataclasses import dataclass
 import json
-import re
 import sys
 from typing import Any, Sequence, TextIO
 
@@ -21,7 +20,6 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 
 
 APPLY_CONFIRMATION_FLAG = "--confirm-apply-oa-attachment-invoices"
-_OA_SOURCE_RE = re.compile(r"^(oa-[^:]+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +217,7 @@ def _load_candidates(connection: Any) -> list[OAAttachmentInvoiceCandidate]:
         left join lateral (
             select attachment.oa_application_id::text as oa_application_id,
                    coalesce(app.oa_source_id, attachment.oa_source_id) as oa_source_id,
-                   attachment.row_id as oa_row_id,
+                   app.row_id as oa_row_id,
                    source.source_expense_item_id,
                    source.source_expense_row_index,
                    source.source_attachment_key,
@@ -284,15 +282,7 @@ def _load_candidates(connection: Any) -> list[OAAttachmentInvoiceCandidate]:
 
 
 def _resolve_oa_row_id(row: dict[str, Any]) -> str | None:
-    for key in ("oa_row_id", "oa_source_id"):
-        value = _clean_text(row.get(key))
-        if value:
-            return value
-    source_expense_item_id = _clean_text(row.get("source_expense_item_id"))
-    if not source_expense_item_id:
-        return None
-    match = _OA_SOURCE_RE.match(source_expense_item_id)
-    return match.group(1) if match else None
+    return _clean_text(row.get("oa_row_id"))
 
 
 def _persist_affected_invoices(connection: Any, invoices: list[Invoice]) -> None:

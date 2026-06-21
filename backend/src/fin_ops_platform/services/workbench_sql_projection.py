@@ -13,6 +13,7 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
     oa_attachment_matches_oa,
+    oa_attachment_parent_oa_id,
 )
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -229,11 +230,28 @@ class WorkbenchSqlProjectionBuilder:
             rows[str(row["id"])] = row
         for row in self._bank_rows(month):
             rows[str(row["id"])] = row
-        for row in self._invoice_rows(month):
+        invoice_rows = self._invoice_rows(month)
+        self._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
+        for row in invoice_rows:
             rows[str(row["id"])] = row
         for row in self._open_etc_invoice_summary_rows(month):
             rows[str(row["id"])] = row
         return rows
+
+    def _supplement_source_oa_rows_for_attachment_invoices(
+        self,
+        rows: dict[str, dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+    ) -> None:
+        missing_parent_oa_ids = {
+            parent_oa_id
+            for row in invoice_rows
+            if str(row.get("source_kind") or "").strip() == OA_ATTACHMENT_INVOICE_SOURCE_KIND
+            if (parent_oa_id := oa_attachment_parent_oa_id(row.get("derived_from_oa_id")))
+            if parent_oa_id not in rows
+        }
+        for row in self._oa_projection_rows_by_ids(missing_parent_oa_ids):
+            rows.setdefault(str(row["id"]), row)
 
     def _oa_projection_rows(self, month: str) -> list[dict[str, Any]]:
         self._oa_query_service.get_workbench(month)
@@ -266,7 +284,24 @@ class WorkbenchSqlProjectionBuilder:
             payload["status"] = "open"
             payload.setdefault("source_kind", payload.get("type") or row.get("type"))
             result.append(payload)
+        missing_row_ids = wanted - {str(row.get("id") or "").strip() for row in result}
+        result.extend(self._oa_projection_rows_by_sql_ids(missing_row_ids))
         return result
+
+    def _oa_projection_rows_by_sql_ids(self, row_ids: set[str]) -> list[dict[str, Any]]:
+        normalized_row_ids = sorted({row_id for row_id in row_ids if row_id.startswith("oa-") and not row_id.startswith("oa-att-")})
+        if not normalized_row_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select row_id, applicant, application_date, project_name, amount, status, workflow_status, normalized_payload, raw_payload
+            from app.oa_applications
+            where row_id = any(%s)
+            order by row_id
+            """,
+            (normalized_row_ids,),
+        )
+        return [payload for row in rows if (payload := self._oa_row_from_sql(row))]
 
     def _legacy_oa_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
@@ -281,27 +316,31 @@ class WorkbenchSqlProjectionBuilder:
         )
         result: list[dict[str, Any]] = []
         for row in rows:
-            payload = row_payload(row, "normalized_payload", "raw_payload")
-            payload = payload if isinstance(payload, dict) else {}
-            row_id = str(row.get("row_id") or payload.get("id") or "").strip()
-            if not row_id:
-                continue
-            result.append(
-                {
-                    "id": row_id,
-                    "type": "oa",
-                    "source_kind": "oa",
-                    "status": "open",
-                    "applicant": row.get("applicant") or payload.get("applicant"),
-                    "date": _date_text(row.get("application_date") or payload.get("date")),
-                    "project_name": row.get("project_name") or payload.get("project_name"),
-                    "amount": str(row.get("amount") or payload.get("amount") or ""),
-                    "reason": payload.get("reason"),
-                    "summary_fields": payload.get("summary_fields") if isinstance(payload.get("summary_fields"), dict) else {},
-                    "detail_fields": payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {},
-                }
-            )
+            if payload := self._oa_row_from_sql(row):
+                result.append(payload)
         return result
+
+    @staticmethod
+    def _oa_row_from_sql(row: dict[str, Any]) -> dict[str, Any] | None:
+        payload = row_payload(row, "normalized_payload", "raw_payload")
+        payload = payload if isinstance(payload, dict) else {}
+        row_id = str(row.get("row_id") or payload.get("id") or "").strip()
+        if not row_id:
+            return None
+        return {
+            "id": row_id,
+            "type": "oa",
+            "source_kind": "oa",
+            "status": "open",
+            "workflow_status": row.get("workflow_status") or payload.get("workflow_status"),
+            "applicant": row.get("applicant") or payload.get("applicant"),
+            "date": _date_text(row.get("application_date") or payload.get("date")),
+            "project_name": row.get("project_name") or payload.get("project_name"),
+            "amount": str(row.get("amount") or payload.get("amount") or ""),
+            "reason": payload.get("reason"),
+            "summary_fields": payload.get("summary_fields") if isinstance(payload.get("summary_fields"), dict) else {},
+            "detail_fields": payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {},
+        }
 
     def _bank_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
