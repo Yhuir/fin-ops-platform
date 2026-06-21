@@ -64,6 +64,7 @@
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
 | 2026-06-10 | 默认 all scope 因月份间嵌套 `workbench_relation_source_versions` 不同而误判 refreshing。 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_read_model_freshness.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered |
+| 2026-06-21 | 默认 all scope 若直接使用全局 `workbench_relation:all` expected source versions，会把已 fresh 的月份 shard 误判 stale，页面长期显示“进项发票使用情况数据正在刷新”。 | `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_api_all_scope_uses_rows_when_month_relation_versions_differ`、`tests/test_read_model_freshness.py::ReadModelFreshnessTests::test_normalize_source_versions_canonicalizes_nested_values` | covered |
 | 2026-06-10 | 创建 OA 草稿错误使用当前操作人 token，而不是目标申请人凭据。 | `tests/test_target_oa_applicant_token_provider.py`、`tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py` | covered |
 | 2026-06-10 | 凭据可能进入普通 settings payload 或前端回显密码。 | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx`、`tests/test_postgres_oa_applicant_credentials_repository.py` | covered |
 | 2026-06-10 | `未提交 OA` 后不能重新创建草稿，或被误记为已提交历史。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |

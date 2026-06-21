@@ -87,6 +87,7 @@ Spec-first Browser e2e 审计入口：
 | 2026-06-18 | `read_export_only` 用户仍能打开待确认分类或自动标签规则写入口，或 forbidden/expired session 下银行明细 protected API 先于 session gate 被调用。 | `web/e2e/bank-details-filtered-export-permissions.spec.ts` | covered |
 | 2026-06-18 | 候选确认误用全量标签字典，或人工补分类走错候选确认接口，外部往来三层标签丢失 turnover 语义。 | `web/e2e/bank-details-category-flow.spec.ts` | covered |
 | 2026-06-18 | 银行明细首屏只被组件测试保护，真实浏览器可能丢失默认日期 query、账户余额、默认列、relation/category 字段，或 fresh 空结果被误当非 fresh 诊断。 | `web/e2e/bank-details-initial-state.spec.ts` | covered |
+| 2026-06-21 | 页面无日期筛选时使用 `bank_detail:all` 作为查询 freshness proof，但 worker 只把 `all` fan-out 到月份 shard，导致月份数据已 fresh 时页面仍长期显示“银行明细正在刷新”。 | `tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_scope_keys_for_unbounded_bank_detail_reads_use_month_shards` | covered |
 
 ## 关键 smoke flows
 

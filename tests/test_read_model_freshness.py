@@ -19,6 +19,23 @@ class ReadModelFreshnessTests(unittest.TestCase):
             {"source_version": "3"},
         )
 
+    def test_normalize_source_versions_canonicalizes_nested_values(self) -> None:
+        self.assertEqual(
+            normalize_source_versions(
+                {
+                    "source_version": 3,
+                    "by_month": {
+                        "2026-05": {"updated_at": "b", "schema": 1},
+                        "2026-04": {"schema": 1, "updated_at": "a"},
+                    },
+                }
+            ),
+            {
+                "source_version": "3",
+                "by_month": '{"2026-04":{"schema":1,"updated_at":"a"},"2026-05":{"schema":1,"updated_at":"b"}}',
+            },
+        )
+
     def test_source_versions_match_when_expected_subset_matches(self) -> None:
         self.assertTrue(
             source_versions_match(

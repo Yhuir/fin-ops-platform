@@ -10296,6 +10296,8 @@ class Application:
 
     @staticmethod
     def _workbench_relation_source_versions_from_repository(repository: object | None, *, scope_key: str | None) -> dict[str, object]:
+        if str(scope_key or "").strip() == "all":
+            return {}
         source_versions_loader = getattr(repository, "workbench_relation_source_versions", None)
         if not callable(source_versions_loader):
             return {}

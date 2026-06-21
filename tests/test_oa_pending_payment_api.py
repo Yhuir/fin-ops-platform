@@ -570,6 +570,50 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "oa-payment-row-api")
         self.assertEqual(queue.refreshes, [])
 
+    def test_production_all_scope_does_not_loop_on_relation_all_versions(self) -> None:
+        queue = QueueRecorder()
+        base_versions = oa_pending_payment_source_versions()
+
+        class OaRepo:
+            def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "rows": [_read_model_row()],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "summary": {"rowCount": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        **base_versions,
+                        "workbench_relation_source_versions": {
+                            "workbench_pair_relations_updated_at": "2026-06-21 15:00:00+08",
+                        },
+                    },
+                    "read_model_scope_key": "all",
+                }
+
+            def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
+                self.requested_scope_key = scope_key
+                return {"workbench_pair_relations_updated_at": "2026-06-21 16:00:00+08"}
+
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._oa_pending_payment_sql_read_repository = OaRepo()
+        app._oa_pending_payment_api_routes = _read_model_routes(
+            repository=app._oa_pending_payment_sql_read_repository,
+            queue=queue,
+            query_service=_empty_query_service(),
+            source_versions_provider=app._oa_pending_payment_expected_source_versions,
+        )
+
+        response = app._handle_api_oa_pending_payments_rows({"page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(queue.refreshes, [])
+
     def test_production_rows_passes_view_mode_to_sql_read_repository(self) -> None:
         queue = QueueRecorder()
         seen_kwargs: dict[str, object] = {}

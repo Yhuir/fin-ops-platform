@@ -64,6 +64,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 生产 read model miss/stale 时回退 live scan | `tests/test_oa_pending_payment_api.py` | production rows/filter/detail 非 fresh 只返回 refreshing 并入队。 |
 | source version 缺失时返回旧 rows | `tests/test_oa_pending_payment_api.py` | stale rows 被清空，返回 `read_model_stale_reasons`。 |
 | all scope 没有单独 scope row 被误判 missing | `tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | all scope 聚合月份 rows/source versions，不要求 all scope row。 |
+| all scope 被全局 `workbench_relation:all` expected source versions 误判 stale | `tests/test_oa_pending_payment_api.py::OaPendingPaymentApiTests::test_production_all_scope_does_not_loop_on_relation_all_versions` | 默认 all 查询不能等待 fan-out-only parent/global relation all proof；已 fresh 的月份 shard 不应反复入队刷新。 |
 | 历史空 scope 的旧 source version 把默认视图误判 stale | `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_oa_repository_all_scope_aggregates_monthly_scope_source_versions` | `all` scope 有实际 rows 时优先从 rows 聚合 source versions，旧空月份 scope 不参与。 |
 | 旧 refresh event 覆盖新 read model | `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_oa_refresh_handler_skips_stale_source_version_before_rebuild` | refresh handler 先检查 `read_model_refresh_is_current`，stale event 不 rebuild、不 fan-out、不 complete dirty scope。 |
 | 收入流水被当作付款证据 | `tests/test_oa_pending_payment_service.py` | 只有 outflow bank relation 计入付款。 |

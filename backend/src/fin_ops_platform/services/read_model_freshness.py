@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
 
 
@@ -15,7 +16,10 @@ def normalize_source_versions(source_versions: Any) -> dict[str, str]:
         normalized_key = str(key or "").strip()
         if not normalized_key or value in (None, ""):
             continue
-        normalized[normalized_key] = str(value)
+        if isinstance(value, (dict, list)):
+            normalized[normalized_key] = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        else:
+            normalized[normalized_key] = str(value)
     return normalized
 
 

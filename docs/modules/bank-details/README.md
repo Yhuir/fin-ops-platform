@@ -21,6 +21,8 @@
 
 关注银行流水、标签、no-OA 状态、业务对象关系和跨页刷新。
 
+银行明细 read model 的 `bank_detail:all` 是 refresh fan-out 控制 scope，用于枚举月份 shard；页面无界查询不能等待 `bank_detail:all` parent proof。无日期筛选的交易列表和账户列表必须解析为当前已存在的月份 scope 集合，并用这些 month shards 的 freshness/source versions 证明页面数据 fresh；只有没有任何月份 shard 时才保留 `all` 作为 empty/missing 判断入口。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

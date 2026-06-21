@@ -53,6 +53,7 @@
 - receipt preview 不允许无收入流水或红冲记录伪造历史：`test_receipt_preview_blocks_no_income_and_red_refund_rows_without_fake_history`。
 - receipt preview 多收入流水必须要求选择：`test_receipt_preview_uses_single_income_transaction_or_requires_selection`。
 - stale SQL read model 必须返回 `202 refreshing` 且不返回 stale rows：`test_output_api_stale_returns_refreshing_without_stale_rows`。
+- 默认 all scope 不能直接用全局 `workbench_relation:all` expected source versions 约束当前页面聚合；已 fresh 的月份 shard 不应因为 relation all 版本不同而反复入队并长期显示“正在刷新”：`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_output_api_all_scope_does_not_loop_on_relation_all_versions`。
 - 生产 PostgreSQL runtime 下缺少 `output_invoice_collection` SQL read repository 时不能回退旧 `OutputInvoiceCollectionQueryService.list_rows` live scan：`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_output_api_requires_sql_repository_in_production_without_live_scan`。
 - fresh SQL rows 返回前必须叠加 lifecycle overlay：`test_sql_fresh_rows_route_applies_lifecycle_overlay_before_response`。
 - lifecycle facts 和 receipt history 必须 tenant scoped：`test_lifecycle_overlays_and_receipt_history_are_tenant_scoped`。

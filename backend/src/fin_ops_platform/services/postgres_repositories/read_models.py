@@ -347,7 +347,40 @@ class PostgresReadModelRepository:
         run_in_transaction(self._connection, write)
 
     def bank_detail_scope_keys_for_range(self, *, date_from: str | None = None, date_to: str | None = None) -> list[str]:
-        return _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+        return self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+
+    def _bank_detail_scope_keys_for_range(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        connection: Any | None = None,
+    ) -> list[str]:
+        scope_keys = _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+        if scope_keys == ["all"]:
+            return self._bank_detail_available_month_scope_keys(connection=connection) or ["all"]
+        return scope_keys
+
+    def _bank_detail_available_month_scope_keys(self, *, tenant_id: str = "default", connection: Any | None = None) -> list[str]:
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            select scope_key
+            from read_model.bank_detail_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_detail'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key
+            """,
+            (tenant_id,),
+        )
+        return _dedupe_preserve_order(
+            scope_key
+            for row in rows
+            if isinstance(row, dict)
+            for scope_key in [text(row.get("scope_key"))]
+            if scope_key and MONTH_SCOPE_RE.match(scope_key)
+        )
 
     def bank_detail_scope_summary(
         self,
@@ -540,8 +573,8 @@ class PostgresReadModelRepository:
     ) -> dict[str, Any] | None:
         page_number = max(1, int_value(page, 1))
         page_limit = min(max(1, int_value(page_size, 100)), 100)
-        scope_keys = _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         with self._connection.transaction() as connection:
+            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
             scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
             if scope_summary["read_model_status"] == "missing":
                 return None
@@ -605,8 +638,8 @@ class PostgresReadModelRepository:
         date_to: str | None = None,
         tenant_id: str = "default",
     ) -> dict[str, Any] | None:
-        scope_keys = _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         with self._connection.transaction() as connection:
+            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
             scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
             if scope_summary["read_model_status"] == "missing":
                 return None

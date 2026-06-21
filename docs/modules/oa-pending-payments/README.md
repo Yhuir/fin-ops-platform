@@ -51,6 +51,8 @@
 
 生产读路径必须先经过 `OaPendingPaymentReadModelService` 的 freshness/source-version gate。rows、filter-options、OA detail、bank detail、invoice detail 和 relation detail 在 read model missing/stale/source mismatch 时只能返回 refreshing/unavailable 语义并入队 `oa_pending_payment.read_model.refresh`，不能同步 live scan 旧事实并伪装 fresh。
 
+`oa_pending_payment:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

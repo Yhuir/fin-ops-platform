@@ -618,6 +618,26 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(placeholder_count, len(params))
         self.assertEqual(len(params), 72)
 
+    def test_scope_keys_for_unbounded_bank_detail_reads_use_month_shards(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    {"scope_key": "2026-04"},
+                    {"scope_key": "2026-05"},
+                    {"scope_key": "all"},
+                    {"scope_key": "bad-scope"},
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        scope_keys = repository.bank_detail_scope_keys_for_range(date_from=None, date_to=None)
+
+        self.assertEqual(scope_keys, ["2026-04", "2026-05"])
+        executed_sql = " ".join(call[1].lower() for call in connection.calls)
+        self.assertIn("from read_model.bank_detail_scopes", executed_sql)
+        self.assertIn("scope_key ~", executed_sql)
+
     def test_transactions_return_none_when_month_scope_is_missing(self) -> None:
         connection = FakeConnection(rows=[[]])
         repository = PostgresReadModelRepository(connection)
