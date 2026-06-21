@@ -28,6 +28,26 @@
 
 ## 历史记录
 
+## 2026-06-21 - 信用卡流水最近同金额兜底配对
+
+- 目标：按新的双侧核对口径，尽量让 ETC 信用卡流水都有配对关系；在强日期窗口内没有票根时，自动选择同金额的最近剩余票根作为推荐配对。
+- 影响范围：`etc_reconciliation_matcher` 自动匹配策略、ETC 对账页面信用卡/票根双侧推荐关系。
+- 关键决策：匹配分两层执行：第一层保留原强规则，金额一致且票根日期落在信用卡交易日/入账日窗口内，强规则已占用的票根不得被抢占；第二层只处理仍未配对的信用卡项，在剩余同金额票根里按交易日期距离最小、同日优先、前日优先于后日的稳定规则一对一配对。推荐配对仍不等于最终提交，提交前仍需人工接受票根或确认处理。
+- 文档影响：更新本实施记录和测试矩阵；产品/API shape 不变。
+- 测试覆盖：更新北京速通 5 月样本，验证 2026-05-10 的 `23.50` 会配到最近的 2026-05-22 `23.50`，而不是更远的 2026-05-24；更新重复金额批量用例，验证强匹配优先后仍可为跨窗口信用卡项选择最近剩余同金额票根。
+- 验证命令：`PYTHONPATH=backend/src python -m pytest tests/test_etc_reconciliation_service.py -q`。
+- 未测风险：本地验证使用项目解析器读取真实 TXT 样本和单元测试；生产已有 task 需要触发刷新匹配或重新解析后，页面才会看到新的 fallback 推荐关系。
+
+## 2026-06-21 - 北京速通信用卡项候选识别
+
+- 目标：修复 `财付通-北京速通科技有限公司` 信用卡流水未进入 ETC 候选集，导致同日同金额票根网 TXT 记录无法自动配对的问题。
+- 影响范围：信用卡账单解析候选识别、ETC reconciliation 自动匹配、票根网 TXT 与信用卡项的推荐状态。
+- 关键决策：只把 `北京速通` / `速通科技` 纳入 ETC 商户候选词；后续最近同金额兜底规则已允许 2026-05-10 的 `23.50` 在没有同窗口票根时推荐到最近剩余同金额票根。
+- 文档影响：更新本实施记录和测试矩阵；产品/API shape 不变。
+- 测试覆盖：新增 `test_matching_links_beijing_sutong_card_rows_to_ticket_root_txt_rows`，覆盖北京速通两笔同金额 `88.35` 自动配对。
+- 验证命令：`PYTHONPATH=backend/src python -m pytest tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_matching_links_beijing_sutong_card_rows_to_ticket_root_txt_rows tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_ccb_credit_card_statement_parser_preserves_rows_and_marks_etc_candidates tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_matching_uses_posting_date_window_and_writes_auto_link tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_matching_links_repeated_amount_by_stable_one_to_one_order -q`。
+- 未测风险：本地验证使用项目解析器读取真实 TXT 样本和单元测试；尚未对生产任务执行重新刷新匹配，生产页面需要触发任务刷新或重新解析后才会更新已有 task 的推荐状态。
+
 ## 2026-06-21 - 双侧核对多候选最近日期优先配对
 
 - 目标：修复信用卡项与票根金额、日期窗口均命中，但因票根候选多于信用卡项而显示未配对的问题；业务目标调整为在保留金额和日期窗口约束下尽量配对。

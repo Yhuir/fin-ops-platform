@@ -1108,6 +1108,68 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(ticket.recommendation_status, "suggested_match")
         self.assertEqual(ticket.linked_credit_card_item_ids, [card.item_id])
 
+    def test_matching_links_beijing_sutong_card_rows_to_ticket_root_txt_rows(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-05 Beijing Sutong ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-05-10 2026-05-10 8514 财付通-北京速通科技有限公司 CNY 23.50 23.50
+2026-05-15 2026-05-15 8514 财付通-北京速通科技有限公司 CNY 88.35 88.35
+2026-05-25 2026-05-25 8514 财付通-北京速通科技有限公司 CNY 88.35 88.35
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云A546NH
+交易时间 2026-05-25 17:02:37
+入口站 A站
+出口站 B站
+金额 88.35
+发票张数 1
+车牌号 云A546NH
+交易时间 2026-05-15 14:47:17
+入口站 A站
+出口站 B站
+金额 88.35
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-05-22 17:09:29
+入口站 A站
+出口站 B站
+金额 23.50
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-05-24 19:15:18
+入口站 A站
+出口站 B站
+金额 23.50
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-BEIJING-SUTONG", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootClipboardTextParser().parse_text(file_id="TICKET-A546NH", text=ticket_text),
+            actor="alice",
+        )
+
+        status_by_amount_and_date = {
+            (item.transaction_date, item.settlement_amount): item.recommendation_status
+            for item in task.credit_card_items
+        }
+        self.assertEqual(status_by_amount_and_date[("2026-05-15", Decimal("88.35"))], "suggested_match")
+        self.assertEqual(status_by_amount_and_date[("2026-05-25", Decimal("88.35"))], "suggested_match")
+        self.assertEqual(status_by_amount_and_date[("2026-05-10", Decimal("23.50"))], "suggested_match")
+        linked_by_time = {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items}
+        card_by_date = {item.transaction_date: item for item in task.credit_card_items}
+        self.assertEqual(linked_by_time["2026-05-15 14:47:17"], [card_by_date["2026-05-15"].item_id])
+        self.assertEqual(linked_by_time["2026-05-25 17:02:37"], [card_by_date["2026-05-25"].item_id])
+        self.assertEqual(linked_by_time["2026-05-22 17:09:29"], [card_by_date["2026-05-10"].item_id])
+        self.assertEqual(linked_by_time["2026-05-24 19:15:18"], [])
+
     def test_matching_prefers_closest_ticket_when_more_tickets_than_cards(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="2026-04 closest ETC", created_by="alice")
@@ -1192,7 +1254,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             },
         )
 
-    def test_matching_links_repeated_amount_batches_and_keeps_real_gaps(self) -> None:
+    def test_matching_links_repeated_amount_batches_and_fills_nearest_fallback_gap(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="2026-04 production ETC", created_by="alice")
         statement_text = """
@@ -1283,9 +1345,12 @@ class EtcReconciliationServiceTests(unittest.TestCase):
                 sorted(item.item_id for item in cards),
             )
         self.assertEqual(statuses["高速通行费缺票"], "missing_ticket")
-        self.assertEqual(statuses["高速通行费跨窗"], "missing_ticket")
+        self.assertEqual(statuses["高速通行费跨窗"], "suggested_match")
         self.assertEqual(linked_by_ticket_time["2026-03-09 08:00:00"], [])
-        self.assertEqual(linked_by_ticket_time["2026-04-23 08:00:00"], [])
+        self.assertEqual(
+            linked_by_ticket_time["2026-04-23 08:00:00"],
+            [next(item for item in task.credit_card_items if item.description == "高速通行费跨窗").item_id],
+        )
 
     def test_matching_uses_description_business_date_as_primary_anchor(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))

@@ -51,7 +51,7 @@ CCB_ROW_RE = re.compile(
     r"(?:(?:[A-Z]{3}|人民币|CNY)\s+)?"
     r"(?P<settlement_amount>-?[0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*$"
 )
-ETC_KEYWORDS = ("etc", "高速", "通行费", "收费站", "联网公司", "联网收费", "票根", "黔通智联", "贵州黔通智联")
+ETC_KEYWORDS = ("etc", "高速", "通行费", "收费站", "联网公司", "联网收费", "票根", "黔通智联", "贵州黔通智联", "北京速通", "速通科技")
 REPAYMENT_KEYWORDS = ("还款", "自动还款", "存入", "退款")
 PLATE_RE = re.compile(r"[\u4e00-\u9fff][A-Z][A-Z0-9]{5,6}")
 DATETIME_RE = re.compile(r"(\d{4}[-/]\d{2}[-/]\d{2}\s*\d{2}:\d{2}(?::\d{2})?)")

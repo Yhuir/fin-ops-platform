@@ -63,6 +63,24 @@ def refresh_reconciliation_matches(
         cards_by_id=cards_by_id,
         tickets_by_id=tickets_by_id,
     )
+    fallback_ticket_candidates_by_card, fallback_card_candidates_by_ticket = _nearest_amount_fallback_candidates(
+        credit_card_items=credit_card_items,
+        active_tickets=active_tickets,
+        manually_consumed_ticket_ids=manually_consumed_ticket_ids,
+        already_linked_card_ids={
+            card_id
+            for card_ids in auto_link_by_ticket.values()
+            for card_id in card_ids
+        },
+        already_linked_ticket_ids=set(auto_link_by_ticket),
+    )
+    fallback_link_by_ticket = _stable_auto_links(
+        ticket_candidates_by_card=fallback_ticket_candidates_by_card,
+        card_candidates_by_ticket=fallback_card_candidates_by_ticket,
+        cards_by_id=cards_by_id,
+        tickets_by_id=tickets_by_id,
+    )
+    auto_link_by_ticket = {**auto_link_by_ticket, **fallback_link_by_ticket}
     auto_linked_card_ids = {
         card_id
         for card_ids in auto_link_by_ticket.values()
@@ -80,7 +98,7 @@ def refresh_reconciliation_matches(
         if card.item_id in manually_resolved_card_ids or card.item_id in auto_linked_card_ids:
             refreshed_cards.append(replace(card, recommendation_status="suggested_match"))
             continue
-        candidates = ticket_candidates_by_card.get(card.item_id, [])
+        candidates = [*ticket_candidates_by_card.get(card.item_id, []), *fallback_ticket_candidates_by_card.get(card.item_id, [])]
         if candidates:
             status = "needs_review"
         else:
@@ -93,7 +111,7 @@ def refresh_reconciliation_matches(
             refreshed_tickets.append(ticket)
             continue
         linked_ids = list(dict.fromkeys([*manual_link_by_ticket.get(ticket.item_id, []), *auto_link_by_ticket.get(ticket.item_id, [])]))
-        candidates = card_candidates_by_ticket.get(ticket.item_id, [])
+        candidates = [*card_candidates_by_ticket.get(ticket.item_id, []), *fallback_card_candidates_by_ticket.get(ticket.item_id, [])]
         if linked_ids:
             status = "suggested_match"
         elif candidates:
@@ -149,6 +167,38 @@ def _extract_business_date(description: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _nearest_amount_fallback_candidates(
+    *,
+    credit_card_items: list[CreditCardItem],
+    active_tickets: list[TicketRootItem],
+    manually_consumed_ticket_ids: set[str],
+    already_linked_card_ids: set[str],
+    already_linked_ticket_ids: set[str],
+) -> tuple[dict[str, list[TicketRootItem]], dict[str, list[CreditCardItem]]]:
+    available_tickets = [
+        ticket
+        for ticket in active_tickets
+        if ticket.item_id not in manually_consumed_ticket_ids
+        and ticket.item_id not in already_linked_ticket_ids
+    ]
+    ticket_candidates_by_card: dict[str, list[TicketRootItem]] = {}
+    card_candidates_by_ticket: dict[str, list[CreditCardItem]] = {}
+    for card in credit_card_items:
+        if not card.is_etc_candidate or card.manual_resolution != "unresolved" or card.item_id in already_linked_card_ids:
+            continue
+        candidates = [
+            ticket
+            for ticket in available_tickets
+            if _money(ticket.amount) == _money(card.settlement_amount)
+        ]
+        if not candidates:
+            continue
+        ticket_candidates_by_card[card.item_id] = candidates
+        for ticket in candidates:
+            card_candidates_by_ticket.setdefault(ticket.item_id, []).append(card)
+    return ticket_candidates_by_card, card_candidates_by_ticket
 
 
 def _stable_auto_links(
