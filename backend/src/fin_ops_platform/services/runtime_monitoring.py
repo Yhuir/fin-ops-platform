@@ -81,6 +81,23 @@ def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
 and not (
   exists (
     select 1
+    from job.outbox_events newer
+    where newer.tenant_id = {prefix}tenant_id
+      and newer.event_type = {prefix}event_type
+      and coalesce(newer.scope_type, newer.raw_payload->>'scope_type', newer.payload->>'scope_type', newer.aggregate_type, '') =
+          {scope_type_expr}
+      and coalesce(newer.scope_key, newer.raw_payload->>'scope_key', newer.payload->>'scope_key', newer.aggregate_id, '') =
+          {scope_key_expr}
+      and newer.status in ('pending', 'processing', 'done')
+      and newer.id <> {prefix}id
+      and (
+        newer.created_at > {prefix}created_at
+        or (newer.created_at = {prefix}created_at and newer.id > {prefix}id)
+      )
+  )
+  or
+  exists (
+    select 1
     from job.outbox_events done
     where done.tenant_id = {prefix}tenant_id
       and done.event_type = {prefix}event_type
@@ -436,6 +453,24 @@ class RuntimeMonitoringRepository:
                 count(*)::bigint as count,
                 max(e.last_error) as last_error,
                 max(e.updated_at)::text as updated_at,
+                bool_or(
+                    exists (
+                        select 1
+                        from job.outbox_events newer
+                        where newer.tenant_id = e.tenant_id
+                          and newer.event_type = e.event_type
+                          and coalesce(newer.scope_type, newer.raw_payload->>'scope_type', newer.payload->>'scope_type', newer.aggregate_type, '') =
+                              coalesce(e.scope_type, e.raw_payload->>'scope_type', e.payload->>'scope_type', e.aggregate_type, '')
+                          and coalesce(newer.scope_key, newer.raw_payload->>'scope_key', newer.payload->>'scope_key', newer.aggregate_id, '') =
+                              coalesce(e.scope_key, e.raw_payload->>'scope_key', e.payload->>'scope_key', e.aggregate_id, '')
+                          and newer.status in ('pending', 'processing', 'done')
+                          and newer.id <> e.id
+                          and (
+                            newer.created_at > e.created_at
+                            or (newer.created_at = e.created_at and newer.id > e.id)
+                          )
+                    )
+                ) as covered_by_later_event,
                 bool_or(
                     exists (
                         select 1
@@ -1925,7 +1960,11 @@ def _is_legacy_cost_statistics_scope(scope_type: object, scope_key: object) -> b
 def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
     if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
         return True
-    return _truthy(row.get("covered_by_later_done")) or _truthy(row.get("covered_by_later_readiness"))
+    return (
+        _truthy(row.get("covered_by_later_event"))
+        or _truthy(row.get("covered_by_later_done"))
+        or _truthy(row.get("covered_by_later_readiness"))
+    )
 
 
 def _truthy(value: object) -> bool:

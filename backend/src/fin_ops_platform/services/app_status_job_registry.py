@@ -49,7 +49,7 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "input_invoice_usage.read_model.refresh": AppStatusBackgroundJobDefinition("input_invoice_usage.read_model.refresh", "刷新进项发票使用", ("input_invoice_usage",), "/input-invoice-usage"),
     "output_invoice_collection.read_model.refresh": AppStatusBackgroundJobDefinition("output_invoice_collection.read_model.refresh", "刷新销项收款", ("output_invoice_collections",), "/output-invoice-collections"),
     "oa_pending_payment.read_model.refresh": AppStatusBackgroundJobDefinition("oa_pending_payment.read_model.refresh", "刷新OA待付款", ("oa_pending_payments",), "/oa-pending-payments"),
-    "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments", "settings"), "/oa-pending-payments"),
+    "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments",), "/oa-pending-payments"),
     "no_oa_bank_batch.read_model.refresh": AppStatusBackgroundJobDefinition("no_oa_bank_batch.read_model.refresh", "刷新免OA批次", ("no_oa_bank_batches",), "/no-oa-bank-batches"),
     "turnover_ledger.read_model.refresh": AppStatusBackgroundJobDefinition("turnover_ledger.read_model.refresh", "刷新往来款台账", ("turnover_ledger",), "/turnover-ledger"),
     "settings_refresh": AppStatusBackgroundJobDefinition("settings_refresh", "刷新设置", ("settings",), "/settings", legacy=True),

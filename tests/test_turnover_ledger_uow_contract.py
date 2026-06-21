@@ -1754,8 +1754,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     for request in getattr(command, "refresh_requests")
                 ] == [
                     ("turnover_ledger", ["all"], "turnover_relation_changed"),
-                    ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
-                    ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("workbench", ["2026-02"], "turnover_relation_changed"),
+                    ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
                     ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
                     ("search", ["2026-02", "all"], "turnover_relation_changed"),
                 ]

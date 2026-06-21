@@ -293,6 +293,35 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             },
         )
 
+    def test_oa_sync_outbox_marks_oa_pending_without_marking_settings_busy(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "oa_pending_payment": {"status": "fresh"},
+                "invoice_lifecycle": {"status": "fresh"},
+            },
+            worker_statuses={
+                "oa-sync": {"status": "ready", "required": True},
+            },
+            outbox_statuses={
+                "oa.sync": {"status": "pending", "count": 1},
+            },
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:00:00+00:00",
+                "status": "busy",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        domain_levels = {domain["key"]: domain["level"] for domain in payload["domains"]}
+        self.assertEqual(domain_levels["oa_pending_payments"], "busy")
+        self.assertEqual(domain_levels["settings"], "ok")
+
     def test_cost_statistics_fresh_readiness_restores_domain_after_previous_failure(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
 
@@ -1045,6 +1074,48 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         input_usage_status = snapshot["read_model_statuses"]["input_invoice_usage"]
         self.assertEqual(input_usage_status["status"], "fresh")
         self.assertEqual(input_usage_status["scopes"][0]["status"], "fresh")
+
+    def test_runtime_repository_ignores_failed_outbox_row_covered_by_later_pending_retry(self) -> None:
+        class CoveredByRetryConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return [
+                        {
+                            "event_type": "oa.sync",
+                            "scope_type": "oa",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "count": 1,
+                            "updated_at": "2026-06-04T09:59:00+00:00",
+                            "covered_by_later_event": True,
+                            "covered_by_later_done": False,
+                            "covered_by_later_readiness": False,
+                        },
+                        {
+                            "event_type": "oa.sync",
+                            "scope_type": "oa",
+                            "scope_key": "all",
+                            "status": "pending",
+                            "count": 1,
+                            "updated_at": "2026-06-04T10:00:00+00:00",
+                            "covered_by_later_event": False,
+                            "covered_by_later_done": False,
+                            "covered_by_later_readiness": False,
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(CoveredByRetryConnection()).app_status_runtime_snapshot()
+
+        self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["status"], "pending")
+        self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["count"], 1)
 
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):

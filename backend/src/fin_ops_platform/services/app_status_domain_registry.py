@@ -139,7 +139,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="设置",
         route="/settings",
         worker_instances=("oa-sync",),
-        job_types=("oa.sync", "settings_refresh"),
+        job_types=("settings_refresh",),
         dependencies=("oa_identity", "state_store"),
     ),
     AppStatusDomainDefinition(

@@ -17,6 +17,16 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-21 - Manual closure Workbench all 普通刷新阻断
+
+- 目标：修复外部往来页确认贾小花三笔 manual zero-difference closure 后，页面 loading 变慢、关联台不刷新，App Health 显示 `workbench_all_scope_parent_inconsistent` 阻断的问题。
+- 影响范围：`TurnoverLedgerWriteFacade.confirm_zero_difference_closure(...)` dirty/outbox scope、Workbench 月 shard/aggregate-only all 收敛链路、外部往来闭环后跨页可见性。
+- 真实原因：闭环 API 响应的硬等待目标已经在 2026-06-17 收窄为 `turnover_ledger:all` + 受影响月份 `workbench_relation`，但写 UoW 仍额外投递普通 `workbench:all` / `workbench_relation:all` refresh。普通 `workbench:all` 会触发 all-scope shard/聚合路径，在受影响月 shard 尚未 fresh 时写出 `workbench_all_scope_parent_inconsistent` failed generation，导致运行状态阻断、队列 failed/backlog，关联台跨页刷新看不到新 case。
+- 关键决策：已知 affected months 时，manual closure confirm 只投递受影响月份的 `workbench` / `workbench_relation` scope；`workbench:all` 继续由现有月 shard 发布后的 aggregate-only 事件更新。只有无法推导月份时才保留普通 `all` fallback。
+- 文档影响：更新本实施记录和 `tests.md`；不改变 API 响应字段或前端交互契约。
+- 测试覆盖：更新 `tests/test_turnover_ledger_uow_contract.py::TurnoverLedgerUoWContractTests::test_target_zero_difference_closure_facade_writes_turnover_and_workbench_pair_relation`，断言闭环确认在已知月份时不投递普通 `workbench:all` / `workbench_relation:all`。
+- 未测风险：本地测试未连接真实生产 worker 队列清理既有 failed job；发布后仍需通过 App Health/queue drain 验证历史 failed/backlog 已清空或被重试处理。
+
 ## 2026-06-21 - 孤儿 turnover 闭环恢复 Workbench active case
 
 - 目标：修复外部往来款页面选择贾小花三条同组流水确认闭环时，后端返回 `Bank transaction already belongs to an active turnover closure.`，但关联台没有显示这三条流水处于同一个 active case 的不一致。

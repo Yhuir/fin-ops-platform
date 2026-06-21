@@ -278,6 +278,7 @@ class TurnoverLedgerWriteFacade:
                 },
             )
         refresh_scope_keys = sorted({"all", *normalized_months})
+        workbench_refresh_scope_keys = sorted(set(normalized_months)) or ["all"]
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=["all"],
@@ -289,12 +290,12 @@ class TurnoverLedgerWriteFacade:
                 },
                 {
                     "scope_type": "workbench",
-                    "scope_keys": refresh_scope_keys,
+                    "scope_keys": workbench_refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
                 {
                     "scope_type": "workbench_relation",
-                    "scope_keys": refresh_scope_keys,
+                    "scope_keys": workbench_refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
                 {
