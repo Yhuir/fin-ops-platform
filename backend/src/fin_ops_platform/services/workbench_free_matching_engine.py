@@ -25,7 +25,7 @@ from fin_ops_platform.services.workbench_scheduled_payment_evidence import (
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-06-15-scheduled-payment-date-v1"
+RULE_VERSION = "2026-06-21-oa-attachment-item-parent-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
