@@ -7,8 +7,13 @@ from datetime import UTC, datetime
 import json
 from typing import Any
 
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    oa_attachment_matches_oa,
+    oa_attachment_parent_oa_id,
+)
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -57,17 +62,14 @@ def build_repair_plan(
     if not isinstance(pair_relations, dict):
         return {"status": "ok", "changed_case_ids": [], "cancelled_case_ids": [], "repaired_case_ids": [], "snapshot": snapshot}
 
-    rows_by_id = {
-        str(row.get("row_id") or "").strip(): row
-        for row in current_rows
-        if str(row.get("row_id") or "").strip()
-    }
+    rows_by_id = _rows_by_id(current_rows)
+    amount_check_service = WorkbenchAmountCheckService()
     attachment_rows_by_parent: dict[str, list[str]] = {}
     for row_id, row in rows_by_id.items():
         source_kind = str(row.get("source_kind") or "").strip()
         parent = str(row.get("derived_from_oa_id") or "").strip()
         if parent and source_kind == "oa_attachment_invoice":
-            attachment_rows_by_parent.setdefault(parent, []).append(row_id)
+            attachment_rows_by_parent.setdefault(oa_attachment_parent_oa_id(parent), []).append(row_id)
 
     repaired_snapshot = deepcopy(snapshot)
     repaired_relations = repaired_snapshot.setdefault("pair_relations", {})
@@ -99,10 +101,20 @@ def build_repair_plan(
         for parent_oa_id in parent_oa_ids:
             for attachment_row_id in sorted(attachment_rows_by_parent.get(parent_oa_id, [])):
                 expected_entries.append((attachment_row_id, "invoice"))
+            for attachment_row_id, attachment_row in rows_by_id.items():
+                if str(attachment_row.get("source_kind") or "").strip() == "oa_attachment_invoice" and oa_attachment_matches_oa(attachment_row, parent_oa_id):
+                    expected_entries.append((attachment_row_id, "invoice"))
         expected_entries = _dedupe_entries(expected_entries)
         missing_entries = [(row_id, row_type) for row_id, row_type in entries if row_id not in rows_by_id]
         expected_row_ids = [row_id for row_id, _row_type in expected_entries]
-        if not missing_entries and expected_row_ids == row_ids:
+        rows_changed = expected_row_ids != row_ids
+        expected_amount_check = _amount_check_for_entries(
+            amount_check_service,
+            rows_by_id=rows_by_id,
+            entries=expected_entries,
+        )
+        amount_check_changed = expected_amount_check != (relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {})
+        if not missing_entries and not rows_changed and not amount_check_changed:
             continue
 
         missing_oa_ids = [
@@ -130,14 +142,18 @@ def build_repair_plan(
             continue
 
         new_entries = expected_entries
-        if [row_id for row_id, _row_type in new_entries] == row_ids:
-            continue
         if len(new_entries) < 2:
             after = _cancel_relation(relation, timestamp=timestamp, actor_id=actor_id)
             operation_type = "repair_cancel_empty_relation"
             cancelled_case_ids.append(str(case_id))
         else:
-            after = _replace_relation_rows(relation, new_entries, timestamp=timestamp, actor_id=actor_id)
+            after = _replace_relation_rows(
+                relation,
+                new_entries,
+                amount_check=expected_amount_check,
+                timestamp=timestamp,
+                actor_id=actor_id,
+            )
             operation_type = "repair_relation_rows"
             repaired_case_ids.append(str(case_id))
         repaired_relations[str(case_id)] = after
@@ -170,8 +186,16 @@ def _load_current_workbench_rows(connection: PostgresConnection) -> list[dict[st
     return connection.fetch_all(
         """
         select row_id, source_kind, payload->>'derived_from_oa_id' as derived_from_oa_id
+             , payload
         from read_model.workbench_rows
         where scope_key = 'all'
+          and generation_id = (
+              select generation_id
+              from read_model.workbench_generations
+              where scope_key = 'all' and status = 'active'
+              order by activated_at desc
+              limit 1
+          )
         order by row_id
         """
     )
@@ -186,12 +210,14 @@ def _replace_relation_rows(
     relation: dict[str, Any],
     entries: list[tuple[str, str]],
     *,
+    amount_check: dict[str, Any],
     timestamp: str,
     actor_id: str,
 ) -> dict[str, Any]:
     updated = deepcopy(relation)
     updated["row_ids"] = [row_id for row_id, _row_type in entries]
     updated["row_types"] = [row_type for _row_id, row_type in entries]
+    updated["amount_check"] = amount_check
     updated["updated_at"] = timestamp
     metadata = dict(updated.get("special_metadata") if isinstance(updated.get("special_metadata"), dict) else {})
     metadata["relation_integrity_repaired_at"] = timestamp
@@ -243,6 +269,52 @@ def _dedupe_entries(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
         seen.add(row_id)
         result.append((row_id, row_type or _row_type_for_id(row_id)))
     return result
+
+
+def _rows_by_id(current_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    for row in current_rows:
+        row_id = str(row.get("row_id") or "").strip()
+        if not row_id:
+            continue
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        normalized = dict(payload)
+        normalized.setdefault("id", row_id)
+        normalized.setdefault("row_id", row_id)
+        normalized.setdefault("source_kind", row.get("source_kind"))
+        if "derived_from_oa_id" not in normalized and row.get("derived_from_oa_id") is not None:
+            normalized["derived_from_oa_id"] = row.get("derived_from_oa_id")
+        normalized.setdefault("type", _row_type_for_id(row_id))
+        rows_by_id[row_id] = normalized
+    return rows_by_id
+
+
+def _amount_check_for_entries(
+    amount_check_service: WorkbenchAmountCheckService,
+    *,
+    rows_by_id: dict[str, dict[str, Any]],
+    entries: list[tuple[str, str]],
+) -> dict[str, Any]:
+    rows_by_type: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
+    for row_id, row_type in entries:
+        row = rows_by_id.get(row_id)
+        if row is None:
+            continue
+        normalized_type = row_type if row_type in rows_by_type else _row_type_for_id(row_id)
+        payload = dict(row)
+        payload["type"] = normalized_type
+        rows_by_type.setdefault(normalized_type, []).append(payload)
+    amount_check = amount_check_service.check(rows_by_type)
+    if (
+        amount_check.get("status") == "unknown"
+        and amount_check.get("oa_total") is None
+        and amount_check.get("bank_total") is None
+        and amount_check.get("invoice_total") is None
+    ):
+        amount_check["status"] = "matched"
+        amount_check["direction"] = "unknown"
+        amount_check["requires_note"] = False
+    return amount_check
 
 
 def _row_type_for_id(row_id: str) -> str:

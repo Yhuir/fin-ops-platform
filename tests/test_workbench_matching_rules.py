@@ -592,6 +592,29 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             ["invoice-oa-no-bank-70", "invoice-oa-no-bank-126"],
         )
 
+    def test_oa_attachment_invoice_item_source_links_to_parent_oa(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-exp-1968", "400.00", counterparty_name="")],
+            bank_rows=[],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-oa-exp-1968-item-4",
+                    "400.00",
+                    seller_name="中国联合网络通信有限公司昆明市分公司",
+                    source_kind="oa_attachment_invoice",
+                    derived_from_oa_id="oa-exp-1968:item:4:de54f988bd66",
+                    total_with_tax="400.00",
+                )
+            ],
+        )
+
+        candidate = find_candidate(candidates, "oa_attachment_invoice_source_link")
+        self.assertEqual(candidate["status"], "incomplete")
+        self.assertEqual(candidate["candidate_type"], "oa_invoice")
+        self.assertEqual(candidate["oa_row_ids"], ["oa-exp-1968"])
+        self.assertEqual(candidate["invoice_row_ids"], ["invoice-oa-exp-1968-item-4"])
+
     def test_payment_receipt_attachment_rows_do_not_enter_invoice_matching_rules(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",

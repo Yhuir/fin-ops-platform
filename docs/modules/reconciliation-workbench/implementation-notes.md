@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - OA 附件发票父 OA 回连与关系完整性修复
+
+- 目标：修复 OA 附件解析出的正式发票已进入统一发票池，但因 `derived_from_oa_id` 使用 `oa-exp-*:item:*` 明细项 ID 而没有回挂到父 OA 行的问题；同时清理清空重导发票后遗留的 active relation 旧发票 row id。
+- 影响范围：Workbench candidate grouping、SQL projection、legacy matching rules、server payload repair、`repair_workbench_pair_relation_integrity` 工具、生产 `app.workbench_pair_relations` 数据。
+- 关键决策：OA 附件发票匹配统一使用父 OA 规则：`oa-exp-xxx:item:n:hash` 归属 `oa-exp-xxx`；选择 OA 附件 source link 时优先使用带 `derived_from_oa_id/source_expense_item_id/source_workbench_row_id` 的有效上下文，避免历史空 source link 抢占。relation integrity repair 必须同步重算 `amount_check`，不能只改 `row_ids`。
+- 文档影响：同步本实施记录和 `workbench-relations` 模块实施记录/测试矩阵；长期事实源口径不变，仍以统一发票池和 Workbench active relation 为事实源。
+- 测试覆盖：新增/更新 `tests/test_workbench_candidate_grouping.py`、`tests/test_workbench_matching_rules.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_pair_relation_integrity_repair.py`，覆盖明细项回父 OA、source link 有效上下文优先、relation repair 补附件和重算 amount_check。
+- 验证命令：`PYTHONPATH=backend/src python -m pytest tests/test_workbench_candidate_grouping.py tests/test_workbench_matching_rules.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_materialized_attachment_rows_by_source_oa_relation tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_materialized_attachment_item_rows_by_parent_oa_relation tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_invoice_row_preserves_canonical_oa_attachment_source_metadata tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_invoice_row_prefers_oa_attachment_source_link_with_context tests/test_oa_attachment_invoice_promotion_tool.py tests/test_workbench_pair_relation_integrity_repair.py`。
+- 未测风险：本地生产库 read model 重建脚本发布了 consistent active all generation，但脚本在后续 scope/status 阶段需要手动中断；真实 worker drain 和浏览器刷新仍需页面人工 smoke。
+
 ## 2026-06-21 - OA 附件 Promotion 不再默认读路径建票
 
 - 目标：防止关联台 OA payload 构建或 OA 附件 cache update 在用户手工重导入发票池时，把 OA 附件 OCR 结果重新写入 `app.invoices`。

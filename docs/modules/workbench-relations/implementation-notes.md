@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-21 - OA 附件发票 relation integrity repair 收敛
+
+目标：确保 OA 附件解析出的正式发票与父 OA 行建立稳定关系，并清理发票池清空重导后 active relation 中指向旧发票 row id 的污染。
+
+变更：
+
+- 新增 `oa_attachment_invoice_linking` helper，统一 `oa-exp-xxx:item:*` 明细项归父 OA `oa-exp-xxx` 的匹配规则。
+- `repair_workbench_pair_relation_integrity` 改为只读取当前 active all generation 的 row payload，不扫描历史 generation。
+- relation repair 会把明细项 OA 附件发票补入父 OA relation，并用 `WorkbenchAmountCheckService` 重算 `amount_check`。
+- 本地执行前备份 `app.workbench_pair_relations` 和 `app.workbench_pair_relation_history` 到 `.runtime/fin_ops_platform/backups/workbench_relation_integrity_20260621_150619`。
+
+决策：
+
+- `app.workbench_pair_relations` 仍是 canonical paired fact；read model 或 UI 不得用已不存在的旧发票 row id 伪装完整三栏关系。
+- 清空重导发票后，无法从旧 row id 强映射到新发票 identity 的关系只移除失效 invoice 引用，不猜测补票。
+- OA 附件发票 source link 选择必须优先使用带 OA 上下文的有效 link，历史空上下文 link 只能作为 fallback。
+
+验证：
+
+- `PYTHONPATH=backend/src python -m pytest tests/test_workbench_pair_relation_integrity_repair.py` 通过。
+- 相关回归集合 `tests/test_workbench_candidate_grouping.py`、`tests/test_workbench_matching_rules.py`、目标 `tests/test_workbench_sql_runtime.py`、`tests/test_oa_attachment_invoice_promotion_tool.py`、`tests/test_workbench_pair_relation_integrity_repair.py` 共 98 tests 通过。
+- 本地生产库校验：active relation 缺失 invoice 引用为 0；无 invoice row 的 active relation stale `invoice_total` 为 0；repair dry-run 返回 0 变更。
+
+剩余风险：
+
+- 本地 read model 重建脚本发布了 consistent active all generation，但在后续 scope/status 阶段需要手动中断；真实 worker/systemd drain 仍需独立 smoke。
+- 用户浏览器需要刷新后读取新的 active generation 和 relation 状态。
+
 ## 2026-06-19 - Workbench 自身写流 UI 错误残留 guard
 
 目标：补齐 Workbench 自身成功写流的 Browser guard，防止撤回、拆分、异常处理或网络恢复最终成功后，页面仍残留“操作失败”、同步失败、read model 失败或 barrier timeout 文案。

@@ -10,6 +10,10 @@ from typing import Any
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    oa_attachment_best_source_link,
+    oa_attachment_matches_oa,
+)
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_SQL,
@@ -1403,7 +1407,7 @@ class WorkbenchSqlProjectionBuilder:
             row_id
             for row_id, row in rows_by_id.items()
             if str(row.get("source_kind") or "").strip() == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-            and str(row.get("derived_from_oa_id") or "").strip() in oa_row_ids
+            and any(oa_attachment_matches_oa(row, oa_row_id) for oa_row_id in oa_row_ids)
         ]
 
     @staticmethod
@@ -1465,10 +1469,7 @@ def _list_of_dicts(value: object) -> list[dict[str, Any]]:
 
 
 def _first_source_link(source_links: list[dict[str, Any]], source_type: str) -> dict[str, Any] | None:
-    for source_link in source_links:
-        if str(source_link.get("source_type") or "").strip() == source_type:
-            return source_link
-    return None
+    return oa_attachment_best_source_link(source_links, source_type)
 
 
 def _metadata_value(source_link: dict[str, Any] | None, detail_fields: dict[str, Any], key: str) -> str | None:

@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_parent_oa_id
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_free_matching_engine import (
     OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH,
@@ -1236,13 +1237,13 @@ class WorkbenchMatchingRules:
         ):
             value = str(invoice_row.get(field_name) or "").strip()
             if value:
-                return value
+                return oa_attachment_parent_oa_id(value)
         metadata = invoice_row.get("metadata")
         if isinstance(metadata, dict):
             for field_name in ("derived_from_oa_id", "oa_row_id", "oa_id", "source_oa_row_id"):
                 value = str(metadata.get(field_name) or "").strip()
                 if value:
-                    return value
+                    return oa_attachment_parent_oa_id(value)
         return None
 
     def _oa_items(self, oa_row: dict[str, Any]) -> list[dict[str, Any]]:

@@ -11,6 +11,10 @@ from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    oa_attachment_parent_oa_id,
+    oa_attachment_source_ids,
+)
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 
 
@@ -379,8 +383,8 @@ class WorkbenchCandidateGroupingService:
 
         invoice_rows_by_source_id: "OrderedDict[str, list[dict[str, Any]]]" = OrderedDict()
         for row in rows:
-            source_id = self._oa_attachment_evidence_source_id(row)
-            if source_id is None or source_id not in oa_rows_by_id:
+            source_id = self._oa_attachment_evidence_source_id(row, set(oa_rows_by_id))
+            if source_id is None:
                 continue
             invoice_rows_by_source_id.setdefault(source_id, []).append(row)
 
@@ -1604,14 +1608,27 @@ class WorkbenchCandidateGroupingService:
     def _is_non_invoice_oa_attachment_evidence_row(cls, row: dict[str, Any]) -> bool:
         return cls._is_oa_attachment_evidence_row(row) and not cls._is_oa_attachment_invoice_row(row)
 
-    def _oa_attachment_evidence_source_id(self, row: dict[str, Any]) -> str | None:
+    def _oa_attachment_evidence_source_id(self, row: dict[str, Any], oa_row_ids: set[str] | None = None) -> str | None:
         if row.get("type") != "invoice":
             return None
         if not self._is_oa_attachment_invoice_row(row):
             return None
         if not self._can_join_oa_attachment_source_group(row):
             return None
-        return self._string_value(row.get("derived_from_oa_id"))
+        source_ids = oa_attachment_source_ids(row)
+        if not source_ids:
+            return None
+        if oa_row_ids is not None:
+            if not oa_row_ids:
+                return None
+            for source_id in source_ids:
+                if source_id in oa_row_ids:
+                    return source_id
+                parent_source_id = oa_attachment_parent_oa_id(source_id)
+                if parent_source_id in oa_row_ids:
+                    return parent_source_id
+            return None
+        return oa_attachment_parent_oa_id(source_ids[0])
 
     def _can_join_oa_attachment_source_group(self, row: dict[str, Any]) -> bool:
         if self._is_paired_row(row):

@@ -186,6 +186,12 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 )
 from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import InputInvoiceUsageReadModelDetailService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    oa_attachment_best_source_link,
+    oa_attachment_matches_oa,
+    oa_attachment_parent_oa_id,
+    oa_attachment_row_id_matches_oa,
+)
 from fin_ops_platform.services.operation_freshness_barrier import (
     OperationFreshnessBarrierService,
     targets_from_payload,
@@ -18688,18 +18694,19 @@ class Application:
             if source_link is None:
                 continue
             derived_from_oa_id = str(source_link.get("derived_from_oa_id") or getattr(invoice, "oa_form_id", "") or "").strip()
-            if derived_from_oa_id not in oa_rows_by_id:
+            source_oa_id = self._source_oa_id_for_attachment_link(source_link, set(oa_rows_by_id))
+            if source_oa_id is None:
                 continue
             row = self._canonical_oa_attachment_invoice_workbench_row(
                 invoice,
                 source_link=source_link,
-                oa_row=oa_rows_by_id[derived_from_oa_id],
+                oa_row=oa_rows_by_id[source_oa_id],
             )
             if invoice_id in existing_invoice_row_ids:
                 if self._replace_raw_workbench_row(payload, row_type="invoice", replacement=row):
                     changed = True
                 continue
-            section_name = oa_sections_by_id.get(derived_from_oa_id, "open")
+            section_name = oa_sections_by_id.get(source_oa_id, "open")
             section_payload = payload.setdefault(section_name, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -18767,21 +18774,30 @@ class Application:
         invoice: object,
         oa_row_ids: set[str],
     ) -> dict[str, str] | None:
-        fallback_link: dict[str, str] | None = None
+        source_links: list[dict[str, object]] = []
         for link in list(getattr(invoice, "source_links", []) or []):
             if not isinstance(link, dict):
                 continue
             if str(link.get("source_type") or "").strip() != "oa_attachment_invoice":
                 continue
             normalized_link = {str(key): str(value) for key, value in link.items() if value is not None}
-            derived_from_oa_id = str(
-                normalized_link.get("derived_from_oa_id") or getattr(invoice, "oa_form_id", "") or ""
-            ).strip()
-            if derived_from_oa_id in oa_row_ids:
-                return normalized_link
-            if fallback_link is None:
-                fallback_link = normalized_link
-        return fallback_link
+            if not normalized_link.get("derived_from_oa_id") and getattr(invoice, "oa_form_id", None):
+                normalized_link["derived_from_oa_id"] = str(getattr(invoice, "oa_form_id") or "")
+            source_links.append(normalized_link)
+        best_link = oa_attachment_best_source_link(source_links, "oa_attachment_invoice", oa_row_ids=oa_row_ids)
+        return {str(key): str(value) for key, value in best_link.items()} if best_link is not None else None
+
+    @staticmethod
+    def _source_oa_id_for_attachment_link(source_link: dict[str, str], oa_row_ids: set[str]) -> str | None:
+        link_row = {
+            "id": source_link.get("source_workbench_row_id"),
+            "derived_from_oa_id": source_link.get("derived_from_oa_id"),
+            "source_expense_item_id": source_link.get("source_expense_item_id"),
+        }
+        for oa_row_id in sorted(oa_row_ids):
+            if oa_attachment_matches_oa(link_row, oa_row_id):
+                return oa_row_id
+        return None
 
     def _canonical_oa_attachment_invoice_workbench_row(
         self,
@@ -19868,12 +19884,19 @@ class Application:
             if not self._invoice_row_is_oa_attachment_context(row):
                 continue
             derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
-            if derived_from_oa_id in oa_row_ids:
-                attachment_row_ids_by_oa_id.setdefault(derived_from_oa_id, []).append(row_id)
-                continue
-            source_oa_id = self._oa_id_from_attachment_invoice_id(row_id, list(oa_row_ids))
-            if source_oa_id:
-                attachment_row_ids_by_oa_id.setdefault(source_oa_id, []).append(row_id)
+            matched_oa_id = None
+            for oa_row_id in sorted(oa_row_ids):
+                if (
+                    derived_from_oa_id == oa_row_id
+                    or oa_attachment_parent_oa_id(derived_from_oa_id) == oa_row_id
+                    or oa_attachment_matches_oa(row, oa_row_id)
+                ):
+                    matched_oa_id = oa_row_id
+                    break
+            if matched_oa_id is None:
+                matched_oa_id = self._oa_id_from_attachment_invoice_id(row_id, list(oa_row_ids))
+            if matched_oa_id:
+                attachment_row_ids_by_oa_id.setdefault(matched_oa_id, []).append(row_id)
         return attachment_row_ids_by_oa_id
 
     @staticmethod
@@ -19884,12 +19907,8 @@ class Application:
 
     @staticmethod
     def _oa_id_from_attachment_invoice_id(invoice_id: str, oa_row_ids: list[str]) -> str | None:
-        prefix = "oa-att-inv-"
-        if not invoice_id.startswith(prefix):
-            return None
-        tail = invoice_id[len(prefix):]
         for oa_row_id in sorted(oa_row_ids, key=len, reverse=True):
-            if tail == oa_row_id or tail.startswith(f"{oa_row_id}-"):
+            if oa_attachment_row_id_matches_oa(invoice_id, oa_row_id):
                 return oa_row_id
         return None
 
@@ -19970,8 +19989,7 @@ class Application:
         for invoice_row in invoice_rows:
             if str(invoice_row.get("source_kind", "")) != "oa_attachment_invoice":
                 continue
-            derived_from_oa_id = str(invoice_row.get("derived_from_oa_id", "")).strip()
-            if derived_from_oa_id == oa_row_id:
+            if oa_attachment_matches_oa(invoice_row, oa_row_id):
                 matches.append(invoice_row)
         return matches
 
@@ -21190,14 +21208,8 @@ class Application:
         source_kind = str(row.get("source_kind") or "").strip()
         if source_kind != "oa_attachment_invoice":
             return False
-        derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
-        if derived_from_oa_id in selected_oa_ids:
-            return True
         row_id = str(row.get("id") or "").strip()
-        return any(
-            row_id.startswith(f"oa-att-inv-{oa_row_id}-") or row_id == f"oa-att-inv-{oa_row_id}"
-            for oa_row_id in selected_oa_ids
-        )
+        return any(oa_attachment_matches_oa(row, oa_row_id) or oa_attachment_row_id_matches_oa(row_id, oa_row_id) for oa_row_id in selected_oa_ids)
 
     @staticmethod
     def _rows_by_type(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:

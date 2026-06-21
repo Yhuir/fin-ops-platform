@@ -64,6 +64,7 @@ Spec-first Browser e2e 审计入口：
 - `PostgresWorkbenchRelationRepository` load/save/history/dirty scope 行为等价。
 - `workbench_relation_history_replay` 只读读取 relation、history 和 readiness，不执行 repair/write。
 - `WorkbenchRelationCommandService` confirm/cancel/withdraw/attach/no-OA/turnover/batch accounting/ETC/input reverse/OA offset 写入；withdraw 必须覆盖 preview lock、expected_versions conflict、恢复上一状态和无 history 撤到无关联。Phase 7A 已补 ETC row-id batch cancel 和 relation metadata update，Phase 7B 已补 ETC repair/link/migration 缺 command fail-fast，Phase 7C 已补 input invoice OA reverse command delegation 和缺 command fail-fast，Phase 7D 已补 batch accounting submit 缺 command fail-fast，Phase 7E 已补 turnover legacy fallback 缺 command fail-fast，Phase 7J 已补 OA offset mode 和 replace-existing repair history，Phase 7K 已补 batch accounting legacy repair command delegation 和缺 command fail-fast，Phase 7L 已补 no-OA legacy migration/repair/consolidation command delegation 和缺 command fail-fast。
+- `repair_workbench_pair_relation_integrity` 必须覆盖 active relation 旧 row id 清理、OA 附件发票明细项 `oa-exp-*:item:*` 回挂父 OA、只读取 active generation、以及 repair 后 `amount_check` 重算；不能只改 `row_ids` 后保留旧 `invoice_total`。
 - `PendingInvoiceApplicationService` manual invoice、attach existing 单条/批量必须委托 `WorkbenchRelationCommandService`，不得直接调用 pair service 写入。
 - transaction rollback 不产生半写入。
 - affected scopes 和 downstream refresh enqueue 完整。

@@ -762,6 +762,35 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-292"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-hurong-292"])
 
+    def test_oa_attachment_source_group_matches_expense_item_to_parent_oa(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                oa_row(
+                    "oa-exp-1968",
+                    amount="952.21",
+                    counterparty_name="刘晓宇",
+                    apply_type="日常报销",
+                )
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "oa-att-inv-oa-exp-1968-item-4",
+                    derived_from_oa_id="oa-exp-1968:item:4:de54f988bd66",
+                    amount="400.00",
+                    total_with_tax="400.00",
+                    seller_name="中国联合网络通信有限公司昆明市分公司",
+                )
+            ],
+        )
+
+        group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
+        self.assertEqual(group["group_id"], "source:oa_attachment:oa-exp-1968")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-1968"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["oa-att-inv-oa-exp-1968-item-4"])
+
     def test_oa_attachment_source_group_excludes_payment_and_unknown_evidence_from_invoice_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

@@ -1206,6 +1206,40 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["tags"], ["人工导入", "OA附件"])
         self.assertEqual(row["summary_fields"]["发票来源"], "OA附件解析")
 
+    def test_sql_projection_invoice_row_prefers_oa_attachment_source_link_with_context(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(connection=WorkbenchProjectionSettingsConnection())
+
+        row = builder._invoice_row_from_sql(
+            {
+                "row_id": "inv-imported-001",
+                "invoice_type": "input",
+                "invoice_no": "26532000000021026521",
+                "digital_invoice_no": "26532000000021026521",
+                "invoice_date": "2026-01-06",
+                "counterparty_name": "云南城建物业运营集团",
+                "seller_name": "云南城建物业运营集团",
+                "buyer_name": "云南溯源科技有限公司",
+                "amount": "566.04",
+                "total_with_tax": "600.00",
+                "tags": ["人工导入"],
+                "source_links": [
+                    {"source_type": "oa_attachment_invoice", "source_id": "legacy-empty-context"},
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "source_workbench_row_id": "oa-att-inv-oa-exp-1968-item-4",
+                        "derived_from_oa_id": "oa-exp-1968:item:4:de54f988bd66",
+                        "source_expense_item_id": "oa-exp-1968:item:4:de54f988bd66",
+                    },
+                ],
+                "raw_payload": {"normalized_payload": {"invoice_source": "OA附件解析"}},
+            }
+        )
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["derived_from_oa_id"], "oa-exp-1968:item:4:de54f988bd66")
+        self.assertEqual(row["source_workbench_row_id"], "oa-att-inv-oa-exp-1968-item-4")
+
     def test_sql_projection_oa_projection_rows_exclude_attachment_invoice_rows(self) -> None:
         class FakeOAQueryService:
             def get_workbench(self, month: str) -> dict[str, object]:
@@ -6012,6 +6046,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         row_ids = WorkbenchSqlProjectionBuilder._attachment_row_ids_for_relation(relation, rows_by_id)
 
         self.assertEqual(row_ids, ["oa-att-inv-new"])
+
+    def test_sql_projection_pairs_materialized_attachment_item_rows_by_parent_oa_relation(self) -> None:
+        relation = {
+            "row_ids": ["oa-exp-1968", "legacy-attachment-row-id"],
+            "row_types": ["oa", "invoice"],
+        }
+        rows_by_id = {
+            "oa-exp-1968": {"id": "oa-exp-1968", "type": "oa", "source_kind": "oa"},
+            "oa-att-inv-oa-exp-1968-item-4": {
+                "id": "oa-att-inv-oa-exp-1968-item-4",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-exp-1968:item:4:de54f988bd66",
+            },
+        }
+
+        row_ids = WorkbenchSqlProjectionBuilder._attachment_row_ids_for_relation(relation, rows_by_id)
+
+        self.assertEqual(row_ids, ["oa-att-inv-oa-exp-1968-item-4"])
 
     def test_sql_projection_keeps_attachment_invoice_rows_source_bound_to_parent_oa(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
