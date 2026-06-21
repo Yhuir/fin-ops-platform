@@ -31,7 +31,7 @@ class QueueRecorder:
 
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
     return {
-        "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
+        "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
         "pending_invoice_tag_groups_version": 1,
         "pending_output_invoice_tag_groups_version": 1,
         "bank_auto_tag_rules_version": 1,
@@ -1580,7 +1580,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue_repository=QueueRecorder(),
             row_normalizer=lambda rows: rows,
             settings_provider=lambda: {},
-            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1"},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2"},
         )
 
         with self.assertRaisesRegex(Exception, "Pending invoice SQL read repository is not configured"):
@@ -1593,7 +1593,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             row_normalizer=lambda rows: rows,
             settings_provider=lambda: {},
-            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1"},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2"},
         )
 
         payload = service.all_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
@@ -1834,7 +1834,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                         "group_ids": ["case-tian-196"],
                         "linked_oa": [
                             {
-                                "id": "oa-tian-196",
+                                "id": "64e31b1fabc9012345678901",
                                 "applicant": "田孟维",
                                 "application_type": "日常报销",
                                 "project_name": "云南溯源科技; 大理卷烟厂余...",
@@ -1892,7 +1892,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(payload["input_invoices"]["payment_summary"]["invoice_total"], "196.00")
         self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
-        self.assertEqual(payload["oa"]["primary"]["id"], "oa-tian-196")
+        self.assertEqual(payload["oa"]["primary"]["id"], "64e31b1fabc9012345678901")
         self.assertEqual(payload["oa"]["relation_count"], 1)
         self.assertEqual(payload["relation_case_ids"], ["case-tian-196"])
         self.assertEqual(relation_facade.calls[0]["reason"], "pending_invoice_sql_projection")

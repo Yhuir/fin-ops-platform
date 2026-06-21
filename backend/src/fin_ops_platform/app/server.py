@@ -1074,7 +1074,6 @@ class Application:
             HistoricalEtcRepairService(
                 state_store=self._state_store,
                 etc_service=self._etc_service,
-                pair_relation_service=self._workbench_pair_relation_service,
                 relation_command_service=self._workbench_relation_command_service(),
                 oa_row_exists=self._historical_etc_oa_row_exists,
                 link_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
@@ -1351,7 +1350,6 @@ class Application:
         self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
             row_provider=lambda month, row_ids: self._resolve_live_rows_direct(row_ids, month_hint=month),
             case_service=self._workbench_exception_case_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
             decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
             source_versions_provider=self._workbench_matching_source_versions,
@@ -13668,7 +13666,6 @@ class Application:
             batch_workbench_loader = self._workbench_sql_read_repository.load_batch_accounting_workbench_payload
         return BatchAccountingService(
             grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
-            pair_relation_service=self._workbench_pair_relation_service,
             batch_workbench_loader=batch_workbench_loader,
             relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(),

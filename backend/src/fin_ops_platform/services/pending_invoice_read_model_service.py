@@ -36,7 +36,7 @@ def pending_invoice_source_versions(
     pending_output_groups = payload.get("pending_output_invoice_tag_groups")
     bank_tags = payload.get("bank_transaction_tags")
     result: dict[str, Any] = {
-        "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
+        "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
         "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
         "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
         "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,

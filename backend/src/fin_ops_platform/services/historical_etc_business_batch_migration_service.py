@@ -61,7 +61,6 @@ class HistoricalEtcBusinessBatchMigrationService:
         self,
         *,
         etc_service: EtcService,
-        pair_relation_service: Any,
         relation_command_service: Any | None = None,
         link_etc_invoices_to_existing_invoices: Callable[[list[Any]], list[str]] | None = None,
         refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
@@ -70,7 +69,6 @@ class HistoricalEtcBusinessBatchMigrationService:
         persist_etc_state: Callable[[], None] | None = None,
     ) -> None:
         self._etc_service = etc_service
-        self._pair_relation_service = pair_relation_service
         self._relation_command_service = relation_command_service
         self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices or (lambda _invoices: [])
         self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link or (lambda _months, _reason: None)
@@ -133,9 +131,18 @@ class HistoricalEtcBusinessBatchMigrationService:
         )
 
     def _validated_relation(self, spec: HistoricalEtcBusinessBatchMigrationSpec) -> dict[str, Any]:
-        relation = self._pair_relation_service.get_active_relation_by_case_id(spec.relation_case_id)
-        if not isinstance(relation, dict):
-            raise KeyError("workbench_pair_relation_not_found")
+        get_relation = getattr(self._relation_command_service, "get_active_relation_by_case_id", None)
+        if not callable(get_relation):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Historical ETC business batch migration requires WorkbenchRelationCommandService.get_active_relation_by_case_id.",
+            )
+        try:
+            relation = get_relation(spec.relation_case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                raise KeyError("workbench_relation_not_found") from exc
+            raise
         amount_check = relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {}
         relation_external_id = str(amount_check.get("external_etc_batch_id") or "").strip()
         if relation_external_id and relation_external_id != spec.external_batch_id:

@@ -504,6 +504,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             path = REPO_ROOT / rel_path
             source = path.read_text(encoding="utf-8")
             tree = _parse(path)
+            for forbidden in (
+                "pair_relation_service",
+                "_pair_relation_service",
+            ):
+                if forbidden in source:
+                    violations.append(f"{rel_path} keeps legacy pair relation dependency {forbidden}")
+            for required in (
+                "get_active_relation_by_case_id",
+                "update_relation_metadata_for_case_id"
+                if "historical_etc_repair_service.py" not in rel_path
+                else "confirm_relation",
+            ):
+                if required not in source:
+                    violations.append(f"{rel_path} does not use relation command boundary method {required}")
             for method_name, forbidden in method_checks.items():
                 method_source = _function_source(tree, source, method_name)
                 if forbidden in method_source:
@@ -546,6 +560,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         submit_source = _function_source(tree, source, "_submit_unlocked")
 
         violations: list[str] = []
+        for forbidden in (
+            "WorkbenchPairRelationService",
+            "pair_relation_service",
+            "_pair_relation_service",
+        ):
+            if forbidden in source:
+                violations.append(f"BatchAccountingService keeps legacy pair relation dependency {forbidden}")
         for forbidden in (
             "replace_with_confirmed_relation",
             "_pair_relation_service.create_active_relation",
@@ -685,6 +706,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Workbench exception apply does not fail fast when relation command service is unavailable")
         if "assert_write_precondition" not in apply_source:
             violations.append("Workbench exception apply lacks relation freshness preflight before local case creation")
+        for forbidden in (
+            "WorkbenchPairRelationService",
+            "pair_relation_service:",
+            "_pair_relation_service",
+        ):
+            if forbidden in service_source:
+                violations.append(f"Workbench exception application keeps legacy pair relation dependency {forbidden}")
         if "confirm_relation" not in create_relation_source:
             violations.append("Workbench exception relation creation does not delegate writes to command service")
         for forbidden in (
@@ -786,6 +814,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{rel_path} lacks command-backed relation cancel helper")
             if "no_oa_relation_command_unavailable" not in class_source:
                 violations.append(f"{rel_path} does not fail fast when relation command service is unavailable")
+            if rel_path.endswith("no_oa_legacy_relation_migration_service.py"):
+                for forbidden in (
+                    "WorkbenchPairRelationService",
+                    "pair_relation_service",
+                    "_pair_relation_service",
+                    "get_active_relation_by_case_id",
+                    "active_relations_for_row_ids",
+                    "list_active_relations",
+                ):
+                    if forbidden in class_source:
+                        violations.append(f"{rel_path} keeps legacy pair relation read dependency {forbidden}")
             for method_name in method_names:
                 method_source = _function_source(tree, source, method_name)
                 for forbidden in (

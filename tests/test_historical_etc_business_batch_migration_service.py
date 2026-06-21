@@ -89,6 +89,9 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.metadata_calls: list[dict[str, object]] = []
 
+                def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+                    return app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+
                 def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
                     self.metadata_calls.append(dict(kwargs))
                     pair_kwargs = {
@@ -114,7 +117,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
             relation_command_service = RecordingRelationCommandService()
             service = HistoricalEtcBusinessBatchMigrationService(
                 etc_service=app._etc_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
                 refresh_after_etc_invoice_link=lambda months, reason: refreshes.append((list(months), reason)),
@@ -236,7 +238,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
             app._workbench_pair_relation_service.update_relation_metadata_for_case_id = forbidden_direct_relation_metadata_update
             service = HistoricalEtcBusinessBatchMigrationService(
                 etc_service=app._etc_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
                 refresh_after_etc_invoice_link=lambda months, reason: None,
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(

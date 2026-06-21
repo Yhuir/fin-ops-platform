@@ -447,6 +447,23 @@ class WorkbenchRelationCommandService:
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         return self._pair_service().active_relations_for_row_ids(list(row_ids or []))
 
+    def list_active_relations(self) -> list[dict[str, Any]]:
+        return self._pair_service().list_active_relations()
+
+    def list_history(self) -> list[dict[str, Any]]:
+        return self._pair_service().list_history()
+
+    def get_active_relation_by_case_id(self, case_id: str) -> dict[str, Any]:
+        resolved_case_id = str(case_id or "").strip()
+        relation = self._pair_service().get_active_relation_by_case_id(resolved_case_id)
+        if not isinstance(relation, dict):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_not_found",
+                "Workbench relation is not active or does not exist.",
+                payload={"case_id": resolved_case_id},
+            )
+        return deepcopy(relation)
+
     def preview_withdraw_relation(
         self,
         *,

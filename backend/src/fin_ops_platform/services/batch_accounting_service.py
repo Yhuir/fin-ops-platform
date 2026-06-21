@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 from threading import RLock
 from typing import Any, Callable, Iterable
 
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -105,19 +105,87 @@ class BatchAccountingService:
         self,
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
-        pair_relation_service: WorkbenchPairRelationService,
         batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
-        self._pair_relation_service = pair_relation_service
         self._batch_workbench_loader = batch_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
         self._mutation_lock = RLock()
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联写入服务不可用，请稍后重试。",
+            )
+        return self._relation_command_service
+
+    def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        command_service = self._require_relation_command_service()
+        active_relations = getattr(command_service, "active_relations_for_row_ids", None)
+        if not callable(active_relations):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联读取服务不可用，请稍后重试。",
+            )
+        return [
+            deepcopy(relation)
+            for relation in list(active_relations(list(row_ids or [])) or [])
+            if isinstance(relation, dict)
+        ]
+
+    def _active_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        relations = self._active_relations_for_row_ids([row_id])
+        return deepcopy(relations[0]) if relations else None
+
+    def _active_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
+        command_service = self._require_relation_command_service()
+        get_relation = getattr(command_service, "get_active_relation_by_case_id", None)
+        if not callable(get_relation):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联读取服务不可用，请稍后重试。",
+            )
+        try:
+            relation = get_relation(case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                return None
+            raise BatchAccountingError(exc.error_code, exc.message, payload=exc.payload) from exc
+        return deepcopy(relation) if isinstance(relation, dict) else None
+
+    def _active_relations(self) -> list[dict[str, Any]]:
+        command_service = self._require_relation_command_service()
+        list_active = getattr(command_service, "list_active_relations", None)
+        if not callable(list_active):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联读取服务不可用，请稍后重试。",
+            )
+        return [
+            deepcopy(relation)
+            for relation in list(list_active() or [])
+            if isinstance(relation, dict)
+        ]
+
+    def _relation_history(self) -> list[dict[str, Any]]:
+        command_service = self._require_relation_command_service()
+        list_history = getattr(command_service, "list_history", None)
+        if not callable(list_history):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联历史读取服务不可用，请稍后重试。",
+            )
+        return [
+            deepcopy(history)
+            for history in list(list_history() or [])
+            if isinstance(history, dict)
+        ]
 
     def build_payload(
         self,
@@ -295,7 +363,7 @@ class BatchAccountingService:
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
         if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水不符合批量账务提交条件。")
-        active_bank_relation = self._pair_relation_service.get_active_relation_by_row_id(normalized_bank_row_id)
+        active_bank_relation = self._active_relation_by_row_id(normalized_bank_row_id)
         if isinstance(active_bank_relation, dict):
             raise BatchAccountingError("batch_accounting_bank_row_already_linked", "银行流水已有关联关系，请刷新后重试。")
         if expected_version is not None:
@@ -313,7 +381,7 @@ class BatchAccountingService:
             oa_row = eligible_oa_by_id.get(oa_row_id)
             if not isinstance(oa_row, dict):
                 raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据不符合批量账务提交条件。")
-            if self._pair_relation_service.get_active_relation_by_row_id(oa_row_id) is not None:
+            if self._active_relation_by_row_id(oa_row_id) is not None:
                 raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联关系，请刷新后重试。")
             selected_oa_rows.append(oa_row)
 
@@ -334,7 +402,7 @@ class BatchAccountingService:
         row_ids = self._dedupe([normalized_bank_row_id, *normalized_oa_row_ids, *invoice_row_ids])
         rows = [context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)}) for row_id in row_ids]
         row_types = [self._row_type(row, row_id) for row, row_id in zip(rows, row_ids, strict=False)]
-        before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        before_relations = self._active_relations_for_row_ids(row_ids)
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
             self._synthetic_existing_case_relations(rows, existing_relations=before_relations, month_scope=self._month_scope(rows)),
@@ -394,7 +462,7 @@ class BatchAccountingService:
         actor: str = BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR,
     ) -> dict[str, Any]:
         latest_relations_by_bank_row_id: dict[str, dict[str, Any]] = {}
-        for history in self._pair_relation_service.list_history():
+        for history in self._relation_history():
             if not isinstance(history, dict):
                 continue
             for relation in list(history.get("before_relations") or []):
@@ -411,21 +479,21 @@ class BatchAccountingService:
 
         active_row_ids = {
             str(row_id).strip()
-            for relation in self._pair_relation_service.list_active_relations()
+            for relation in self._active_relations()
             for row_id in list(relation.get("row_ids") or [])
             if str(row_id).strip()
         }
         repaired_case_ids: list[str] = []
         affected_row_ids: list[str] = []
         affected_months: list[str] = []
-        repaired_at = self._pair_relation_service._timestamp()
+        repaired_at = datetime.now(UTC).isoformat()
         repair_note = "修复批量账务关系号复用导致的关联丢失"
 
         for bank_row_id, relation in sorted(latest_relations_by_bank_row_id.items()):
             if bank_row_id in active_row_ids:
                 continue
             target_case_id = self._case_id_provider(bank_row_id)
-            existing_target_relation = self._pair_relation_service.get_active_relation_by_case_id(target_case_id)
+            existing_target_relation = self._active_relation_by_case_id(target_case_id)
             if isinstance(existing_target_relation, dict):
                 continue
             row_ids = self._dedupe(str(row_id) for row_id in list(relation.get("row_ids") or []))
@@ -527,7 +595,7 @@ class BatchAccountingService:
         note = str(reason or "").strip()
         if not note:
             raise BatchAccountingError("batch_accounting_withdraw_reason_required", "撤回原因不能为空。")
-        active_relation = self._pair_relation_service.get_active_relation_by_case_id(normalized_relation_id)
+        active_relation = self._active_relation_by_case_id(normalized_relation_id)
         if not self._is_batch_accounting_relation(active_relation):
             raise BatchAccountingError("batch_accounting_relation_not_found", "批量账务关联不存在或不可撤回。")
         if expected_version is not None:

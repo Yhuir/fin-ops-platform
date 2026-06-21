@@ -5237,6 +5237,9 @@ class EtcApiTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.confirm_calls: list[dict[str, object]] = []
 
+                def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+                    return app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+
                 def confirm_relation(self, **kwargs: object) -> dict[str, object]:
                     self.confirm_calls.append(dict(kwargs))
                     relation = original_create_relation(
@@ -5264,7 +5267,6 @@ class EtcApiTests(unittest.TestCase):
             service = HistoricalEtcRepairService(
                 state_store=app._state_store,
                 etc_service=app._etc_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
                 specs=[spec],
                 oa_row_exists=lambda row_id: row_id == "oa-exp-test",
@@ -5339,7 +5341,6 @@ class EtcApiTests(unittest.TestCase):
             service = HistoricalEtcRepairService(
                 state_store=app._state_store,
                 etc_service=app._etc_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 specs=[spec],
                 oa_row_exists=lambda row_id: row_id == "oa-exp-no-command",
                 link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
@@ -5430,6 +5431,9 @@ class EtcApiTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.metadata_calls: list[dict[str, object]] = []
 
+                def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+                    return app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+
                 def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
                     self.metadata_calls.append(dict(kwargs))
                     pair_kwargs = {
@@ -5456,7 +5460,6 @@ class EtcApiTests(unittest.TestCase):
             service = ExistingEtcBatchLinkService(
                 etc_service=app._etc_service,
                 import_service=app._import_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
                 link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
@@ -5597,7 +5600,6 @@ class EtcApiTests(unittest.TestCase):
             service = ExistingEtcBatchLinkService(
                 etc_service=app._etc_service,
                 import_service=app._import_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
                 refresh_after_etc_invoice_link=lambda months, reason: None,
@@ -5665,6 +5667,9 @@ class EtcApiTests(unittest.TestCase):
                 def __init__(self) -> None:
                     self.metadata_calls: list[dict[str, object]] = []
 
+                def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+                    return app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+
                 def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
                     self.metadata_calls.append(dict(kwargs))
                     pair_kwargs = {
@@ -5691,7 +5696,6 @@ class EtcApiTests(unittest.TestCase):
             service = ExistingEtcBatchLinkService(
                 etc_service=app._etc_service,
                 import_service=app._import_service,
-                pair_relation_service=app._workbench_pair_relation_service,
                 relation_command_service=relation_command_service,
                 link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,

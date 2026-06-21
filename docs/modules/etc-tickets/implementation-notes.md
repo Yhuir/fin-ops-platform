@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - 双侧核对多候选最近日期优先配对
+
+- 目标：修复信用卡项与票根金额、日期窗口均命中，但因票根候选多于信用卡项而显示未配对的问题；业务目标调整为在保留金额和日期窗口约束下尽量配对。
+- 影响范围：`EtcReconciliationTaskService` 自动刷新匹配、`etc_reconciliation_matcher` 自动链接策略、ETC 对账任务确认前的信用卡/票根推荐状态。
+- 关键决策：自动匹配继续要求金额精确一致、票根日期落在信用卡交易日/入账日窗口内；候选图不再因“信用卡项少于票根候选”跳过自动链接，而是最大化一对一配对数量，并按信用卡摘要中的显式业务日期或交易日选择日期最近的票根。同日优先，其次前一日，再其次后一日；未被选中的候选仍保留 `needs_review` 供人工复核。
+- 文档影响：产品/API shape 不变；更新 ETC 模块测试矩阵和本实施记录。
+- 测试覆盖：新增最近日期优先用例，覆盖 2026-04-28 信用卡 75.05 在 2026-04-27/04-28 两个同金额票根中自动选 04-28；更新多候选回归用例，确认最佳候选自动配对、其它候选保留待复核。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_reconciliation_service.py -q`。
+- 未测风险：未跑前端浏览器测试；本次未改前端渲染，页面会消费后端新的 `suggested_match` 和 linked ticket 结果。真实生产批次需用户点击“刷新匹配”或重新触发任务刷新后看到新配对结果。
+
 ## 2026-06-21 - ETC existing invoice link service收敛
 
 - 目标：移除 `server.py` 和 runtime worker 中重复的 ETC canonical invoice link 循环，防止旧 ETC 模块代码重新把 metadata 当作发票池写入口。

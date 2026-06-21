@@ -37,7 +37,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         service = ExistingEtcBatchLinkService(
             etc_service=app._etc_service,
             import_service=app._import_service,
-            pair_relation_service=app._workbench_pair_relation_service,
             relation_command_service=app._workbench_relation_command_service(),
             link_import_result_to_existing_invoices=link_service.link_import_result_to_existing_invoices,
             link_etc_invoices_to_existing_invoices=link_service.link_etc_invoices_to_existing_invoices,
@@ -84,7 +83,7 @@ def _load_specs(path: Path) -> list[ExistingEtcBatchLinkSpec]:
 
 
 def _dry_run_spec(app: Any, spec: ExistingEtcBatchLinkSpec) -> dict[str, object]:
-    relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(spec.case_id)
+    relation = _active_relation_by_case_id(app, spec.case_id)
     identity_repository = _object_identity_repository(app)
     if identity_repository is None:
         return {
@@ -116,6 +115,18 @@ def _dry_run_spec(app: Any, spec: ExistingEtcBatchLinkSpec) -> dict[str, object]
         "invoice_total": f"{invoice_total:.2f}",
         "missing_invoice_numbers": missing_numbers,
     }
+
+
+def _active_relation_by_case_id(app: Any, case_id: str) -> dict[str, object] | None:
+    command_service = app._workbench_relation_command_service()
+    get_relation = getattr(command_service, "get_active_relation_by_case_id", None)
+    if not callable(get_relation):
+        return None
+    try:
+        relation = get_relation(case_id)
+    except Exception:
+        return None
+    return relation if isinstance(relation, dict) else None
 
 
 def _object_identity_repository(app: Any) -> Any | None:

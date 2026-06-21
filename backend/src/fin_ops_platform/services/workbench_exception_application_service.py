@@ -10,7 +10,6 @@ from fin_ops_platform.services.workbench_candidate_match_service import Workbenc
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_classifier import WorkbenchExceptionClassifier
 from fin_ops_platform.services.workbench_exception_rules import ACTION_DEFINITIONS, RULE_VERSION, action
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
@@ -32,7 +31,6 @@ class WorkbenchExceptionApplicationService:
         *,
         row_provider: RowProvider,
         case_service: WorkbenchExceptionCaseService,
-        pair_relation_service: WorkbenchPairRelationService,
         candidate_match_service: WorkbenchCandidateMatchService | None = None,
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
         classifier: WorkbenchExceptionClassifier | None = None,
@@ -41,7 +39,6 @@ class WorkbenchExceptionApplicationService:
     ) -> None:
         self._row_provider = row_provider
         self._case_service = case_service
-        self._pair_relation_service = pair_relation_service
         self._candidate_match_service = candidate_match_service
         self._decision_store = decision_store
         self._classifier = classifier or WorkbenchExceptionClassifier()
@@ -62,7 +59,7 @@ class WorkbenchExceptionApplicationService:
         )
         warnings = self._normalized_classifier_warnings(classification.get("warnings"))
         active_cases = self._case_service.preview_existing_case_conflicts(row_ids)
-        active_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        active_relations = self._active_relations_for_row_ids(row_ids)
         candidate_lifecycle_conflicts = self._candidate_lifecycle_conflicts(candidate_evidence)
         if active_cases:
             warnings.append(
@@ -100,7 +97,7 @@ class WorkbenchExceptionApplicationService:
         idempotency_key = self._idempotency_key(month=month, row_ids=row_ids, scenario_code=scenario_code, action_code=action_code)
         existing_case = self._case_service.find_case_by_idempotency_key(idempotency_key)
         if existing_case is not None:
-            relation = self._pair_relation_service.get_active_relation_by_case_id(str(existing_case.get("id") or ""))
+            relation = self._active_relation_by_case_id(str(existing_case.get("id") or ""))
             self._mark_decisions_resolved(
                 row_ids=row_ids,
                 case_id=str(existing_case.get("id") or ""),
@@ -499,6 +496,30 @@ class WorkbenchExceptionApplicationService:
             "Workbench relation command service is not configured.",
             payload={"read_model_status": "unavailable"},
         )
+
+    def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        relation_command_service = self._require_relation_command_service()
+        active_relations = getattr(relation_command_service, "active_relations_for_row_ids", None)
+        if not callable(active_relations):
+            raise self._relation_command_unavailable_error()
+        return [
+            deepcopy(relation)
+            for relation in list(active_relations(list(row_ids or [])) or [])
+            if isinstance(relation, dict)
+        ]
+
+    def _active_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
+        relation_command_service = self._require_relation_command_service()
+        get_relation = getattr(relation_command_service, "get_active_relation_by_case_id", None)
+        if not callable(get_relation):
+            raise self._relation_command_unavailable_error()
+        try:
+            relation = get_relation(case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                return None
+            raise
+        return deepcopy(relation) if isinstance(relation, dict) else None
 
     def _mark_candidates_consumed(
         self,

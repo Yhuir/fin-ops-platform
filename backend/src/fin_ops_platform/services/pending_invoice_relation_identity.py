@@ -72,7 +72,7 @@ def is_valid_pending_invoice_oa_row_id(value: object) -> bool:
     text = _clean_text(value)
     if not text or is_reserved_relation_identifier(text):
         return False
-    return text.lower().startswith("oa-")
+    return True
 
 
 def is_reserved_relation_identifier(value: object) -> bool:

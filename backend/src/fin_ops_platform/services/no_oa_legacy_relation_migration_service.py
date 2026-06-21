@@ -8,13 +8,11 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_LEGACY_RELATION_MIGRATION_VERSION,
     no_oa_batch_type_for_legacy_relation_mode,
 )
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 class NoOaLegacyRelationMigrationService:
-    def __init__(self, *, pair_relation_service: WorkbenchPairRelationService, relation_command_service: Any | None = None) -> None:
-        self._pair_relation_service = pair_relation_service
+    def __init__(self, *, relation_command_service: Any | None = None) -> None:
         self._relation_command_service = relation_command_service
 
     def batch_type_for_relation(self, relation: dict[str, Any]) -> str:
@@ -32,23 +30,14 @@ class NoOaLegacyRelationMigrationService:
             case_id = str(relation.get("case_id") or "").strip()
             if not case_id:
                 continue
-            current_relation = self._pair_relation_service.get_active_relation_by_case_id(case_id)
-            if current_relation is None:
-                continue
-            relations.append(deepcopy(current_relation))
+            relations.append(deepcopy(relation))
         return relations
-
-    def current_active_relation(self, case_id: str) -> dict[str, Any] | None:
-        resolved_case_id = str(case_id or "").strip()
-        if not resolved_case_id:
-            return None
-        current_relation = self._pair_relation_service.get_active_relation_by_case_id(resolved_case_id)
-        return deepcopy(current_relation) if isinstance(current_relation, dict) else None
 
     def migrate_relation_to_no_oa(
         self,
         *,
         legacy_relation: dict[str, Any],
+        existing_relation: dict[str, Any] | None = None,
         no_oa_relation_case_id: str,
         row_ids: list[str],
         month_scope: str,
@@ -59,6 +48,7 @@ class NoOaLegacyRelationMigrationService:
     ) -> tuple[dict[str, Any], list[str]]:
         return self.migrate_relations_to_no_oa(
             legacy_relations=[legacy_relation],
+            existing_relation=existing_relation,
             no_oa_relation_case_id=no_oa_relation_case_id,
             row_ids=row_ids,
             month_scope=month_scope,
@@ -72,6 +62,7 @@ class NoOaLegacyRelationMigrationService:
         self,
         *,
         legacy_relations: list[dict[str, Any]],
+        existing_relation: dict[str, Any] | None = None,
         no_oa_relation_case_id: str,
         row_ids: list[str],
         month_scope: str,
@@ -90,7 +81,6 @@ class NoOaLegacyRelationMigrationService:
         ]
         first_legacy_relation = resolved_legacy_relations[0] if resolved_legacy_relations else {}
         changed_case_ids: list[str] = []
-        existing_relation = self._pair_relation_service.get_active_relation_by_case_id(no_oa_relation_case_id)
         if not self._is_matching_no_oa_relation(existing_relation, no_oa_relation_case_id, row_ids, special_metadata):
             for legacy_case_id in legacy_case_ids:
                 changed_case_ids.extend(

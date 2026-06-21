@@ -56,7 +56,6 @@ class NoOaBankBatchService:
         self._pair_relation_service = pair_relation_service or WorkbenchPairRelationService()
         self._relation_command_service = relation_command_service
         self._legacy_migration_service = NoOaLegacyRelationMigrationService(
-            pair_relation_service=self._pair_relation_service,
             relation_command_service=self._relation_command_service,
         )
         self._last_legacy_migration_result: dict[str, Any] = self._empty_legacy_migration_result()
@@ -668,6 +667,9 @@ class NoOaBankBatchService:
             "migrated_batch_ids": [],
             "skipped": [],
         }
+        if self._relation_command_service is None:
+            self._last_legacy_migration_result = result
+            return
         rows_by_id = {self._row_id(row): row for row in rows if self._row_id(row)}
         single_side_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for legacy_relation in self._active_relations_for_no_oa_migration(
@@ -782,6 +784,7 @@ class NoOaBankBatchService:
             self._batches[batch_id] = self._normalize_batch(batch)
             relation, changed_case_ids = self._legacy_migration_service.migrate_relation_to_no_oa(
                 legacy_relation=legacy_relation,
+                existing_relation=self._active_relation_by_case_id(active_relations, str(batch["relation_case_id"])),
                 no_oa_relation_case_id=str(batch["relation_case_id"]),
                 row_ids=row_ids,
                 month_scope=str(batch.get("scope_month") or legacy_relation.get("month_scope") or "all"),
@@ -844,6 +847,7 @@ class NoOaBankBatchService:
             self._batches[batch_id] = self._normalize_batch(batch)
             relation, changed_case_ids = self._legacy_migration_service.migrate_relations_to_no_oa(
                 legacy_relations=legacy_relations,
+                existing_relation=self._active_relation_by_case_id(active_relations, str(batch["relation_case_id"])),
                 no_oa_relation_case_id=str(batch["relation_case_id"]),
                 row_ids=[str(row_id) for row_id in list(batch.get("row_ids") or [])],
                 month_scope=str(batch.get("scope_month") or "all"),
@@ -907,18 +911,32 @@ class NoOaBankBatchService:
             case_id = str(relation.get("case_id") or "").strip()
             if not case_id or case_id in seen_case_ids:
                 continue
-            current_relation = self._legacy_migration_service.current_active_relation(case_id)
-            if current_relation is None:
-                continue
             if not self._manual_confirmed_internal_transfer_relation_batch_type(
-                current_relation,
+                relation,
                 rows_by_id=rows_by_id,
                 categories=categories,
             ):
                 continue
             seen_case_ids.add(case_id)
-            relations.append(current_relation)
+            relations.append(deepcopy(relation))
         return relations
+
+    @staticmethod
+    def _active_relation_by_case_id(
+        active_relations: list[dict[str, Any]],
+        case_id: str,
+    ) -> dict[str, Any] | None:
+        resolved_case_id = str(case_id or "").strip()
+        if not resolved_case_id:
+            return None
+        for relation in list(active_relations or []):
+            if not isinstance(relation, dict):
+                continue
+            if str(relation.get("status") or "active") != "active":
+                continue
+            if str(relation.get("case_id") or "").strip() == resolved_case_id:
+                return deepcopy(relation)
+        return None
 
     def _manual_confirmed_internal_transfer_relation_batch_type(
         self,

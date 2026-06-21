@@ -37,6 +37,20 @@ class PendingInvoiceRelationIdentityTests(unittest.TestCase):
         self.assertEqual(identity.bank_transaction_ids, ["txn-expense"])
         self.assertEqual(identity.invalid_oa_row_ids, ["candidate:wrong-oa-id"])
 
+    def test_accepts_typed_oa_identity_without_legacy_prefix_requirement(self) -> None:
+        identity = pending_invoice_relation_identity(
+            [
+                {
+                    "case_id": "case-mongo-oa",
+                    "row_ids": ["64e31b1fabc9012345678901", "txn-expense"],
+                    "row_types": ["oa", "bank"],
+                }
+            ]
+        )
+
+        self.assertEqual(identity.oa_row_ids, ["64e31b1fabc9012345678901"])
+        self.assertEqual(identity.invalid_oa_row_ids, [])
+
     def test_falls_back_to_prefixes_without_guessing_candidate_type(self) -> None:
         identity = pending_invoice_relation_identity(
             [

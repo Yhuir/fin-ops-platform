@@ -80,7 +80,7 @@ const INCOME_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
   { value: "cash_income", label: "现金收入", backendFilter: "cash_income" },
 ];
 
-const DEFAULT_STATUS_FILTERS: StatusFilterSelection[] = ["paid_pending_invoice"];
+const DEFAULT_STATUS_FILTERS: StatusFilterSelection[] = ["paid_pending_invoice", "paid_invoiced"];
 
 function statusFilterOptionsForDirection(direction: PendingInvoiceDirection) {
   if (direction === "expense") {

@@ -12,6 +12,7 @@ from fin_ops_platform.services.historical_etc_business_batch_migration_service i
     HistoricalEtcBusinessBatchMigrationSpec,
 )
 from fin_ops_platform.tools.link_existing_etc_batches import (
+    _active_relation_by_case_id,
     _build_full_snapshot_application,
     _link_etc_invoices_to_existing_invoices,
 )
@@ -32,7 +33,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.execute:
         service = HistoricalEtcBusinessBatchMigrationService(
             etc_service=app._etc_service,
-            pair_relation_service=app._workbench_pair_relation_service,
             relation_command_service=app._workbench_relation_command_service(),
             link_etc_invoices_to_existing_invoices=lambda invoices: _link_etc_invoices_to_existing_invoices(app, invoices),
             refresh_after_etc_invoice_link=lambda months, reason: _refresh_after_historical_migration(app, months, reason),
@@ -77,7 +77,7 @@ def _load_specs(path: Path) -> list[HistoricalEtcBusinessBatchMigrationSpec]:
 
 
 def _dry_run_spec(app: Any, spec: HistoricalEtcBusinessBatchMigrationSpec) -> dict[str, object]:
-    relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(spec.relation_case_id)
+    relation = _active_relation_by_case_id(app, spec.relation_case_id)
     active_relation_found = isinstance(relation, dict)
     relation_external_id = ""
     oa_row_in_relation = False

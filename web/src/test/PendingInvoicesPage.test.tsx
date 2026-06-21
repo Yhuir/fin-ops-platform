@@ -865,7 +865,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "状态" })).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待开票" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "供应商 / 识别号" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 支付差额" })).toBeInTheDocument();
@@ -909,7 +909,7 @@ describe("Pending invoices page", () => {
     expect(request.searchParams.get("direction")).toBe("expense");
     expect(request.searchParams.get("filter")).toBe("requires_invoice");
     expect(JSON.parse(request.searchParams.get("filters") ?? "[]")).toEqual([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
     ]);
     expect(request.searchParams.get("page")).toBe("1");
     expect(request.searchParams.get("page_size")).toBe("50");
@@ -927,7 +927,7 @@ describe("Pending invoices page", () => {
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
 
-    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待开票" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).queryByRole("menuitemcheckbox", { name: "需要开票" })).not.toBeInTheDocument();
     expect(within(menu).getAllByRole("menuitemcheckbox").map((item) => item.textContent?.replace("✓", ""))).toEqual([
@@ -944,10 +944,10 @@ describe("Pending invoices page", () => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("filter")).toBe("requires_invoice");
       expect(JSON.parse(latest?.searchParams.get("filters") ?? "[]")).toEqual([
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
+        { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
       ]);
     });
-    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待开票" })).toBeInTheDocument();
 
     await user.click(within(menu).getByRole("menuitem", { name: "清空" }));
     await waitFor(() => {
@@ -988,7 +988,7 @@ describe("Pending invoices page", () => {
       expect(filters).toEqual([
         { field: "counterparty_name", operator: "in", values: ["分期供应商"] },
         { field: "transaction_tag", operator: "in", values: ["货款 / 设备采购"] },
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
       ]);
     });
 
@@ -1007,7 +1007,7 @@ describe("Pending invoices page", () => {
         { field: "transaction_tag", operator: "in", values: ["货款 / 设备采购"] },
         { field: "bank_account", operator: "in", values: ["光大 8826"] },
         { field: "direction", operator: "in", values: ["expense"] },
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
       ]);
     });
   });
@@ -1379,7 +1379,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待开票" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" }));
     await user.click(await screen.findByRole("menuitem", { name: "清空" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);

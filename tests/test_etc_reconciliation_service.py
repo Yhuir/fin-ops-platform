@@ -1041,7 +1041,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             closed_service.get_task(closed_importing.task_id)
 
-    def test_matching_marks_unique_multiple_missing_and_extra_candidates(self) -> None:
+    def test_matching_links_best_candidate_and_keeps_alternatives_for_review(self) -> None:
         multi_ticket_text = TICKET_ROOT_TEXT + """
 车牌号 云ADA0381
 交易时间 2026-03-04 09:30:00
@@ -1072,10 +1072,14 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         statuses = {item.description: item.recommendation_status for item in task.credit_card_items}
         ticket_statuses = {item.transaction_at: item.recommendation_status for item in task.ticket_root_items}
 
-        self.assertEqual(statuses["微信支付-云南昆明南站高速通行费"], "needs_review")
+        self.assertEqual(statuses["微信支付-云南昆明南站高速通行费"], "suggested_match")
         self.assertEqual(statuses["云南九龙池站高速通行费"], "missing_ticket")
-        self.assertEqual(ticket_statuses["2026-03-03 17:06:18"], "needs_review")
+        self.assertEqual(ticket_statuses["2026-03-03 17:06:18"], "suggested_match")
         self.assertEqual(ticket_statuses["2026-03-04 09:30:00"], "needs_review")
+        self.assertEqual(
+            next(item for item in task.ticket_root_items if item.transaction_at == "2026-03-03 17:06:18").linked_credit_card_item_ids,
+            [next(item for item in task.credit_card_items if item.description == "微信支付-云南昆明南站高速通行费").item_id],
+        )
 
         single_service, single_task_id = self._parsed_task()
         single_task = single_service.refresh_matches(task_id=single_task_id)
@@ -1103,6 +1107,45 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(card.recommendation_status, "suggested_match")
         self.assertEqual(ticket.recommendation_status, "suggested_match")
         self.assertEqual(ticket.linked_credit_card_item_ids, [card.item_id])
+
+    def test_matching_prefers_closest_ticket_when_more_tickets_than_cards(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-04 closest ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-04-28 2026-04-29 8514 财付通-贵州黔通智联科技股份有限公司 CNY 75.05 75.05
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-04-27 14:21:44
+入口站 云南会泽站
+出口站 云南昭通南站
+金额 75.05
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-28 18:11:15
+入口站 云南昭通南站
+出口站 云南会泽站
+金额 75.05
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-CLOSEST", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-CLOSEST", text=ticket_text),
+            actor="alice",
+        )
+
+        self.assertEqual(task.credit_card_items[0].recommendation_status, "suggested_match")
+        linked_by_time = {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items}
+        self.assertEqual(linked_by_time["2026-04-28 18:11:15"], [task.credit_card_items[0].item_id])
+        self.assertEqual(linked_by_time["2026-04-27 14:21:44"], [])
 
     def test_matching_links_repeated_amount_by_stable_one_to_one_order(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))

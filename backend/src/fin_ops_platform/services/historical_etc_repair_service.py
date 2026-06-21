@@ -119,7 +119,6 @@ class HistoricalEtcRepairService:
         *,
         state_store: Any,
         etc_service: EtcService,
-        pair_relation_service: Any,
         relation_command_service: Any | None = None,
         specs: Iterable[HistoricalEtcRepairBatchSpec] = DEFAULT_HISTORICAL_ETC_REPAIR_SPECS,
         oa_row_exists: Callable[[str], bool] | None = None,
@@ -132,7 +131,6 @@ class HistoricalEtcRepairService:
     ) -> None:
         self._state_store = state_store
         self._etc_service = etc_service
-        self._pair_relation_service = pair_relation_service
         self._relation_command_service = relation_command_service
         self._specs = list(specs)
         self._oa_row_exists = oa_row_exists or (lambda _row_id: True)
@@ -272,7 +270,7 @@ class HistoricalEtcRepairService:
         }
         missing_numbers = [invoice_number for invoice_number in invoice_numbers if invoice_number not in existing_numbers]
         existing_batch = self._existing_historical_batch(spec)
-        existing_relation = self._pair_relation_service.get_active_relation_by_case_id(spec.case_id)
+        existing_relation = self._active_relation_by_case_id(spec.case_id)
         if existing_batch is not None and isinstance(existing_relation, dict) and not missing_numbers:
             return HistoricalEtcRepairBatchResult(
                 bundle_id=spec.bundle_id,
@@ -366,8 +364,23 @@ class HistoricalEtcRepairService:
             raise WorkbenchRelationCommandError(
                 "workbench_relation_command_unavailable",
                 "Historical ETC repair requires WorkbenchRelationCommandService.confirm_relation.",
-            )
+        )
         return command_confirm
+
+    def _active_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
+        get_relation = getattr(self._relation_command_service, "get_active_relation_by_case_id", None)
+        if not callable(get_relation):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Historical ETC repair requires WorkbenchRelationCommandService.get_active_relation_by_case_id.",
+            )
+        try:
+            relation = get_relation(case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                return None
+            raise
+        return relation if isinstance(relation, dict) else None
 
     def _parse_unique_zip_invoices(self, upload: UploadedEtcZipFile) -> list[Any]:
         parsed_by_number: OrderedDict[str, Any] = OrderedDict()

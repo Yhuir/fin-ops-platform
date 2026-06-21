@@ -176,8 +176,6 @@ def _stable_auto_links(
             continue
         cards = sorted((cards_by_id[item_id] for item_id in component_card_ids), key=_card_sort_key)
         tickets = sorted((tickets_by_id[item_id] for item_id in component_ticket_ids), key=_ticket_sort_key)
-        if len(cards) < len(tickets):
-            continue
         pairs = _stable_component_pairs(
             cards=cards,
             tickets=tickets,
@@ -230,7 +228,10 @@ def _stable_component_pairs(
     candidate_ticket_ids_by_card = {
         card.item_id: [
             ticket.item_id
-            for ticket in sorted(ticket_candidates_by_card.get(card.item_id, []), key=_ticket_sort_key)
+            for ticket in sorted(
+                ticket_candidates_by_card.get(card.item_id, []),
+                key=lambda ticket, card=card: _ticket_candidate_sort_key(card, ticket),
+            )
             if ticket.item_id in ticket_order
         ]
         for card in cards
@@ -238,6 +239,7 @@ def _stable_component_pairs(
     if len(tickets) <= 16:
         pairs = _best_stable_pairs(
             cards=cards,
+            tickets=tickets,
             ticket_order=ticket_order,
             candidate_ticket_ids_by_card=candidate_ticket_ids_by_card,
         )
@@ -280,9 +282,16 @@ def _deterministic_bipartite_pairs(
 def _best_stable_pairs(
     *,
     cards: list[CreditCardItem],
+    tickets: list[TicketRootItem],
     ticket_order: dict[str, int],
     candidate_ticket_ids_by_card: dict[str, list[str]],
 ) -> tuple[tuple[int, int], ...]:
+    pair_scores = {
+        (card_index, ticket_order[ticket_id]): _pair_score(cards[card_index], tickets[ticket_order[ticket_id]])
+        for card_index, card in enumerate(cards)
+        for ticket_id in candidate_ticket_ids_by_card.get(card.item_id, [])
+    }
+
     @lru_cache(maxsize=None)
     def choose(card_index: int, used_ticket_indexes: frozenset[int]) -> tuple[tuple[int, int], ...]:
         if card_index >= len(cards):
@@ -298,7 +307,7 @@ def _best_stable_pairs(
                 (card_index, ticket_index),
                 *choose(card_index + 1, frozenset((*used_ticket_indexes, ticket_index))),
             )
-            if _stable_pair_tuple_is_better(candidate, best):
+            if _stable_pair_tuple_is_better(candidate, best, pair_scores=pair_scores):
                 best = candidate
         return best
 
@@ -308,10 +317,51 @@ def _best_stable_pairs(
 def _stable_pair_tuple_is_better(
     candidate: tuple[tuple[int, int], ...],
     current: tuple[tuple[int, int], ...],
+    *,
+    pair_scores: dict[tuple[int, int], tuple[int, int]],
 ) -> bool:
     if len(candidate) != len(current):
         return len(candidate) > len(current)
+    candidate_score = _pair_tuple_score(candidate, pair_scores=pair_scores)
+    current_score = _pair_tuple_score(current, pair_scores=pair_scores)
+    if candidate_score != current_score:
+        return candidate_score < current_score
     return candidate < current
+
+
+def _pair_tuple_score(
+    pairs: tuple[tuple[int, int], ...],
+    *,
+    pair_scores: dict[tuple[int, int], tuple[int, int]],
+) -> tuple[int, int]:
+    total_days = 0
+    total_direction = 0
+    for pair in pairs:
+        days, direction = pair_scores[pair]
+        total_days += days
+        total_direction += direction
+    return total_days, total_direction
+
+
+def _ticket_candidate_sort_key(card: CreditCardItem, ticket: TicketRootItem) -> tuple[int, int, datetime, int, str]:
+    days, direction = _pair_score(card, ticket)
+    ticket_sort = _ticket_sort_key(ticket)
+    return days, direction, ticket_sort[0], ticket_sort[1], ticket_sort[2]
+
+
+def _pair_score(card: CreditCardItem, ticket: TicketRootItem) -> tuple[int, int]:
+    anchor = _extract_business_date(card.description) or _parse_date_or_max(card.transaction_date)
+    ticket_date = _parse_date_or_max(ticket.transaction_at)
+    if anchor == date.max or ticket_date == date.max:
+        return 10**9, 10**9
+    days = abs((ticket_date - anchor).days)
+    if ticket_date == anchor:
+        direction = 0
+    elif ticket_date < anchor:
+        direction = 1
+    else:
+        direction = 2
+    return days, direction
 
 
 def _card_sort_key(card: CreditCardItem) -> tuple[date, date, date, int, str]:

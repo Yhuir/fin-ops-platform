@@ -36,6 +36,8 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 如果正式进项发票由 OA 附件发票提升或合并而来，列表关系查询必须同时使用发票自身 id 和 `source_links[].source_workbench_row_id` 中的 OA 附件发票 row id 查询统一 relation distribution。这样截图类“正式发票 id 与 OA 附件 row id 不同”的行仍能显示 OA/流水证据，但证据仍来自 `WorkbenchRelationReadFacade`，不能改为本页私有匹配。
 
+关联台页面上的当前选中行、同屏排列或候选高亮不是关系事实。进项发票使用情况只能消费 `workbench_relation` distribution 中已持久化的 `linked` / `candidate` relation；如果某张正式发票在 distribution 中是 `unlinked`，本页必须继续显示未关联，不能用金额相同、销方相似、筛选选中态或关联台视觉行位置推断 OA/流水关系。
+
 `以发票反提 OA` drawer 必须区分 OA 关系三态：`linked` 展示 `已关联oa`、不可勾选；`candidate` 展示 `候选oa`、不可勾选，提示用户先回关联台确认或处理候选；`unlinked` 展示 `未关联oa` 并允许进入创建 OA 草稿 payload。
 
 同一 linked 或 candidate relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。`relationStatus='candidate'` 只能作为候选证据展示；支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。

@@ -183,9 +183,30 @@ class RepairWriteBlockingPairRelationService(WorkbenchPairRelationService):
 
 
 class RecordingBatchRelationCommandService:
-    def __init__(self) -> None:
+    def __init__(self, pair_relation_service: WorkbenchPairRelationService | None = None) -> None:
+        self._pair_relation_service = pair_relation_service
         self.confirm_calls: list[dict[str, object]] = []
         self.withdraw_calls: list[dict[str, object]] = []
+
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        if self._pair_relation_service is None:
+            return []
+        return self._pair_relation_service.active_relations_for_row_ids(row_ids)
+
+    def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        if self._pair_relation_service is None:
+            return None
+        return self._pair_relation_service.get_active_relation_by_case_id(case_id)
+
+    def list_active_relations(self) -> list[dict[str, object]]:
+        if self._pair_relation_service is None:
+            return []
+        return self._pair_relation_service.list_active_relations()
+
+    def list_history(self) -> list[dict[str, object]]:
+        if self._pair_relation_service is None:
+            return []
+        return self._pair_relation_service.list_history()
 
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         self.confirm_calls.append(dict(kwargs))
@@ -827,10 +848,9 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_submit_delegates_relation_write_to_command_service(self) -> None:
         pair_service = WriteBlockingPairRelationService()
-        relation_command = RecordingBatchRelationCommandService()
+        relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            pair_relation_service=pair_service,
             relation_facade=FakeBatchRelationFacade(),
             relation_command_service=relation_command,
         )
@@ -855,7 +875,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         pair_service = WriteBlockingPairRelationService()
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            pair_relation_service=pair_service,
             relation_facade=FakeBatchRelationFacade(),
         )
 
@@ -1045,10 +1064,9 @@ class BatchAccountingApiTests(unittest.TestCase):
                 }
             ]
         )
-        relation_command = RecordingBatchRelationCommandService()
+        relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
             relation_command_service=relation_command,
         )
 
@@ -1092,7 +1110,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
         )
 
         with self.assertRaises(BatchAccountingError) as context:
@@ -1159,7 +1176,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
             relation_command_service=relation_command_service_for(pair_service),
         )
 
@@ -1209,7 +1225,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
             relation_command_service=relation_command_service_for(pair_service),
         )
 
@@ -1250,7 +1265,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
             relation_command_service=relation_command_service_for(pair_service),
         )
 
@@ -1286,7 +1300,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
-            pair_relation_service=pair_service,
             relation_command_service=relation_command_service_for(pair_service),
         )
 
@@ -1385,7 +1398,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         facade = FakeBatchRelationFacade()
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            pair_relation_service=pair_service,
             relation_facade=facade,
         )
 
@@ -1484,10 +1496,9 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "year": "2026",
             },
         )
-        relation_command = RecordingBatchRelationCommandService()
+        relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            pair_relation_service=pair_service,
             relation_facade=FakeBatchRelationFacade(),
             relation_command_service=relation_command,
         )
@@ -1524,7 +1535,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            pair_relation_service=pair_service,
             relation_facade=FakeBatchRelationFacade(),
         )
 

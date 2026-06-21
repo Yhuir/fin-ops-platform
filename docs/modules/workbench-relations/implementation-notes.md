@@ -1,5 +1,37 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-21 - legacy pair runtime dependency 收敛第一批
+
+目标：推进“旧代码、旧逻辑物理清零”，减少业务 service、repair/migration/tool 路径直接持有 `WorkbenchPairRelationService` 作为运行时事实源。
+
+变更：
+
+- `NoOaLegacyRelationMigrationService` 不再接收或回读 `WorkbenchPairRelationService`；legacy relation 迁移只使用调用方提供的 active relation 列表和 `WorkbenchRelationCommandService` 写边界。缺 command service 时不执行迁移写动作，避免读模型构建路径产生半写入。
+- ETC historical repair、existing batch link、historical business batch migration 不再接收 `pair_relation_service`；active relation 校验和 metadata 更新统一走 `WorkbenchRelationCommandService`。
+- ETC link/migration dry-run 工具不再直接读 `app._workbench_pair_relation_service`，改用 command service canonical read。
+- `WorkbenchExceptionApplicationService` 不再接收 `pair_relation_service`；preview/idempotent apply 的 active relation 读取统一走 command service。
+- `BatchAccountingService` 不再接收 `pair_relation_service`；submit/withdraw/legacy repair 的 active relation、history、active list 读取统一走 command service。
+- `WorkbenchRelationCommandService` 增加 canonical read 方法：`get_active_relation_by_case_id`、`list_active_relations`、`list_history`，供迁移后的业务 service 使用，避免各 service 自行持有 pair runtime snapshot。
+
+决策：
+
+- `WorkbenchPairRelationService` 仍保留为 command service 内部领域规则对象；本轮不是删除 canonical write table，也不是重命名 `app.workbench_pair_relations`。
+- “物理清零”的判断口径是：业务 service、repair/migration/tool 正常运行路径不得绕过 command/read facade 直接持有 pair service。command service、domain object、repository/state store 的 canonical persistence 仍是允许边界。
+
+剩余未清零范围：
+
+- `WorkbenchWriteFacade`、turnover write adapters、pending invoice service、no-OA application/service、worker/bootstrap、settings reset、Workbench matching/reconciliation engine、server 内部分散 helper 仍有 pair service/snapshot 依赖，需要后续继续小步迁移。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python -m pytest tests/test_no_oa_bank_batch_service.py tests/test_no_oa_bank_batch_workbench_integration.py tests/test_no_oa_bank_batch_read_model_refresh.py -q
+PYTHONPATH=backend/src python -m pytest tests/test_etc_backend.py tests/test_historical_etc_business_batch_migration_service.py tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests -q
+PYTHONPATH=backend/src python -m pytest tests/test_workbench_exception_application_service.py -q
+PYTHONPATH=backend/src python -m pytest tests/test_batch_accounting_api.py -q
+PYTHONPATH=backend/src python -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_exception_application_uses_relation_command_boundary tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_submit_has_no_direct_pair_write_fallback tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_withdraw_has_no_direct_pair_write_fallback tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_repair_has_no_direct_pair_write_fallback -q
+```
+
 ## 2026-06-21 - OA 附件发票 relation integrity repair 收敛
 
 目标：确保 OA 附件解析出的正式发票与父 OA 行建立稳定关系，并清理发票池清空重导后 active relation 中指向旧发票 row id 的污染。

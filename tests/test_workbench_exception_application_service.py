@@ -157,7 +157,6 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         return WorkbenchExceptionApplicationService(
             row_provider=StaticWorkbenchRows(rows),
             case_service=case_service or WorkbenchExceptionCaseService(),
-            pair_relation_service=pair_service,
             candidate_match_service=candidate_match_service or WorkbenchCandidateMatchService(),
             decision_store=decision_store,
             relation_command_service=relation_command_service or relation_command_service_for(pair_service),

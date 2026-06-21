@@ -102,7 +102,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     expect(amountAscUrl.searchParams.get("page")).toBe("1");
     expect(amountAscUrl.searchParams.get("page_size")).toBe("50");
     expect(parseColumnFilters(amountAscUrl)).toEqual([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
     ]);
     await expect.poll(() => visibleCounterparties(page)).toEqual(["智能工厂设备商二号", "智能工厂设备商"]);
 
@@ -144,7 +144,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     expect(filteredUrl.searchParams.get("sort_field")).toBe("amount");
     expect(filteredUrl.searchParams.get("sort_direction")).toBe("desc");
     expect(parseColumnFilters(filteredUrl)).toEqual(expect.arrayContaining([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
       { field: "counterparty_name", operator: "in", values: ["智能工厂设备商二号"] },
     ]));
     await expect.poll(() => visibleCounterparties(page)).toEqual(["智能工厂设备商二号"]);

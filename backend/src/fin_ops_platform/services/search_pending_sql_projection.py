@@ -541,7 +541,7 @@ class SearchPendingSqlProjectionBuilder:
         pending_output_groups = settings.get("pending_output_invoice_tag_groups")
         bank_tags = settings.get("bank_transaction_tags")
         return {
-            "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
+            "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
             "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
             "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
             "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,

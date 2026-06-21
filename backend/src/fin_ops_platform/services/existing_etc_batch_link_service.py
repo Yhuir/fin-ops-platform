@@ -59,7 +59,6 @@ class ExistingEtcBatchLinkService:
         *,
         etc_service: EtcService,
         import_service: Any,
-        pair_relation_service: Any,
         relation_command_service: Any | None = None,
         object_identity_repository: Any | None = None,
         link_import_result_to_existing_invoices: Callable[[Any], list[str]] | None = None,
@@ -71,7 +70,6 @@ class ExistingEtcBatchLinkService:
     ) -> None:
         self._etc_service = etc_service
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._relation_command_service = relation_command_service
         self._object_identity_repository = object_identity_repository or import_service
         self._link_import_result_to_existing_invoices = link_import_result_to_existing_invoices or (lambda _result: [])
@@ -214,9 +212,18 @@ class ExistingEtcBatchLinkService:
         return command_update
 
     def _active_relation_for_spec(self, spec: ExistingEtcBatchLinkSpec) -> dict[str, Any]:
-        relation = self._pair_relation_service.get_active_relation_by_case_id(spec.case_id)
-        if not isinstance(relation, dict):
-            raise KeyError("workbench_pair_relation_not_found")
+        get_relation = getattr(self._relation_command_service, "get_active_relation_by_case_id", None)
+        if not callable(get_relation):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Existing ETC batch link requires WorkbenchRelationCommandService.get_active_relation_by_case_id.",
+            )
+        try:
+            relation = get_relation(spec.case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                raise KeyError("workbench_relation_not_found") from exc
+            raise
         relation_row_ids = {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
         required_row_ids = {str(spec.oa_row_id or "").strip()}
         if spec.bank_row_id:
