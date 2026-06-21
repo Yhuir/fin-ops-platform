@@ -4996,28 +4996,32 @@ class PostgresReadModelRepository:
             else []
         )
         groups_schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
+        active_refresh_in_progress = bool(
+            dirty_statuses.intersection({"pending", "processing"})
+            or generation_metadata.get("building_generation_id")
+        )
         read_model_status = "fresh"
-        if consistency_failures:
-            read_model_status = "failed"
-        elif dirty_statuses.intersection({"pending", "processing"}):
+        if active_refresh_in_progress:
             read_model_status = "refreshing"
+        elif consistency_failures:
+            read_model_status = "failed"
         elif "failed" in dirty_statuses:
             read_model_status = "stale"
-        elif generation_metadata.get("building_generation_id"):
-            read_model_status = "refreshing"
         elif generation_metadata.get("failed_generation_is_relevant"):
             read_model_status = "stale"
         elif groups_schema_status != "fresh":
             read_model_status = "stale"
-        last_error = (
-            next((scope["last_error"] for scope in dirty_scopes if scope.get("last_error")), None)
-            or generation_metadata.get("generation_last_error")
-            or (
-                self._workbench_generation_consistency_error(consistency_failures)
-                if consistency_failures
-                else None
+        last_error = None
+        if read_model_status != "refreshing":
+            last_error = (
+                next((scope["last_error"] for scope in dirty_scopes if scope.get("last_error")), None)
+                or generation_metadata.get("generation_last_error")
+                or (
+                    self._workbench_generation_consistency_error(consistency_failures)
+                    if consistency_failures
+                    else None
+                )
             )
-        )
         worker_lag_values = [
             row.get("lag_seconds")
             for row in worker_rows

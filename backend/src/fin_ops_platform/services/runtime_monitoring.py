@@ -66,6 +66,31 @@ not (
 """
 
 
+def _active_dirty_scope_coverage_sql(alias: str) -> str:
+    prefix = f"{alias}."
+    scope_type_expr = (
+        f"coalesce({prefix}scope_type, {prefix}raw_payload->>'scope_type', "
+        f"{prefix}payload->>'scope_type', {prefix}aggregate_type, '')"
+    )
+    scope_key_expr = (
+        f"coalesce({prefix}scope_key, {prefix}raw_payload->>'scope_key', "
+        f"{prefix}payload->>'scope_key', {prefix}aggregate_id, '')"
+    )
+    return f"""
+exists (
+  select 1
+  from job.read_model_dirty_scopes dirty
+  where {prefix}event_type like '%%.read_model.refresh'
+    and {prefix}status in ('failed', 'dead_lettered')
+    and dirty.tenant_id = {prefix}tenant_id
+    and coalesce(dirty.scope_type, '') = {scope_type_expr}
+    and coalesce(dirty.scope_key, '') = {scope_key_expr}
+    and dirty.status in ('pending', 'processing')
+    and dirty.updated_at >= {prefix}updated_at
+)
+"""
+
+
 def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
     prefix = f"{alias}."
     scope_type_expr = (
@@ -117,6 +142,7 @@ and not (
       and readiness.status = 'fresh'
       and readiness.updated_at > {prefix}updated_at
   )
+  or {_active_dirty_scope_coverage_sql(alias)}
 )
 """
 
@@ -439,7 +465,7 @@ class RuntimeMonitoringRepository:
 
     def _app_status_outbox_statuses(self) -> dict[str, dict[str, Any]]:
         rows = self._connection.fetch_all(
-            """
+            f"""
             select
                 e.event_type,
                 coalesce(e.scope_type, e.raw_payload->>'scope_type', e.payload->>'scope_type', e.aggregate_type, '') as scope_type,
@@ -497,7 +523,10 @@ class RuntimeMonitoringRepository:
                           and readiness.status = 'fresh'
                           and readiness.updated_at > e.updated_at
                     )
-                ) as covered_by_later_readiness
+                ) as covered_by_later_readiness,
+                bool_or(
+                    {_active_dirty_scope_coverage_sql("e")}
+                ) as covered_by_active_dirty_scope
             from job.outbox_events e
             where e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
                or e.publish_status in ('publishing', 'failed')
@@ -1964,6 +1993,7 @@ def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
         _truthy(row.get("covered_by_later_event"))
         or _truthy(row.get("covered_by_later_done"))
         or _truthy(row.get("covered_by_later_readiness"))
+        or _truthy(row.get("covered_by_active_dirty_scope"))
     )
 
 

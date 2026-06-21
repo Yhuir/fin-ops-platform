@@ -60,7 +60,7 @@
 | 状态 | 判定 | 后续动作 |
 | --- | --- | --- |
 | `fresh` | active generation source/schema/version 一致，且没有 active dirty scope | 页面可展示和 Redis 可缓存。 |
-| `refreshing` | dirty scope pending/processing，或 refresh handler 正在重建 | 页面展示刷新状态，worker 继续处理。 |
+| `refreshing` | dirty scope pending/processing，或 refresh handler 正在重建 | 页面展示刷新状态，worker 继续处理；同 scope active repair 优先于旧 generation consistency failure 的当前错误展示。 |
 | `stale` | active generation 落后、failed generation newer、dirty scope failed、source mismatch | 入队/重试 refresh；不能缓存 stale payload。 |
 | `failed` | generation consistency failure 或 refresh handler failed | App Health/refresh status 暴露失败，运维修复后重跑 worker。 |
 | `unavailable` | SQL/read model/runtime dependency 不可用 | route 返回可恢复错误或 unavailable 状态。 |
@@ -72,7 +72,7 @@ Refresh 触发来源：
 - 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
 - `workbench:all` aggregate-only refresh 如果携带 `parent_scope_keys`，必须等这些 parent month shard 的 `workbench` scope 真实 fresh 后再聚合；parent 仍 pending/processing/failed/stale 时返回 `workbench_read_model_not_fresh` 并由 runtime worker defer，不能把暂态 parent/member mismatch 写成 failed all generation。若 all-scope 聚合前发现 parent active generation 自身存在 metadata/actual count mismatch、重复 owner 或 active relation open membership 等 consistency failure，也必须返回 `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...`，由 runtime worker 重刷对应 parent month scope 后再重试 aggregate-only all；不得发布新的 failed all generation。
-- `/api/workbench/refresh-status` 的 current-effective 状态以同一 scope 合并后的当前事实为准：同一 scope 旧 `failed` 已被新的 `pending`/`processing` 覆盖时展示 `refreshing`，旧 `last_error` 只作为历史诊断，不再弹出当前失败横幅。
+- `/api/workbench/refresh-status` 的 current-effective 状态以同一 scope 合并后的当前事实为准：同一 scope 旧 `failed` 或旧 generation consistency failure 已被新的 `pending`/`processing` dirty scope 或 building generation 覆盖时展示 `refreshing`，旧 `last_error` 只作为历史诊断，不再弹出当前失败横幅。没有 active repair 的 generation consistency failure 仍是 `failed`。
 - `read_model.workbench_reconciliation_decisions` 的 upsert、stale expire 和 missing expire 必须在同一事务内同时入队 `workbench_relation` 与主 `workbench` month scope refresh；只刷新 relation 会导致 downstream relation fresh 但 Workbench active generation 继续发布旧自动候选/旧分组。
 - Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
 - `workbench-matching` worker 每轮 claim 前会把 completed 但 matching source versions 落后的 scope run 原子转回 dirty。这个自愈路径是规则版本发布后的主恢复机制；`startup_stale_scan` 只是 opt-in 补扫，不是常驻一致性边界。
@@ -91,6 +91,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-21 | Workbench active repair 优先于旧 generation consistency failure 展示为 refreshing，保留 consistency diagnostics 但不把旧 last_error 作为当前阻断 | `/api/workbench/refresh-status`、App Status Workbench domain blocked/busy 口径、外部往来闭环后的 Workbench 后台追赶 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair` |
 | 2026-06-21 | `workbench:all` aggregate-only 遇到 parent active generation inconsistent 时改为 dependency-not-fresh defer，并由 runtime worker 补投 parent month scope；普通月 scope 发布顺手刷新 all 时只跳过 all，不回滚月 shard、不写 failed all generation | `PostgresReadModelRepository` all-scope 聚合、`WorkbenchSqlProjectionBuilder` aggregate-only all、runtime worker parent dependency refresh、App Health failed/backlog 自愈 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent`、`test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent`、`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` |
 | 2026-06-21 | 已配对多 OA 大组按 source OA 做横向子分段；OA 附件发票或银行流水 `oa-exp-*:item:*` 明细项来源归一到父 OA row id 后再对齐 | `CandidateGroupGrid` / `groupDisplayModel` 展示契约；防止 405 等 OA 的对应发票或流水只落在大组而不在同一行 | `web/src/test/CandidateGroupGrid.test.tsx::aligns attachment invoice item ids with their parent OA row inside a multi-OA group`、`web/src/test/CandidateGroupGrid.test.tsx::aligns source bank rows with their parent OA row inside a multi-OA group` |
 | 2026-06-18 | App Health write-safety blocked 纳入浏览器级闭环：`read_export_only`、`full_access`、`admin` 仍可查看 open/paired/processed/ignored 读侧状态，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且 Workbench mutation API 与 operation barrier 零调用 | `ReconciliationWorkbenchPage` 写 gate、`AppHealthStatusContext` write-safety source、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-permissions-flow.spec.ts` |

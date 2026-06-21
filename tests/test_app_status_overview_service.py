@@ -1117,6 +1117,61 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["status"], "pending")
         self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["count"], 1)
 
+    def test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope(self) -> None:
+        class CoveredByDirtyScopeConnection(FakeRuntimeConnection):
+            def __init__(self) -> None:
+                self.outbox_sql = ""
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    self.outbox_sql = normalized
+                    return [
+                        {
+                            "event_type": "workbench.read_model.refresh",
+                            "scope_type": "workbench",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "count": 1,
+                            "last_error": "generation_metadata_actual_mismatch",
+                            "updated_at": "2026-06-21T22:47:00+08:00",
+                            "covered_by_later_event": False,
+                            "covered_by_later_done": False,
+                            "covered_by_later_readiness": False,
+                            "covered_by_active_dirty_scope": True,
+                        },
+                        {
+                            "event_type": "workbench.read_model.refresh",
+                            "scope_type": "workbench",
+                            "scope_key": "all",
+                            "status": "pending",
+                            "count": 1,
+                            "last_error": None,
+                            "updated_at": "2026-06-21T22:48:00+08:00",
+                            "covered_by_later_event": False,
+                            "covered_by_later_done": False,
+                            "covered_by_later_readiness": False,
+                            "covered_by_active_dirty_scope": False,
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        connection = CoveredByDirtyScopeConnection()
+        snapshot = RuntimeMonitoringRepository(connection).app_status_runtime_snapshot()
+
+        self.assertEqual(snapshot["outbox_statuses"]["workbench.read_model.refresh"]["status"], "pending")
+        self.assertEqual(snapshot["outbox_statuses"]["workbench.read_model.refresh"]["count"], 1)
+        self.assertNotIn("last_error", snapshot["outbox_statuses"]["workbench.read_model.refresh"])
+        self.assertIn("from job.read_model_dirty_scopes dirty", connection.outbox_sql)
+        self.assertIn("covered_by_active_dirty_scope", connection.outbox_sql)
+        self.assertIn("e.status in ('failed', 'dead_lettered')", connection.outbox_sql)
+
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):
             def __init__(self) -> None:

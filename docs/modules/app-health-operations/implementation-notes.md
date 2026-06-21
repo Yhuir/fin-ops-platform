@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - Active dirty scope 覆盖历史 outbox/read model 阻断
+
+- 目标：修复 Workbench parent generation 正在重刷时，App Status 仍显示旧 `workbench_all_scope_parent_inconsistent`、`1 failed` 和 blocked/red 的问题。
+- 影响范围：`RuntimeMonitoringRepository.app_status_runtime_snapshot()`、`health_summary()`、dashboard outbox current-effective 过滤、Workbench refresh-status 进入 App Status 的状态口径；不改变业务写接口、worker claim/complete 行为或 read model durable queue 事实源。
+- 关键决策：同一 read model scope 已存在 `job.read_model_dirty_scopes.status in ('pending','processing')` 且更新时间覆盖旧 outbox failure 时，旧 failed/dead-letter/publish failure 不再参与当前 queue failed/backlog。Workbench active generation consistency failure 在同 scope 有 active repair 时展示为 `refreshing`，保留 `consistency_status=failed` 和 stale reason 供诊断，但不再把旧 `last_error` 推为当前阻断。
+- 文档影响：同步系统状态状态机/测试矩阵、关联台状态机和 runtime worker 测试矩阵。
+- 测试覆盖：新增 `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope`，以及 Workbench repository active repair 回归。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地 fake repository/connection 证明 current-effective contract；真实生产仍需发布后观察对应 dirty/outbox scope 自然 drain，若某个 failed 没有 active dirty scope、later done 或 fresh readiness 覆盖，仍会继续作为真实 failed 暴露。
+
 ## 2026-06-21 - Runtime outbox dashboard current-effective 口径收敛
 
 - 目标：修复系统状态后台显示 `Read model fresh` 但 `Worker issue` / `Queue backlog` 仍被历史 RabbitMQ publish failure 长期拉高的问题。

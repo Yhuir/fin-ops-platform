@@ -86,6 +86,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | 2026-06-20 | 历史 `import.fact.changed` 事件已 done，但 `import_facts_changed` dirty scope 仍 pending 且无 active outbox 可 claim，导致 App Status 卡同步中。 | `tests/test_read_model_scope_contract.py::ReadModelScopeContractServiceTests::test_check_reports_orphaned_import_fact_dirty_scopes_without_writes`、`test_apply_deletes_orphaned_import_fact_dirty_scopes_and_records_audit` | covered |
 | 2026-06-21 | runtime ETC import link helper 若绕过 `upsert_etc_invoice` 的 link-existing 边界，重新调用 canonical invoice 创建 API，会让 ETC ZIP/OA 附件路径再次污染统一发票池。 | `tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests::test_runtime_etc_import_link_never_calls_canonical_invoice_create_api` | covered |
 | 2026-06-21 | `workbench:all` aggregate-only 报 `parent_generation_inconsistent parent_scope_keys=...` 时，runtime worker 因同 scope type 跳过 dependency refresh，导致 all 事件 failed/dead-letter，parent month scope 不会被重建。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered |
+| 2026-06-21 | 同一 read model scope 已有 active dirty scope 修复时，历史 failed outbox 仍进入 App Status current queue failed，导致“同步中”和“阻断”同时出现。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope` | covered |
 
 ## 关键 smoke flows
 

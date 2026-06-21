@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - Workbench active repair 状态优先级修复
+
+- 目标：修复 Workbench parent generation 已经入队/processing 重刷时，`/api/workbench/refresh-status` 和 App Status 仍优先展示旧 generation consistency failure，导致用户看到“刷新中”和“阻断”并存的问题。
+- 影响范围：`PostgresReadModelRepository.get_workbench_refresh_status(...)`、App Status 读取 Workbench refresh status 的 blocked/busy 推导、外部往来闭环后的 Workbench month/all 后台追赶展示；不改变 Workbench active generation 发布事实或 relation 写入口。
+- 关键决策：同一 Workbench scope 有 `pending`/`processing` dirty scope 或 building generation 时，当前 read model 状态为 `refreshing`；generation consistency failure 仍保留在 `consistency_status` 和 `read_model_stale_reasons` 中供诊断，但旧 `last_error` 不再作为当前失败弹窗/阻断原因。若没有 active repair，generation consistency failure 仍为 `failed`，不能伪装 fresh。
+- 文档影响：同步本实施记录、`state-machine.md`、系统状态实施记录/状态机/测试矩阵和 runtime worker 测试矩阵。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair`。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地测试证明 repository 状态优先级；真实生产仍需发布后等待 worker 消费 active dirty scopes，确认 `2026-02`、`2026-03` 和 `all` 收敛到 fresh。
+
 ## 2026-06-21 - Workbench all parent inconsistency 自愈
 
 - 目标：修复外部往来闭环发布后 App Health 仍显示 `workbench_all_scope_parent_inconsistent`、1 failed、1 backlog、1 refreshing、两个同步中的问题，避免历史或可恢复的 all-scope parent inconsistency 长期阻断运行状态。

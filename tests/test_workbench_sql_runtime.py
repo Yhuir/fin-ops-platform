@@ -5331,6 +5331,47 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("generation_metadata_actual_mismatch", status["read_model_stale_reasons"])
         self.assertIn("gen-2026-03", status["last_error"])
 
+    def test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair(self) -> None:
+        class RepairingInconsistentGenerationConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "status": "processing",
+                            "updated_at": "2026-06-21T22:48:00+08:00",
+                            "last_error": "previous generation mismatch",
+                            "source_version": 9,
+                        }
+                    ]
+                if "actual_group_count" in normalized and "from read_model.workbench_generations" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03",
+                            "row_count": 253,
+                            "group_count": 151,
+                            "summary_count": 1,
+                            "actual_row_count": 0,
+                            "actual_group_count": 0,
+                            "actual_group_row_count": 0,
+                            "actual_summary_count": 1,
+                            "build_metadata": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = PostgresReadModelRepository(RepairingInconsistentGenerationConnection())
+
+        status = repository.get_workbench_refresh_status(scope_key="2026-03")
+
+        self.assertEqual(status["read_model_status"], "refreshing")
+        self.assertEqual(status["consistency_status"], "failed")
+        self.assertIn("generation_metadata_actual_mismatch", status["read_model_stale_reasons"])
+        self.assertIsNone(status["last_error"])
+
     def test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent(self) -> None:
         class InconsistentAggregateConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

@@ -55,7 +55,7 @@
 - `stale`：source/schema/version 不匹配或 dirty 未完成；busy/yellow。
 - `failed`：refresh 失败或 readiness failed；critical domain blocked/red。
 - `unavailable`：runtime repository/readiness reader 不可用；blocked/red，不能空 green。
-- current-effective blocker：`scopes[]`、dirty scope 和 outbox failed/dead-letter 只有在仍代表当前 scope 未收敛时才参与 overall/domain 判定。成本统计 legacy scope `all` / 裸 `YYYY-MM`、以及已被后续同 scope `done` 或 fresh readiness 覆盖的 outbox 失败，只能进入历史诊断或 repair 队列，不能把 canonical fresh 页面拖成 busy/blocked。同一 current-effective scope 如果旧 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 不再作为当前阻断。
+- current-effective blocker：`scopes[]`、dirty scope 和 outbox failed/dead-letter 只有在仍代表当前 scope 未收敛时才参与 overall/domain 判定。成本统计 legacy scope `all` / 裸 `YYYY-MM`、以及已被后续同 scope `done`、fresh readiness 或同 scope active dirty scope 覆盖的 outbox 失败，只能进入历史诊断或 repair 队列，不能把 canonical fresh/refreshing 页面拖成 blocked。同一 current-effective scope 如果旧 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 不再作为当前阻断。
 - historical diagnostics：`historical_read_model_scopes[]` 暴露历史失败、废弃 scope contract 和可审计修复对象；该字段不作为 fresh 证明，也不参与 `details`、`level` 或 `blocks_mutations` 推导。
 - refresh 触发来源：各业务模块 lifecycle event、settings reset、read model miss/stale API enqueue、worker/backfill。`startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes，不应直接刷新用户可见 read model。
 - 失败恢复：通过对应 runbook、runtime queue ops、readiness backfill、worker restart/drain；App Health 只展示和定位，不直接执行 repair。
@@ -65,6 +65,7 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | - | 初始骨架 | 待补充 | - |
+| 2026-06-21 | current-effective outbox 增加同 scope active dirty scope 覆盖，Workbench generation consistency failure 在 active repair 期间展示 refreshing 而不是 blocked | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、health summary/outbox attention SQL、Workbench refresh status 到 App Status 的状态口径 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair` |
 | 2026-06-20 | App Status 增加 runtime summary，并在 hover 与系统状态页展示 read model / worker / queue 整体状态 | 用户不用进入具体表格即可判断 read model 是否 fresh、worker 是否 active/working、queue 是否有 backlog | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppStatusIndicator.test.tsx src/test/AppHealthOperationsPage.test.tsx` |
 | 2026-06-18 | 同一 read model scope 旧 failed 被新 pending/processing 覆盖时展示 refreshing，旧 last_error 只做历史诊断 | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、App Health / App Status current-effective read model 状态 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v` |
 | 2026-06-11 | 补齐 App Health / App Status 测试闭环状态机 | 将 overall/domain/job/runtime/dashboard/readiness 状态纳入统一维护边界 | `tests.test_app_health_api`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
