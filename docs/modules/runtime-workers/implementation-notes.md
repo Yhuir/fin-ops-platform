@@ -8,6 +8,7 @@
 - Worker lifecycle 触发 read model refresh 时必须走统一 scope policy/gateway 入队；worker 不直接拼接或投递成本统计等 read model 的业务 scope contract。
 - 非事务 read model refresh producer 由 architecture guard 约束：不得绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
 - `bank_detail:all` 是显式 fan-out 命令，不是 downstream `*_read_model_not_fresh` 可自动推导的稳定 freshness 依赖 scope；下游 all-scope event 只能等待或补投可识别的具体月份 shard。
+- `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
 
 ## 记录模板
 
@@ -25,6 +26,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - Same-scope parent dependency refresh
+
+- 目标：修复 `workbench:all` aggregate-only 遇到 parent generation inconsistent 时只能把 all 事件标 failed、无法自动重刷 parent month scope 的问题。
+- 影响范围：`RuntimeWorker._dependency_refresh_scopes(...)`、dependency-not-fresh defer、Workbench all-scope aggregate 自愈链路。
+- 关键决策：默认仍禁止从同一 scope type 的 `*_read_model_not_fresh` 盲目补投自己，避免循环；只有错误明确携带 `parent_scope_keys` 时才允许补投 same-scope parent。`parent_generation_inconsistent` 标记会跳过 fresh readiness 短路，但仍尊重 active refresh dedupe。
+- 文档影响：更新本实施记录和测试矩阵；运行事实源和 queue 状态流转不变。
+- 测试覆盖：新增 `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent`。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：真实生产若历史事件已 `failed`/`dead_lettered` 而没有新的 pending/backlog 同 scope 事件，需要用 `runtime_queue_ops requeue` 或重新 enqueue 对应 read model refresh 后才会进入新自愈路径。
 
 ## 2026-06-20 - Orphaned import fact dirty scope repair
 

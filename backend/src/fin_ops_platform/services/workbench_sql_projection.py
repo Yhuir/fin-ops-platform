@@ -207,7 +207,11 @@ class WorkbenchSqlProjectionBuilder:
         normalized_scope = str(scope_key or "").strip() or "all"
         if normalized_scope != "all":
             raise ValueError("workbench all-scope aggregation requires scope_key='all'.")
-        self._read_model_repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+        self._read_model_repository.save_workbench_read_models(
+            {"read_models": {}},
+            changed_scope_keys={"all"},
+            raise_on_all_scope_parent_inconsistent=True,
+        )
         status = self._read_model_repository.get_workbench_refresh_status(scope_key="all")
         if str(status.get("read_model_status") or "").strip() == "failed":
             raise RuntimeError(str(status.get("last_error") or "Workbench all-scope aggregation failed."))

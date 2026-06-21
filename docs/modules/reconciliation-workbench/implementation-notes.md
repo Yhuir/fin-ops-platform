@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - Workbench all parent inconsistency 自愈
+
+- 目标：修复外部往来闭环发布后 App Health 仍显示 `workbench_all_scope_parent_inconsistent`、1 failed、1 backlog、1 refreshing、两个同步中的问题，避免历史或可恢复的 all-scope parent inconsistency 长期阻断运行状态。
+- 影响范围：`PostgresReadModelRepository` 的 all-scope aggregate 发布、`WorkbenchSqlProjectionBuilder.refresh_workbench_all_scope_from_active_shards(...)`、`RuntimeWorker` dependency-not-fresh defer、App Health 对后续 pending/retry 覆盖旧 failed 的展示链路。
+- 关键决策：普通月 scope 发布时如果顺手聚合 all 发现 parent generation inconsistent，只跳过 all 聚合，不写新的 failed all generation，也不回滚已经发布的月 shard。aggregate-only `workbench:all` 事件发现 parent inconsistent 时抛 `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...`；runtime worker 将 all 事件 defer，并强制补投对应 parent month scope，即使旧 readiness 仍显示 fresh，也要以 consistency failure 为准重建 parent。
+- 文档影响：更新本实施记录和 `state-machine.md`；App Health 口径不变，继续以 current-effective dirty/outbox/readiness 判断左上角状态。
+- 测试覆盖：新增/更新 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent`、`test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent`、`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent`。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地未直接操作生产队列；发布后需要让 runtime worker 消费当前 backlog，确认 parent month scope 被重建、aggregate-only all 发布新 active generation，旧 failed 被后续 pending/done/fresh 覆盖后 App Health 恢复。
+
 ## 2026-06-21 - OA 附件 item id 三方自动闭合修复
 
 - 目标：修复未配对区仍出现“OA+银行自动匹配 + 发票同组展示”的 196 等三栏闭合场景；这些发票来自 OA 附件且 `derived_from_oa_id` 为 `oa-exp-*:item:*`，含税合计已闭合，但 free matching engine 没有生成三方 decision。

@@ -18,6 +18,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
 READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
 MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
+PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
 
 
 class RuntimeWorkerResult(str, Enum):
@@ -268,10 +269,11 @@ class RuntimeWorker:
         for dependency in dependencies:
             scope_type = dependency["scope_type"]
             scope_key = dependency["scope_key"]
+            force_refresh = dependency.get("force_refresh") is True
             if self._dependency_refresh_is_active(event.tenant_id, scope_type, scope_key):
                 enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_active"})
                 continue
-            if self._dependency_refresh_is_fresh(event.tenant_id, scope_type, scope_key):
+            if not force_refresh and self._dependency_refresh_is_fresh(event.tenant_id, scope_type, scope_key):
                 enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_fresh"})
                 continue
             try:
@@ -323,13 +325,28 @@ class RuntimeWorker:
         return "read_model_not_fresh" in normalized
 
     @classmethod
-    def _dependency_refresh_scopes(cls, event: RuntimeQueueEvent, error: str) -> list[dict[str, str]]:
+    def _dependency_refresh_scopes(cls, event: RuntimeQueueEvent, error: str) -> list[dict[str, Any]]:
         normalized = str(error or "").strip().lower()
-        dependencies: list[dict[str, str]] = []
+        dependencies: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         for match in READ_MODEL_NOT_FRESH_RE.finditer(normalized):
             scope_type = match.group(1)
-            if not scope_type or scope_type == str(event.scope_type or ""):
+            if not scope_type:
+                continue
+            parent_scope_keys = cls._parent_scope_keys_from_error(normalized)
+            force_refresh = "parent_generation_inconsistent" in normalized
+            if scope_type == str(event.scope_type or "") and parent_scope_keys:
+                for parent_scope_key in parent_scope_keys:
+                    identity = (scope_type, parent_scope_key)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    payload: dict[str, Any] = {"scope_type": scope_type, "scope_key": parent_scope_key}
+                    if force_refresh:
+                        payload["force_refresh"] = True
+                    dependencies.append(payload)
+                continue
+            if scope_type == str(event.scope_type or ""):
                 continue
             scope_key = cls._dependency_scope_key(scope_type, event)
             if not scope_key:
@@ -340,6 +357,21 @@ class RuntimeWorker:
             seen.add(identity)
             dependencies.append({"scope_type": scope_type, "scope_key": scope_key})
         return dependencies
+
+    @staticmethod
+    def _parent_scope_keys_from_error(error: str) -> list[str]:
+        match = PARENT_SCOPE_KEYS_RE.search(str(error or "").strip().lower())
+        if not match:
+            return []
+        scope_keys: list[str] = []
+        seen: set[str] = set()
+        for item in match.group(1).split(","):
+            scope_key = item.strip()
+            if not scope_key or scope_key in seen:
+                continue
+            seen.add(scope_key)
+            scope_keys.append(scope_key)
+        return scope_keys
 
     @classmethod
     def _dependency_scope_key(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> str:

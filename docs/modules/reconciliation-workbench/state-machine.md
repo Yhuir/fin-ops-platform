@@ -71,7 +71,7 @@ Refresh 触发来源：
 - 关联台确认/撤回、exception apply/cancel、ignore/unignore。
 - 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
-- `workbench:all` aggregate-only refresh 如果携带 `parent_scope_keys`，必须等这些 parent month shard 的 `workbench` scope 真实 fresh 后再聚合；parent 仍 pending/processing/failed/stale 时返回 `workbench_read_model_not_fresh` 并由 runtime worker defer，不能把暂态 parent/member mismatch 写成 failed all generation。
+- `workbench:all` aggregate-only refresh 如果携带 `parent_scope_keys`，必须等这些 parent month shard 的 `workbench` scope 真实 fresh 后再聚合；parent 仍 pending/processing/failed/stale 时返回 `workbench_read_model_not_fresh` 并由 runtime worker defer，不能把暂态 parent/member mismatch 写成 failed all generation。若 all-scope 聚合前发现 parent active generation 自身存在 metadata/actual count mismatch、重复 owner 或 active relation open membership 等 consistency failure，也必须返回 `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...`，由 runtime worker 重刷对应 parent month scope 后再重试 aggregate-only all；不得发布新的 failed all generation。
 - `/api/workbench/refresh-status` 的 current-effective 状态以同一 scope 合并后的当前事实为准：同一 scope 旧 `failed` 已被新的 `pending`/`processing` 覆盖时展示 `refreshing`，旧 `last_error` 只作为历史诊断，不再弹出当前失败横幅。
 - `read_model.workbench_reconciliation_decisions` 的 upsert、stale expire 和 missing expire 必须在同一事务内同时入队 `workbench_relation` 与主 `workbench` month scope refresh；只刷新 relation 会导致 downstream relation fresh 但 Workbench active generation 继续发布旧自动候选/旧分组。
 - Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
@@ -84,13 +84,14 @@ Refresh 触发来源：
 
 1. 查 `/api/workbench/refresh-status`、App Health、dirty scopes、outbox 和 worker heartbeat。
 2. 如果是 matching dirty scope，重试 `workbench-matching` worker；不要回退 legacy dirty scope。
-3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。
+3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。`workbench:all` 发现 parent month generation inconsistent 时应自动重刷 parent month scope 并 defer all aggregate；只有 parent scope 自身反复失败才升级为运维故障。
 4. 如果是页面交互问题，先确认写 API response 的 affected months、operation freshness targets、operation projection、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。确认/撤回/拆分候选预览必须等操作级 `workbench_relation` barrier 和当前 Workbench fresh refetch 后才关闭；它不应等待 `workbench:all` 或下游跨页面 read model 才释放。这些下游失败或 pending 仍是后台一致性问题，必须单独修复。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-21 | `workbench:all` aggregate-only 遇到 parent active generation inconsistent 时改为 dependency-not-fresh defer，并由 runtime worker 补投 parent month scope；普通月 scope 发布顺手刷新 all 时只跳过 all，不回滚月 shard、不写 failed all generation | `PostgresReadModelRepository` all-scope 聚合、`WorkbenchSqlProjectionBuilder` aggregate-only all、runtime worker parent dependency refresh、App Health failed/backlog 自愈 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent`、`test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent`、`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` |
 | 2026-06-21 | 已配对多 OA 大组按 source OA 做横向子分段；OA 附件发票或银行流水 `oa-exp-*:item:*` 明细项来源归一到父 OA row id 后再对齐 | `CandidateGroupGrid` / `groupDisplayModel` 展示契约；防止 405 等 OA 的对应发票或流水只落在大组而不在同一行 | `web/src/test/CandidateGroupGrid.test.tsx::aligns attachment invoice item ids with their parent OA row inside a multi-OA group`、`web/src/test/CandidateGroupGrid.test.tsx::aligns source bank rows with their parent OA row inside a multi-OA group` |
 | 2026-06-18 | App Health write-safety blocked 纳入浏览器级闭环：`read_export_only`、`full_access`、`admin` 仍可查看 open/paired/processed/ignored 读侧状态，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且 Workbench mutation API 与 operation barrier 零调用 | `ReconciliationWorkbenchPage` 写 gate、`AppHealthStatusContext` write-safety source、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-permissions-flow.spec.ts` |
 | 2026-06-18 | 关联台银行行支持展示 OA 待付款核对创建的进行中 OA relation chip | `special_metadata.origin=oa_pending_payment_in_progress` 的 active relation 在 Workbench payload 中显示“已关联进行中OA”，防止进行中 OA 已占用流水被误当作普通未配对流水 | `tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests.test_oa_pending_in_progress_relation_uses_dedicated_bank_chip` |

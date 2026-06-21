@@ -327,6 +327,50 @@ class RuntimeWorkerTests(unittest.TestCase):
             [{"scope_type": "bank_detail", "scope_key": "2026-03", "status": "already_fresh"}],
         )
 
+    def test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("workbench.read_model.refresh").__dict__,
+                "tenant_id": "tenant-a",
+                "scope_type": "workbench",
+                "scope_key": "all",
+                "priority": "normal",
+                "trace_id": "trace-workbench-all",
+            }
+        )
+        queue = FakeQueue(claimed)
+        queue.fresh_read_model_refreshes.add(("tenant-a", "workbench", "2026-03"))
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError(
+                "workbench_read_model_not_fresh: parent_generation_inconsistent "
+                "parent_scope_keys=2026-03"
+            )
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["workbench.read_model.refresh"],
+                dependency_not_fresh_delay_seconds=4,
+            ),
+            handlers={"workbench.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.failed_events, [])
+        self.assertIn(("tenant-a", "workbench", "2026-03"), queue.active_read_model_refresh_checks)
+        self.assertEqual(queue.fresh_read_model_refresh_checks, [])
+        self.assertEqual(len(queue.enqueued_read_model_refreshes), 1)
+        dependency = queue.enqueued_read_model_refreshes[0]
+        self.assertEqual(dependency["scope_type"], "workbench")
+        self.assertEqual(dependency["scope_key"], "2026-03")
+        self.assertEqual(dependency["reason"], "dependency_not_fresh")
+        self.assertEqual(dependency["priority"], "high")
+        self.assertEqual(dependency["trace_id"], "trace-workbench-all")
+        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "workbench", "scope_key": "2026-03"}])
+
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
         claimed = event()
         claimed = RuntimeQueueEvent(**{**claimed.__dict__, "attempts": 3})

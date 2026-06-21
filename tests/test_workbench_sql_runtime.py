@@ -5388,8 +5388,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
         sql = "\n".join(statement for statement, _params in connection.executed)
-        self.assertIn("status = 'failed'", sql)
-        self.assertTrue(
+        self.assertNotIn("workbench_all_scope_parent_inconsistent", sql)
+        self.assertFalse(
             any(
                 any("workbench_all_scope_parent_inconsistent" in str(param) for param in params)
                 for _statement, params in connection.executed
@@ -5399,6 +5399,44 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any(
                 "insert into read_model.workbench_groups" in statement and "values ( %s, %s, 'all'" in statement
                 for statement, _params in connection.executed
+            )
+        )
+
+    def test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent(self) -> None:
+        class InconsistentAggregateConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "actual_group_count" in normalized and "from read_model.workbench_generations" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03",
+                            "row_count": 253,
+                            "group_count": 151,
+                            "summary_count": 1,
+                            "actual_row_count": 0,
+                            "actual_group_count": 0,
+                            "actual_group_row_count": 0,
+                            "actual_summary_count": 1,
+                            "build_metadata": {},
+                        }
+                    ]
+                if "from read_model.workbench_groups g" in normalized:
+                    return []
+                return []
+
+        connection = InconsistentAggregateConnection()
+        repository = PostgresReadModelRepository(connection)
+        builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        with self.assertRaisesRegex(RuntimeError, "workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=2026-03"):
+            builder.refresh_workbench_all_scope_from_active_shards("all")
+
+        self.assertFalse(
+            any(
+                any("workbench_all_scope_parent_inconsistent" in str(param) for param in params)
+                for _statement, params in connection.executed
             )
         )
 

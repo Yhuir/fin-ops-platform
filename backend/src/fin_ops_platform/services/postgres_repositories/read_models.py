@@ -5407,6 +5407,7 @@ class PostgresReadModelRepository:
         *,
         changed_scope_keys: set[str] | None = None,
         refresh_all_scope_from_month_shards: bool = True,
+        raise_on_all_scope_parent_inconsistent: bool = False,
     ) -> None:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
         published_scope_keys: set[str] = set()
@@ -5760,7 +5761,10 @@ class PostgresReadModelRepository:
                 )
                 published_scope_keys.add(scope_key)
             if refresh_all_scope:
-                if self._refresh_workbench_all_scope_from_month_shards(connection):
+                if self._refresh_workbench_all_scope_from_month_shards(
+                    connection,
+                    raise_on_parent_inconsistent=raise_on_all_scope_parent_inconsistent,
+                ):
                     published_scope_keys.add("all")
 
         try:
@@ -5816,25 +5820,30 @@ class PostgresReadModelRepository:
                 ",".join(normalized_scope_keys),
             )
 
-    def _refresh_workbench_all_scope_from_month_shards(self, connection: Any) -> bool:
+    def _refresh_workbench_all_scope_from_month_shards(
+        self,
+        connection: Any,
+        *,
+        raise_on_parent_inconsistent: bool = False,
+    ) -> bool:
         self._lock_workbench_generation_scope(connection, scope_key="all")
         consistency_failures = self._workbench_generation_consistency_failures(connection, include_all=False)
         if consistency_failures:
-            generation_id = self._new_workbench_generation_id("all")
-            aggregate_source_versions = {
-                "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
-                "source_version": 0,
-            }
-            self._fail_workbench_generation(
-                connection,
-                scope_key="all",
-                generation_id=generation_id,
-                source_versions=aggregate_source_versions,
-                error=(
-                    "workbench_all_scope_parent_inconsistent: "
+            if raise_on_parent_inconsistent:
+                parent_scope_keys = ",".join(
+                    sorted(
+                        {
+                            str(failure.get("scope_key") or "").strip()
+                            for failure in consistency_failures
+                            if str(failure.get("scope_key") or "").strip()
+                        }
+                    )
+                )
+                raise RuntimeError(
+                    "workbench_read_model_not_fresh: parent_generation_inconsistent "
+                    f"parent_scope_keys={parent_scope_keys}; "
                     + self._workbench_generation_consistency_error(consistency_failures)
-                ),
-            )
+                )
             return False
         group_rows = connection.fetch_all(
             """

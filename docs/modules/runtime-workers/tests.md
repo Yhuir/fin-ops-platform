@@ -24,6 +24,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | Worker 从 Postgres claim event 并 complete | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | 覆盖内存 fake 与真实 Postgres integration。 |
 | Handler 失败进入 retry / dead-letter | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | 覆盖 retry delay、max attempts、processing lock。 |
 | Handler 遇到依赖 read model 未 fresh 时短延迟 defer | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | `*_read_model_not_fresh` / `read_model_not_fresh` 不走普通失败/dead-letter，而是短延迟回 pending。 |
+| Same-scope parent shard 未 fresh / inconsistent 时补投 parent scope | P0 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered | `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...` 不被同 scope skip；会补投 parent month scope，且不被旧 fresh readiness 短路。 |
 | defer 遇到同 dedupe pending 覆盖事件 | P0 | `tests/test_runtime_queue.py` | covered | 当前 processing 事件标记 done + `runtime_defer_superseded`，避免唯一冲突导致 worker 崩溃并等待 300s lock timeout。 |
 | defer 遇到旧 done 事件 source_version 更高 | P0 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event` | covered | 覆盖事件必须比当前 processing event 更新；旧 done 事件不能把新导入产生的 dirty scope 对应事件错误标记 superseded。 |
 | 无 handler / 无 event type 不误 claim | P0 | `tests/test_runtime_worker.py` | covered | 防止 worker 注册错误时吞事件。 |
@@ -84,6 +85,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | 2026-06-20 | 银行导入持久化路径只投递 `bank_detail`，未主动投递 `bank_account_balance`，账户余额页面只能依赖 API miss 被动补刷，`bank_import_confirmed` SLO 缺少真实事件来源。 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_bank_import_confirmed_profile_fails_when_account_balance_scope_is_missing` | covered |
 | 2026-06-20 | 历史 `import.fact.changed` 事件已 done，但 `import_facts_changed` dirty scope 仍 pending 且无 active outbox 可 claim，导致 App Status 卡同步中。 | `tests/test_read_model_scope_contract.py::ReadModelScopeContractServiceTests::test_check_reports_orphaned_import_fact_dirty_scopes_without_writes`、`test_apply_deletes_orphaned_import_fact_dirty_scopes_and_records_audit` | covered |
 | 2026-06-21 | runtime ETC import link helper 若绕过 `upsert_etc_invoice` 的 link-existing 边界，重新调用 canonical invoice 创建 API，会让 ETC ZIP/OA 附件路径再次污染统一发票池。 | `tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests::test_runtime_etc_import_link_never_calls_canonical_invoice_create_api` | covered |
+| 2026-06-21 | `workbench:all` aggregate-only 报 `parent_generation_inconsistent parent_scope_keys=...` 时，runtime worker 因同 scope type 跳过 dependency refresh，导致 all 事件 failed/dead-letter，parent month scope 不会被重建。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` | covered |
 
 ## 关键 smoke flows
 
