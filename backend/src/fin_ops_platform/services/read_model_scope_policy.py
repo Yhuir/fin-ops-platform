@@ -135,8 +135,19 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
+        "bank_account_balance": _month_or_all_scope_policy("bank_account_balance"),
+        "bank_detail": _month_or_all_scope_policy("bank_detail"),
         "cost_statistics": _cost_statistics_scope_policy(),
+        "input_invoice_usage": _month_or_all_scope_policy("input_invoice_usage"),
+        "invoice_lifecycle": _month_or_all_scope_policy("invoice_lifecycle"),
         "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),
+        "oa_pending_payment": _month_or_all_scope_policy("oa_pending_payment"),
+        "output_invoice_collection": _month_or_all_scope_policy("output_invoice_collection"),
         "pending_invoice": _pending_invoice_scope_policy(),
+        "search": _month_or_all_scope_policy("search"),
+        "tax_offset": _month_or_all_scope_policy("tax_offset"),
+        "turnover_ledger": _month_or_all_scope_policy("turnover_ledger"),
+        "workbench": _month_or_all_scope_policy("workbench"),
+        "workbench_relation": _month_or_all_scope_policy("workbench_relation"),
     }
 )

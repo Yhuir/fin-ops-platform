@@ -23,6 +23,7 @@
 - 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合、任一流水缺少证据、或已有更高优先级候选时，不自动选择。
 - 已有 active relation 的 ETC summary 不得继续出现在 open 区；paired 区仍可展示展开明细。
 - active relation 的 `row_ids` 是集合语义：同一 relation 内重复 row id 必须在写入/normalize/repair/query grouping 层去重；同一 row id 不能跨不同 active case 复用。重复 row id 的真实结果是列表详情重复渲染同一个 OA/银行/发票，不代表存在两条业务事实。
+- 已配对多 OA 大组展示时，确定 source OA 的发票或流水必须与对应 OA 同排。OA 附件发票来源允许是 `oa-exp-*:item:*` 明细项 ID，展示分段必须先归一到父 OA row id；无 source OA 的行保持 group-level 展示，不能按金额或顺序推断同排。
 - 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
 - 进行中 OA 在 OA 待付款核对页面关联的支出流水会写入 Workbench active relation，并在关联台银行行展示“已关联进行中OA”chip。由于进行中 OA 尚不属于普通 completed OA 关联台主流程，这类流水仍可能出现在 open/未配对上下文，但不得被当作未占用流水重复确认到其他 active case。
 - 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源，但不是 bank-only paired 例外；仅银行流水的外部往来闭环必须留在 open，只有 OA + 银行 + 发票三栏都存在时才进入 paired。
@@ -90,6 +91,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-21 | 已配对多 OA 大组按 source OA 做横向子分段；OA 附件发票或银行流水 `oa-exp-*:item:*` 明细项来源归一到父 OA row id 后再对齐 | `CandidateGroupGrid` / `groupDisplayModel` 展示契约；防止 405 等 OA 的对应发票或流水只落在大组而不在同一行 | `web/src/test/CandidateGroupGrid.test.tsx::aligns attachment invoice item ids with their parent OA row inside a multi-OA group`、`web/src/test/CandidateGroupGrid.test.tsx::aligns source bank rows with their parent OA row inside a multi-OA group` |
 | 2026-06-18 | App Health write-safety blocked 纳入浏览器级闭环：`read_export_only`、`full_access`、`admin` 仍可查看 open/paired/processed/ignored 读侧状态，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且 Workbench mutation API 与 operation barrier 零调用 | `ReconciliationWorkbenchPage` 写 gate、`AppHealthStatusContext` write-safety source、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-permissions-flow.spec.ts` |
 | 2026-06-18 | 关联台银行行支持展示 OA 待付款核对创建的进行中 OA relation chip | `special_metadata.origin=oa_pending_payment_in_progress` 的 active relation 在 Workbench payload 中显示“已关联进行中OA”，防止进行中 OA 已占用流水被误当作普通未配对流水 | `tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests.test_oa_pending_in_progress_relation_uses_dedicated_bank_chip` |
 | 2026-06-18 | 关联预览网络恢复、409 stale preview 和重复提交防护纳入浏览器级闭环：临时失败可同预览重试，stale preview 必须重新预览，confirm/split/withdraw 双击只产生一次 mutation | `ReconciliationWorkbenchPage` 预览错误状态机、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-network-recovery-flow.spec.ts` |

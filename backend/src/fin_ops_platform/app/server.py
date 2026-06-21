@@ -10104,9 +10104,12 @@ class Application:
     def _get_input_invoice_usage_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
         list_rows = getattr(repository, "list_input_invoice_usage_rows", None)
-        if not callable(list_rows):
-            return None
         scope_key = self._invoice_relation_scope_key_from_query(query)
+        if not callable(list_rows):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
+                return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+            return None
         try:
             payload = list_rows(
                 month=query.get("month", [None])[0],
@@ -10158,9 +10161,15 @@ class Application:
     def _get_output_invoice_collection_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
         list_rows = getattr(repository, "list_output_invoice_collection_rows", None)
-        if not callable(list_rows):
-            return None
         scope_key = self._invoice_relation_scope_key_from_query(query)
+        if not callable(list_rows):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_output_invoice_collection_read_model_refresh(
+                    scope_key,
+                    reason="api_sql_repository_unavailable",
+                )
+                return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
+            return None
         try:
             payload = list_rows(
                 month=query.get("month", [None])[0],

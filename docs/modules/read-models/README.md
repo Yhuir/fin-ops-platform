@@ -30,6 +30,10 @@
 
 read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时必须传入 `expected_source_versions` 或 `expected_schema_version`；自管 freshness 的旧 query service 必须用等价的 expected source/schema contract。缺少 expected contract 属于代码配置错误，应直接失败；存在 expected schema/source 时，SQL view 或 Redis fresh gate 缺少实际 `schema_version` / `source_versions` 证明，必须返回 refreshing/stale reason 并通过 `ReadModelRefreshGateway` 入队，不能把旧 projection 标为 fresh。
 
+生产 PostgreSQL runtime 下，页面 read model API 缺少 SQL read repository 或 SQL view 时必须返回 `read_model_status=refreshing` 并通过 `ReadModelRefreshGateway` 入队；不能回退到旧 `QueryService` / live scan / memory snapshot 来返回 `live_query` 或伪 fresh。legacy/local 模式可以保留旧 query service 作为开发兼容路径，但该路径不得在 `_requires_sql_read_model_runtime()` 为真时执行。
+
+`read_model_scope_policy.py` 是 refresh scope 入口契约。除 `cost_statistics` 与 `pending_invoice` 的特殊 scope 外，主要页面 read model（`bank_detail`、`bank_account_balance`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`invoice_lifecycle`、`search`、`tax_offset`、`turnover_ledger`、`workbench`、`workbench_relation`、`no_oa_bank_batch`）接受 month 或 `all` scope，并在 gateway 阶段拒绝 `active:*` 等非本 read model 合约 scope。新增 read model 或变更 scope 形态时必须先更新 registry、worker manifest、tests 和本模块文档。
+
 依赖 `workbench_relation` distribution 的页面 read model 还必须把当前 `read_model.workbench_relation_scopes.source_versions` 纳入 expected source versions。进项发票使用、销项发票收款、OA 待付款等页面即使自身 schema 版本未变，只要 relation scope 版本与 payload 保存时不一致，也必须返回 refreshing/stale 并入队对应页面 read model refresh，不能把旧 OA/流水/发票配对关系展示为空并标为 fresh。待找发票通过 pending invoice source versions 按当前筛选范围读取 `workbench_relation` scope versions，必须保持等价语义。
 
 写操作后的用户体验闭环由 operation freshness barrier 负责。前端写操作成功后可以调用 `/api/operation-barrier/status` 轮询受影响 read model/scope；后端只读取 `RuntimeMonitoringRepository.app_status_runtime_snapshot()` 中的 current-effective readiness、dirty/outbox 和 worker facts，不写 readiness、不重建 read model、不把 RabbitMQ/Redis 当事实源。barrier 返回 `fresh` 才允许页面关闭全屏操作 overlay；`refreshing` 继续等待；`blocked` 必须暴露具体 read model/scope 和原因，不能伪装成已同步。

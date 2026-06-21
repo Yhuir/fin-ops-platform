@@ -475,7 +475,7 @@ function CandidateGroupGrid({
                 >
                   {panes.flatMap((pane, paneIndex) => {
                     const paneId = pane.id as WorkbenchRecordType;
-                    if (!isSourceSegmentedPane(paneId)) {
+                    if (!isSourceSegmentedPane(paneId, displaySegments)) {
                       return [];
                     }
                     return [
@@ -513,7 +513,7 @@ function CandidateGroupGrid({
               ))}
               {panes.flatMap((pane, paneIndex) => {
                 const paneId = pane.id as WorkbenchRecordType;
-                if (isSourceSegmentedPane(paneId)) {
+                if (isSourceSegmentedPane(paneId, displaySegments)) {
                   return [];
                 }
                 return [
@@ -855,8 +855,11 @@ function hasDefaultRowActions(row: WorkbenchRecord) {
   return row.availableActions.some((action) => action !== "detail" && action !== "view_relation");
 }
 
-function isSourceSegmentedPane(paneId: WorkbenchRecordType) {
-  return paneId === "oa" || paneId === "invoice";
+function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType<typeof buildWorkbenchGroupDisplaySegments>) {
+  if (paneId === "oa") {
+    return true;
+  }
+  return Boolean(segments?.some((segment) => segment.rows[paneId].length > 0));
 }
 
 function buildPreviewDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {

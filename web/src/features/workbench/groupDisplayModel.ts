@@ -117,13 +117,26 @@ export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): Workb
 export function buildWorkbenchGroupDisplaySegments(
   group: WorkbenchCandidateGroup,
 ): WorkbenchGroupDisplaySegment[] | null {
-  if (group.displayMode === "collapsed_summary" || group.rows.oa.length < 2 || group.rows.invoice.length === 0) {
+  if (group.displayMode === "collapsed_summary" || group.rows.oa.length < 2) {
     return null;
   }
 
   const oaRowsById = new Map(group.rows.oa.map((row) => [row.id, row]));
+  const bankRowsBySourceOaId = new Map<string, WorkbenchRecord[]>();
+  const unlinkedBankRows: WorkbenchRecord[] = [];
   const invoicesBySourceOaId = new Map<string, WorkbenchRecord[]>();
   const unlinkedInvoiceRows: WorkbenchRecord[] = [];
+
+  group.rows.bank.forEach((bankRow) => {
+    const sourceOaId = normalizeSourceOaId(bankRow.sourceOaId);
+    if (sourceOaId && oaRowsById.has(sourceOaId)) {
+      const rows = bankRowsBySourceOaId.get(sourceOaId) ?? [];
+      rows.push(bankRow);
+      bankRowsBySourceOaId.set(sourceOaId, rows);
+      return;
+    }
+    unlinkedBankRows.push(bankRow);
+  });
 
   group.rows.invoice.forEach((invoiceRow) => {
     const sourceOaId = normalizeSourceOaId(invoiceRow.sourceOaId);
@@ -136,7 +149,9 @@ export function buildWorkbenchGroupDisplaySegments(
     unlinkedInvoiceRows.push(invoiceRow);
   });
 
-  if (!Array.from(invoicesBySourceOaId.values()).some((rows) => rows.length > 0)) {
+  const hasLinkedBankRows = Array.from(bankRowsBySourceOaId.values()).some((rows) => rows.length > 0);
+  const hasLinkedInvoiceRows = Array.from(invoicesBySourceOaId.values()).some((rows) => rows.length > 0);
+  if (!hasLinkedBankRows && !hasLinkedInvoiceRows) {
     return null;
   }
 
@@ -144,18 +159,20 @@ export function buildWorkbenchGroupDisplaySegments(
     id: oaRow.id,
     rows: {
       oa: [oaRow],
-      bank: [],
+      bank: bankRowsBySourceOaId.get(oaRow.id) ?? [],
       invoice: invoicesBySourceOaId.get(oaRow.id) ?? [],
     },
   }));
 
-  if (unlinkedInvoiceRows.length > 0) {
+  const groupLevelBankRows = hasLinkedBankRows ? unlinkedBankRows : [];
+  const groupLevelInvoiceRows = hasLinkedInvoiceRows ? unlinkedInvoiceRows : [];
+  if (groupLevelBankRows.length > 0 || groupLevelInvoiceRows.length > 0) {
     segments.push({
-      id: "unlinked-invoices",
+      id: "unlinked-source-rows",
       rows: {
         oa: [],
-        bank: [],
-        invoice: unlinkedInvoiceRows,
+        bank: groupLevelBankRows,
+        invoice: groupLevelInvoiceRows,
       },
     });
   }
@@ -254,7 +271,7 @@ function normalizeSourceOaId(value: string | undefined) {
   if (!normalizedValue || normalizedValue === "--" || normalizedValue === "—") {
     return null;
   }
-  return normalizedValue;
+  return normalizedValue.replace(/:item:.*$/, "");
 }
 
 export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {

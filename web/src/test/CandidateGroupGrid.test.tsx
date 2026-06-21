@@ -81,6 +81,25 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
+  function createSourceBankRecord(id: string, amount: string, sourceOaId: string): WorkbenchRecord {
+    const baseRecord = createBankRecord();
+    return {
+      ...baseRecord,
+      id,
+      caseId: "CASE-MULTI-OA-ATTACHMENT",
+      amount,
+      sourceOaId,
+      counterparty: "云南辰飞机电工程有限公司",
+      tableValues: {
+        ...baseRecord.tableValues,
+        counterparty: "云南辰飞机电工程有限公司",
+        amount,
+        direction: "支出",
+        note: "报销",
+      },
+    } as WorkbenchRecord;
+  }
+
   function createOaRecord(id: string, applicant: string, amount: string): WorkbenchRecord {
     return {
       id,
@@ -711,6 +730,102 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(secondOaSegment).getAllByText("135").length).toBeGreaterThanOrEqual(2);
     expect(within(secondOaSegment).queryByText("刘晓宇")).not.toBeInTheDocument();
     expect(within(secondOaSegment).queryByText("56.22")).not.toBeInTheDocument();
+  });
+
+  test("aligns attachment invoice item ids with their parent OA row inside a multi-OA group", () => {
+    const parentOa = createOaRecord("oa-exp-1968", "吴云江", "405");
+    const siblingOa = createOaRecord("oa-exp-2001", "吴云江", "282");
+    const group: WorkbenchCandidateGroup = {
+      id: "case:CASE-MULTI-OA-ITEM-ATTACHMENT",
+      groupType: "paired",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [parentOa, siblingOa],
+        bank: [],
+        invoice: [
+          createAttachmentInvoiceRecord(
+            "iv-oa-exp-1968-item-4",
+            "云南澳约出行科技有限公司",
+            "55",
+            "oa-exp-1968:item:4:de54f988bd66",
+          ),
+        ],
+      },
+    };
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const parentSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-ITEM-ATTACHMENT-oa-exp-1968");
+    expect(within(parentSegment).getByText("405")).toBeInTheDocument();
+    expect(within(parentSegment).getByText("云南澳约出行科技有限公司")).toBeInTheDocument();
+    expect(within(parentSegment).getAllByText("55").length).toBeGreaterThan(0);
+
+    const siblingSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-ITEM-ATTACHMENT-oa-exp-2001");
+    expect(within(siblingSegment).getByText("282")).toBeInTheDocument();
+    expect(within(siblingSegment).queryByText("云南澳约出行科技有限公司")).not.toBeInTheDocument();
+  });
+
+  test("aligns source bank rows with their parent OA row inside a multi-OA group", () => {
+    const parentOa = createOaRecord("oa-exp-1968", "吴云江", "405");
+    const siblingOa = createOaRecord("oa-exp-2001", "吴云江", "282");
+    const group: WorkbenchCandidateGroup = {
+      id: "case:CASE-MULTI-OA-SOURCE-BANK",
+      groupType: "paired",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [parentOa, siblingOa],
+        bank: [createSourceBankRecord("bank-oa-exp-1968", "405", "oa-exp-1968:item:0:feed")],
+        invoice: [],
+      },
+    };
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const parentSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-SOURCE-BANK-oa-exp-1968");
+    expect(within(parentSegment).getAllByText("405").length).toBeGreaterThan(1);
+    expect(within(parentSegment).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
+
+    const siblingSegment = screen.getByTestId("candidate-group-segment-paired-case:CASE-MULTI-OA-SOURCE-BANK-oa-exp-2001");
+    expect(within(siblingSegment).getByText("282")).toBeInTheDocument();
+    expect(within(siblingSegment).queryByText("云南辰飞机电工程有限公司")).not.toBeInTheDocument();
   });
 
   test("renders no-OA summary rows collapsed by default and expands to original bank detail rows", () => {

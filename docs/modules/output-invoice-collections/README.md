@@ -47,6 +47,7 @@
 当前事实边界：
 
 - 列表读接口优先读取 SQL read model `output_invoice_collection`；miss/stale/schema/source version mismatch 时返回 `202` 与 `read_model_status=refreshing`，不得在请求线程同步 live rebuild。
+- 生产 PostgreSQL runtime 下，SQL read repository 缺失也属于 read model unavailable：API 必须 enqueue `output_invoice_collection` 对应 month/all scope 并返回 `read_model_status=refreshing`，不能回退 `OutputInvoiceCollectionQueryService.list_rows(...)` 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
 - fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
 - 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
 - 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。

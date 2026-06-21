@@ -23,6 +23,8 @@
 
 Workbench active pair relation 是 OA、银行流水、发票跨页面关系的唯一已配对事实。同一 active relation 内的 `row_ids` 必须按 row id 去重并保持 `row_types` 对齐；同一个 row 不能同时属于两个不同 active case。页面展示多 OA/多流水/多发票时应使用 relation summaries 和 `+N` 展开详情，不能把重复 row 当成两条业务事实。
 
+同一 active relation 内如果存在可证明的子对应关系，页面必须把对应 OA 与发票或银行流水显示在同一横向分段中。OA 附件发票的 `derived_from_oa_id` / `source_oa_id` 可能带 `:item:*` 明细项后缀；前端展示归一时必须折叠到父 OA row id 后再分段，例如 `oa-exp-1968:item:4:*` 对齐到 `oa-exp-1968`。没有确定 source OA 的发票或流水只能作为 group-level 行展示，禁止按金额、顺序或大组位置臆造同排关系。
+
 `GET /api/workbench/rows/{row_id}` 是 row detail 读接口。它必须优先使用当前 live service/cache，miss 后通过 `WorkbenchQueryFacade` 读取 SQL active generation；opaque OA row id 不能仅依赖从 row id 解析月份。该接口不写 relation，不接入 `WorkbenchRelationCommandService`。
 
 `confirm-link`、`cancel-link` 和 `withdraw-link` 的 relation 写入必须通过 `WorkbenchRelationCommandService`。缺少 command service 时 API fail fast，不得回退到 `WorkbenchPairRelationService` 直接写 pair snapshot；UoW 路径应通过 transaction-bound relation repository 保存。

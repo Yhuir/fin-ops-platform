@@ -825,6 +825,48 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_miss")])
 
+    def test_input_api_requires_sql_repository_in_production_without_live_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._input_invoice_usage_sql_read_repository = None
+        app._input_invoice_usage_query_service = type(
+            "InputService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("production input API must not live scan"))},
+        )()
+
+        response = app._handle_api_input_invoice_usage_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_sql_repository_unavailable")])
+
+    def test_output_api_requires_sql_repository_in_production_without_live_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._output_invoice_collection_sql_read_repository = None
+
+        payload = app._get_output_invoice_collection_rows_from_sql_read_model(
+            {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}
+        )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["readModelStatus"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "api_sql_repository_unavailable")])
+
     def test_input_api_source_version_miss_enqueues_refresh_without_stale_rows(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
