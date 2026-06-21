@@ -1468,8 +1468,17 @@ describe("Pending invoices page", () => {
       const paths = fetchMock.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname);
       expect(paths).toContain("/api/pending-invoices/attach-existing-invoices/preview");
       expect(paths).toContain("/api/pending-invoices/attach-existing-invoices");
+      expect(paths).toContain("/api/operation-barrier/status");
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
+    const barrierCall = fetchMock.mock.calls.find(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
+    });
+    expect(JSON.parse(String(barrierCall?.[1]?.body ?? "{}")).targets).toEqual([
+      { read_model_key: "workbench_relation", scope_key: "2026-05" },
+      { read_model_key: "pending_invoice", scope_key: "expense:requires_invoice:2026-05" },
+    ]);
   }, 45_000);
 
   test("shows preview conflicts and keeps confirm disabled when attach-existing cannot be confirmed", async () => {

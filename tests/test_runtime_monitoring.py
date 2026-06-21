@@ -185,7 +185,7 @@ class FakeConnection:
                     "latest_generated_at": "2026-05-29 21:00:00+08",
                 }
             ]
-        if "publish_status" in normalized:
+        if "select e.publish_status, count(*)::bigint as count" in normalized:
             return [{"publish_status": "unpublished", "count": 4}, {"publish_status": "failed", "count": 2}]
         if "from job.outbox_events" in normalized:
             return [{"status": "pending", "count": 3}, {"status": "failed", "count": 1}]
@@ -455,9 +455,20 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         queue_status_sql = next(
             sql
             for sql in normalized_calls
-            if "select status, count(*)::bigint as count from job.outbox_events" in sql
+            if "select e.status, count(*)::bigint as count from job.outbox_events e" in sql
         )
-        self.assertIn("where status <> 'done'", queue_status_sql)
+        self.assertIn("where e.status <> 'done'", queue_status_sql)
+        self.assertIn("done.status = 'done'", queue_status_sql)
+        self.assertIn("readiness.status = 'fresh'", queue_status_sql)
+        self.assertIn("readiness.updated_at > e.updated_at", queue_status_sql)
+        publish_status_sql = next(
+            sql
+            for sql in normalized_calls
+            if "select e.publish_status, count(*)::bigint as count from job.outbox_events e" in sql
+        )
+        self.assertIn("or e.publish_status = 'failed'", publish_status_sql)
+        self.assertIn("done.status = 'done'", publish_status_sql)
+        self.assertIn("readiness.status = 'fresh'", publish_status_sql)
 
     def test_ready_health_summary_uses_lightweight_runtime_contract(self) -> None:
         connection = FakeConnection()
@@ -511,8 +522,13 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         metric = repository.dashboard_outbox_metric()
 
         self.assertEqual(metric["pending_count"], 1)
-        self.assertIn("where status in ('pending', 'failed', 'dead_lettered')", connection.sql)
-        self.assertIn("or publish_status in ('publishing', 'failed')", connection.sql)
+        self.assertIn("where ( e.status in ('pending', 'failed', 'dead_lettered')", connection.sql)
+        self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.sql)
+        self.assertIn("e.event_type = 'cost_statistics.read_model.refresh'", connection.sql)
+        self.assertIn("or e.publish_status = 'failed'", connection.sql)
+        self.assertIn("done.status = 'done'", connection.sql)
+        self.assertIn("readiness.status = 'fresh'", connection.sql)
+        self.assertIn("readiness.updated_at > e.updated_at", connection.sql)
 
     def test_dashboard_worker_metrics_are_registry_instance_aware(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())

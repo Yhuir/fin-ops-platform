@@ -1020,13 +1020,19 @@ describe("Input invoice usage workflow drawers", () => {
           id: "waiting_payment",
           label: "待付款（自动识别有oa无流水）",
           description: "有发票、有 OA、无流水",
+          reason: "有发票、有 OA、无流水",
           priority: 6,
+          enabled: true,
+          conditions: { hasOa: true, hasBank: false },
         },
         {
           id: "paid_full_match",
           label: "已付款（自动识别有oa有流水）",
           description: "有发票、有 OA、有流水，并且关联台完全匹配",
+          reason: "有发票、有 OA、有流水，并且关联台完全匹配",
           priority: 2,
+          enabled: true,
+          conditions: { hasOa: true, hasBank: true, fullyMatched: true },
         },
       ],
       pendingDirections: [
@@ -1041,7 +1047,11 @@ describe("Input invoice usage workflow drawers", () => {
     await waitFor(() => expect(loadRules).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("待付款（自动识别有oa无流水）")).toBeInTheDocument();
     expect(screen.getByText("有发票、有 OA、无流水")).toBeInTheDocument();
+    expect(screen.getAllByText("有 OA").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("无流水")).toBeInTheDocument();
     expect(screen.getByText("陈秀云批量反提oa")).toBeInTheDocument();
+    expect(screen.getByText("当前仅作为待处理方向标签，不影响自动分流。")).toBeInTheDocument();
+    expect(screen.queryByText(/版本\s*\d|sheet4-v1/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /保存|确认保存/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByText("保存成功")).not.toBeInTheDocument();
@@ -1058,7 +1068,10 @@ describe("Input invoice usage workflow drawers", () => {
           id: "waiting_payment",
           label: "待付款",
           description: "有发票、有 OA、无流水",
+          reason: "有发票、有 OA、无流水",
           priority: 6,
+          enabled: true,
+          conditions: { hasOa: true, hasBank: false },
         },
       ],
       pendingDirections: [{ code: "pending", label: "待处理" }],
@@ -1072,7 +1085,10 @@ describe("Input invoice usage workflow drawers", () => {
           id: "waiting_payment",
           label: "待付款",
           description: "已更新规则",
+          reason: "已更新规则",
           priority: 6,
+          enabled: true,
+          conditions: { hasOa: true, hasBank: false },
         },
       ],
       pendingDirections: [{ code: "pending", label: "待处理" }],
@@ -1080,17 +1096,18 @@ describe("Input invoice usage workflow drawers", () => {
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
 
-    const ruleEditor = await screen.findByLabelText("规则");
+    expect(screen.queryByText(/版本\s*7/)).not.toBeInTheDocument();
+    const ruleEditor = await screen.findByLabelText("原因文案");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "已更新规则");
-    await user.click(screen.getByRole("button", { name: "保存规则" }));
+    await user.click(screen.getByRole("button", { name: "保存并刷新" }));
 
     await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({
       expectedVersion: 7,
-      rules: [expect.objectContaining({ description: "已更新规则" })],
+      rules: [expect.objectContaining({ description: "已更新规则", reason: "已更新规则", enabled: true })],
     })));
     expect(saveRules.mock.calls[0][0].idempotencyKey).toMatch(/^input-invoice-usage-payment-rules-save:/);
-    expect(await screen.findByText("规则已保存，读模型会按后端返回的刷新状态更新。")).toBeInTheDocument();
+    expect(await screen.findByText("规则已保存，正在刷新进项发票使用情况。")).toBeInTheDocument();
   });
 
   test("payment status rules drawer handles version conflicts by asking the user to reload", async () => {
@@ -1106,10 +1123,10 @@ describe("Input invoice usage workflow drawers", () => {
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
 
-    const ruleEditor = await screen.findByLabelText("规则");
+    const ruleEditor = await screen.findByLabelText("原因文案");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "新规则");
-    await user.click(screen.getByRole("button", { name: "保存规则" }));
+    await user.click(screen.getByRole("button", { name: "保存并刷新" }));
 
     expect(await screen.findByText("规则已被其他人更新，请重新加载后再编辑。")).toBeInTheDocument();
   });

@@ -200,7 +200,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(rulesDrawer).toBeVisible();
     await expect(rulesDrawer.getByText("只读")).toBeVisible();
     await expect(rulesDrawer.getByText("待付款（自动识别有oa无流水）")).toBeVisible();
-    await expect(rulesDrawer.getByRole("button", { name: "保存规则" })).toHaveCount(0);
+    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toHaveCount(0);
     await expect(rulesDrawer.getByRole("button", { name: "还原" })).toHaveCount(0);
     await expect(rulesDrawer.getByRole("textbox")).toHaveCount(0);
     await rulesDrawer.getByRole("button", { name: "关闭支付状态规则抽屉" }).click();
@@ -251,18 +251,18 @@ test.describe("input invoice usage browser flow", () => {
     await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
     const rulesDrawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
     await expect(rulesDrawer).toBeVisible();
-    await expect(rulesDrawer.getByText("版本 1")).toBeVisible();
-    await expect(rulesDrawer.getByRole("button", { name: "保存规则" })).toBeDisabled();
+    await expect(rulesDrawer.getByText(/版本\s*1/)).toHaveCount(0);
+    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toBeDisabled();
 
     await rulesDrawer.getByRole("textbox", { name: "支付状态" }).first().fill("待付款（规则保存后刷新）");
-    await expect(rulesDrawer.getByRole("button", { name: "保存规则" })).toBeEnabled();
+    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toBeEnabled();
 
     const saveResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT" && url.pathname.endsWith("/api/input-invoice-usage/payment-status-rules");
     });
     const refreshedRowsPromise = waitForInputInvoiceUsageRows(page);
-    await rulesDrawer.getByRole("button", { name: "保存规则" }).click();
+    await rulesDrawer.getByRole("button", { name: "保存并刷新" }).click();
     const saveResponse = await saveResponsePromise;
     expect(saveResponse.status()).toBe(200);
     expect((await refreshedRowsPromise).status()).toBe(200);
@@ -276,8 +276,8 @@ test.describe("input invoice usage browser flow", () => {
     expect(String(saveBody.idempotencyKey ?? "")).toMatch(/^input-invoice-usage-payment-rules-save:/);
     expect(saveBody.rules?.find((rule) => rule.id === "waiting_payment")?.label).toBe("待付款（规则保存后刷新）");
 
-    await expect(rulesDrawer.getByText("规则已保存，读模型会按后端返回的刷新状态更新。")).toBeVisible();
-    await expect(rulesDrawer.getByText("版本 2")).toBeVisible();
+    await expect(rulesDrawer.getByText("规则已保存，正在刷新进项发票使用情况。")).toBeVisible();
+    await expect(rulesDrawer.getByText(/版本\s*2/)).toHaveCount(0);
     await expect(row).toContainText("待付款（规则保存后刷新）");
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(2);

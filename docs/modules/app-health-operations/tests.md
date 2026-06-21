@@ -50,6 +50,7 @@
 
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
+| 2026-06-21 | Operations dashboard / health summary 直接统计历史 `publish_status=failed` outbox，导致 read model 已 fresh 后仍显示 Worker issue / Queue backlog。 | `tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_dashboard_outbox_metric_only_scans_current_attention_statuses`、`test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes` | covered |
 | 2026-06-19 | 生产公网 HTTP SLO probe 未请求 gzip，导致大 JSON API 按非浏览器未压缩传输口径被误判为慢。 | `tests/test_http_slo_probe.py::HttpSloProbeTests::test_collects_samples_with_api_prefix_without_leaking_auth`、`tests/test_http_slo_probe.py::HttpSloProbeTests::test_gzip_json_response_is_decoded_for_metadata` | covered |
 | 2026-06-19 | 生产 authenticated HTTP SLO 用普通目标 OA bearer 采样 admin-only `/api/operations/app-health-dashboard`，导致 dashboard 固定 403 并把真实 admin credential 缺口混成 API 性能失败。 | `tests/test_http_slo_probe.py::HttpSloProbeTests::test_admin_scoped_probe_uses_admin_headers_without_overriding_user_probes`、`tests/test_runtime_sync_closure_gate.py::RuntimeSyncClosureGateTests::test_gate_passes_admin_headers_to_http_slo_probe` | covered |
 | 2026-06-18 | 同一 `cost_statistics active:2026-03` scope 旧 `failed deadlock detected` 已被新 `processing` 重试覆盖，但 App Health 仍显示当前失败，误导用户认为数据域阻断。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_treats_requeued_cost_statistics_deadlock_as_refreshing` | covered |

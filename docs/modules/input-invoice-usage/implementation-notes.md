@@ -36,6 +36,28 @@
 
 ## 历史记录
 
+## 2026-06-21 - 支付状态规则抽屉第一阶段 UI 闭环
+
+- 目标：按 `payment-status-rules-ui-spec.md` 落地 `发票与支付状态规则设置` 右侧抽屉第一阶段 UI，避免显示内部版本号并明确规则抽屉不负责补全 OA/流水关系。
+- 影响范围：`PaymentStatusRulesDrawer`、input invoice usage API/types 规则字段映射、抽屉样式、`InputInvoiceUsageFiltersAndDrawers.test.tsx` 和本模块测试矩阵。
+- 关键决策：UI 不显示版本号；前端仍保留 `version` 并在保存时提交 `expectedVersion`。规则条件只读展示为 chips；可编辑字段包含启用状态、优先级、状态名称和原因文案。待处理方向展示为标签并明确“当前仅作为待处理方向标签，不影响自动分流”。
+- 文档影响：更新本实施记录和 `tests.md`；长期产品/API 事实未变化。
+- 测试覆盖：扩展 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`，覆盖无版本号展示、条件 chips、待处理方向边界、`保存并刷新`、内部 expectedVersion 提交和冲突反馈；更新 `web/e2e/input-invoice-usage-flow.spec.ts` 支付规则保存流程，验证真实浏览器下保存后刷新 rows 且不展示版本号；`InputInvoiceUsagePage.test.tsx` 作为页面集成回归。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium --grep "payment status rules"`；`cd web && npm run build`。
+- 未测风险：未新增规则影响 preview API，未开放条件编辑，未把 OA 反提目标申请人迁移到设置事实源；真实 worker drain 和真实 OA 仍按既有风险处理。
+- 后续事项：若继续推进完整自动化闭环，可新增 preview API 或拆分待处理方向/OA 反提目标申请人设置，并补 API/service/read model/Browser 覆盖。
+
+## 2026-06-21 - 支付状态规则抽屉 UI Spec
+
+- 目标：为 `发票与支付状态规则设置` 右侧抽屉补小范围 UI 合同，明确抽屉只维护支付状态解释规则，不负责补全 OA/流水关系。
+- 影响范围：`docs/modules/input-invoice-usage/payment-status-rules-ui-spec.md` 与模块 README 文档索引；不改产品代码、API contract 或测试代码。
+- 关键决策：UI 不显示版本号；前端仍可在内存中保留版本并提交 `expectedVersion` 做后端冲突保护。第一阶段规则条件只读展示，只开放启用、优先级、状态名称和原因文案等低风险字段。
+- 文档影响：新增本模块 UI spec，并在 `README.md` 本目录文件中登记。
+- 测试覆盖：本轮仅新增设计文档，未新增自动化测试；后续实现时按 spec 补 frontend/API/service/read model 回归。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：尚未实现 UI、preview API 或条件编辑能力；真实影响范围需在实现阶段通过 read model 和 Browser 回归验证。
+- 后续事项：确认是否新增规则影响 preview API、是否拆出待处理方向设置、是否将 OA 反提目标申请人迁移到设置事实源。
+
 ## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
 
 - 目标：补齐进项发票使用页的本地 `NETWORK-RECOVERY` 负面链路，防止 rows 首屏暂时失败时显示普通空态、允许导出或隐藏真实加载错误。

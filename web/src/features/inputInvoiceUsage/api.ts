@@ -546,10 +546,13 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
       return {
         id: stringValue(rule.id),
         code: stringValue(rule.code),
+        statusCode: stringValue(camelOrSnake(rule, "statusCode", "status_code")),
         label: stringValue(rule.label),
         description: stringValue(rule.description),
+        reason: stringValue(rule.reason),
         priority: numberValue(rule.priority, 0),
         enabled: rule.enabled === undefined ? undefined : booleanValue(rule.enabled),
+        conditions: objectValue(rule.conditions),
         applicantConstraints: arrayValue(camelOrSnake(rule, "applicantConstraints", "applicant_constraints")).map(stringValue),
       };
     }),

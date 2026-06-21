@@ -1,0 +1,1 @@
+{"fields":[{"field":"status_code","label":"发票获取状态","operators":["in"],"options":[{"value":"paid_pending_invoice","label":"已支付待开票","count":1}]},{"field":"counterparty_name","label":"对方户名","operators":["in"],"options":[{"value":"智能工厂设备商","label":"智能工厂设备商","count":1}]}]}

@@ -948,9 +948,13 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
     def test_runtime_repository_ignores_outbox_failures_covered_by_later_success(self) -> None:
         class CoveredOutboxConnection(FakeRuntimeConnection):
+            def __init__(self) -> None:
+                self.outbox_sql = ""
+
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
+                    self.outbox_sql = normalized
                     return [
                         {
                             "event_type": "output_invoice_collection.read_model.refresh",
@@ -989,11 +993,14 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                     return []
                 raise AssertionError(sql)
 
-        snapshot = RuntimeMonitoringRepository(CoveredOutboxConnection()).app_status_runtime_snapshot()
+        connection = CoveredOutboxConnection()
+        snapshot = RuntimeMonitoringRepository(connection).app_status_runtime_snapshot()
 
         self.assertNotIn("output_invoice_collection.read_model.refresh", snapshot["outbox_statuses"])
         self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "failed")
         self.assertEqual(snapshot["outbox_statuses"]["pending_invoice.read_model.refresh"]["status"], "pending")
+        self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
+        self.assertIn("when e.publish_status = 'failed' then 'publish_failed'", connection.outbox_sql)
 
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):

@@ -9,9 +9,13 @@ import type {
 export type PaymentStatusRule = {
   id?: string;
   code?: string;
+  statusCode?: string;
   label: string;
   description: string;
+  reason?: string;
   priority: number;
+  enabled?: boolean;
+  conditions?: Record<string, unknown>;
 };
 
 export type PaymentStatusRulesPayload = {
@@ -113,7 +117,9 @@ export default function PaymentStatusRulesDrawer({
         ...rule,
         label: rule.label.trim(),
         description: rule.description.trim(),
+        reason: String(rule.reason ?? "").trim() || undefined,
         priority: Number(rule.priority),
+        enabled: rule.enabled !== false,
       })),
       pendingDirections: draftPendingDirections.map((item) => ({
         ...item,
@@ -124,7 +130,7 @@ export default function PaymentStatusRulesDrawer({
         setPayload(nextPayload);
         setDraftRules(cloneRules(nextPayload.rules));
         setDraftPendingDirections(nextPayload.pendingDirections.map((item) => ({ ...item })));
-        setFeedback("规则已保存，读模型会按后端返回的刷新状态更新。");
+        setFeedback("规则已保存，正在刷新进项发票使用情况。");
         onSaved?.();
       })
       .catch((caught) => {
@@ -138,8 +144,8 @@ export default function PaymentStatusRulesDrawer({
   };
 
   const subtitle = canSave
-    ? "编辑后保存会带版本和幂等键提交，由后端校验并触发刷新"
-    : "按后端权限展示规则和待处理下拉方向";
+    ? "编辑后保存会校验冲突并触发刷新"
+    : "按后端权限展示规则和待处理方向";
 
   return (
     <AppDrawer
@@ -149,7 +155,7 @@ export default function PaymentStatusRulesDrawer({
       open={open}
       subtitle={subtitle}
       title="发票与支付状态规则设置"
-      width="min(820px, 100vw)"
+      width="min(880px, 100vw)"
     >
       <div className="input-invoice-usage-drawer-body">
         {loading ? (
@@ -171,26 +177,49 @@ export default function PaymentStatusRulesDrawer({
         {payload ? (
           <>
             <div className="input-invoice-usage-rules-meta" aria-label="支付状态规则状态">
-              {payload.version !== null && payload.version !== undefined ? (
-                <span className="input-invoice-usage-rules-tag">版本 {payload.version}</span>
-              ) : null}
+              {payload.readOnly === false && canSave ? <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success">可编辑</span> : null}
               {payload.readOnly !== false ? <span className="input-invoice-usage-rules-tag">只读</span> : null}
               {payload.readOnly === false && !canSave ? (
                 <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning">无保存权限</span>
               ) : null}
+              <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info">保存后刷新进项发票使用情况与发票生命周期</span>
             </div>
+            <section className="input-invoice-usage-rules-section">
+              <h3>影响预览</h3>
+              <p className="input-invoice-usage-rules-empty">
+                当前暂未提供命中统计，保存后以刷新后的列表状态为准。
+              </p>
+            </section>
             <div className="input-invoice-usage-rules-table-shell">
               <table aria-label="Sheet4 支付状态规则" className="input-invoice-usage-rules-table">
                 <thead>
                   <tr>
+                    <th scope="col">启用</th>
                     <th scope="col">支付状态</th>
-                    <th scope="col">规则</th>
+                    <th scope="col">命中条件</th>
+                    <th scope="col">原因文案</th>
                     <th scope="col">优先级</th>
                   </tr>
                 </thead>
                 <tbody>
                   {draftRules.map((rule, index) => (
                     <tr key={rule.id || rule.code || rule.label}>
+                      <td className="input-invoice-usage-rules-table__enabled">
+                        {canSave ? (
+                          <label className="input-invoice-usage-rules-toggle">
+                            <input
+                              checked={rule.enabled !== false}
+                              onChange={(event) => updateRule(index, { enabled: event.target.checked }, setDraftRules)}
+                              type="checkbox"
+                            />
+                            <span>{rule.enabled === false ? "停用" : "启用"}</span>
+                          </label>
+                        ) : (
+                          <span className={rule.enabled === false ? "input-invoice-usage-rules-tag" : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"}>
+                            {rule.enabled === false ? "停用" : "启用"}
+                          </span>
+                        )}
+                      </td>
                       <td className="input-invoice-usage-rules-table__status">
                         {canSave ? (
                           <label className="input-invoice-usage-rules-field">
@@ -203,16 +232,25 @@ export default function PaymentStatusRulesDrawer({
                         ) : rule.label}
                       </td>
                       <td>
+                        <div className="input-invoice-usage-rules-chip-list" aria-label={`${rule.label || "规则"}命中条件`}>
+                          {conditionChips(rule).map((chip) => (
+                            <span className="input-invoice-usage-rules-tag" key={`${rule.id || rule.label}:${chip}`}>
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
                         {canSave ? (
                           <label className="input-invoice-usage-rules-field">
-                            <span>规则</span>
+                            <span>原因文案</span>
                             <textarea
-                              onChange={(event) => updateRule(index, { description: event.target.value }, setDraftRules)}
+                              onChange={(event) => updateRule(index, { reason: event.target.value, description: event.target.value }, setDraftRules)}
                               rows={2}
-                              value={rule.description}
+                              value={rule.reason ?? rule.description}
                             />
                           </label>
-                        ) : rule.description}
+                        ) : (rule.reason || rule.description)}
                       </td>
                       <td className="input-invoice-usage-rules-table__priority">
                         {canSave ? (
@@ -231,14 +269,17 @@ export default function PaymentStatusRulesDrawer({
                   ))}
                   {draftRules.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>暂无规则。</td>
+                      <td colSpan={5}>暂无规则。</td>
                     </tr>
                   ) : null}
                 </tbody>
               </table>
             </div>
             <section className="input-invoice-usage-rules-section">
-              <h3>待处理下拉方向</h3>
+              <h3>待处理发票处理方向</h3>
+              <p className="input-invoice-usage-rules-empty">
+                当前仅作为待处理方向标签，不影响自动分流。
+              </p>
               <div className="input-invoice-usage-rules-directions">
                 {draftPendingDirections.length === 0 ? (
                   <span className="input-invoice-usage-rules-empty">暂无待处理方向。</span>
@@ -281,7 +322,7 @@ export default function PaymentStatusRulesDrawer({
                   onClick={handleSave}
                   type="button"
                 >
-                  {saving ? "保存中..." : "保存规则"}
+                  {saving ? "保存中..." : "保存并刷新"}
                 </button>
               </div>
             ) : null}
@@ -293,7 +334,10 @@ export default function PaymentStatusRulesDrawer({
 }
 
 function cloneRules(rules: PaymentStatusRule[]) {
-  return rules.map((rule) => ({ ...rule }));
+  return rules.map((rule) => ({
+    ...rule,
+    conditions: rule.conditions ? { ...rule.conditions } : rule.conditions,
+  }));
 }
 
 function updateRule(
@@ -321,6 +365,34 @@ function createIdempotencyKey(prefix: string) {
     return `${prefix}:${crypto.randomUUID()}`;
   }
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function conditionChips(rule: PaymentStatusRule) {
+  const conditions = rule.conditions ?? {};
+  const chips: string[] = [];
+  const addBooleanChip = (key: string, label: string) => {
+    if (conditions[key] === true) {
+      chips.push(label);
+    } else if (conditions[key] === false) {
+      chips.push(`无${label.replace(/^有/, "")}`);
+    }
+  };
+  const applicantName = String(conditions.applicantName ?? "").trim();
+  if (applicantName) {
+    chips.push(`申请人=${applicantName}`);
+  }
+  addBooleanChip("hasOa", "有 OA");
+  addBooleanChip("hasBank", "有流水");
+  if (conditions.fullyMatched === true) {
+    chips.push("完全匹配");
+  }
+  if (conditions.invoiceOaAmountMatched === true) {
+    chips.push("发票/OA 金额匹配");
+  }
+  if (conditions.fallback === true) {
+    chips.push("兜底规则");
+  }
+  return chips.length > 0 ? chips : ["条件由后端规则定义"];
 }
 
 function isVersionConflict(reason: unknown) {

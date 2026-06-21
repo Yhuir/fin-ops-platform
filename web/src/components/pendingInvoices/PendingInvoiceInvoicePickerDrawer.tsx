@@ -15,7 +15,7 @@ type PendingInvoiceInvoicePickerDrawerProps = {
   loadCandidates: (request: FetchPendingInvoiceBatchCandidatesRequest) => Promise<PendingInvoiceCandidatesResponse>;
   previewAttach: (transactionIds: string[], invoiceIds: string[], requestId: string) => Promise<AttachExistingInvoicesPreview>;
   confirmAttach: (transactionIds: string[], invoiceIds: string[], previewId: string, requestId: string) => Promise<AttachExistingInvoicesResult>;
-  onConfirmed: (result: AttachExistingInvoicesResult) => void;
+  onConfirmed: (result: AttachExistingInvoicesResult) => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -223,7 +223,7 @@ export default function PendingInvoiceInvoicePickerDrawer({
     setError(null);
     try {
       const result = await confirmAttach(transactionIds, selectedInvoiceIdsForSubmit, preview.previewId, confirmRequestId);
-      onConfirmed(result);
+      await onConfirmed(result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "关系确认失败");
     } finally {

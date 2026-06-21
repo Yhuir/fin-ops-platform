@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-21 - Runtime outbox dashboard current-effective 口径收敛
+
+- 目标：修复系统状态后台显示 `Read model fresh` 但 `Worker issue` / `Queue backlog` 仍被历史 RabbitMQ publish failure 长期拉高的问题。
+- 影响范围：`RuntimeMonitoringRepository.health_summary()`、`ready_health_summary()`、`dashboard_outbox_metric()` 和 pending outbox scope 聚合；不改变业务写接口、read model refresh worker 执行逻辑或 Operations dashboard API shape。
+- 关键决策：dashboard/health summary 与 App Status current-effective outbox 保持同类证明：成本统计 legacy scope 不计当前问题；`failed/dead_lettered/publish_failed` 和 `publish_status=failed` 只有在没有后续同 tenant/event/scope `done` 事件、且没有后续同 scope fresh readiness 时才参与当前 backlog/failed 指标。未覆盖的 publish failure 仍保留为当前问题。
+- 文档影响：更新本模块测试矩阵和实施记录。
+- 测试覆盖：`tests.test_runtime_monitoring.RuntimeMonitoringRepositoryTests.test_dashboard_outbox_metric_only_scans_current_attention_statuses` 锁定 dashboard outbox SQL；`test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes` 锁定 health summary publish/backlog SQL 也使用 later done/fresh readiness 过滤。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试证明 SQL contract；真实 PostgreSQL 上历史 backlog 数字下降幅度需要部署后用生产只读 dashboard/SQL 复验。该修复不声称降低 worker 刷新执行耗时，`workbench` p99 仍需依赖 slow event samples 做后续定量优化。
+
 ## 2026-06-21 - OA 解析发票 inventory 口径收敛
 
 - 目标：修正系统状态 `发票 > OA 解析` 把 OCR 候选项总数展示为发票数的问题，只展示 OCR 缓存中可识别为正式发票的去重数量。

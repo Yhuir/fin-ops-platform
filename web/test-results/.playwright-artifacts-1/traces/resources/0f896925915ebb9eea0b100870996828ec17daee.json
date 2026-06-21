@@ -1,0 +1,1 @@
+{"user":{"user_id":"e2e-user","username":"E2EUSER001","nickname":"浏览器测试用户","display_name":"浏览器测试用户","dept_id":"finance","dept_name":"财务部","avatar":null},"roles":["fin_ops_user"],"permissions":["finops:app:view"],"allowed":true,"access_tier":"full_access","can_access_app":true,"can_mutate_data":true,"can_admin_access":false}

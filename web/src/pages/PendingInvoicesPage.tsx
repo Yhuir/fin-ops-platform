@@ -27,7 +27,7 @@ import {
   savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
-import { OperationBarrierTimeoutError, operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { OperationBarrierTimeoutError, operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
@@ -120,6 +120,18 @@ function pendingInvoiceRuleRefreshScopes(
 ) {
   const refreshFilter = currentDirection === rulesDirection ? effectiveBackendFilter(currentDirection, currentFilters) : "all";
   return [`${rulesDirection}:${refreshFilter}`];
+}
+
+function pendingInvoiceAttachRefreshScopes(
+  currentDirection: PendingInvoiceDirection,
+  currentFilters: StatusFilterSelection[],
+  affectedMonths: string[],
+) {
+  const refreshDirection: RulesDirection = currentDirection === "income" ? "income" : "expense";
+  const refreshFilter = effectiveBackendFilter(refreshDirection, currentFilters);
+  const baseScope = `${refreshDirection}:${refreshFilter}`;
+  const months = Array.from(new Set(affectedMonths.map((month) => month.trim()).filter(Boolean)));
+  return months.length > 0 ? months.map((month) => `${baseScope}:${month}`) : [baseScope];
 }
 
 function transactionIdForRow(row: PendingInvoiceRow) {
@@ -456,7 +468,7 @@ export default function PendingInvoicesPage() {
     setInvoicePickerTransactionIds([]);
   }
 
-  function handleAttachConfirmed(result: AttachExistingInvoiceResult | AttachExistingInvoicesResult) {
+  async function handleAttachConfirmed(result: AttachExistingInvoiceResult | AttachExistingInvoicesResult) {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, {
       affectedMonths: result.affectedMonths,
       affectedRowIds: [...result.affectedTransactionIds, ...result.affectedInvoiceIds],
@@ -467,10 +479,31 @@ export default function PendingInvoicesPage() {
       affectedRowIds: result.affectedTransactionIds,
       source: "pending_invoice_attach_existing_invoice",
     });
-    if (result.row) {
-      setRows((current) => current.map((row) => (row.id === result.row?.id ? result.row : row)));
-    } else {
-      setRefreshToken((current) => current + 1);
+    const operationResult = await runOperation({
+      loadingMessage: "正在等待关联关系同步...",
+      blockOnError: false,
+      action: async ({ setMessage }) => {
+        if (result.row) {
+          setRows((current) => current.map((row) => (row.id === result.row?.id ? result.row : row)));
+        }
+        try {
+          await waitForOperationFreshness([
+            ...operationBarrierTargetsFromMonths("workbench_relation", result.affectedMonths),
+            ...operationBarrierTargets("pending_invoice", pendingInvoiceAttachRefreshScopes(direction, statusFilters, result.affectedMonths)),
+          ]);
+        } catch (caught) {
+          if (!(caught instanceof OperationBarrierTimeoutError)) {
+            throw caught;
+          }
+        }
+        setMessage("正在刷新待找发票...");
+        const rowsPayload = await fetchPendingInvoiceRows(query);
+        applyRowsPayload(rowsPayload);
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "关联关系同步失败。",
+    });
+    if (operationResult.status !== "success") {
+      throw operationResult.error;
     }
     clearSelectedTransactions();
     closeDrawer();

@@ -178,10 +178,13 @@ export type InputInvoiceUsagePaymentStatusRulesResponse = {
 export type InputInvoiceUsagePaymentStatusRule = {
   id?: string;
   code?: string;
+  statusCode?: string;
   label: string;
   description: string;
+  reason?: string;
   priority: number;
   enabled?: boolean;
+  conditions?: Record<string, unknown>;
   applicantConstraints?: string[];
 };
 

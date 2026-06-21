@@ -62,6 +62,7 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 - `oa-reverse-design.md`：维护以发票反提 OA 的目标流程、权限、凭据、安全边界和 API/服务设计。
 - `oa-reverse-implementation-plan.md`：维护以发票反提 OA 闭环的分阶段实现计划和阶段 prompt。
+- `payment-status-rules-ui-spec.md`：维护“发票与支付状态规则设置”右侧抽屉的小范围 UI 合同。
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
 - `e2e-spec.md`：维护 Spec-first Browser e2e 业务验收合同。

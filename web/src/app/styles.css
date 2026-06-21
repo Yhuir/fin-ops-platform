@@ -1237,8 +1237,12 @@ textarea {
 }
 
 .input-invoice-usage-rules-table__status {
-  width: 30%;
+  width: 22%;
   font-weight: 900;
+}
+
+.input-invoice-usage-rules-table__enabled {
+  width: 90px;
 }
 
 .input-invoice-usage-rules-table__priority {
@@ -1293,6 +1297,29 @@ textarea {
 .input-invoice-usage-rules-field textarea:focus-visible {
   border-color: var(--fp-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.input-invoice-usage-rules-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-1);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-label);
+  font-weight: 900;
+}
+
+.input-invoice-usage-rules-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--fp-primary);
+}
+
+.input-invoice-usage-rules-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fp-space-1);
+  min-width: 180px;
 }
 
 .input-invoice-usage-rules-section {

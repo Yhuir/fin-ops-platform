@@ -42,6 +42,82 @@ not (
 """
 
 
+def _current_effective_outbox_event_predicate_sql(alias: str) -> str:
+    prefix = f"{alias}."
+    return f"""
+not (
+  {prefix}event_type = 'cost_statistics.read_model.refresh'
+  and coalesce(
+    {prefix}scope_type,
+    {prefix}raw_payload->>'scope_type',
+    {prefix}payload->>'scope_type',
+    {prefix}aggregate_type,
+    ''
+  ) = 'cost_statistics'
+  and (
+    coalesce(
+      {prefix}scope_key,
+      {prefix}raw_payload->>'scope_key',
+      {prefix}payload->>'scope_key',
+      {prefix}aggregate_id,
+      ''
+    ) = 'all'
+    or coalesce(
+      {prefix}scope_key,
+      {prefix}raw_payload->>'scope_key',
+      {prefix}payload->>'scope_key',
+      {prefix}aggregate_id,
+      ''
+    ) ~ '^[0-9]{{4}}-[0-9]{{2}}$'
+  )
+)
+"""
+
+
+def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
+    prefix = f"{alias}."
+    scope_type_expr = (
+        f"coalesce({prefix}scope_type, {prefix}raw_payload->>'scope_type', "
+        f"{prefix}payload->>'scope_type', {prefix}aggregate_type, '')"
+    )
+    scope_key_expr = (
+        f"coalesce({prefix}scope_key, {prefix}raw_payload->>'scope_key', "
+        f"{prefix}payload->>'scope_key', {prefix}aggregate_id, '')"
+    )
+    return f"""
+{_current_effective_outbox_event_predicate_sql(alias)}
+and not (
+  (
+    {prefix}status in ('failed', 'dead_lettered', 'publish_failed')
+    or {prefix}publish_status = 'failed'
+  )
+  and (
+    exists (
+      select 1
+      from job.outbox_events done
+      where done.tenant_id = {prefix}tenant_id
+        and done.event_type = {prefix}event_type
+        and coalesce(done.scope_type, done.raw_payload->>'scope_type', done.payload->>'scope_type', done.aggregate_type, '') =
+            {scope_type_expr}
+        and coalesce(done.scope_key, done.raw_payload->>'scope_key', done.payload->>'scope_key', done.aggregate_id, '') =
+            {scope_key_expr}
+        and done.status = 'done'
+        and done.updated_at > {prefix}updated_at
+    )
+    or exists (
+      select 1
+      from read_model.app_status_readiness readiness
+      where readiness.tenant_id = {prefix}tenant_id
+        and coalesce(readiness.scope_type, '') = {scope_type_expr}
+        and coalesce(readiness.scope_key, '') = {scope_key_expr}
+        and readiness.status = 'fresh'
+        and readiness.updated_at > {prefix}updated_at
+    )
+  )
+)
+"""
+
+
 class RuntimeMonitoringRepository:
     def __init__(self, connection: Any, rabbitmq_metrics_provider: Any | None = None) -> None:
         self._connection = connection
@@ -333,7 +409,12 @@ class RuntimeMonitoringRepository:
                 e.event_type,
                 e.scope_type,
                 e.scope_key,
-                e.status,
+                case
+                  when e.status in ('failed', 'dead_lettered') then e.status
+                  when e.publish_status = 'failed' then 'publish_failed'
+                  when e.publish_status = 'publishing' then 'publishing'
+                  else e.status
+                end as status,
                 count(*)::bigint as count,
                 max(e.last_error) as last_error,
                 max(e.updated_at)::text as updated_at,
@@ -362,7 +443,8 @@ class RuntimeMonitoringRepository:
                 ) as covered_by_later_readiness
             from job.outbox_events e
             where e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
-            group by e.event_type, e.scope_type, e.scope_key, e.status
+               or e.publish_status in ('publishing', 'failed')
+            group by e.event_type, e.scope_type, e.scope_key, 4
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
@@ -436,20 +518,20 @@ class RuntimeMonitoringRepository:
     def health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
         queue_rows = self._connection.fetch_all(
             f"""
-            select status, count(*)::bigint as count
-            from job.outbox_events
-            where status <> 'done'
-              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
-            group by status
-            order by status
+            select e.status, count(*)::bigint as count
+            from job.outbox_events e
+            where e.status <> 'done'
+              and {_current_effective_outbox_attention_predicate_sql("e")}
+            group by e.status
+            order by e.status
             """
         )
         age_row = self._connection.fetch_one(
             f"""
-            select extract(epoch from max(now() - created_at))::float as max_pending_age_seconds
-            from job.outbox_events
-            where status = 'pending'
-              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
+            select extract(epoch from max(now() - e.created_at))::float as max_pending_age_seconds
+            from job.outbox_events e
+            where e.status = 'pending'
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             """
         )
         dirty_count_rows = self._connection.fetch_all(
@@ -841,23 +923,25 @@ class RuntimeMonitoringRepository:
         read_model_refresh_slow_events = _read_model_refresh_slow_event_payloads(slow_event_rows)
         read_model_refresh_current_slow_events = _read_model_refresh_slow_event_payloads(current_slow_event_rows)
         publish_rows = self._connection.fetch_all(
-            """
-            select publish_status, count(*)::bigint as count
-            from job.outbox_events
-            where status = 'pending'
-              and event_type = any(%s)
-            group by publish_status
-            order by publish_status
+            f"""
+            select e.publish_status, count(*)::bigint as count
+            from job.outbox_events e
+            where e.status = 'pending'
+              and e.event_type = any(%s)
+              and {_current_effective_outbox_attention_predicate_sql("e")}
+            group by e.publish_status
+            order by e.publish_status
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
         publish_lag_row = self._connection.fetch_one(
-            """
-            select extract(epoch from max(now() - created_at))::float as max_unpublished_age_seconds
-            from job.outbox_events
-            where status = 'pending'
-              and event_type = any(%s)
-              and publish_status in ('unpublished', 'failed')
+            f"""
+            select extract(epoch from max(now() - e.created_at))::float as max_unpublished_age_seconds
+            from job.outbox_events e
+            where e.status = 'pending'
+              and e.event_type = any(%s)
+              and e.publish_status in ('unpublished', 'failed')
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
@@ -975,19 +1059,21 @@ class RuntimeMonitoringRepository:
 
     def ready_health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
         queue_rows = self._connection.fetch_all(
-            """
-            select status, count(*)::bigint as count
-            from job.outbox_events
-            where status <> 'done'
-            group by status
-            order by status
+            f"""
+            select e.status, count(*)::bigint as count
+            from job.outbox_events e
+            where e.status <> 'done'
+              and {_current_effective_outbox_attention_predicate_sql("e")}
+            group by e.status
+            order by e.status
             """
         )
         age_row = self._connection.fetch_one(
-            """
-            select extract(epoch from max(now() - created_at))::float as max_pending_age_seconds
-            from job.outbox_events
-            where status = 'pending'
+            f"""
+            select extract(epoch from max(now() - e.created_at))::float as max_pending_age_seconds
+            from job.outbox_events e
+            where e.status = 'pending'
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             """
         )
         dirty_count_rows = self._connection.fetch_all(
@@ -1066,24 +1152,24 @@ class RuntimeMonitoringRepository:
         )
         publish_rows = self._connection.fetch_all(
             f"""
-            select publish_status, count(*)::bigint as count
-            from job.outbox_events
-            where status = 'pending'
-              and event_type = any(%s)
-              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
-            group by publish_status
-            order by publish_status
+            select e.publish_status, count(*)::bigint as count
+            from job.outbox_events e
+            where e.status = 'pending'
+              and e.event_type = any(%s)
+              and {_current_effective_outbox_attention_predicate_sql("e")}
+            group by e.publish_status
+            order by e.publish_status
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
         publish_lag_row = self._connection.fetch_one(
             f"""
-            select extract(epoch from max(now() - created_at))::float as max_unpublished_age_seconds
-            from job.outbox_events
-            where status = 'pending'
-              and event_type = any(%s)
-              and publish_status in ('unpublished', 'failed')
-              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
+            select extract(epoch from max(now() - e.created_at))::float as max_unpublished_age_seconds
+            from job.outbox_events e
+            where e.status = 'pending'
+              and e.event_type = any(%s)
+              and e.publish_status in ('unpublished', 'failed')
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
@@ -1148,17 +1234,17 @@ class RuntimeMonitoringRepository:
             f"""
             with pending_outbox_by_scope as (
               select
-                event_type,
-                status,
-                coalesce(scope_type, raw_payload->>'scope_type', aggregate_type, '') as scope_type,
-                coalesce(scope_key, raw_payload->>'scope_key', aggregate_id, '') as scope_key,
+                e.event_type,
+                e.status,
+                coalesce(e.scope_type, e.raw_payload->>'scope_type', e.aggregate_type, '') as scope_type,
+                coalesce(e.scope_key, e.raw_payload->>'scope_key', e.aggregate_id, '') as scope_key,
                 count(*)::bigint as count,
-                extract(epoch from max(now() - created_at))::float as oldest_age_seconds,
-                max(attempts)::integer as attempts,
-                max(coalesce(last_error, '')) as last_error
-              from job.outbox_events
-              where status in ('pending', 'processing', 'failed', 'dead_lettered')
-                and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
+                extract(epoch from max(now() - e.created_at))::float as oldest_age_seconds,
+                max(e.attempts)::integer as attempts,
+                max(coalesce(e.last_error, '')) as last_error
+              from job.outbox_events e
+              where e.status in ('pending', 'processing', 'failed', 'dead_lettered')
+                and {_current_effective_outbox_attention_predicate_sql("e")}
               group by 1, 2, 3, 4
               order by oldest_age_seconds desc nulls last, event_type, scope_type, scope_key
               limit 30
@@ -1300,16 +1386,20 @@ class RuntimeMonitoringRepository:
 
     def dashboard_outbox_metric(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
-            """
+            f"""
             select
-              count(*) filter (where status = 'pending')::bigint as pending_count,
-              count(*) filter (where publish_status = 'publishing')::bigint as publishing_count,
-              count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
-              count(*) filter (where publish_status = 'failed')::bigint as publish_failed_count,
-              extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float as oldest_pending_age_seconds
-            from job.outbox_events
-            where status in ('pending', 'failed', 'dead_lettered')
-               or publish_status in ('publishing', 'failed')
+              count(*) filter (where e.status = 'pending')::bigint as pending_count,
+              count(*) filter (where e.publish_status = 'publishing')::bigint as publishing_count,
+              count(*) filter (where e.status in ('failed', 'dead_lettered'))::bigint as failed_count,
+              count(*) filter (where e.publish_status = 'failed')::bigint as publish_failed_count,
+              extract(epoch from max(now() - e.created_at) filter (where e.status = 'pending'))::float
+                as oldest_pending_age_seconds
+            from job.outbox_events e
+            where (
+                e.status in ('pending', 'failed', 'dead_lettered')
+                or e.publish_status in ('publishing', 'failed')
+              )
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             """
         ) or {}
         return {

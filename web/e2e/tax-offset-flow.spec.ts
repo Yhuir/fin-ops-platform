@@ -172,6 +172,7 @@ test.describe("tax offset browser flow", () => {
 
     const outputPanel = page.locator(".tax-panel").filter({ hasText: "销项票开票情况" });
     const inputPanel = page.locator(".tax-panel").filter({ hasText: "进项票认证计划" });
+    const inputGrid = page.getByRole("grid", { name: "进项票认证计划" });
     await expect(outputPanel.getByText("共 81 条")).toBeVisible();
     await expect(inputPanel.getByText("已选 2 / 92")).toBeVisible();
 
@@ -187,12 +188,19 @@ test.describe("tax offset browser flow", () => {
 
     await inputPanel.getByRole("button", { name: "清空搜索 进项票认证计划" }).click();
     await expect(inputPanel.getByText("已选 2 / 92")).toBeVisible();
+    await inputPanel.getByRole("button", { name: "收起搜索 进项票认证计划" }).click();
     await inputPanel.getByRole("button", { name: "进项票认证计划按时间降序" }).click();
     await expect(inputPanel.getByRole("button", { name: "进项票认证计划按时间升序" })).toBeVisible();
 
-    await inputPanel.getByRole("button", { name: "筛选 对方名称" }).click();
-    await page
-      .getByRole("dialog", { name: "筛选 对方名称" })
+    await inputGrid.evaluate((grid) => grid.scrollIntoView({ block: "start", inline: "nearest" }));
+    const inputCounterpartyFilter = inputGrid
+      .getByRole("columnheader", { name: /对方名称/ })
+      .getByRole("button", { name: "筛选 对方名称" });
+    await expectVisibleAndUncovered(inputCounterpartyFilter, "input tax counterparty filter");
+    await inputCounterpartyFilter.click();
+    const counterpartyFilterDialog = page.getByRole("dialog", { name: "筛选 对方名称" });
+    await expect(counterpartyFilterDialog).toBeVisible();
+    await counterpartyFilterDialog
       .getByRole("checkbox", { name: "进项超长供应商-003-筛选滚动验证", exact: true })
       .click();
     await expect(inputPanel.getByRole("row", { name: /1129900003/ })).toBeVisible();
