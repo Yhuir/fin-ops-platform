@@ -663,6 +663,32 @@ describe("Input invoice usage page", () => {
     });
   });
 
+  test("clears persisted keyword search and reloads all input invoice usage rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installInputInvoiceUsageFetch();
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    const searchInput = within(page).getByLabelText("进项发票使用情况搜索");
+
+    await user.type(searchInput, "南华县沙桥镇润华清真饭店");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("keyword")).toBe("南华县沙桥镇润华清真饭店");
+    });
+
+    await user.click(within(page).getByRole("button", { name: "清除查询" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.has("keyword")).toBe(false);
+      expect(request?.searchParams.get("page")).toBe("1");
+    });
+    expect(searchInput).toHaveValue("");
+  });
+
   test("shows relation totals with +N entry points for multi OA, bank, and invoice relations", async () => {
     const user = userEvent.setup();
     const multiRowsPayload = {

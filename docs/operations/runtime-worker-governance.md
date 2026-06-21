@@ -105,13 +105,13 @@ sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release
 ```
 
 脚本会检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness`
-中不符合当前 registry 的 `cost_statistics` scope，同时扫描 failed/dead_lettered/publish_failed
-read model outbox event 是否已有 later done 或 fresh readiness 覆盖。发现 violation、历史已覆盖 failure
+中不符合当前 registry 的 `cost_statistics` scope，同时扫描未完成或 publish 异常的
+read model outbox event 是否已有 later done 或 fresh readiness 覆盖。发现 violation、历史已覆盖 outbox
 或 current uncovered failure 时默认返回非 0，JSON 的 `repair_manifest` 会区分：
 
 - `legacy`：如 `2026-03`、裸 `all`，可归一化为规范 `active/all` scope。
 - `invalid`：如未知 project scope，当前 registry 无法解释，不猜测 replacement。
-- `covered_historical_outbox_failures`：同一 tenant/event/scope 后续已有 `done` 或 `fresh` readiness，可进入人工 resolve/归档候选。
+- `covered_historical_outbox_failures`：同一 tenant/event/scope 后续已有 `done` 或 `fresh` readiness，可进入人工 resolve/归档候选；字段名沿用历史命名，但 App Status current-effective 口径也会过滤旧 pending/backlog。
 - `current_uncovered_outbox_failures`：没有后续成功或 fresh 证明，仍然是当前真实 blocker，必须调查 worker、query、数据或重投原因。
 
 dry-run JSON 必须随发布/修复记录归档，至少保留 `repair_manifest.items[]` 的 `scope_type`、`scope_key`、

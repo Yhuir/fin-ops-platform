@@ -1,4 +1,4 @@
-import { Download } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -266,6 +266,15 @@ export default function InputInvoiceUsagePage() {
     }));
   }, [keywordDraft, setQuery]);
 
+  const handleKeywordClear = useCallback(() => {
+    setKeywordDraft("");
+    setQuery((current) => ({
+      ...current,
+      page: 1,
+      keyword: "",
+    }));
+  }, [setQuery]);
+
   const handlePageChange = useCallback((page: number) => {
     setQuery((current) => ({ ...current, page }));
   }, [setQuery]);
@@ -381,6 +390,7 @@ export default function InputInvoiceUsagePage() {
   const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
   const isReadModelRefreshing = readModelStatus === "refreshing";
   const exportDisabled = Boolean(error) || isReadModelRefreshing;
+  const hasKeyword = keywordDraft.trim().length > 0 || query.keyword.trim().length > 0;
 
   const actions = useMemo(() => (
     <PageToolbar className="input-invoice-usage-actions">
@@ -445,6 +455,17 @@ export default function InputInvoiceUsagePage() {
                       type="text"
                     />
                   </label>
+                  {hasKeyword ? (
+                    <button
+                      aria-label="清除查询"
+                      className="input-invoice-usage-button input-invoice-usage-button--icon"
+                      onClick={handleKeywordClear}
+                      title="清除查询"
+                      type="button"
+                    >
+                      <X aria-hidden="true" size={16} />
+                    </button>
+                  ) : null}
                   <button className="input-invoice-usage-button" onClick={handleKeywordSubmit} type="button">
                     查询
                   </button>

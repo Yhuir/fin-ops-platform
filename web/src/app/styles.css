@@ -320,6 +320,12 @@ textarea {
   box-shadow: 0 8px 18px color-mix(in srgb, var(--fp-primary) 20%, transparent);
 }
 
+.input-invoice-usage-button--icon {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
 .input-invoice-usage-button--primary:hover:not(:disabled),
 .input-invoice-usage-button--primary:focus-visible,
 .input-invoice-usage-button--accent:hover:not(:disabled),

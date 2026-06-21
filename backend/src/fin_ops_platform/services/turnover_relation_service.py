@@ -620,6 +620,8 @@ class TurnoverRelationService:
                 for row_id in list(relation.get("bank_row_ids") or [])
                 if str(row_id).strip()
             }
+            if existing_row_ids == requested_row_ids:
+                continue
             if requested_row_ids.intersection(existing_row_ids):
                 raise TurnoverRelationValidationError(
                     "turnover_relation_conflict",

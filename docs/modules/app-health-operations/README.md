@@ -65,7 +65,7 @@
 | read model missing/stale/refreshing | domain busy/yellow，暴露 scope diagnostics | 对应页面显示刷新中，App Status hover 可定位 |
 | critical read model failed/unavailable | domain blocked/red，暴露 current-effective scope diagnostics | 对应页面不能假装 fresh；普通 read model failure 不进入全局写闸门，写入是否禁用由 `overall.write_safety` 和具体写 API precondition 决定 |
 | required worker missing/stale/mismatch | domain blocked/red 或 busy/yellow | 所有依赖该 worker 的页面不能假设会收敛 |
-| dirty scope/outbox backlog | domain busy/yellow | 用户看到后台刷新，而不是旧数据 fresh |
+| dirty scope/outbox backlog | domain busy/yellow；只统计当前有效记录，已被后续 `done` 或 `fresh` readiness 覆盖的旧 pending/failed 不再进入 backlog/同步中 | 用户看到真实后台刷新，而不是被历史队列噪声误导 |
 | runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 read model、worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 fresh/refreshing/failed、active/working/stale/missing、pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |
 | dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见 |

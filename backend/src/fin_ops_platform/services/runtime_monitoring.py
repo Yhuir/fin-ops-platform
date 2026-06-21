@@ -34,14 +34,6 @@ not (
   )
 )
 """
-_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL = """
-not (
-  scope_type = 'cost_statistics'
-  and (scope_key = 'all' or scope_key ~ '^[0-9]{4}-[0-9]{2}$')
-)
-"""
-
-
 def _current_effective_outbox_event_predicate_sql(alias: str) -> str:
     prefix = f"{alias}."
     return f"""
@@ -87,33 +79,46 @@ def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
     return f"""
 {_current_effective_outbox_event_predicate_sql(alias)}
 and not (
-  (
-    {prefix}status in ('failed', 'dead_lettered', 'publish_failed')
-    or {prefix}publish_status = 'failed'
+  exists (
+    select 1
+    from job.outbox_events done
+    where done.tenant_id = {prefix}tenant_id
+      and done.event_type = {prefix}event_type
+      and coalesce(done.scope_type, done.raw_payload->>'scope_type', done.payload->>'scope_type', done.aggregate_type, '') =
+          {scope_type_expr}
+      and coalesce(done.scope_key, done.raw_payload->>'scope_key', done.payload->>'scope_key', done.aggregate_id, '') =
+          {scope_key_expr}
+      and done.status = 'done'
+      and done.updated_at > {prefix}updated_at
   )
-  and (
-    exists (
-      select 1
-      from job.outbox_events done
-      where done.tenant_id = {prefix}tenant_id
-        and done.event_type = {prefix}event_type
-        and coalesce(done.scope_type, done.raw_payload->>'scope_type', done.payload->>'scope_type', done.aggregate_type, '') =
-            {scope_type_expr}
-        and coalesce(done.scope_key, done.raw_payload->>'scope_key', done.payload->>'scope_key', done.aggregate_id, '') =
-            {scope_key_expr}
-        and done.status = 'done'
-        and done.updated_at > {prefix}updated_at
-    )
-    or exists (
-      select 1
-      from read_model.app_status_readiness readiness
-      where readiness.tenant_id = {prefix}tenant_id
-        and coalesce(readiness.scope_type, '') = {scope_type_expr}
-        and coalesce(readiness.scope_key, '') = {scope_key_expr}
-        and readiness.status = 'fresh'
-        and readiness.updated_at > {prefix}updated_at
-    )
+  or exists (
+    select 1
+    from read_model.app_status_readiness readiness
+    where readiness.tenant_id = {prefix}tenant_id
+      and coalesce(readiness.scope_type, '') = {scope_type_expr}
+      and coalesce(readiness.scope_key, '') = {scope_key_expr}
+      and readiness.status = 'fresh'
+      and readiness.updated_at > {prefix}updated_at
   )
+)
+"""
+
+
+def _current_effective_dirty_scope_predicate_sql(alias: str | None = None) -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"""
+not (
+  {prefix}scope_type = 'cost_statistics'
+  and ({prefix}scope_key = 'all' or {prefix}scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$')
+)
+and not exists (
+  select 1
+  from read_model.app_status_readiness readiness
+  where readiness.tenant_id = {prefix}tenant_id
+    and coalesce(readiness.scope_type, '') = coalesce({prefix}scope_type, '')
+    and coalesce(readiness.scope_key, '') = coalesce({prefix}scope_key, '')
+    and readiness.status = 'fresh'
+    and readiness.updated_at > {prefix}updated_at
 )
 """
 
@@ -232,21 +237,34 @@ class RuntimeMonitoringRepository:
         rows = self._connection.fetch_all(
             """
             select
-                scope_type,
-                scope_key,
-                status,
+                dirty.scope_type,
+                dirty.scope_key,
+                dirty.status,
                 count(*)::bigint as count,
-                max(last_error) as last_error,
-                max(updated_at)::text as updated_at
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and status in ('pending', 'processing', 'failed')
-            group by scope_type, scope_key, status
+                max(dirty.last_error) as last_error,
+                max(dirty.updated_at)::text as updated_at,
+                bool_or(
+                    exists (
+                        select 1
+                        from read_model.app_status_readiness readiness
+                        where readiness.tenant_id = dirty.tenant_id
+                          and coalesce(readiness.scope_type, '') = coalesce(dirty.scope_type, '')
+                          and coalesce(readiness.scope_key, '') = coalesce(dirty.scope_key, '')
+                          and readiness.status = 'fresh'
+                          and readiness.updated_at > dirty.updated_at
+                    )
+                ) as covered_by_later_readiness
+            from job.read_model_dirty_scopes dirty
+            where dirty.tenant_id = 'default'
+              and dirty.status in ('pending', 'processing', 'failed')
+            group by dirty.scope_type, dirty.scope_key, dirty.status
             """
         )
         for row in rows:
             scope_type = str(row.get("scope_type") or "").strip()
             if not scope_type:
+                continue
+            if _truthy(row.get("covered_by_later_readiness")):
                 continue
             read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
             last_error = str(row.get("last_error") or "").strip()
@@ -407,8 +425,8 @@ class RuntimeMonitoringRepository:
             """
             select
                 e.event_type,
-                e.scope_type,
-                e.scope_key,
+                coalesce(e.scope_type, e.raw_payload->>'scope_type', e.payload->>'scope_type', e.aggregate_type, '') as scope_type,
+                coalesce(e.scope_key, e.raw_payload->>'scope_key', e.payload->>'scope_key', e.aggregate_id, '') as scope_key,
                 case
                   when e.status in ('failed', 'dead_lettered') then e.status
                   when e.publish_status = 'failed' then 'publish_failed'
@@ -424,8 +442,10 @@ class RuntimeMonitoringRepository:
                         from job.outbox_events done
                         where done.tenant_id = e.tenant_id
                           and done.event_type = e.event_type
-                          and coalesce(done.scope_type, '') = coalesce(e.scope_type, '')
-                          and coalesce(done.scope_key, '') = coalesce(e.scope_key, '')
+                          and coalesce(done.scope_type, done.raw_payload->>'scope_type', done.payload->>'scope_type', done.aggregate_type, '') =
+                              coalesce(e.scope_type, e.raw_payload->>'scope_type', e.payload->>'scope_type', e.aggregate_type, '')
+                          and coalesce(done.scope_key, done.raw_payload->>'scope_key', done.payload->>'scope_key', done.aggregate_id, '') =
+                              coalesce(e.scope_key, e.raw_payload->>'scope_key', e.payload->>'scope_key', e.aggregate_id, '')
                           and done.status = 'done'
                           and done.updated_at > e.updated_at
                     )
@@ -435,8 +455,10 @@ class RuntimeMonitoringRepository:
                         select 1
                         from read_model.app_status_readiness readiness
                         where readiness.tenant_id = e.tenant_id
-                          and coalesce(readiness.scope_type, '') = coalesce(e.scope_type, '')
-                          and coalesce(readiness.scope_key, '') = coalesce(e.scope_key, '')
+                          and coalesce(readiness.scope_type, '') =
+                              coalesce(e.scope_type, e.raw_payload->>'scope_type', e.payload->>'scope_type', e.aggregate_type, '')
+                          and coalesce(readiness.scope_key, '') =
+                              coalesce(e.scope_key, e.raw_payload->>'scope_key', e.payload->>'scope_key', e.aggregate_id, '')
                           and readiness.status = 'fresh'
                           and readiness.updated_at > e.updated_at
                     )
@@ -444,7 +466,7 @@ class RuntimeMonitoringRepository:
             from job.outbox_events e
             where e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
                or e.publish_status in ('publishing', 'failed')
-            group by e.event_type, e.scope_type, e.scope_key, 4
+            group by e.event_type, 2, 3, 4
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
@@ -538,7 +560,7 @@ class RuntimeMonitoringRepository:
             f"""
             select status, count(*)::bigint as count
             from job.read_model_dirty_scopes
-            where {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
+            where {_current_effective_dirty_scope_predicate_sql()}
             group by status
             order by status
             """
@@ -1098,7 +1120,7 @@ class RuntimeMonitoringRepository:
             from job.read_model_dirty_scopes
             where status in ('pending', 'processing', 'failed')
               and updated_at < now() - (%s * interval '1 second')
-              and {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
+              and {_current_effective_dirty_scope_predicate_sql()}
             order by updated_at, tenant_id, scope_type, scope_key
             limit 5
             """,
@@ -1280,7 +1302,7 @@ class RuntimeMonitoringRepository:
                 max(coalesce(last_error, '')) as last_error
               from job.read_model_dirty_scopes
               where status in ('pending', 'processing', 'failed')
-                and {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
+                and {_current_effective_dirty_scope_predicate_sql()}
               group by scope_type, scope_key, status
               order by oldest_age_seconds desc nulls last, scope_type, scope_key
               limit 30
@@ -1901,9 +1923,6 @@ def _is_legacy_cost_statistics_scope(scope_type: object, scope_key: object) -> b
 
 
 def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
-    status = str(row.get("status") or "").strip()
-    if status not in {"publish_failed", "failed", "dead_lettered"}:
-        return False
     if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
         return True
     return _truthy(row.get("covered_by_later_done")) or _truthy(row.get("covered_by_later_readiness"))

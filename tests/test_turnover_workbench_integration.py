@@ -550,6 +550,38 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertNotEqual(after_turnover_snapshot, before_turnover_snapshot)
         self.assertNotEqual(after_pair_snapshot, before_pair_snapshot)
 
+    def test_manual_closure_repairs_orphaned_turnover_closure_without_workbench_case(self) -> None:
+        with self._temporary_app() as app:
+            transaction_ids = self._import_three_personal_borrow_rows(app)
+            rows = app._turnover_bank_transaction_rows()
+            app._turnover_relation_service.rebuild_from_bank_rows(rows)
+            orphaned_relation = app._turnover_relation_service.confirm_zero_difference_closure(
+                transaction_ids,
+                actor="YNSYLP005",
+                note="历史半写入闭环",
+            )
+            relation_id = str(orphaned_relation["relation_id"])
+            case_id = f"turnover:{relation_id}"
+            self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id))
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "恢复关联台闭环"}),
+            )
+            payload = json.loads(response.body)
+            active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["turnover_relation"]["relation_id"], relation_id)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["workbench_pair_relation"]["case_id"], case_id)
+        self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertIsNotNone(active_closure)
+        assert active_closure is not None
+        self.assertEqual(active_closure["row_ids"], transaction_ids)
+        self.assertEqual(active_closure["row_types"], ["bank", "bank", "bank"])
+
     def test_manual_closure_accepts_source_bank_row_ids_from_grouped_read_model(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, principal_amount="40000.00", settlement_amount="40000.00")

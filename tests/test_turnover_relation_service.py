@@ -573,7 +573,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "single_sided_relation")
 
-    def test_confirm_zero_difference_closure_rejects_already_closed_rows(self) -> None:
+    def test_confirm_zero_difference_closure_reuses_exact_existing_closure_rows(self) -> None:
         service = TurnoverRelationService.from_snapshot(
             None,
             bank_rows=[
@@ -581,10 +581,37 @@ class TurnoverRelationServiceTests(unittest.TestCase):
                 bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
             ],
         )
+        existing = service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+
+        relation = service.confirm_zero_difference_closure(
+            ["txn-in-1", "txn-out-1"],
+            actor="YNSYLP005",
+            note="恢复关联台闭环",
+        )
+
+        self.assertEqual(relation["relation_id"], existing["relation_id"])
+        self.assertEqual(relation["status"], "confirmed")
+        self.assertEqual(relation["evidence"]["closure_mode"], "manual_zero_difference_pair")
+        self.assertEqual(len(service.relations()), 1)
+        self.assertEqual(
+            [entry["action"] for entry in service.audit_log()],
+            ["confirm_zero_difference_closure", "confirm_zero_difference_closure"],
+        )
+
+    def test_confirm_zero_difference_closure_rejects_partial_existing_closure_overlap(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-in-2", category_code="borrow_in_personal_pending_repayment", credit_amount="100000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
+                bank_row("txn-out-2", category_code="borrow_in_personal_repaid", debit_amount="300000.00"),
+            ],
+        )
         service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
 
         with self.assertRaises(TurnoverRelationValidationError) as context:
-            service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+            service.confirm_zero_difference_closure(["txn-in-1", "txn-in-2", "txn-out-2"], actor="YNSYLP005")
 
         self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
 

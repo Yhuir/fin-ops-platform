@@ -596,6 +596,16 @@ class FakeRuntimeConnection:
                     "updated_at": "2026-06-04T10:00:00+00:00",
                 }
             ]
+        if "from job.read_model_dirty_scopes" in normalized:
+            return [
+                {
+                    "scope_type": "bank_detail",
+                    "status": "processing",
+                    "count": 2,
+                    "last_error": None,
+                    "updated_at": "2026-06-04T10:00:00+00:00",
+                }
+            ]
         if "from read_model.app_status_readiness" in normalized:
             return [
                 {
@@ -609,16 +619,6 @@ class FakeRuntimeConnection:
                     "generated_at": "2026-06-04T10:00:00+00:00",
                     "updated_at": "2026-06-04T10:00:00+00:00",
                     "last_error": None,
-                }
-            ]
-        if "from job.read_model_dirty_scopes" in normalized:
-            return [
-                {
-                    "scope_type": "bank_detail",
-                    "status": "processing",
-                    "count": 2,
-                    "last_error": None,
-                    "updated_at": "2026-06-04T10:00:00+00:00",
                 }
             ]
         if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
@@ -665,9 +665,9 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
                     return []
-                if "from read_model.app_status_readiness" in normalized:
-                    return []
                 if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return []
@@ -684,6 +684,17 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
                     return []
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all:2026-05",
+                            "status": "processing",
+                            "count": 1,
+                            "last_error": None,
+                            "updated_at": "2026-06-04T10:06:00+00:00",
+                        },
+                    ]
                 if "from read_model.app_status_readiness" in normalized:
                     return [
                         {
@@ -709,17 +720,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "generated_at": None,
                             "updated_at": "2026-06-04T10:05:00+00:00",
                             "last_error": "projection failed",
-                        },
-                    ]
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all:2026-05",
-                            "status": "processing",
-                            "count": 1,
-                            "last_error": None,
-                            "updated_at": "2026-06-04T10:06:00+00:00",
                         },
                     ]
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
@@ -781,21 +781,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
                     return []
-                if "from read_model.app_status_readiness" in normalized:
-                    return [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "schema_version": "cost-v1",
-                            "source_versions": {"workbench": 10},
-                            "row_count": 42,
-                            "generated_at": "2026-06-04T10:03:00+00:00",
-                            "updated_at": "2026-06-04T10:03:00+00:00",
-                            "last_error": None,
-                        },
-                    ]
                 if "from job.read_model_dirty_scopes" in normalized:
                     return [
                         {
@@ -813,6 +798,21 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "count": 1,
                             "last_error": None,
                             "updated_at": "2026-06-04T10:06:00+00:00",
+                        },
+                    ]
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "schema_version": "cost-v1",
+                            "source_versions": {"workbench": 10},
+                            "row_count": 42,
+                            "generated_at": "2026-06-04T10:03:00+00:00",
+                            "updated_at": "2026-06-04T10:03:00+00:00",
+                            "last_error": None,
                         },
                     ]
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
@@ -866,6 +866,17 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
                     return []
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "count": 1,
+                            "last_error": "legacy dirty scope failed",
+                            "updated_at": "2026-06-04T09:02:00+00:00",
+                        },
+                    ]
                 if "from read_model.app_status_readiness" in normalized:
                     return [
                         {
@@ -905,17 +916,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "last_error": "legacy month scope failed",
                         },
                     ]
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all",
-                            "status": "failed",
-                            "count": 1,
-                            "last_error": "legacy dirty scope failed",
-                            "updated_at": "2026-06-04T09:02:00+00:00",
-                        },
-                    ]
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return [
                         {
@@ -946,7 +946,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         )
         self.assertTrue(all(scope["current_effective"] is False for scope in cost_status["historical_scopes"]))
 
-    def test_runtime_repository_ignores_outbox_failures_covered_by_later_success(self) -> None:
+    def test_runtime_repository_ignores_outbox_rows_covered_by_later_success(self) -> None:
         class CoveredOutboxConnection(FakeRuntimeConnection):
             def __init__(self) -> None:
                 self.outbox_sql = ""
@@ -983,6 +983,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "count": 1,
                             "updated_at": "2026-06-04T10:01:00+00:00",
                             "covered_by_later_done": True,
+                            "covered_by_later_readiness": False,
                         },
                     ]
                 if "from read_model.app_status_readiness" in normalized:
@@ -998,9 +999,52 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         self.assertNotIn("output_invoice_collection.read_model.refresh", snapshot["outbox_statuses"])
         self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "failed")
-        self.assertEqual(snapshot["outbox_statuses"]["pending_invoice.read_model.refresh"]["status"], "pending")
+        self.assertNotIn("pending_invoice.read_model.refresh", snapshot["outbox_statuses"])
         self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
         self.assertIn("when e.publish_status = 'failed' then 'publish_failed'", connection.outbox_sql)
+
+    def test_runtime_repository_ignores_dirty_scope_covered_by_later_fresh_readiness(self) -> None:
+        class CoveredDirtyScopeConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "input_invoice_usage",
+                            "scope_key": "all",
+                            "status": "pending",
+                            "count": 1,
+                            "last_error": None,
+                            "updated_at": "2026-06-04T09:59:00+00:00",
+                            "covered_by_later_readiness": True,
+                        }
+                    ]
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "input_invoice_usage",
+                            "scope_type": "input_invoice_usage",
+                            "scope_key": "all",
+                            "status": "fresh",
+                            "schema_version": "v1",
+                            "source_versions": {"input_invoices": 7},
+                            "row_count": 128,
+                            "generated_at": "2026-06-04T10:00:00+00:00",
+                            "updated_at": "2026-06-04T10:00:00+00:00",
+                            "last_error": None,
+                        }
+                    ]
+                if "from job.outbox_events" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(CoveredDirtyScopeConnection()).app_status_runtime_snapshot()
+
+        input_usage_status = snapshot["read_model_statuses"]["input_invoice_usage"]
+        self.assertEqual(input_usage_status["status"], "fresh")
+        self.assertEqual(input_usage_status["scopes"][0]["status"], "fresh")
 
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):

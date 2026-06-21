@@ -466,7 +466,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             for sql in normalized_calls
             if "select e.publish_status, count(*)::bigint as count from job.outbox_events e" in sql
         )
-        self.assertIn("or e.publish_status = 'failed'", publish_status_sql)
+        self.assertIn("readiness.updated_at > e.updated_at", publish_status_sql)
         self.assertIn("done.status = 'done'", publish_status_sql)
         self.assertIn("readiness.status = 'fresh'", publish_status_sql)
 
@@ -525,7 +525,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("where ( e.status in ('pending', 'failed', 'dead_lettered')", connection.sql)
         self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.sql)
         self.assertIn("e.event_type = 'cost_statistics.read_model.refresh'", connection.sql)
-        self.assertIn("or e.publish_status = 'failed'", connection.sql)
+        self.assertIn("count(*) filter (where e.publish_status = 'failed')", connection.sql)
         self.assertIn("done.status = 'done'", connection.sql)
         self.assertIn("readiness.status = 'fresh'", connection.sql)
         self.assertIn("readiness.updated_at > e.updated_at", connection.sql)

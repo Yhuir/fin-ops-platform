@@ -17,6 +17,15 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-21 - 孤儿 turnover 闭环恢复 Workbench active case
+
+- 目标：修复外部往来款页面选择贾小花三条同组流水确认闭环时，后端返回 `Bank transaction already belongs to an active turnover closure.`，但关联台没有显示这三条流水处于同一个 active case 的不一致。
+- 真实原因：外部往来本地 `TurnoverRelationService` 已有同一批流水的 `manual_zero_difference_group` confirmed relation，所以本地台账可计算“已闭合计”；但 Workbench canonical active relation 中缺少对应 `turnover:{relation_id}` case，关联台自然不显示配对。再次确认时，本地 `_ensure_no_manual_closure_overlap()` 在 Workbench command service 写入前直接拒绝，导致无法修复这个孤儿闭环。
+- 关键决策：同一批 `bank_row_ids` 已存在本地 manual closure 时，允许 `confirm_zero_difference_closure()` 复用同一个 `relation_id` 继续执行下游 Workbench `turnover_manual_closure` 写入，用于恢复缺失 active case；部分重叠或 Workbench 中已有其他 active `turnover_manual_closure` 仍必须拒绝，避免覆盖真实闭环。
+- 文档影响：更新本实施记录和 `tests.md`；业务口径、API shape、read model/worker 状态机不变。
+- 测试覆盖：新增/更新 `test_confirm_zero_difference_closure_reuses_exact_existing_closure_rows`、`test_confirm_zero_difference_closure_rejects_partial_existing_closure_overlap`、`test_manual_closure_repairs_orphaned_turnover_closure_without_workbench_case`。
+- 未测风险：本地没有直连生产库对截图中的贾小花真实 row id 执行 mutation；已用同形态三流水、孤儿 turnover closure 和 Workbench 缺 active case 的集成测试覆盖服务端路径。
+
 ## 2026-06-21 - 普通 confirmed relation 升级为手动闭环
 
 - 目标：修复外部往来款页面选择 `txn_imported_1277`、`txn_imported_1292`、`txn_imported_1344` 三条同组流水确认闭环时，后端返回 `Bank transaction already belongs to an active turnover relation` 的问题。
