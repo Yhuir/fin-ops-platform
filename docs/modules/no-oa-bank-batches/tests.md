@@ -6,7 +6,7 @@
 
 | 影响面 | 当前事实源 | 需要保护的行为 |
 | --- | --- | --- |
-| 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签抽屉、提交选择、内部往来提交、撤回 dialog、stale retry、首屏 GET 暂时失败刷新恢复、跨账户选择保护 |
+| 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签抽屉、右侧流水行级银行明细标签、提交选择、内部往来提交、撤回 dialog、stale retry、首屏 GET 暂时失败刷新恢复、跨账户选择保护 |
 | Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | submit-selection、submit、withdraw、tag-selection 保存后等待 `no_oa_bank_batch` barrier fresh，再 reload；失败不假装同步 |
 | API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、affected months、relation read model freshness 字段 |
 | Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、legacy relation migration/repair/consolidation command 委托 |
@@ -14,7 +14,7 @@
 | Write contract | `bankdetail_write_uow.py`、`tests/test_bankdetail_write_uow_contract.py` | stale expected version、batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
 | Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入、月度 scope 不全量读取且不删除其它月份批次 |
 | 跨页面影响 | Bank Details、Workbench、Cost Statistics、Search、App Status | no-OA 提交/撤回影响 Workbench relation、银行明细关系状态、成本统计、搜索候选和 App Status |
-| 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer |
+| 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer，并保持右侧流水行级标签来自最新 detail row |
 
 ## 现有测试入口
 
@@ -116,6 +116,7 @@
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |
 | no-OA list 首屏 GET 失败后同时显示普通空态，误导用户以为当前条件下没有流水 | `web/src/test/NoOaBankBatchPage.test.tsx::recovers after a transient no OA batch list failure when refreshed`、`web/e2e/no-oa-bank-batches-flow.spec.ts::recovers list after a transient load failure when refreshed` |
+| 右侧流水栏缺少每条银行流水的银行明细有效标签，导致用户只能看到批次标签，无法逐行核对分类事实 | `web/src/test/NoOaBankBatchApi.test.ts::maps batch detail rows`、`web/src/test/NoOaBankBatchPage.test.tsx::renders tag management and compact main/sub/transaction layout without account search or debug fields` |
 | 写操作成功但 no-OA read model 仍 refreshing 时页面提前可操作，导致用户看到旧批次或重复提交 | `web/src/test/NoOaBankBatchPage.test.tsx` operation overlay 回归、`web/src/test/OperationBarrierApi.test.ts` |
 | 2026-06-17 标签准入保存等待当前月份 scope 而不是后端实际 dirty 的 `all` scope，overlay 提前释放后列表仍需手动刷新 | `web/src/test/NoOaBankBatchPage.test.tsx::saves tag selection through the global overlay and reloads after the barrier is fresh`、`web/e2e/no-oa-bank-batches-flow.spec.ts::saves tag scope through the freshness barrier and reloads the no-OA list` |
 | 2026-06-17 SQL read model 返回 `status=stale,status_bucket=submitted` 时，页面显示“分类已变更，需复核”而不是已提交/可撤回 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchApi.test.ts::maps relation-backed stale batches as submitted`、`web/src/test/NoOaBankBatchPage.test.tsx::presents relation-backed stale batches as submitted without review prompts` |

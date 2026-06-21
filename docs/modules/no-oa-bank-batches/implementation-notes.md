@@ -17,6 +17,31 @@
 - `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 - relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
+- 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
+
+## 2026-06-21 - 右侧流水栏行级银行明细标签
+
+- 目标：修复免 OA 流水批量处理右侧流水栏只显示摘要/用途/备注，缺少每条银行流水在银行明细中的有效标签，用户无法逐行核对分类事实的问题。
+- 影响范围：`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/app/styles.css`、`web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/NoOaBankBatchPage.test.tsx`、本模块测试矩阵。
+- UI 决策：
+  - 不新增列，避免压缩交易时间、对方户名和金额列；标签放入“摘要/用途/备注”单元格内。
+  - 优先按 `category_label_path` 拆成多个 chip；路径缺失时回退主/子/标签名/code。
+  - 无标签时不显示占位文案；relation context chip 仍保留在标签下方。
+  - CSS 从 `span:first-child/last-child` 改为显式 class，避免新增 chip 被摘要/备注样式误伤。
+- 文档影响：本轮只改变 no-OA 页面展示和测试矩阵，不改变业务口径、后端 API contract、read model、worker 或长期架构文档。
+- 测试覆盖：
+  - `web/src/test/NoOaBankBatchApi.test.ts::maps batch detail rows` 覆盖 detail row 分类路径映射。
+  - `web/src/test/NoOaBankBatchPage.test.tsx::renders tag management and compact main/sub/transaction layout without account search or debug fields` 覆盖右侧流水行内银行明细标签 chip。
+  - `web/src/test/NoOaBankBatchPage.test.tsx::keeps premium compact rails, transaction table, and interaction CSS contracts` 覆盖标签行 flex-wrap 和 chip 样式。
+- 七类测试覆盖：
+  - Business core unit tests：不适用，本轮不改批次生成、状态流转、金额、选择或提交规则。
+  - Service-layer tests：不适用，本轮不改 application service、repository、audit、rollback 或 worker。
+  - API contract tests：适用，前端 API mapper 测试锁定 detail row 的银行明细标签字段。
+  - Read model/cache/background job tests：不适用，本轮不改 freshness、cache、dirty scope 或后台任务。
+  - Frontend component and interaction tests：适用，页面测试覆盖流水表行级标签可见。
+  - End-to-end business-flow integration tests：不适用，本轮不改跨模块写流程。
+  - Existing feature regression tests：适用，既有 no-OA page/API 回归保护分页、标签管理、提交/撤回、只读门禁和 stale polling。
+- 未测风险：真实生产长标签路径、超长摘要和大数据月份下的横向滚动/视觉遮挡仍需 staging 或生产登录态 smoke。
 
 ## 2026-06-20 - no-OA list GET 加载失败刷新恢复
 

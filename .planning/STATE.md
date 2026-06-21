@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 1 of 18 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
 Status: Ready to discuss/plan page-specific phases using Phase 0 as required baseline
-Last activity: 2026-06-21 - Completed quick task 260621-n7i: 银行明细页面时间选择器简化为按年/按月和全部
+Last activity: 2026-06-21 - Completed quick task 260621-ssv: 免 OA 流水栏行级银行明细标签
 
 Progress: [█░░░░░░░░░] 6%
 
@@ -80,6 +80,7 @@ None yet.
 | 260618-m4d | 发票信息汇总表模板识别 | 2026-06-18 | — | [260618-m4d-excel](./quick/260618-m4d-excel/) |
 | 260621-ivm | OA 附件发票 Promotion 设置化与读路径收敛 | 2026-06-21 | — | [260621-ivm-oa-promotion-oa-app-invoices-excel](./quick/260621-ivm-oa-promotion-oa-app-invoices-excel/) |
 | 260621-n7i | 银行明细页面时间选择器简化为按年/按月和全部 | 2026-06-21 | — | [260621-n7i-bank-details-date-picker](./quick/260621-n7i-bank-details-date-picker/) |
+| 260621-ssv | 免 OA 流水栏行级银行明细标签 | 2026-06-21 | — | [260621-ssv-oa-ui](./quick/260621-ssv-oa-ui/) |
 
 ## Deferred Items
 

@@ -48,7 +48,7 @@ const unsubmittedPayload = {
   bank_rows: [
     {
       id: "bank-row-001",
-      trade_time: "2026-01-07 15:54:00",
+      trade_time: "2026-01-07T15:54:00+08:00",
       counterparty_name: "批量账务集中处理",
       direction: "expense",
       direction_label: "支出",
@@ -467,6 +467,8 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("1-2 / 2");
     expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-2 / 2");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
+    expect(within(bankList).getByText("2026-01-07 15:54:00")).toBeInTheDocument();
+    expect(within(bankList).queryByText("2026-01-07T15:54:00+08:00")).not.toBeInTheDocument();
     expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
     const oaTable = screen.getByRole("table", { name: "可关联OA项" });

@@ -444,6 +444,42 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(relation["evidence"]["closure_mode"], "manual_zero_difference_group")
         self.assertEqual(set(service.audit_log()[0]["affected_row_ids"]), {"txn-in-1", "txn-in-2", "txn-out-1"})
 
+    def test_confirm_zero_difference_closure_upgrades_existing_confirmed_relation_for_same_rows(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-in-2", category_code="borrow_in_personal_pending_repayment", credit_amount="100000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="300000.00"),
+            ],
+        )
+        confirmed = service.confirm_relation(
+            ["txn-in-1", "txn-in-2", "txn-out-1"],
+            actor="YNSYLP005",
+            note="普通确认",
+        )
+
+        try:
+            closure = service.confirm_zero_difference_closure(
+                ["txn-in-1", "txn-in-2", "txn-out-1"],
+                actor="YNSYLP005",
+                note="升级闭环",
+            )
+        except TurnoverRelationValidationError as exc:
+            self.fail(f"same-row confirmed turnover relation should be upgradeable to closure, got {exc.error_code}")
+
+        self.assertEqual(closure["relation_id"], confirmed["relation_id"])
+        self.assertEqual(closure["status"], "confirmed")
+        self.assertEqual(closure["source"], "manual")
+        self.assertEqual(closure["evidence"]["closure_mode"], "manual_zero_difference_group")
+        self.assertEqual(closure["evidence"]["amount_delta"], "0.00")
+        self.assertEqual(len(service.relations()), 1)
+        self.assertEqual(service.relations()[0]["relation_id"], confirmed["relation_id"])
+        self.assertEqual(
+            [entry["action"] for entry in service.audit_log()],
+            ["confirm_relation", "confirm_zero_difference_closure"],
+        )
+
     def test_confirm_zero_difference_closure_accepts_source_bank_row_ids(self) -> None:
         income = bank_row(
             "canonical-in-1",

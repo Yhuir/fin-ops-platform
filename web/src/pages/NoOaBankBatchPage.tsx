@@ -275,6 +275,20 @@ function relationContextLabels(row: NoOaBankBatchDetailRow) {
   return [relationLabel, `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
 }
 
+function bankDetailTagLabels(row: NoOaBankBatchDetailRow) {
+  const labelPath = row.categoryLabelPath.map((label) => label.trim()).filter(Boolean);
+  if (labelPath.length > 0) {
+    return Array.from(new Set(labelPath));
+  }
+  const fallbackLabels = [
+    row.categoryPrimaryLabel,
+    row.categorySubLabel,
+    row.categoryLabel,
+    row.categoryCode,
+  ].map((label) => label.trim()).filter(Boolean);
+  return Array.from(new Set(fallbackLabels));
+}
+
 type LabelRailGroup = {
   key: string;
   label: string;
@@ -1235,50 +1249,61 @@ export default function NoOaBankBatchPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {rows.map((row) => (
-                              <tr key={row.transactionId}>
-                                {rowSelectionEnabled ? (
-                                  <td className="no-oa-bank-batches-table__check">
-                                    <input
-                                      aria-label={`选择流水 ${row.transactionId}`}
-                                      checked={selectedTransactionIds.has(row.transactionId)}
-                                      className="no-oa-bank-batches-checkbox"
-                                      disabled={!canMutateData}
-                                      onChange={(event) => toggleTransaction(row, event.target.checked)}
-                                      type="checkbox"
-                                    />
-                                  </td>
-                                ) : null}
-                                <td>{row.tradeTime || "-"}</td>
-                                <td>{row.counterpartyName || "-"}</td>
-                                <td className="no-oa-bank-batches-table__amount">
-                                  <div className="no-oa-bank-batches-amount-cell">
-                                    <div className="no-oa-bank-batches-amount-cell__main">
-                                      <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--direction">
-                                        {directionTagLabel(row)}
-                                      </span>
-                                      <span className="no-oa-bank-batches-amount">{formatMoney(row.amount)}</span>
-                                    </div>
-                                    <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--bank">
-                                      {bankTagLabel(row)}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td>
-                                  <div className="no-oa-bank-batches-summary-cell">
-                                    <span>{row.summary || "-"}</span>
-                                    <span>{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
-                                    {relationContextLabels(row).length > 0 ? (
-                                      <div className="no-oa-bank-batches-relation-cell">
-                                        {relationContextLabels(row).map((label) => (
-                                          <span className="no-oa-bank-batches-tag" key={label}>{label}</span>
-                                        ))}
+                            {rows.map((row) => {
+                              const rowTagLabels = bankDetailTagLabels(row);
+                              const relationLabels = relationContextLabels(row);
+                              return (
+                                <tr key={row.transactionId}>
+                                  {rowSelectionEnabled ? (
+                                    <td className="no-oa-bank-batches-table__check">
+                                      <input
+                                        aria-label={`选择流水 ${row.transactionId}`}
+                                        checked={selectedTransactionIds.has(row.transactionId)}
+                                        className="no-oa-bank-batches-checkbox"
+                                        disabled={!canMutateData}
+                                        onChange={(event) => toggleTransaction(row, event.target.checked)}
+                                        type="checkbox"
+                                      />
+                                    </td>
+                                  ) : null}
+                                  <td>{row.tradeTime || "-"}</td>
+                                  <td>{row.counterpartyName || "-"}</td>
+                                  <td className="no-oa-bank-batches-table__amount">
+                                    <div className="no-oa-bank-batches-amount-cell">
+                                      <div className="no-oa-bank-batches-amount-cell__main">
+                                        <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--direction">
+                                          {directionTagLabel(row)}
+                                        </span>
+                                        <span className="no-oa-bank-batches-amount">{formatMoney(row.amount)}</span>
                                       </div>
-                                    ) : null}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                      <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--bank">
+                                        {bankTagLabel(row)}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <div className="no-oa-bank-batches-summary-cell">
+                                      <span className="no-oa-bank-batches-summary-cell__summary">{row.summary || "-"}</span>
+                                      <span className="no-oa-bank-batches-summary-cell__memo">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
+                                      {rowTagLabels.length > 0 ? (
+                                        <div aria-label={`银行明细标签 ${row.transactionId}`} className="no-oa-bank-batches-bank-tags">
+                                          {rowTagLabels.map((label) => (
+                                            <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--bank-detail" key={label}>{label}</span>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                      {relationLabels.length > 0 ? (
+                                        <div className="no-oa-bank-batches-relation-cell">
+                                          {relationLabels.map((label) => (
+                                            <span className="no-oa-bank-batches-tag" key={label}>{label}</span>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

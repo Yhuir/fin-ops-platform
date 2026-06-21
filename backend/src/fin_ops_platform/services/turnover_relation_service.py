@@ -288,8 +288,8 @@ class TurnoverRelationService:
             prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
             self._ensure_confirmable_relation(prepared_rows)
             self._ensure_zero_difference_closure(prepared_rows)
-            self._ensure_no_active_confirmed_overlap(row_ids, error_code="turnover_relation_conflict")
             self._ensure_no_manual_closure_overlap(row_ids)
+            self._ensure_no_blocking_confirmed_overlap_for_closure(row_ids)
             relation = self._build_relation_from_rows(
                 prepared_rows,
                 status="confirmed",
@@ -625,6 +625,27 @@ class TurnoverRelationService:
                     "turnover_relation_conflict",
                     "Bank transaction already belongs to an active turnover closure.",
                 )
+
+    def _ensure_no_blocking_confirmed_overlap_for_closure(self, row_ids: list[str]) -> None:
+        requested_row_ids = set(row_ids)
+        for relation in self._relations:
+            status = str(relation.get("status") or "")
+            if status != "confirmed":
+                continue
+            existing_row_ids = {
+                str(row_id)
+                for row_id in list(relation.get("bank_row_ids") or [])
+                if str(row_id).strip()
+            }
+            overlap = sorted(requested_row_ids.intersection(existing_row_ids))
+            if not overlap:
+                continue
+            if existing_row_ids == requested_row_ids:
+                continue
+            raise TurnoverRelationValidationError(
+                "turnover_relation_conflict",
+                f"Bank transaction already belongs to an active turnover relation: {', '.join(overlap)}",
+            )
 
     def _ensure_no_active_confirmed_overlap(self, row_ids: list[str], *, error_code: str = "relation_row_conflict") -> None:
         requested_row_ids = set(row_ids)

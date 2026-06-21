@@ -17,6 +17,15 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-21 - 普通 confirmed relation 升级为手动闭环
+
+- 目标：修复外部往来款页面选择 `txn_imported_1277`、`txn_imported_1292`、`txn_imported_1344` 三条同组流水确认闭环时，后端返回 `Bank transaction already belongs to an active turnover relation` 的问题。
+- 真实原因：不是金额不平、前端误允许选择或 Workbench OA-bank 合并失败。错误文案来自 `TurnoverRelationService._ensure_no_active_confirmed_overlap()`；这三条流水已经处于 Turnover 本地普通 `confirmed` relation，但尚未带 `manual_zero_difference_group` 闭环 evidence。`confirm_zero_difference_closure()` 在检查已闭环关系前先用通用 active confirmed overlap 规则拦截，导致同一 row 集合不能从普通 confirmed relation 升级为手动闭环，Workbench `turnover_manual_closure` 写入链路也没有执行。
+- 关键决策：手动零差额闭环先拒绝已存在的 manual closure overlap；普通 `confirmed` relation 只有在 `bank_row_ids` 与本次选择完全一致时允许升级并复用同一 `relation_id`，部分重叠仍按 `turnover_relation_conflict` 拒绝，避免绕过“漏选需先撤回再重选”的闭环约束。
+- 文档影响：更新本实施记录和 `tests.md`；既有业务口径、API shape、read model/worker 状态机不变。
+- 测试覆盖：新增 `test_confirm_zero_difference_closure_upgrades_existing_confirmed_relation_for_same_rows`，并运行 `tests.test_turnover_relation_service`、`tests.test_turnover_workbench_integration`、`tests.test_turnover_ledger_uow_contract`。
+- 未测风险：本地未连接真实生产 PostgreSQL 对截图三笔原始流水执行写入；已用同形态三流水和普通 confirmed relation 复现服务端拦截点，并用 Workbench/UoW 回归保护下游合并链路。
+
 ## 2026-06-20 - grouped ledger 加载失败刷新恢复
 
 - 目标：补齐外部往来款首屏 `GET /api/turnover-ledger` 暂时失败后的 Browser 恢复链路，防止 API 503 被页面误显示成普通“暂无往来款台账”空态，或恢复后残留失败文案。

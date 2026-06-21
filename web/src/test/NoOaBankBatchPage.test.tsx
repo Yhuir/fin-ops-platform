@@ -515,6 +515,8 @@ describe("NoOaBankBatchPage", () => {
     const tableHeadRule = cssRule(styles, ".no-oa-bank-batches-table th");
     const amountRule = cssRule(styles, ".no-oa-bank-batches-table .no-oa-bank-batches-table__amount");
     const tagRule = cssRule(styles, ".no-oa-bank-batches-status,\\n.no-oa-bank-batches-tag");
+    const bankTagsRule = cssRule(styles, ".no-oa-bank-batches-bank-tags,\\n.no-oa-bank-batches-relation-cell");
+    const bankDetailTagRule = cssRule(styles, ".no-oa-bank-batches-tag--bank-detail");
     const drawerRule = cssRule(styles, ".no-oa-bank-batches-drawer");
     const drawerGroupsRule = cssRule(styles, ".no-oa-bank-batches-drawer__groups");
     const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
@@ -545,6 +547,8 @@ describe("NoOaBankBatchPage", () => {
     expect(amountRule).toContain("text-align: right");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("background: var(--fp-surface-muted)");
+    expect(bankTagsRule).toContain("flex-wrap: wrap");
+    expect(bankDetailTagRule).toContain("var(--fp-primary)");
     expect(drawerRule).toContain("min(960px, 92vw)");
     expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
     expect(drawerGroupsRule).toContain("repeat(auto-fit, minmax(260px, 1fr))");
@@ -593,6 +597,9 @@ describe("NoOaBankBatchPage", () => {
     const transactionRegion = screen.getByRole("region", { name: "流水" });
     expect(within(transactionRegion).getByText("建设银行8106")).toBeInTheDocument();
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
+    const bankTagGroup = within(transactionRegion).getByLabelText("银行明细标签 bank-row-001");
+    expect(within(bankTagGroup).getByText("费用")).toBeInTheDocument();
+    expect(within(bankTagGroup).getByText("手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();

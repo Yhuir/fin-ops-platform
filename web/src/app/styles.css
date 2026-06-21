@@ -6943,22 +6943,30 @@ textarea {
   font-weight: 800;
 }
 
-.no-oa-bank-batches-summary-cell span:first-child {
+.no-oa-bank-batches-summary-cell__summary {
   color: var(--fp-text-primary);
   font-weight: 750;
 }
 
-.no-oa-bank-batches-summary-cell span:last-child {
+.no-oa-bank-batches-summary-cell__memo {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
   font-weight: 700;
 }
 
+.no-oa-bank-batches-bank-tags,
 .no-oa-bank-batches-relation-cell {
   display: flex;
   flex-wrap: wrap;
   gap: var(--fp-space-1);
   padding-top: 2px;
+}
+
+.no-oa-bank-batches-tag--bank-detail {
+  border-color: color-mix(in srgb, var(--fp-primary) 22%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-primary) 8%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+  font-weight: 820;
 }
 
 .no-oa-bank-batches-drawer-shell {

@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-06-21 - 左侧流水时间展示格式修复
+
+- 目标：修复“日常报销批量账务管理”左侧“批量账务流水”列表把 `2026-04-10T17:12:02+08:00` 这类 ISO 时区字符串直接展示给用户的问题，让时间 chip 和可访问名称统一显示为 `YYYY-MM-DD HH:mm:ss`。
+- 影响范围：`BatchAccountingPage` 展示层 formatter、`BatchAccountingPage.test.tsx` 页面交互回归。
+- 关键决策：只做 UI 展示归一化，不改 `GET /api/batch-accounting` DTO、不改后端事实源、不做时区换算，避免把生产已带本地时区的交易时间二次转换。
+- GSD/UI 决策：采用 GSD fast 小步修复；左栏时间仍保留为 compact meta tag，宽度、颜色、列表布局和分页交互不变，只清理原始 ISO 分隔符和时区后缀，保证扫读稳定。
+- 测试覆盖：组件测试把首条银行流水 mock 改成带 `T/+08:00` 的问题输入，并断言左栏显示正常时间、原始字符串不出现在可见 chip 中，按钮 accessible name 也使用正常时间。
+- 文档影响：本轮不改变业务状态、API contract、read model/worker 或测试矩阵，只新增本实施记录。
+- 未测风险：真实登录态浏览器截图和生产历史不同银行返回的非标准时间格式仍需手工 smoke；当前 formatter 对既有空值和普通 `YYYY-MM-DD HH:mm:ss` 保持原样。
+
 ## 2026-06-20 - GET 列表加载失败刷新恢复
 
 - 目标：补齐批量账务首屏 `GET /api/batch-accounting` 暂时失败后的 Browser 恢复链路，防止 API 503 被页面误显示成普通“暂无流水”空态，或恢复后残留失败文案。

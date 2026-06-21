@@ -80,6 +80,19 @@ function formatCents(cents: number) {
   });
 }
 
+function formatTradeTime(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "-";
+  }
+  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+  if (!isoMatch) {
+    return text;
+  }
+  const time = isoMatch[2].length === 5 ? `${isoMatch[2]}:00` : isoMatch[2];
+  return `${isoMatch[1]} ${time}`;
+}
+
 function accountLabel(row: BatchAccountingBankRow) {
   const bankName = row.bankName || "多账户";
   return row.accountLast4 ? `${bankName} ${row.accountLast4}` : bankName;
@@ -682,9 +695,10 @@ export default function BatchAccountingPage() {
           <div className="batch-accounting-bank-list">
             {payload.bankRows.map((row) => {
               const selected = row.id === selectedBankRowId;
+              const tradeTimeLabel = formatTradeTime(row.tradeTime);
               return (
                 <button
-                  aria-label={`批量账务集中处理 ${formatMoney(row.amount)} ${row.tradeTime} ${row.directionLabel || "支出"} ${accountLabel(row)}`}
+                  aria-label={`批量账务集中处理 ${formatMoney(row.amount)} ${tradeTimeLabel} ${row.directionLabel || "支出"} ${accountLabel(row)}`}
                   aria-pressed={selected}
                   className={cx("batch-accounting-bank-row", selected && "batch-accounting-bank-row--selected")}
                   key={row.id}
@@ -696,7 +710,7 @@ export default function BatchAccountingPage() {
                     <span className="batch-accounting-bank-row__amount">{formatMoney(row.amount)}</span>
                   </span>
                   <span className="batch-accounting-bank-row__tags">
-                    <span className="batch-accounting-tag batch-accounting-tag--meta">{row.tradeTime || "-"}</span>
+                    <span className="batch-accounting-tag batch-accounting-tag--meta">{tradeTimeLabel}</span>
                     <span className="batch-accounting-tag batch-accounting-tag--direction">{row.directionLabel || "支出"}</span>
                     <span className="batch-accounting-tag batch-accounting-tag--meta">{accountLabel(row)}</span>
                   </span>
