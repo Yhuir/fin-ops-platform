@@ -915,6 +915,34 @@ describe("NoOaBankBatchPage", () => {
     }
   });
 
+  test("keeps draft row selection available when legacy read model rows omit can_submit", async () => {
+    const legacyDraftBatch = { ...listPayload.batches[0] };
+    delete (legacyDraftBatch as Partial<typeof legacyDraftBatch>).can_submit;
+    const fetchMock = installFetchMock({
+      ...listPayload,
+      batches: [legacyDraftBatch, ...listPayload.batches.slice(1)],
+    });
+    const user = userEvent.setup();
+
+    renderPage();
+
+    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    expect(rowCheckbox).toBeEnabled();
+
+    await user.click(rowCheckbox);
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/no-oa-bank-batches/submit-selection",
+        expect.objectContaining({
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          method: "POST",
+        }),
+      );
+    });
+  });
+
   test("prevents selecting rows from another bank before clearing the current bank region", async () => {
     const secondFeeBatch = {
       ...listPayload.batches[0],

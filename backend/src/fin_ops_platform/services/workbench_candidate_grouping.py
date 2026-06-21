@@ -249,8 +249,17 @@ class WorkbenchCandidateGroupingService:
             if self._paired_group_has_enough_row_types(group):
                 valid_groups.append(group)
                 continue
-            demoted_rows.extend([*group.oa_rows, *group.bank_rows, *group.invoice_rows])
+            demoted_rows.extend(
+                self._open_context_row(row)
+                for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+            )
         return valid_groups, demoted_rows
+
+    @staticmethod
+    def _open_context_row(row: dict[str, Any]) -> dict[str, Any]:
+        cloned = deepcopy(row)
+        cloned["status"] = "open"
+        return cloned
 
     def _build_case_or_temp_groups(
         self,
@@ -1224,6 +1233,8 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_processed_exception_projection_row(row) for row in rows):
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
+        if self._is_turnover_manual_closure_group(group):
+            return row_type_count >= 3 and self._is_confirmed_active_relation_group(group)
         if row_type_count >= 2 and self._is_confirmed_active_relation_group(group):
             return True
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
@@ -1257,6 +1268,17 @@ class WorkbenchCandidateGroupingService:
                 return True
         return row_type_count >= 3
 
+    def _is_turnover_manual_closure_group(self, group: CandidateGroup) -> bool:
+        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        if not rows:
+            return False
+        relation_modes = {
+            self._string_value(row.get("relation_mode"))
+            for row in rows
+            if self._string_value(row.get("relation_mode"))
+        }
+        return relation_modes == {TURNOVER_MANUAL_CLOSURE_RELATION_MODE}
+
     def _is_confirmed_active_relation_group(self, group: CandidateGroup) -> bool:
         rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
         if not rows:
@@ -1276,6 +1298,8 @@ class WorkbenchCandidateGroupingService:
         if not relation_modes or "automatic_decision" in relation_modes:
             return False
         relation_codes = {self._relation_code(row) for row in rows}
+        if relation_modes == {TURNOVER_MANUAL_CLOSURE_RELATION_MODE}:
+            return bool(relation_codes) and relation_codes.issubset({TURNOVER_MANUAL_CLOSURE_RELATION_MODE})
         return bool(relation_codes) and relation_codes.issubset({"fully_linked"})
 
     @staticmethod
@@ -1359,7 +1383,15 @@ class WorkbenchCandidateGroupingService:
             return False
         if self._is_processed_exception_projection_row(row):
             return True
+        if self._is_turnover_manual_closure_row(row):
+            return True
         return self._relation_code(row) in {"fully_linked", "automatic_match", *AUTO_PAIRED_CODES}
+
+    def _is_turnover_manual_closure_row(self, row: dict[str, Any]) -> bool:
+        return (
+            self._string_value(row.get("relation_mode")) == TURNOVER_MANUAL_CLOSURE_RELATION_MODE
+            and self._relation_code(row) == TURNOVER_MANUAL_CLOSURE_RELATION_MODE
+        )
 
     def _relation_code(self, row: dict[str, Any]) -> str:
         relation = self._relation_payload(row)

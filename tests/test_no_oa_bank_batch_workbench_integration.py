@@ -663,6 +663,74 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
         self.assertEqual([row["id"] for row in flatten_groups(open_payload["open"]["groups"], "bank")], [salary_row_id])
 
+    def test_submit_selection_fee_rows_render_as_collapsed_paired_workbench_group(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-fees.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:15:00",
+                    "pay_receive_time": "2026-02-03 09:15:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "1.00",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                    "remark": "手续费明细 A",
+                },
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:16:00",
+                    "pay_receive_time": "2026-02-03 09:16:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "4.50",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                    "remark": "手续费明细 B",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"} for row_id in row_ids],
+            actor="tester",
+        )
+        self._enable_no_oa_tags(app, ["fee"])
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+
+        submit_result = app._no_oa_bank_batch_application_service().submit_selected_rows(
+            row_ids=row_ids,
+            actor="finance-user",
+            note="确认手续费",
+        )
+        submitted = submit_result["batch"]
+        app._invalidate_workbench_read_models()
+        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        paired_group = workbench_payload["paired"]["groups"][0]
+        summary_row = paired_group["summary_row"]
+
+        self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
+        self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
+        self.assertTrue(paired_group["default_collapsed"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"no_oa_summary:{submitted['batch_id']}"])
+        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
+        self.assertEqual(summary_row["source_kind"], "no_oa_bank_batch_summary")
+        self.assertEqual(summary_row["invoice_relation"]["code"], "no_oa_bank_batch")
+        self.assertEqual(summary_row["invoice_relation"]["label"], "已匹配：手续费")
+        self.assertEqual(summary_row["special_metadata"]["source_batch_id"], submitted["batch_id"])
+        self.assertEqual(summary_row["special_metadata"]["batch_type"], "fee")
+        self.assertEqual(summary_row["special_metadata"]["row_count"], 2)
+        self.assertEqual(summary_row["special_metadata"]["total_amount"], "5.50")
+        self.assertIn("withdraw_no_oa_batch", summary_row["available_actions"])
+
     def test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
             category_codes=["internal_transfer", "internal_transfer"]

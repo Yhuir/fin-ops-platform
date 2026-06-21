@@ -12639,6 +12639,7 @@ body.column-layout-dragging {
   position: absolute;
   top: 38px;
   left: 10px;
+  right: 10px;
   z-index: 3;
   display: flex;
   gap: 8px;
@@ -12681,6 +12682,7 @@ body.column-layout-dragging {
 }
 
 .candidate-group-pane-slot {
+  position: relative;
   min-width: 0;
   background: transparent;
 }

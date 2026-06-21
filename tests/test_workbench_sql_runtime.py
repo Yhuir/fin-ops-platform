@@ -5276,6 +5276,42 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("insert into read_model.workbench_snapshots", sql)
         self.assertNotIn("delete from read_model.workbench_rows", sql)
 
+    def test_repository_publishes_workbench_snapshot_when_builder_changes_despite_lower_source_version(self) -> None:
+        class BuilderChangedConnection(StaleWorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+                if "from read_model.workbench_snapshots" in self.fetch_one_calls[-1][0]:
+                    return {"source_versions": {"source_version": 5, "builder": "old-builder"}}
+                return None
+
+        connection = BuilderChangedConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "scope_month": "2026-05",
+                        "payload": {
+                            "month": "2026-05",
+                            "scope_key": "2026-05",
+                            "paired": {"groups": []},
+                            "open": {"groups": []},
+                            "summary": {},
+                        },
+                        "source_versions": {"source_version": 4, "builder": "new-builder"},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+            refresh_all_scope_from_month_shards=False,
+        )
+
+        sql = "\n".join(statement for statement, _params in connection.executed)
+        self.assertIn("insert into read_model.workbench_snapshots", sql)
+        self.assertIn("update read_model.workbench_generations", sql)
+
     def test_repository_skips_stale_workbench_candidate_write_by_source_version(self) -> None:
         connection = StaleWorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -6803,6 +6839,63 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(paired_group["group_id"], "case:CASE-MANUAL-1")
         self.assertTrue(all(row["case_id"] == "CASE-MANUAL-1" for row in paired_rows))
         self.assertTrue(all("workbench_reconciliation_decision" not in row for row in paired_rows))
+
+    def test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "bank-in-1": {
+                "id": "bank-in-1",
+                "type": "bank",
+                "source_kind": "bank",
+                "credit_amount": "100000.00",
+                "counterparty_name": "贾小花",
+                "trade_time": "2026-02-04 17:07:45",
+                "summary": "暂借款",
+            },
+            "bank-in-2": {
+                "id": "bank-in-2",
+                "type": "bank",
+                "source_kind": "bank",
+                "credit_amount": "200000.00",
+                "counterparty_name": "贾小花",
+                "trade_time": "2026-02-04 13:20:48",
+                "summary": "暂借款",
+            },
+            "bank-out-1": {
+                "id": "bank-out-1",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "300000.00",
+                "counterparty_name": "贾小花",
+                "trade_time": "2026-03-04 15:24:58",
+                "summary": "还暂借款",
+            },
+        }
+        relation = {
+            "case_id": "turnover:turnover_rel_jia_xiaohua",
+            "relation_mode": "turnover_manual_closure",
+            "row_ids": ["bank-in-1", "bank-in-2", "bank-out-1"],
+            "row_types": ["bank", "bank", "bank"],
+        }
+
+        payload = builder._group_payload("2026-03", rows_by_id, [relation])
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 1)
+        self.assertEqual(open_groups[0]["group_id"], "case:turnover:turnover_rel_jia_xiaohua")
+        self.assertEqual(open_groups[0]["group_type"], "candidate")
+        self.assertEqual(open_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertCountEqual(
+            [row["id"] for row in open_groups[0]["bank_rows"]],
+            ["bank-in-1", "bank-in-2", "bank-out-1"],
+        )
+        self.assertTrue(all(row["case_id"] == relation["case_id"] for row in open_groups[0]["bank_rows"]))
+        self.assertTrue(all(row["invoice_relation"]["label"] == "收支闭环" for row in open_groups[0]["bank_rows"]))
+        self.assertTrue(all(row["status"] == "open" for row in open_groups[0]["bank_rows"]))
 
     def test_sql_projection_active_no_oa_relation_uses_grouping_contract(self) -> None:
         recorder = CandidateSnapshotRecorder()

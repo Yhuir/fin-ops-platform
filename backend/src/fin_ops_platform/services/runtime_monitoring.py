@@ -528,8 +528,14 @@ class RuntimeMonitoringRepository:
                     {_active_dirty_scope_coverage_sql("e")}
                 ) as covered_by_active_dirty_scope
             from job.outbox_events e
-            where e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
-               or e.publish_status in ('publishing', 'failed')
+            where (
+                e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
+                or (
+                    e.status <> 'done'
+                    and e.publish_status in ('publishing', 'failed')
+                )
+            )
+              and {_current_effective_outbox_attention_predicate_sql("e")}
             group by e.event_type, 2, 3, 4
             """
         )
@@ -1171,7 +1177,7 @@ class RuntimeMonitoringRepository:
             """
         )
         stale_rows = self._connection.fetch_all(
-            """
+            f"""
             select
               tenant_id,
               scope_type,

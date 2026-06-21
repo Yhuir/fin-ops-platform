@@ -413,12 +413,11 @@ function CandidateGroupGrid({
     <div className="candidate-grid-body">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
       {groups.map((group, index) => {
-        const collapseControls = panes.flatMap((pane) => {
-          const paneId = pane.id as WorkbenchRecordType;
+        const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];
           const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
           if (!isCollapsedSummary) {
-            return [];
+            return null;
           }
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedCollapsedGroups.has(collapseKey);
@@ -426,8 +425,8 @@ function CandidateGroupGrid({
           const displayRowCount = group.displayRowCounts?.[paneId] ?? group.rows[paneId].length;
           const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
-          return [
-            <Fragment key={collapseKey}>
+          return (
+            <Fragment>
               <button
                 aria-expanded={isExpanded}
                 aria-label={
@@ -452,9 +451,9 @@ function CandidateGroupGrid({
                   <span>{collapseCopy.totalLabel(collapsedRowCount)}</span>
                 </span>
               ) : null}
-            </Fragment>,
-          ];
-        });
+            </Fragment>
+          );
+        };
         const displaySegments = buildWorkbenchGroupDisplaySegments(group);
         const segmentCount = displaySegments?.length ?? 0;
 
@@ -466,7 +465,6 @@ function CandidateGroupGrid({
               data-testid={`candidate-group-${zoneId}-${group.id}`}
               style={{ gridTemplateColumns: rowTemplateColumns }}
             >
-              {collapseControls}
               {displaySegments.map((segment, segmentIndex) => (
                 <div
                   key={`${group.id}-segment-${segment.id}`}
@@ -487,6 +485,7 @@ function CandidateGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
+                        {segmentIndex === 0 ? renderCollapseControls(paneId) : null}
                         <CandidateGroupCell
                           actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
@@ -525,6 +524,7 @@ function CandidateGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
+                    {renderCollapseControls(paneId)}
                     <CandidateGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
@@ -592,7 +592,6 @@ function CandidateGroupGrid({
             data-testid={`candidate-group-${zoneId}-${group.id}`}
             style={{ gridTemplateColumns: rowTemplateColumns }}
           >
-            {collapseControls}
             {panes.map((pane, paneIndex) => {
               const paneId = pane.id as WorkbenchRecordType;
               const collapsedRows = group.collapsedRows?.[paneId] ?? [];
@@ -603,6 +602,7 @@ function CandidateGroupGrid({
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                    {renderCollapseControls(paneId)}
                     <CandidateGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}

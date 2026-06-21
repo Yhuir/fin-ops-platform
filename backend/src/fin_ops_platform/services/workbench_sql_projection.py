@@ -46,7 +46,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-active-relation-metadata-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-turnover-manual-closure-open-until-three-way-v2"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -935,6 +935,8 @@ class WorkbenchSqlProjectionBuilder:
         relation_mode = str(relation.get("relation_mode") or "").strip()
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             return {"code": NO_OA_BANK_BATCH_RELATION_MODE, "label": "免OA批量处理", "tone": "success"}
+        if relation_mode == "turnover_manual_closure":
+            return {"code": relation_mode, "label": "收支闭环", "tone": "success"}
         if relation_mode and relation_mode != "manual_confirmed":
             return {"code": relation_mode, "label": "已关联", "tone": "success"}
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}

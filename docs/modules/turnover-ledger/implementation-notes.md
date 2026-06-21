@@ -6,7 +6,7 @@
 
 - 外部往来款管理 Spec-first E2E 本地闭环状态为 `spec-first-covered`：`TURNOVER-E2E-001..009` 已映射到 Browser、组件、API、后端和 integration 覆盖；`TURNOVER-E2E-010` 真实基础设施 worker drain 明确保留为 staging/runtime risk。
 - 后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `e2e-spec.md` 和 `tests.md` 中七类矩阵补测试。
-- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保持 open，直到发票等完整业务关系在关联台补齐；若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
+- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保留同一个 `turnover_manual_closure` active case/evidence；纯银行或 OA+银行但缺发票的闭环留在 open/candidate，只有 OA + 银行 + 发票三栏完整后才进入 paired。若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
 - 外部往来页撤回只允许 row types 子集为 `{oa, bank}` 的 `turnover_manual_closure`；若已在关联台补齐发票或其他业务 row type，必须去关联台撤回完整关系。
@@ -16,6 +16,22 @@
 - 外部往来闭环和 OA/发票关联是两个不同事实：OA/发票关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；前端只展示正向 chip，“已关联 OA”“已关联 发票”“收支闭环”。未闭环不显示 chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回同一 `cash_closure_case_id` 的 Workbench active case，并恢复确认前的 OA-bank relation。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+
+## 2026-06-22 - 外部往来闭环关联台三栏分区纠偏
+
+- 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域的问题。
+- 真实原因：2026-06-21 的修复把 `turnover_manual_closure` active relation ownership 和 Workbench paired zone completeness 混为一谈；`WorkbenchCandidateGroupingService` 对 bank-only turnover group 放行到 paired，SQL projection 进入 paired serializer 后又把 chip 覆盖成“完全关联”。
+- 关键决策：`turnover_manual_closure` 继续写 Workbench active relation，外部往来页继续显示“收支闭环”并支持撤回；关联台分区必须遵守三栏规则，bank-only / OA+bank-only 留在 canonical `case:<case_id>` open/candidate，只有 OA + 银行 + 发票完整后进入 paired。generation consistency 允许 active relation row 出现在 canonical open owner，禁止的是非 canonical open/temp owner。
+- 文档影响：同步产品规格、app architecture、关联台和外部往来模块文档。
+- 测试覆盖：新增/更新 `test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation_until_invoice_exists`、`test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists`、`test_bank_only_turnover_manual_closure_rows_stay_open_until_three_way_complete`、`test_two_pane_turnover_manual_closure_rows_stay_open_until_invoice_exists`、`test_three_pane_turnover_manual_closure_rows_render_as_paired_case`、`test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete`。
+
+## 2026-06-21 - 外部往来闭环关联台 paired 可见性修复（已被 2026-06-22 纠偏）
+
+- 目标：修复贾小花三笔外部往来手动闭环确认后，外部往来台账能检测到闭环关系，但关联台没有显示同一个 paired case，App Status 继续显示 Workbench generation consistency failed 的问题。
+- 真实原因：前序修复已经让本地 Turnover relation 和 Workbench active relation 写入成功；剩余阻断来自 Workbench read model 分组规则。SQL/legacy projection 给银行行写入 `relation_mode=turnover_manual_closure` 和 relation code `turnover_manual_closure`，但 grouping 未把这个 code 当 paired，并按旧 “bank-only open” 规则把 active relation rows 发布到 open/temp，触发 `active_relation_open_membership` consistency failure。
+- 关键决策（历史错误）：`turnover_manual_closure` 多银行 active relation 曾被视为外部往来完整闭环并展示在 paired 区；该 paired zone 口径已在 2026-06-22 撤销，当前规则要求未补齐 OA + 银行 + 发票三栏前留在 open/candidate。
+- 文档影响：同步产品规格、app architecture、关联台和外部往来模块文档。
+- 测试覆盖（历史，已由 2026-06-22 三栏分区测试替换）：当时新增/更新过 bank-only paired 断言；当前不再作为有效测试口径。
 
 ## 2026-06-21 - Manual closure Workbench all 普通刷新阻断
 
@@ -277,6 +293,8 @@
 - 未测风险：真实生产登录态 operation-to-fresh latency 需要发布后度量。
 
 ## 2026-06-11 - 外部往来多流水闭环与 Workbench 三栏规则
+
+> 历史记录：本节中的 bank-only open 分区决策在 2026-06-22 重新成为当前有效口径；当前规则以 `2026-06-22 - 外部往来闭环关联台三栏分区纠偏` 为准。
 
 - 目标：取消外部往来手动闭环只能选择两笔银行流水的限制，并让外部往来闭环完全复用 Workbench active pair relation 事实源。
 - 影响范围：`TurnoverRelationService`、`TurnoverLedgerWriteFacade`、`TurnoverLedgerWorkbenchPairPort`、Workbench candidate grouping、server relation display payload、外部往来页 closure drawer、关联台本地 optimistic update。

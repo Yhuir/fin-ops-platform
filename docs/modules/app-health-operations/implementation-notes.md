@@ -28,6 +28,36 @@
 
 ## 历史记录
 
+## 2026-06-21 - App Status outbox 与 ready summary current-effective 口径对齐
+
+- 目标：修复 `/health/ready` 和 ready summary 已显示无 backlog/failed，但左上角 App Status 仍显示一个历史 `oa.sync` failed 的不一致。
+- 影响范围：`RuntimeMonitoringRepository.app_status_runtime_snapshot()` 的 outbox 聚合；不改变 `job.outbox_events` durable facts、不改变 OA sync worker、不改变 ready health summary API shape。
+- 关键决策：App Status outbox 查询必须在 SQL `where` 层复用 current-effective predicate，并且只有 `status <> 'done'` 的 publish failure 才能作为当前 publish issue。`status='done'` 但保留旧 `publish_status='failed'` 的历史行不应重新映射成当前 failed。
+- 文档影响：更新系统状态实施记录和测试矩阵。
+- 测试覆盖：`tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_covered_outbox_statuses` 锁定 App Status outbox SQL 带 current-effective done/fresh 覆盖，并拒绝把 done publish failure 作为当前 issue。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_app_status_overview_service.py tests/test_runtime_monitoring.py -q`。
+- 未测风险：本地测试证明 SQL contract；真实生产需要发布后复查 App Status runtime snapshot，确认 read model/outbox/worker attention 均为空。
+
+## 2026-06-21 - Workbench all 聚合事件抢占导致 App Status 长期刷新中
+
+- 目标：解释并修复 Workbench 业务生成已可配对后，左上角仍显示 Workbench refreshing/backlog 的队列层原因。
+- 影响范围：App Status runtime summary、Workbench read model pending/backlog 可见性、runtime worker dependency-not-fresh 退避策略；不改变 App Health 前端展示或 `/api/app-health` contract。
+- 关键决策：App Health 的 pending/backlog 是正确症状，真实根因在 runtime worker 调度：`workbench:all` aggregate-only 事件遇到 `parent_scope_keys=2026-02` 未 fresh 时按 0.25s 重发，抢占了月 scope refresh。修复应在 worker 层把 same-scope parent dependency 改为 retry 级退避，而不是在 App Status 中隐藏 pending。
+- 文档影响：runtime-workers 模块记录调度 contract；本模块记录用户可见状态原因和生产验证要求。
+- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py -q`。
+- 未测风险：生产发布后仍需观察 pending `workbench.read_model.refresh` 是否自然 drain 或被后续 fresh readiness 覆盖，确认左上角 queue/read model attention 清零。
+
+## 2026-06-21 - Ready health summary current-effective SQL 修复
+
+- 目标：修复左上角运行状态和 `/health/ready` 相关 runtime summary 在查询 dirty scope current-effective 口径时触发 PostgreSQL syntax error，导致用户看到阻断、failed/backlog/刷新中残留但 readiness 诊断不可信的问题。
+- 影响范围：`RuntimeMonitoringRepository.ready_health_summary()`、App Status runtime summary、生产 readiness smoke；不改变 dirty scope/outbox 表结构、不改变 worker claim/complete 行为、不改变业务写入流程。
+- 关键决策：`ready_health_summary()` 必须和 `health_summary()` / App Status snapshot 使用同一 current-effective dirty-scope 过滤 SQL；SQL helper 必须在 Python 层插值后再提交给 PostgreSQL，不能把 `{_current_effective_dirty_scope_predicate_sql()}` 之类模板文本原样发给数据库。查询异常应作为 runtime unavailable 暴露，不能吞成空绿色。
+- 文档影响：更新系统状态 README、测试矩阵和本实施记录；关联台/往来款文档继续记录业务闭环读模型归属。
+- 测试覆盖：`tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_ready_health_summary_uses_lightweight_runtime_contract` 锁定 ready summary 不返回 heavyweight payload、不扫描慢事件明细，并断言执行 SQL 不包含未插值 helper 模板。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_ready_health_summary_uses_lightweight_runtime_contract -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_monitoring.py -q`。
+- 未测风险：本地测试证明 SQL contract；真实生产仍需发布后调用 production `ready_health_summary()` 和 App Status snapshot，确认没有 syntax error 且 current-effective queue/dirty counts 收敛。
+
 ## 2026-06-21 - Active dirty scope 覆盖历史 outbox/read model 阻断
 
 - 目标：修复 Workbench parent generation 正在重刷时，App Status 仍显示旧 `workbench_all_scope_parent_inconsistent`、`1 failed` 和 blocked/red 的问题。

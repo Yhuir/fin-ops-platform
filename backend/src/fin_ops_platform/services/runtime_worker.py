@@ -141,14 +141,15 @@ class RuntimeWorker:
             error = str(exc) or exc.__class__.__name__
             if self._is_dependency_not_fresh_error(error):
                 dependency_refreshes = self._enqueue_dependency_refreshes(event, error)
-                self._defer_event(event, error)
+                delay_seconds = self._dependency_not_fresh_delay_seconds(event, error)
+                self._defer_event(event, error, delay_seconds=delay_seconds)
                 self._record_heartbeat(
                     "deferred",
                     {
                         "event_id": event.event_id,
                         "retry": True,
                         "error": error,
-                        "delay_seconds": self._config.dependency_not_fresh_delay_seconds,
+                        "delay_seconds": delay_seconds,
                         **({"dependency_refreshes": dependency_refreshes} if dependency_refreshes else {}),
                     },
                 )
@@ -248,14 +249,19 @@ class RuntimeWorker:
             return
         self._fail_event(event, reason)
 
-    def _defer_event(self, event: RuntimeQueueEvent, reason: str) -> None:
+    def _defer_event(self, event: RuntimeQueueEvent, reason: str, *, delay_seconds: float | None = None) -> None:
+        resolved_delay_seconds = (
+            self._config.dependency_not_fresh_delay_seconds
+            if delay_seconds is None
+            else max(float(delay_seconds), self._config.dependency_not_fresh_delay_seconds)
+        )
         defer_event = getattr(self._queue, "defer_event", None)
         if callable(defer_event):
             if not defer_event(
                 event.event_id,
                 self._config.worker_id,
                 reason=reason,
-                delay_seconds=self._config.dependency_not_fresh_delay_seconds,
+                delay_seconds=resolved_delay_seconds,
             ):
                 raise RuntimeError(f"PostgreSQL defer update did not match event {event.event_id}.")
             return
@@ -318,6 +324,17 @@ class RuntimeWorker:
     def _retry_delay_for_attempt(self, attempts: int) -> int:
         exponent = max(0, int(attempts or 1) - 1)
         return int(self._config.retry_delay_seconds * (2**exponent))
+
+    def _dependency_not_fresh_delay_seconds(self, event: RuntimeQueueEvent, error: str) -> float:
+        normalized_scope_type = str(event.scope_type or "").strip().lower()
+        if normalized_scope_type and self._parent_scope_keys_from_error(error):
+            for match in READ_MODEL_NOT_FRESH_RE.finditer(str(error or "").strip().lower()):
+                if match.group(1) == normalized_scope_type:
+                    return max(
+                        float(self._config.dependency_not_fresh_delay_seconds),
+                        float(self._config.retry_delay_seconds),
+                    )
+        return float(self._config.dependency_not_fresh_delay_seconds)
 
     @staticmethod
     def _is_dependency_not_fresh_error(error: str) -> bool:

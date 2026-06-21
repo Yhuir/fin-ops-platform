@@ -5,6 +5,7 @@
 ## 当前决策
 
 - 免 OA 流水批量处理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、application/service、API contract、read model/worker、前端交互、Workbench integration 和旧功能回归。
+- 普通未提交 draft 流水的行级选择入口属于 `submit-selection` 新链路，前端显示 checkbox 只依据 `bucket=unsubmitted`、`status=draft` 且非 `internal_transfer`；不得再由旧批次级 `can_submit` flag 控制。`can_submit` 仍可用于内部往来整批提交等批次级动作，最终提交合法性由后端 `submit-selection` 校验同月、同账户、同 `category_code` 和标签准入。
 - 2026-06-19 Spec-first E2E Audit 校准后，本地 `NO-OA-E2E-001..009` 已有 Browser、组件、API、service 和 integration 映射；`NO-OA-E2E-010` 真实基础设施 worker drain 保持 staging/runtime `external-risk`。
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
@@ -18,6 +19,28 @@
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 - relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
+
+## 2026-06-22 - 未提交普通流水选择列不再受旧 can_submit 污染
+
+- 目标：修复免 OA 流水批量处理里普通未提交手续费流水前没有 checkbox，用户无法选择流水后提交批次的问题。
+- 根因：页面已有 `submit-selection` 新链路和 row selection state，但行级 checkbox 的显示仍额外依赖批次级 `canSubmit`。当 SQL/read model 旧 payload 缺少 `can_submit` 时，前端 mapper 会把 `canSubmit` 归一为 `false`，导致普通 `draft` 流水隐藏选择列，旧批次级 flag 污染了按流水选择提交的新链路。
+- 影响范围：`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、本模块测试矩阵。
+- 架构决策：
+  - 普通未提交流水的可选择性由页面可见业务状态决定：`bucket=unsubmitted`、`status=draft`、非 `internal_transfer`。
+  - `can_submit` 不再参与普通行级选择入口；它保留给内部往来整批提交等批次级动作。
+  - 后端 `submit-selection` 继续作为最终事实边界，校验空选择、重复、跨标签、未准入标签、跨月份、跨账户、内部往来单边和 active relation 占用。
+- 测试覆盖：
+  - `web/src/test/NoOaBankBatchPage.test.tsx::keeps draft row selection available when legacy read model rows omit can_submit` 覆盖旧 SQL/read model payload 缺少 `can_submit` 时 checkbox 仍显示并提交 `submit-selection`。
+  - `tests/test_no_oa_bank_batch_workbench_integration.py::NoOaBankBatchWorkbenchIntegrationTests::test_submit_selection_fee_rows_render_as_collapsed_paired_workbench_group` 覆盖同账户多条手续费通过 `submit-selection` 提交后，在关联台已配对区显示为 `collapsed_summary` 折叠组。
+- 七类测试覆盖：
+  - Business core unit tests：不适用，本轮不改批次生成、状态流转、金额或后端选择校验。
+  - Service-layer tests：不适用，本轮不改 application service、repository、audit、rollback 或 worker。
+  - API contract tests：不适用，本轮不改 HTTP contract 或 DTO 字段。
+  - Read model/cache/background job tests：不适用，本轮不改 freshness、cache、dirty scope 或后台任务。
+  - Frontend component and interaction tests：适用，页面测试覆盖 checkbox 可见、可点击和 selected-row submit 请求体。
+  - End-to-end business-flow integration tests：适用，新增 no-OA 多行手续费 submit-selection -> Workbench paired collapsed summary 后端集成验证。
+  - Existing feature regression tests：适用，新增旧 read model payload 缺字段回归，避免旧 flag 再次隐藏新链路选择入口。
+- 未测风险：真实生产长列表横向滚动、登录态权限和 staging/生产 worker drain 仍按既有 smoke 管理。
 
 ## 2026-06-21 - 右侧流水栏行级银行明细标签
 

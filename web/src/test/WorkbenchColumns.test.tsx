@@ -206,6 +206,51 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaRow as HTMLElement).getByText("11:05")).toBeInTheDocument();
   });
 
+  test("keeps OA applicant name on the first line and renders only a date chip on the second line", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[{ key: "applicant", label: "申请人", track: "minmax(112px, 112fr)", minWidth: 112 }]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="oa"
+        row={{
+          id: "oa-applicant-date-chip-1",
+          recordType: "oa",
+          label: "日常报销",
+          status: "待处理",
+          statusCode: "pending",
+          statusTone: "warn",
+          exceptionHandled: false,
+          amount: "1872.93",
+          counterparty: "批量账务集中处理",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            applicant: "刘树刚",
+            applicationTime: "2026-01-14 14:04:00",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="open"
+      />,
+    );
+
+    const applicantLine = screen.getByText("刘树刚").closest(".workbench-oa-applicant-line");
+    const dateChip = screen.getByText("2026-01-14").closest(".inline-meta-tag");
+
+    expect(applicantLine).not.toBeNull();
+    expect(dateChip).not.toBeNull();
+    expect(within(applicantLine as HTMLElement).queryByText("2026-01-14")).not.toBeInTheDocument();
+    expect(dateChip).toHaveClass("inline-meta-tag-muted");
+    expect(dateChip?.closest(".compound-cell-secondary")).not.toBeNull();
+    expect(screen.getByText("14:04:00").closest(".inline-meta-tag")).toBe(dateChip);
+  });
+
   test("renders OA project metadata row with both application type and OA-bank relation status", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
@@ -230,6 +275,51 @@ describe("Workbench columns and inline actions", () => {
     expect(applicationType).toHaveClass("inline-meta-tag");
     expect(relationStatus.closest(".compound-cell-secondary")).not.toBeNull();
     expect(metadataRow).toBe(relationStatus.closest(".compound-cell-secondary"));
+  });
+
+  test("collapses ETC OA project tags to one ETC chip and hides multi-detail noise", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[{ key: "projectName", label: "项目名称", track: "minmax(192px, 192fr)", minWidth: 192 }]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="oa"
+        row={{
+          id: "oa-etc-tags-1",
+          recordType: "oa",
+          label: "日常报销",
+          status: "完全关联",
+          statusCode: "linked",
+          statusTone: "success",
+          exceptionHandled: false,
+          amount: "1872.93",
+          counterparty: "批量账务集中处理",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tags: ["ETC 发票已关联", "ETC 批次", "ETC 批次批量提交", "多明细"],
+          tableValues: {
+            projectName: "云南溯源科技",
+            applicationType: "日常报销",
+            reconciliationStatus: "完全关联",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="paired"
+      />,
+    );
+
+    const etcTags = screen.getAllByText("ETC");
+    expect(etcTags).toHaveLength(1);
+    expect(etcTags[0]).toHaveClass("inline-meta-tag");
+    expect(screen.queryByText("ETC 发票已关联")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC 批次")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC 批次批量提交")).not.toBeInTheDocument();
+    expect(screen.queryByText("多明细")).not.toBeInTheDocument();
   });
 
   test("renders OA invoice offset tag next to application type and pending status", () => {

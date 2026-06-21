@@ -26,6 +26,8 @@ const COMPACT_BANK_NAME_BY_PREFIX: Record<string, string> = {
   平安银行: "平安",
 };
 
+const HIDDEN_OA_PROJECT_TAGS = new Set(["多明细"]);
+
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "open";
   paneId: WorkbenchRecordType;
@@ -663,7 +665,7 @@ function renderOaProjectValue(
   const hasApplicationType = applicationType !== "--" && applicationType !== "—" && applicationType !== "";
   const hasReconciliationStatus =
     reconciliationStatus !== "--" && reconciliationStatus !== "—" && reconciliationStatus !== "";
-  const visibleTags = tags.map((tag) => tag.trim()).filter(Boolean);
+  const visibleTags = normalizeOaProjectTags(tags);
 
   return (
     <span className="compound-cell-value">
@@ -681,6 +683,35 @@ function renderOaProjectValue(
       ) : null}
     </span>
   );
+}
+
+function normalizeOaProjectTags(tags: string[]) {
+  const visibleTags: string[] = [];
+  const seenTags = new Set<string>();
+  let hasEtcTag = false;
+
+  tags.forEach((tag) => {
+    const normalizedTag = tag.trim();
+    const compactTag = normalizedTag.replace(/\s+/g, "");
+    if (!normalizedTag || HIDDEN_OA_PROJECT_TAGS.has(compactTag)) {
+      return;
+    }
+    if (compactTag.toUpperCase().startsWith("ETC")) {
+      if (!hasEtcTag) {
+        visibleTags.push("ETC");
+        seenTags.add("ETC");
+        hasEtcTag = true;
+      }
+      return;
+    }
+    if (seenTags.has(normalizedTag)) {
+      return;
+    }
+    visibleTags.push(normalizedTag);
+    seenTags.add(normalizedTag);
+  });
+
+  return visibleTags;
 }
 
 function highlightSearchText(value: string, query: string) {

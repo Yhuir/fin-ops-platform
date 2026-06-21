@@ -5477,6 +5477,10 @@ class PostgresReadModelRepository:
                     incoming_source_version is not None
                     and _source_version_value(existing_source_versions) is not None
                     and incoming_source_version < _source_version_value(existing_source_versions)
+                    and _workbench_source_versions_allow_stale_write_skip(
+                        source_versions,
+                        existing_source_versions,
+                    )
                 ):
                     continue
                 generation_id = self._new_workbench_generation_id(scope_key)
@@ -10700,6 +10704,17 @@ def _source_version_value(source_versions: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _workbench_source_versions_allow_stale_write_skip(incoming: Any, existing: Any) -> bool:
+    if not isinstance(incoming, dict) or not isinstance(existing, dict):
+        return True
+    for key, value in incoming.items():
+        if key == "source_version":
+            continue
+        if existing.get(key) != value:
+            return False
+    return True
 
 
 def _source_versions_from_scope_summary(scope_summary: dict[str, Any]) -> dict[str, Any]:

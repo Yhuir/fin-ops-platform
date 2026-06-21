@@ -9,6 +9,8 @@
 - Workbench matching 仍保留 legacy candidate 与 SQL decision 两条生产相关链路。新增规则时先复用现有 service/helper/test 工具，后续再单独规划匹配逻辑收敛。
 - 旧逻辑清理不和业务规则变更混做。`WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、`WorkbenchReconciliationEngine`、工资/内部转账 legacy rule code 仍有 orchestrator、worker、免 OA、分组和异常投影调用或兼容引用，不能无测试删除。
 - OA 附件解析缓存不是正式发票事实源。Workbench 发票栏和 relation projection 只读取 canonical invoice/read model；OA 附件 OCR 结果是否补充到统一发票池由设置页 `OA附件发票晋级` 控制，默认 `link_existing_only` 只关联已有发票，不创建缺失发票，`disabled` 完全跳过，只有 `create_missing` 才允许受控创建。旧 OA query service 只保留 OA detail 附件摘要。
+- 外部往来 `turnover_manual_closure` 是 confirmed active relation fact；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical ownership 和“收支闭环”证据，但未补齐 OA + 银行 + 发票三栏前留在 open/candidate 区，三栏完整后才进入 paired。
+- Workbench SQL active generation 的发布跳过逻辑不能只比较 numeric `source_version`。当 incoming `source_versions` 中的 builder/schema/rules/parser 等签名与现有 active generation 不一致时，即使 incoming `source_version` 更低，也必须发布新 generation；否则 schema bump 只能让状态显示 stale/refreshing，无法替换旧 generation。
 
 ## 记录模板
 
@@ -26,6 +28,23 @@
 ```
 
 ## 历史记录
+
+## 2026-06-22 - 外部往来闭环三栏分区纠偏
+
+- 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域，并被显示成“完全关联”的问题。
+- 真实原因：2026-06-21 的修复把 active relation ownership 和 paired zone completeness 混为一谈；`WorkbenchCandidateGroupingService._paired_group_has_enough_row_types()` 对 bank-only `turnover_manual_closure` 放行到 paired，SQL projection 进入 paired serializer 后又把 chip 覆盖成“完全关联”。
+- 关键决策：`turnover_manual_closure` 继续写 Workbench active relation，外部往来页继续显示“收支闭环”并支持撤回；关联台分区必须遵守三栏规则，bank-only / OA+bank-only 留在 canonical `case:<case_id>` open/candidate，只有 OA + 银行 + 发票完整后进入 paired。generation consistency 允许 active relation row 出现在 canonical open owner，禁止的是非 canonical open/temp owner。
+- 文档影响：同步产品规格、app architecture、本模块 README/state-machine/tests/implementation notes，以及 turnover-ledger 模块文档。
+- 测试覆盖：新增/更新 `test_bank_only_turnover_manual_closure_rows_stay_open_until_three_way_complete`、`test_two_pane_turnover_manual_closure_rows_stay_open_until_invoice_exists`、`test_three_pane_turnover_manual_closure_rows_render_as_paired_case`、`test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete`、`test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation_until_invoice_exists`、`test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists`。
+
+## 2026-06-21 - 外部往来 bank-only 闭环进入 paired（已被 2026-06-22 纠偏）
+
+- 目标：修复生产 App Status 显示 `Workbench read model generation consistency failed`，且贾小花三笔外部往来闭环银行流水在关联台仍处于 open/temp、没有显示同一个 paired active case 的问题。
+- 真实原因：`turnover_manual_closure` active relation 已经写入 `app.workbench_pair_relations`，但 Workbench grouping 仍沿用 2026-06-11 的 “bank-only 留 open” 规则；SQL projection 写入的银行 row relation code 是 `turnover_manual_closure`，`WorkbenchCandidateGroupingService._is_paired_row()` 不识别该 code，随后 `_paired_group_has_enough_row_types()` 又把纯银行 active relation demote 到 open。生产 consistency checker 正确发现 active relation row 被发布到非 canonical open/temp owner，报 `active_relation_open_membership` 并阻断 worker。
+- 真实原因 2：第一次部署分组修复后，生产仍保留旧月度 active generation。`PostgresReadModelRepository.save_workbench_read_models(...)` 的 stale 写入护栏只比较 numeric `source_version`，没有比较 builder/schema 签名；当 dirty scope 已被清过或 source_version 低于旧 active generation 时，schema bump 后的新月度 generation 会被跳过，all scope 继续引用旧失败 parent generation。
+- 关键决策（历史错误）：`turnover_manual_closure` 多银行 active relation 曾被视为外部往来完整闭环并展示在 paired 区；该 paired zone 口径已在 2026-06-22 撤销，当前规则要求未补齐 OA + 银行 + 发票三栏前留在 open/candidate。
+- 文档影响：同步更新产品规格、app architecture、本模块 README/state-machine/tests/implementation notes，以及 turnover-ledger 模块文档。
+- 测试覆盖（历史，已由 2026-06-22 三栏分区测试替换）：当时新增/更新过 bank-only paired 断言；当前不再作为有效测试口径。
 
 ## 2026-06-21 - Workbench active repair 状态优先级修复
 
@@ -457,6 +476,8 @@
 - 未测风险：个人暂借款、exception application、server active relation repair 等 Workbench-adjacent relation 写入口仍待后续切片迁移。
 
 ## 2026-06-11 - 外部往来 bank-only 闭环保持 open
+
+> 历史记录：本节的 paired 分区规则在 2026-06-22 重新成为当前口径；当前规则要求 `turnover_manual_closure` 未补齐 OA + 银行 + 发票三栏前留在 open/candidate。
 
 - 目标：修正外部往来手动闭环在关联台的分区语义，移除 `bank-only + turnover_manual_closure + exactly 2 bank rows` 进入 paired 的例外。
 - 影响范围：Workbench candidate grouping、server pair relation display payload、Workbench read model schema version、外部往来 closure integration、关联台本地 optimistic update。

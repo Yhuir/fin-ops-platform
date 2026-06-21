@@ -1029,8 +1029,10 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertNotIn("output_invoice_collection.read_model.refresh", snapshot["outbox_statuses"])
         self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "failed")
         self.assertNotIn("pending_invoice.read_model.refresh", snapshot["outbox_statuses"])
-        self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
+        self.assertIn("e.status <> 'done' and e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
         self.assertIn("when e.publish_status = 'failed' then 'publish_failed'", connection.outbox_sql)
+        self.assertIn("done.status = 'done'", connection.outbox_sql)
+        self.assertIn("readiness.status = 'fresh'", connection.outbox_sql)
 
     def test_runtime_repository_ignores_dirty_scope_covered_by_later_fresh_readiness(self) -> None:
         class CoveredDirtyScopeConnection(FakeRuntimeConnection):

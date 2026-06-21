@@ -496,6 +496,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("event_type = 'cost_statistics.read_model.refresh'", executed_sql)
         self.assertIn("scope_key = 'all' or scope_key ~ '^[0-9]{4}-[0-9]{2}$'", executed_sql)
         self.assertIn("payload->>'scope_key'", executed_sql)
+        self.assertNotIn("{_current_effective_dirty_scope_predicate_sql", executed_sql)
         self.assertNotIn("slow_refresh_event_samples", executed_sql)
         self.assertNotIn("current_refresh_event_samples", executed_sql)
         self.assertNotIn("workbench_generation_status_counts", executed_sql)

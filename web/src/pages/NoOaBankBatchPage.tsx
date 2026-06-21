@@ -176,7 +176,6 @@ function canWithdraw(batch: NoOaBankBatch) {
 function canSelectBatchRows(batch: NoOaBankBatch, bucket: NoOaBankBatchStatusBucket) {
   return bucket === "unsubmitted"
     && batch.status === "draft"
-    && batch.canSubmit
     && batch.batchType !== "internal_transfer";
 }
 

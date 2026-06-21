@@ -99,6 +99,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 - durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
 - queue API：producer 先通过 `ReadModelRefreshGateway` / scope policy registry 归一化、校验和去重 read model scope，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer 写入 durable queue。
 - worker registry：`runtime_worker_registry.py` 定义 worker 名称、scope、manifest、health 可见性。
+- parent/aggregate read model event 只能在 parent shard fresh 后发布聚合；遇到同一 read model `parent_scope_keys` 未 fresh 时，worker 必须补投 parent shard 并使用 retry 级退避，让 shard work 先 drain，不能用快速 dependency retry 反复重发 `all` 聚合事件。
 - RabbitMQ 只能作为可选 wakeup/transport，不能成为 read model 状态事实源。
 - Redis 只能缓存通过 fresh gate 后的 payload，不能缓存或伪造 freshness。
 

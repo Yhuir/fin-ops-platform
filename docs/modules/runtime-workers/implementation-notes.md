@@ -9,6 +9,7 @@
 - 非事务 read model refresh producer 由 architecture guard 约束：不得绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
 - `bank_detail:all` 是显式 fan-out 命令，不是 downstream `*_read_model_not_fresh` 可自动推导的稳定 freshness 依赖 scope；下游 all-scope event 只能等待或补投可识别的具体月份 shard。
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
+- Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
 
 ## 记录模板
 
@@ -26,6 +27,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-21 - Same-scope parent dependency 长退避防止 all 聚合抢占
+
+- 目标：修复 Workbench `all` aggregate-only 事件在父月 scope 未 fresh 时每 0.25s defer/republish，持续抢占 `2026-01/02/04` 月 scope refresh，导致 App Status 保持 `refreshing/backlog` 的问题。
+- 影响范围：`RuntimeWorker` dependency-not-fresh defer 策略、RabbitMQ transport 下同一 read model parent/aggregate 调度；不改变 PostgreSQL durable queue、readiness、dirty scope 或 Workbench projection 业务逻辑。
+- 关键决策：普通跨 read model 依赖仍使用 `dependency_not_fresh_delay_seconds` 短退避；错误中同时出现当前 event scope type 和 `parent_scope_keys=...` 时，当前 event 用 `retry_delay_seconds` 级别退避，并先通过 dependency refresh path 补投/让出 parent month scope。这样 parent shard 有机会先被 worker claim，`all` 聚合不会以亚秒级重发淹没队列。
+- 文档影响：更新 runtime-workers README、测试矩阵、系统状态实施记录和本 GSD debug 记录。
+- 测试覆盖：加强 `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent`，断言 same-scope parent dependency defer 使用 `retry_delay_seconds`，同时保留普通 dependency-not-fresh 测试证明短退避不变。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py -q`。
+- 未测风险：本地测试证明调度 contract；生产仍需发布后观察 Workbench parent month scopes 是否先 drain，再确认 App Status queue/read model attention 清零。
 
 ## 2026-06-21 - Same-scope parent dependency refresh
 

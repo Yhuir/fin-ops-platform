@@ -353,12 +353,24 @@ class RuntimeWorkerTests(unittest.TestCase):
                 worker_id="worker-1",
                 event_types=["workbench.read_model.refresh"],
                 dependency_not_fresh_delay_seconds=4,
+                retry_delay_seconds=60,
             ),
             handlers={"workbench.read_model.refresh": fail_not_fresh},
         )
 
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
         self.assertEqual(queue.failed_events, [])
+        self.assertEqual(
+            queue.deferred_events,
+            [
+                (
+                    "event-1",
+                    "worker-1",
+                    "workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=2026-03",
+                    60.0,
+                )
+            ],
+        )
         self.assertIn(("tenant-a", "workbench", "2026-03"), queue.active_read_model_refresh_checks)
         self.assertEqual(queue.fresh_read_model_refresh_checks, [])
         self.assertEqual(len(queue.enqueued_read_model_refreshes), 1)
@@ -369,6 +381,7 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(dependency["priority"], "high")
         self.assertEqual(dependency["trace_id"], "trace-workbench-all")
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertEqual(deferred_payloads[0]["delay_seconds"], 60.0)
         self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "workbench", "scope_key": "2026-03"}])
 
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
