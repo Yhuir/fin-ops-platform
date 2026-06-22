@@ -57,6 +57,7 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 - defer 不会把任何 projection/readiness 标为 fresh；它只缩短已知依赖顺序竞态的等待时间。
 - dependency refresh 只能补投可从 source scope 明确推导的依赖 scope。对 `bank_detail` 依赖，裸月份或 source scope 内嵌月份可补投对应月份；下游 `all` scope 不能自动补投 `bank_detail:all`。
 - `bank_detail:all` 是 fan-out 命令，不是稳定 freshness 依赖；它只能由导入、规则变化、backfill 或明确的银行明细 refresh producer 触发，再由 bank detail handler 展开为月份 shard。
+- App Health 汇总 runtime/read model 状态时必须以 current-effective facts 为准。Workbench active repair 已进入 `pending`/`processing` 或 repository 报 `read_model_status=refreshing/rebuilding` 时，旧 generation consistency failure 只能作为诊断，不能升级为 unavailable dependency 或全局 blocked；没有 active repair 的 failed/dead-letter 才是 blocker。
 
 Refresh 触发来源：
 
@@ -77,6 +78,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-22 | App Health 聚合 Workbench active repair 时优先 current-effective refreshing/rebuilding，旧 consistency failure 不再写 blocked dependency | 修复“运行摘要显示刷新中但顶部阻断”的矛盾状态；worker/queue 仍按 PostgreSQL durable facts 收敛，不伪造 fresh | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_app_status_overview_service tests.test_runtime_monitoring -v` |
 | 2026-06-13 | 依赖 read model 未 fresh 使用短延迟 defer | `*_read_model_not_fresh` 不再走 60s 普通 retry/dead-letter，减少跨 read model fan-out 长尾 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |
 | 2026-06-16 | `bank_detail:all` 不再由 downstream all-scope dependency defer 自动推导 | 防止 `turnover_ledger:all` / `no_oa_bank_batch:all` 与 `bank_detail:all` fan-out 互相放大，页面长期 refreshing | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker.RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency tests.test_read_model_refresh_gateway.ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope -v` |
 | 2026-06-13 | 补齐 RabbitMQ transport 下 stale/superseded processing 运维恢复 | RabbitMQ 只负责 wakeup，PostgreSQL `processing` 超过 lock timeout 且没有 envelope 时，可先用 `resolve-superseded-processing` 清理已被更新同 dedupe event 覆盖的旧 processing，再用 `release-stale-processing` 释放仍需重跑的事件；不伪造 readiness/fresh | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_queue_ops -v` |

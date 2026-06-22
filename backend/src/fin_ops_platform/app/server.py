@@ -4548,6 +4548,27 @@ class Application:
             return
         read_model_status = str(status_payload.get("read_model_status") or "").strip().lower()
         consistency_status = str(status_payload.get("consistency_status") or "").strip().lower()
+        if read_model_status in {"loading", "pending", "processing", "refreshing", "rebuilding"}:
+            workbench_payload = snapshot.get("workbench_read_model")
+            if not isinstance(workbench_payload, dict):
+                workbench_payload = {}
+                snapshot["workbench_read_model"] = workbench_payload
+            workbench_payload.update(
+                {
+                    "status": "rebuilding",
+                    "read_model_status": read_model_status,
+                    "consistency_status": consistency_status or "refreshing",
+                    "active_generation_id": status_payload.get("active_generation_id"),
+                    "failed_generation_id": status_payload.get("failed_generation_id"),
+                    "last_error": status_payload.get("last_error"),
+                    "consistency_failures": status_payload.get("consistency_failures")
+                    if isinstance(status_payload.get("consistency_failures"), list)
+                    else [],
+                }
+            )
+            if snapshot.get("status") != "blocked":
+                snapshot["status"] = "busy"
+            return
         if read_model_status != "failed" and consistency_status != "failed":
             return
         workbench_payload = snapshot.get("workbench_read_model")

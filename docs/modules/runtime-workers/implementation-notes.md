@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-22 - App Health active repair current-effective 聚合
+
+- 目标：修复 Workbench active repair 已经 pending/processing 时，App Health 仍把旧 generation consistency failure 提升成全局 `blocked` 的矛盾状态。
+- 影响范围：`/api/app-health` snapshot、App Status overview、Workbench read model dependency summary；不改变 worker claim、dirty scope、readiness 或 RabbitMQ transport。
+- 关键决策：runtime/App Health 聚合必须先看 current-effective refresh facts。`read_model_status=refreshing/rebuilding` 表示 worker 正在修复，旧 consistency failure 只保留在诊断字段；没有 active repair 的 failed/dead-letter 才是 blocker。
+- 文档影响：同步 runtime-workers、read-models 和 reconciliation-workbench 状态机/测试矩阵。
+- 测试覆盖：新增 `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair`，并复跑 App Status overview/runtime monitoring 相关回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_app_status_overview_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_runtime_monitoring -v`。
+- 未测风险：本地 fake runtime 不证明生产 worker drain；发布后仍需观察 `job.outbox_events`、`job.read_model_dirty_scopes`、`read_model.app_status_readiness` 是否自然收敛。
+
 ## 2026-06-22 - Production runtime parity guard
 
 - 目标：防止生产 schema、worker、RabbitMQ、Redis 与本地测试覆盖再次分叉。历史问题不是某个 worker/Redis/RabbitMQ 事实源重写，而是多个 registry、migration 和 env 模板缺少交叉断言，新增 read model 容易只改一处。

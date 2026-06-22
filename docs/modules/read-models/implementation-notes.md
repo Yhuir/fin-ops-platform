@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-22 - Active repair App Health 与 refresh enqueue 语义收敛
+
+- 目标：修复 App Status 同时展示 Workbench read model “刷新中”和 `Workbench read model generation consistency failed.` 阻断的问题，并让 API `refresh_enqueued` 只表示本次调用真实新增 refresh request。
+- 影响范围：`/api/app-health` Workbench generation health 聚合、`ReadModelQueryGateway` API miss/stale 入队语义、App Status popover 和依赖 `refresh_enqueued` 的 HTTP SLO/页面判断。
+- 关键决策：Workbench active repair/current-effective 状态优先于旧 consistency failure。`read_model_status=refreshing/rebuilding` 时保留 `consistency_status/last_error` 诊断，但不写 unavailable dependency 或全局 blocked。`ReadModelQueryGateway` 使用 refresh gateway 的 actual enqueue events 判断 `refresh_enqueued`，active scope coalescing 返回 false。
+- 文档影响：同步 read-models、runtime-workers 和 reconciliation-workbench 状态机/测试矩阵；durable queue、readiness、Redis/RabbitMQ 边界不变。
+- 测试覆盖：新增 `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair`、`tests/test_read_model_query_gateway.py::ReadModelQueryGatewayTests::test_missing_sql_view_does_not_report_new_enqueue_when_scope_is_already_active`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_read_model_query_gateway tests.test_read_model_refresh_gateway tests.test_app_status_overview_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_runtime_monitoring -v`。
+- 未测风险：本地测试不连接真实生产 PostgreSQL/RabbitMQ/Redis，也不证明具体页面首屏 SQL p95；发布后仍需 authenticated HTTP SLO、App Status/dirty scope 只读观察和必要的 SQL profiling。
+
 ## 2026-06-22 - Production runtime parity guards
 
 - 目标：修复生产 schema、worker、RabbitMQ、Redis 与本地测试覆盖“各测各的”缺口，避免新增 read model 后只改 App Status 或 worker registry，漏掉 migration storage contract、critical SLO smoke、RabbitMQ dispatch 或 Redis/deploy env 模板。

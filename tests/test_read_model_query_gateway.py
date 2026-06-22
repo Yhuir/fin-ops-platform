@@ -8,9 +8,16 @@ from fin_ops_platform.services.read_model_query_gateway import ReadModelQueryGat
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[dict[str, object]] = []
+        self.active_refreshes: set[tuple[str, str, str]] = set()
+        self.active_checks: list[tuple[str, str, str]] = []
 
     def enqueue_read_model_refresh(self, **kwargs: object) -> None:
         self.refreshes.append(dict(kwargs))
+
+    def read_model_refresh_is_active(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        key = (tenant_id, scope_type, scope_key)
+        self.active_checks.append(key)
+        return key in self.active_refreshes
 
 
 class RedisRecorder:
@@ -272,6 +279,26 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
             queue.refreshes,
             [{"scope_type": "example", "scope_key": "all", "reason": "api_miss"}],
         )
+
+    def test_missing_sql_view_does_not_report_new_enqueue_when_scope_is_already_active(self) -> None:
+        queue = QueueRecorder()
+        queue.active_refreshes.add(("default", "example", "all"))
+        gateway = ReadModelQueryGateway(queue_repository=queue)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_source_versions={"source_version": 3},
+            load_view=lambda: None,
+            empty_payload_factory=lambda: {"rows": [], "summary": {"row_count": 0}},
+            missing_reason="api_miss",
+        )
+
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertFalse(result.payload["refresh_enqueued"])
+        self.assertFalse(result.refresh_enqueued)
+        self.assertEqual(queue.active_checks, [("default", "example", "all")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_invalid_sql_payload_contract_enqueues_refresh_without_populating_cache(self) -> None:
         queue = QueueRecorder()

@@ -44,7 +44,9 @@
 
 依赖未 fresh 不是 fresh，也不是普通失败：当 downstream refresh handler 读取 source read model 时遇到 `*_read_model_not_fresh`，runtime worker 会短延迟 defer 该 outbox event，等待 source projection/readiness 真实收敛后再处理；readiness reporter 必须记录为 `refreshing` 并保留 last_error 诊断，不能写 `failed` blocker，也不得因为 defer 把页面标为已同步。Workbench `all` aggregate-only refresh 携带 `parent_scope_keys` 时同样适用：parent month shard 仍 pending/processing/failed 时返回 `workbench_read_model_not_fresh`，等待 parent active generation 收敛后再聚合。
 
-同一 scope 的 current-effective 状态必须合并后展示：如果历史 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 只能作为历史诊断，不能继续作为当前失败阻断页面或操作。
+同一 scope 的 current-effective 状态必须合并后展示：如果历史 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 只能作为历史诊断，不能继续作为当前失败阻断页面或操作。App Health 聚合 Workbench active generation 诊断时也必须遵守这一点：`read_model_status=refreshing/rebuilding` 时，即使 `consistency_status=failed`，也只能展示 busy/rebuilding 和诊断字段，不能把 `workbench_read_model` 写成 unavailable dependency 或全局 blocked。
+
+`refresh_enqueued` 只表示本次 query gateway 调用实际写入了新的 refresh request；如果 `ReadModelRefreshGateway` 因同 scope 已有 active refresh 而合并/去重，API 仍可返回 `read_model_status=refreshing`，但 `refresh_enqueued=false`。页面和 SLO probe 不能把“已有刷新在跑”误解为“本次请求又触发了一轮刷新”。
 
 ## refresh 触发来源
 
@@ -86,6 +88,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-22 | App Health 和 query gateway 对 active repair/coalescing 采用 current-effective 语义：Workbench 修复中不再把旧 consistency failure 提升为 blocked；已被 active refresh 合并的 API miss 不再报告 `refresh_enqueued=true` | 修复 App Status 同时显示“刷新中/阻断”的矛盾状态，减少页面和 SLO 误判“每次加载都新触发刷新”的噪音；不改变 durable queue/readiness 事实源 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_read_model_query_gateway tests.test_read_model_refresh_gateway tests.test_app_status_overview_service -v` |
 | 2026-06-18 | `ReadModelQueryGateway` 支持业务 payload validator；旧 Redis/SQL payload 即使通过 freshness gate，也不能绕过当前 API payload contract | 避免 App Health 显示 fresh/已同步，但业务页面因旧 payload 缺少必需字段而报泛化加载失败；invalid Redis cache 改走 SQL view，invalid SQL view 返回 refreshing 并入队 refresh，不写 fresh cache | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime -v` |
 | 2026-06-18 | Workbench `all` aggregate-only refresh 在 parent month scope 仍 active 或 not fresh 时走 dependency-not-fresh defer；同 scope 旧 failed 被重新 pending/processing 覆盖时展示 refreshing | 避免 relation 写入后的暂态“旧 month generation + 新 canonical relation”被误写为 failed all generation；避免旧 `workbench_all_scope_parent_inconsistent` / deadlock last_error 在重试中继续污染 Workbench refresh status 和 App Health | `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime tests.test_runtime_queue tests.test_runtime_worker tests.test_app_status_overview_service -v` |
 | 2026-06-17 | read model 查询 freshness contract fail-closed，并纳管 legacy direct fresh/direct mismatch 路径 | `ReadModelQueryGateway` 必须传 expected schema/source；actual schema/source metadata 缺失时不能 fresh；自管 read model service 禁止空 source version provider；所有直接写 fresh 或直接比较 source version 的 legacy 入口必须通过静态架构 guard 分类 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v` |

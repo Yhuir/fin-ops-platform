@@ -215,6 +215,38 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["workbench_read_model"]["active_generation_id"], "gen-all")
         self.assertIn("generation_metadata_actual_mismatch", payload["workbench_read_model"]["last_error"])
 
+    def test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair(self) -> None:
+        app = build_application()
+
+        class RepairingWorkbenchRepository:
+            def get_workbench_refresh_status(self, *, scope_key: str):
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "refreshing",
+                    "consistency_status": "failed",
+                    "active_generation_id": "gen-all",
+                    "last_error": "Workbench read model generation consistency failed.",
+                    "consistency_failures": [
+                        {
+                            "scope_key": "all",
+                            "generation_id": "gen-all",
+                            "group_count": 6,
+                            "actual_group_count": 0,
+                        }
+                    ],
+                }
+
+        app._workbench_sql_read_repository = RepairingWorkbenchRepository()
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "busy")
+        self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
+        self.assertNotEqual(payload["dependencies"].get("workbench_read_model", {}).get("status"), "unavailable")
+        self.assertNotEqual(payload["app_status"]["overall"]["level"], "blocked")
+
     def test_app_health_caches_workbench_refresh_status_briefly(self) -> None:
         app = build_application()
 

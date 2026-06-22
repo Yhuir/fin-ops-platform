@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-22 - Workbench active repair 不再污染 App Health 阻断
+
+- 目标：修复关联台/Workbench 后台修复正在运行时，App Status 仍展示 `Workbench read model generation consistency failed.` 和红色阻断的问题。
+- 影响范围：Workbench refresh status 到 `/api/app-health` 的聚合展示、App Status popover、关联台后台追赶时的用户可见状态；不改变 active generation 发布、paired/open 分区或写操作 barrier。
+- 关键决策：`/api/workbench/refresh-status` 和 App Health 都采用 current-effective 语义。`read_model_status=refreshing/rebuilding` 时旧 consistency failure 只作为诊断，不能写 `workbench_read_model` unavailable dependency；没有 active repair 的 generation consistency failure 仍然保留为 failed/blocker。
+- 文档影响：同步本模块 state-machine/tests，并在 read-models/runtime-workers 记录共享语义。
+- 测试覆盖：新增 `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_app_status_overview_service -v`。
+- 未测风险：本地测试不回放真实 Workbench month/all active generation；发布后需要看 App Status 是否从 blocked 降为 busy/refreshing，并等待 worker drain 到 fresh。
+
 ## 2026-06-22 - Workbench all view 使用 active all generation
 
 - 目标：修复 `GET /api/workbench?month=all` 主视图和分页视图在 `workbench:all` active generation 已发布时仍从 month snapshots 临时合成 payload/summary 的问题。

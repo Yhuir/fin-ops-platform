@@ -177,7 +177,7 @@ class ReadModelQueryGateway:
     def _enqueue_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> bool:
         if not self._refresh_gateway.can_enqueue():
             return False
-        return bool(self._refresh_gateway.enqueue_many(scope_type, [scope_key], reason=reason))
+        return bool(self._refresh_gateway.enqueue_many_events(scope_type, [scope_key], reason=reason))
 
     def _get_cached_payload(
         self,
