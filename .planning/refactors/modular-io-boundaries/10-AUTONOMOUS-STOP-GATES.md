@@ -4,7 +4,7 @@
 
 ## Principle
 
-The autonomous loop should keep moving across independent modules. Missing staging DB, missing local `PGSQL_URL`, missing root SSH, and unavailable production DB evidence are not hard blockers.
+The autonomous loop should keep moving across independent modules. Missing staging DB, missing local `PGSQL_URL`, and unavailable production DB evidence are not hard blockers. `finops-prod-root` is available for privileged read-only checks, but secret access and production writes remain hard gates.
 
 Only stop when continuing would be unsafe, destructive, or meaningless.
 
@@ -51,7 +51,6 @@ Do not stop for these. Record the condition and continue to the next independent
 
 - No local `PGSQL_URL`.
 - No staging database.
-- `finops-prod-root` unavailable.
 - No passwordless sudo.
 - Production read-only evidence unavailable.
 - A specific module's tests fail after repair attempts.
@@ -88,12 +87,14 @@ Without staging DB or local `PGSQL_URL`, production evidence is best effort.
 Allowed:
 
 - `ssh finops-prod` non-privileged read-only checks.
+- `ssh finops-prod-root` privileged read-only checks that do not read secrets or write production state.
 - Public health endpoint checks.
 - File existence checks where permission allows.
 
 Forbidden:
 
 - Reading secrets.
+- Printing DSNs, tokens, cookies or env secret values.
 - sudo prompts.
 - production writes.
 - queue mutation.

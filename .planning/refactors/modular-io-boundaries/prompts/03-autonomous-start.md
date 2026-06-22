@@ -26,7 +26,7 @@ Primary constraints:
 - Never record secrets.
 - Do not ask me for SSH passwords, DB passwords, tokens, cookies, PGSQL_URL, or staging database.
 - Do not require staging DB or local PGSQL_URL. They are unavailable.
-- Use local static checks, local fake/stub tests, API contract tests, frontend tests, and non-privileged production read-only SSH checks when useful.
+- Use local static checks, local fake/stub tests, API contract tests, frontend tests, and production read-only SSH checks when useful.
 - Remove obsolete legacy code paths when tests and call graph prove they are unused.
 - Quarantine retained legacy paths as compat-only with owner, caller list, deletion condition, and tests.
 - Prevent old modules from writing new canonical facts, dirty scopes, outbox, read model readiness, cache, or App Status.
@@ -37,7 +37,7 @@ Primary constraints:
 - Target read model strategy is Partitioned Scoped Read Model + Scoped Incremental Projection. Workbench keeps active generation.
 - Target worker runtime is Go Worker + PostgreSQL dual queue, where dual queue means job.outbox_events plus job.read_model_dirty_scopes. RabbitMQ is optional wakeup/transport only.
 - ssh finops-prod is available as finops-deploy, but has no passwordless sudo.
-- finops-prod-root may become available after interactive ssh-copy-id. Test it before privileged read-only production validation. If unavailable, treat privileged production validation as deferred evidence, not a blocker.
+- ssh finops-prod-root is available as root with key login. Use it only for privileged read-only checks; do not read or print secrets.
 - Do not perform production writes. If a production write or secret is required, record needs-human-production-gate and continue to another independent module if possible.
 
 Required reading before any edits:
@@ -84,7 +84,7 @@ Autonomous loop:
 Failure behavior:
 - For a module-specific failure, try up to 3 repair iterations.
 - If still failing, preserve evidence, mark the module deferred-module-failure, stash the failed module diff if needed, and continue to the next independent module only if the working tree is clean.
-- Missing PGSQL_URL, missing staging DB, missing root SSH, and missing production DB evidence are soft gates. Record production-evidence-deferred and continue.
+- Missing PGSQL_URL, missing staging DB, and missing production DB evidence are soft gates. Record production-evidence-deferred and continue.
 - Go candidate admission failure is a soft gate. Record go-candidate-deferred and continue with Python boundary hardening or the next independent module.
 - Stop only for hard gates in 10-AUTONOMOUS-STOP-GATES.md.
 

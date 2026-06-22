@@ -14,7 +14,7 @@
 | BR-008 | 当前 worktree 有用户未提交变更 | 误改或回滚用户工作 | `git status --short` 显示 workbench/OA 相关修改 | Open | 后续实现前必须阅读相关 diff，不能回滚用户变更 |
 | BR-009 | 没有本地 `PGSQL_URL` 和 staging 数据库 | 真实 PostgreSQL/read model/worker 验证无法在本地闭环 | 用户确认只有 SSH 服务器密码 | Open | 验证计划分为 local fake/stub、production read-only、production controlled-write；不能把未跑真实环境的验证标为完成 |
 | BR-010 | SSH 密码被误写入文档/脚本/日志 | 生产凭据泄露 | 用户只有 SSH 密码，后续 agent 可能要求粘贴密码 | Open | 明确禁止记录 secret；生产命令使用交互式登录或服务器 root-only env，不在仓库保存密码 |
-| BR-011 | 当前 SSH 只具备非特权 `finops-deploy` 访问 | 无法完成 root/systemd/secret/read model/worker 级生产验证 | `finops-prod` 可登录为 `finops-deploy`，无无密码 sudo；`finops-prod-root` 仍 Permission denied | Open | 将生产验证拆成非特权只读、特权只读、受控写入；获得 root/sudo/fin-ops 组/只读 DB 前不能关闭生产验证 |
+| BR-011 | 生产验证需要严格区分 root 只读、secret 和写入 | root 权限可扩大验证面，但也提高误读 secret 或误写生产状态的风险 | `finops-prod-root` 已可免密公钥登录，验证返回 `user=root uid=0 host=VM-0-6-opencloudos key_login=ok` | Mitigated | root 只用于特权只读验证；不得读取或输出 secret；生产写入、DB 写入、worker 消费/重放必须单独审批 |
 | BR-012 | 自动推进可能误提交当前 main 工作区的用户变更 | 污染 Dev 分支或覆盖用户工作 | 当前 main 工作区有大量业务修改和新增文件 | Open | 启动自动推进前，用户必须先提交并 push 当前 main；主 repo 工作区必须干净，自动流程才能切到 `dev` |
 | BR-013 | 无人值守流程遇到模块失败后停滞 | 无法趁用户离开持续推进其它安全模块 | 多模块队列中部分模块可能失败 | Open | 模块失败后最多 3 次修复，保存证据并标记 deferred，然后继续下一个独立模块 |
 | BR-014 | 旧代码和旧链路污染新链路 | 新模块看似完成，但运行时仍通过旧 route/service/repository/frontend API 写入事实源或 refresh 状态 | 用户明确要求移除旧逻辑并禁止旧模块污染新链路 | Open | 每个模块必须填写 legacy 退役/隔离合同；默认删除旧链路，保留则必须 `compat-only`、有 owner、调用者清单、删除条件和污染防护测试 |

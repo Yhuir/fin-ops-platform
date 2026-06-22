@@ -18,7 +18,8 @@ Go hot-path state: `candidate-gated-not-started`
 - No staging database.
 - `ssh finops-prod` works as `finops-deploy`.
 - `finops-deploy` has no passwordless sudo.
-- `finops-prod-root` is pending interactive `ssh-copy-id` completion; if still unavailable, privileged production validation remains deferred.
+- `ssh finops-prod-root` works as root with key login: `user=root uid=0 host=VM-0-6-opencloudos key_login=ok`.
+- Root access allows privileged read-only production checks, but automatic runs still must not read secrets or perform production writes.
 - Production validation is non-blocking unless a production write or secret is required.
 - Go/Fiber/Go Worker work is candidate-gated by `11-GO-HOT-PATH-CARVE-OUT.md`.
 - Target read model strategy is partitioned scoped + scoped incremental.

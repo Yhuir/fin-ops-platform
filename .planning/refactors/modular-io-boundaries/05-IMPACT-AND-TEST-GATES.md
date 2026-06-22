@@ -121,7 +121,8 @@
 - 没有本地 `PGSQL_URL`。
 - 没有 staging 数据库。
 - 当前 `finops-prod` 可 SSH 登录服务器，但用户是 `finops-deploy`，没有无密码 sudo。
-- 当前 `finops-prod-root` 尚不可用，root 登录返回 `Permission denied`。
+- 当前 `finops-prod-root` 已可免密公钥登录，验证返回 `user=root uid=0 host=VM-0-6-opencloudos key_login=ok`。
+- root 访问只允许用于特权只读验证；不得读取或输出 secret，不得执行生产写入、DB 写入、worker 消费/重放。
 - 不允许把 SSH 密码或任何 secret 写入计划、命令、脚本、测试或日志。
 
 ## read model refresh 边界闸门
@@ -414,7 +415,7 @@ cd web && npm run build
 
 没有 staging 时，任何涉及真实 PostgreSQL/read model/worker 的重构最多只能在 local 层证明设计正确。生产闭环必须另走 read-only 或 controlled-write runbook。
 
-当前 SSH 状态下，`Production read-only` 只能覆盖非特权可见范围；root/systemd/env/read model/worker 级只读验证仍需要额外权限或只读验证脚本。
+当前 SSH 状态下，`Production read-only` 可以覆盖 root 可见的 systemd、日志、部署文件和只读 health/readiness 检查；read model/worker/DB 级验证仍需要受控只读 wrapper，避免暴露 DSN 或 secret。
 
 ## Autonomous No-Block Policy
 

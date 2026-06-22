@@ -116,7 +116,7 @@
 
 - 只读生产验证可以通过 SSH 进入服务器后执行 read-only smoke、日志检查、health/readiness 查询，但命令不得包含明文密码。
 - 当前已确认 `finops-prod` 可用，但用户是 `finops-deploy`，没有无密码 sudo；因此只能做非特权只读验证。
-- 当前 `finops-prod-root` 不可用；root/systemd/secret/read model/worker 级验证仍是缺口。
+- 当前 `finops-prod-root` 已可免密公钥登录；root/systemd/log/部署文件级只读验证可纳入 runbook。secret、生产写入、DB 写入、worker 消费/重放仍必须单独审批。
 - 任何写入生产数据的验证必须先有备份/回滚方案、影响范围、人工审批和维护窗口。
 - 没有 staging 时，优先选择可逆、幂等、只读或 dry-run 工具；避免把生产当作试错环境。
 

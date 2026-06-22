@@ -19,7 +19,7 @@ The autonomous loop must optimize for safe forward progress:
 - Do not introduce Go for modules outside `11-GO-HOT-PATH-CARVE-OUT.md`.
 - Commit and push only passing, reviewable slices.
 - Do not require staging DB or local `PGSQL_URL`.
-- Do not require production root access.
+- `finops-prod-root` is available for privileged read-only checks.
 - Do not perform production writes.
 - If production evidence is unavailable, record it and continue to the next safe module.
 
@@ -177,7 +177,7 @@ cd web && npm test -- <targeted-tests>
 cd web && npm run build
 ```
 
-If a real PostgreSQL/read model/worker check would normally be required, replace it with repository fake/stub tests, gateway contract tests, force refresh contract tests, partition/scope contract tests, API response shape tests, cross-page freshness regression tests, Python-vs-Go equivalence tests for Go candidates, and non-privileged production read-only evidence if available through `ssh finops-prod`.
+If a real PostgreSQL/read model/worker check would normally be required, replace it with repository fake/stub tests, gateway contract tests, force refresh contract tests, partition/scope contract tests, API response shape tests, cross-page freshness regression tests, Python-vs-Go equivalence tests for Go candidates, and production read-only evidence if available through `ssh finops-prod-root` without reading secrets or writing production state.
 
 Do not block on missing staging DB or missing `PGSQL_URL`.
 
@@ -230,18 +230,19 @@ The loop must not claim real production DB/worker proof unless such proof was ac
 Current known SSH state:
 
 - `ssh finops-prod` works as `finops-deploy`.
-- No passwordless sudo.
-- `finops-prod-root` is not available.
+- `finops-deploy` has no passwordless sudo.
+- `ssh finops-prod-root` works as root with key login.
 
 Allowed:
 
-- Non-secret, non-privileged read-only checks.
+- Non-secret, privileged read-only checks through `finops-prod-root`.
 - HTTP health checks that do not need token/cookie.
 
 Forbidden:
 
 - Production writes.
 - Reading secrets.
+- Printing DSNs, tokens, cookies or env secret values.
 - Asking the user for passwords.
 - Recording credentials.
 
