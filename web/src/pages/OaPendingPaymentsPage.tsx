@@ -232,6 +232,9 @@ export default function OaPendingPaymentsPage() {
     if (!canMutateData) {
       return undefined;
     }
+    if (loading || refreshing || error || !isReadModelFresh(readModelStatus)) {
+      return undefined;
+    }
     const scopeKey = query.month || "all";
     if (autoReconcileCompletedKeysRef.has(scopeKey)) {
       return undefined;
@@ -278,7 +281,16 @@ export default function OaPendingPaymentsPage() {
     return () => {
       active = false;
     };
-  }, [autoReconcileCompletedKeysRef, autoReconcilePromisesRef, canMutateData, query.month]);
+  }, [
+    autoReconcileCompletedKeysRef,
+    autoReconcilePromisesRef,
+    canMutateData,
+    error,
+    loading,
+    query.month,
+    readModelStatus,
+    refreshing,
+  ]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));

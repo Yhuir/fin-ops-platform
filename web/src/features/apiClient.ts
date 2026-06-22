@@ -153,6 +153,40 @@ function createBoundedSignal(inputSignal: AbortSignal | null | undefined, timeou
   };
 }
 
+function finOpsApiFallbackUrl(resolvedUrl: string): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const pagePath = window.location.pathname || "";
+  if (pagePath !== "/fin-ops" && !pagePath.startsWith("/fin-ops/")) {
+    return null;
+  }
+  const parsedUrl = new URL(resolvedUrl, window.location.origin);
+  if (parsedUrl.origin !== window.location.origin || !parsedUrl.pathname.startsWith("/api/")) {
+    return null;
+  }
+  parsedUrl.pathname = `/fin-ops-api${parsedUrl.pathname}`;
+  if (/^https?:\/\//i.test(resolvedUrl)) {
+    return parsedUrl.toString();
+  }
+  return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+}
+
+async function fetchApiResponseText(
+  resolvedUrl: string,
+  init: RequestInit,
+  signal: AbortSignal | undefined,
+) {
+  const response = await fetch(resolvedUrl, buildApiRequestInit({
+    ...init,
+    signal,
+  }));
+  const rawText = await response.text();
+  const trimmedText = rawText.trim();
+  const contentType = response.headers?.get?.("Content-Type") ?? "";
+  return { response, rawText, trimmedText, contentType, resolvedUrl };
+}
+
 export async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
   return fetch(apiUrl(url), buildApiRequestInit(init));
 }
@@ -168,12 +202,15 @@ export async function apiRequestJson<T>(
 ): Promise<T> {
   const resolvedUrl = apiUrl(url);
   const boundedSignal = createBoundedSignal(init.signal, options.timeoutMs);
-  let response: Response;
+  let result: Awaited<ReturnType<typeof fetchApiResponseText>>;
   try {
-    response = await fetch(resolvedUrl, buildApiRequestInit({
-      ...init,
-      signal: boundedSignal.signal,
-    }));
+    result = await fetchApiResponseText(resolvedUrl, init, boundedSignal.signal);
+    if (result.trimmedText && looksLikeHtmlResponse(result.trimmedText, result.contentType)) {
+      const fallbackUrl = finOpsApiFallbackUrl(result.resolvedUrl);
+      if (fallbackUrl !== null && fallbackUrl !== result.resolvedUrl) {
+        result = await fetchApiResponseText(fallbackUrl, init, boundedSignal.signal);
+      }
+    }
   } catch (error) {
     if (boundedSignal.didTimeout()) {
       throw new ApiClientError(options.timeoutMessage ?? `接口 ${url} 请求超时，请稍后重试。`, {
@@ -186,9 +223,7 @@ export async function apiRequestJson<T>(
   } finally {
     boundedSignal.cleanup();
   }
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  const contentType = response.headers?.get?.("Content-Type") ?? "";
+  const { response, rawText, trimmedText, contentType } = result;
 
   if (trimmedText && looksLikeHtmlResponse(trimmedText, contentType)) {
     throw new ApiClientError(
@@ -196,7 +231,7 @@ export async function apiRequestJson<T>(
       {
         status: response.status,
         responseText: rawText,
-        url: resolvedUrl,
+        url: result.resolvedUrl,
       },
     );
   }
@@ -211,7 +246,7 @@ export async function apiRequestJson<T>(
         {
           status: response.status,
           responseText: rawText,
-          url: resolvedUrl,
+          url: result.resolvedUrl,
         },
       );
     }
@@ -225,7 +260,7 @@ export async function apiRequestJson<T>(
       code: errorCodeFromPayload(payload),
       payload,
       responseText: rawText,
-      url: resolvedUrl,
+      url: result.resolvedUrl,
     });
   }
 

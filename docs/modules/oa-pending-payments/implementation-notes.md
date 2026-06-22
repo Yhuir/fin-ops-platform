@@ -3,6 +3,16 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-22 - 自动匹配等待 read model fresh 与 API fallback
+
+- 目标：修复 OA 待付款核对页在 rows/read model 仍显示“同步中”时仍立即触发后台自动匹配/写回，并且当根 `/api/*` 请求被前端 HTML fallback 吞掉时把 `接口返回了 HTML 页面` 错误直接暴露给用户的问题。
+- 影响范围：`OaPendingPaymentsPage` 自动匹配 effect、共享 `apiClient` HTML fallback 处理、前端回归测试和本模块状态机/测试矩阵；后端 API endpoint、匹配规则、read model freshness gate 和 OA MySQL 写回语义不变。
+- 关键决策：自动匹配/写回是写命令，必须在 rows/filter-options 加载完成且 `oa_pending_payment` read model 为 fresh 后才触发；refreshing/stale/unavailable 或 rows 加载失败时只展示同步/错误状态，不叠加写命令。前端 API 仅在 `/fin-ops/` 页面下确认根 `/api/*` 返回 HTML shell 时重试 canonical `/fin-ops-api/*`，JSON 错误和非 HTML 响应仍按原契约处理。
+- 文档影响：更新 `state-machine.md` 和 `tests.md`；部署/Nginx 长期口径不变，真实代理仍应保证 `/api/`、`/fin-ops/api/`、`/fin-ops-api/` 返回 JSON API 而不是 HTML。
+- 测试覆盖：新增/更新 `web/src/test/OaPendingPaymentsPage.test.tsx::does not auto reconcile while OA pending payment read model is still refreshing` 和 `web/src/test/apiClient.test.ts::falls back to canonical fin-ops API prefix when root API returns the SPA shell under fin-ops`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：生产 App Status 中 `Workbench read model generation consistency failed` 仍表示运行时/worker/readiness 层有独立问题，需要用生产只读 App Health、dirty scopes、outbox 和 worker journal 继续定位；本地修复只防止页面在 non-fresh 状态下额外发写命令，并提高 API prefix 临时错配恢复能力。
+
 ## 2026-06-22 - 自动匹配跳过诊断
 
 - 目标：排查“金额、对方名和日期看似满足规则但未自动配对”的进行中 OA 场景，补齐自动匹配失败的可观测性。

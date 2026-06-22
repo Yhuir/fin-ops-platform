@@ -6,6 +6,7 @@ describe("apiClient", () => {
     vi.resetModules();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    window.history.pushState({}, "", "/");
   });
 
   test("normalizes production API base path and sends OA auth credentials", async () => {
@@ -42,6 +43,35 @@ describe("apiClient", () => {
     const { apiRequestJson } = await import("../features/apiClient");
 
     await expect(apiRequestJson("/api/example")).rejects.toThrow("接口返回了 HTML 页面");
+  });
+
+  test("falls back to canonical fin-ops API prefix when root API returns the SPA shell under fin-ops", async () => {
+    window.history.pushState({}, "", "/fin-ops/oa-pending-payments");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response("<!doctype html><html><body>fin-ops shell</body></html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const { apiRequestJson } = await import("../features/apiClient");
+
+    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/auto-reconcile-bank-transactions", {
+      method: "POST",
+      body: "{}",
+    })).resolves.toEqual({ ok: true });
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+      "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+      "/fin-ops-api/api/oa-pending-payments/auto-reconcile-bank-transactions",
+    ]);
   });
 
   test("surfaces structured API errors with status and error code", async () => {

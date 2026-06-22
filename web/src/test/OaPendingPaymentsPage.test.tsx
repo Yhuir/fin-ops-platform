@@ -1198,6 +1198,24 @@ describe("OA pending payments page", () => {
     });
   });
 
+  test("does not auto reconcile while OA pending payment read model is still refreshing", async () => {
+    const fetchMock = installOaPendingPaymentsFetch({
+      rowsPayload: {
+        rows: [],
+        pagination: { page: 1, pageSize: 20, total: 0 },
+        summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
+        filterConfig: [],
+        read_model_status: "refreshing",
+      },
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
+    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
+  });
+
   test("waits for the OA pending payment barrier before reloading after bank link", async () => {
     const barrier = deferred();
     const fetchMock = installOaPendingPaymentsFetch({ operationBarrierDelay: barrier.promise });
