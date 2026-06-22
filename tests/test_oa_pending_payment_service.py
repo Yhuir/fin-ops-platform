@@ -296,6 +296,71 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
 
+    def test_in_progress_view_hides_payment_admitted_shadow_when_completed_projection_has_same_business_record(self) -> None:
+        duplicate_detail = {
+            "申请日期": "2026-04-16",
+            "开户行": "中国农业银行股份有限公司威信扎西支行",
+            "收款账号": "24231201040003910",
+        }
+        payment_repository = FakeAdmissionPaymentStatusRepository(
+            flow_ids={
+                "oa-pay-old-mongo-id": "old-mongo-id",
+                "oa-progress-real": "real-progress-id",
+            },
+            admitted_flow_ids={"old-mongo-id", "real-progress-id"},
+        )
+        service = self._service(
+            oa_records=[
+                self._oa(
+                    "oa-pay-2094",
+                    "樊祖芳",
+                    "7000.00",
+                    project_name="昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
+                    apply_type="支付申请",
+                    workflow_status="completed",
+                    counterparty_name="云南心诚环保科技有限公司",
+                    reason="申请支付昭通烟厂能源系统维护项目：环保数采仪1套，合同金额：7000元，全额付款7000元。",
+                    detail_fields=duplicate_detail,
+                )
+            ],
+            in_progress_oa_records=[
+                self._oa(
+                    "oa-pay-old-mongo-id",
+                    "樊祖芳",
+                    "7000.00",
+                    project_name="昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
+                    apply_type="支付申请",
+                    workflow_status="in_progress",
+                    counterparty_name="云南心诚环保科技有限公司",
+                    reason="申请支付昭通烟厂能源系统维护项目：环保数采仪1套，合同金额：7000元，全额付款7000元。",
+                    detail_fields=duplicate_detail,
+                ),
+                self._oa(
+                    "oa-progress-real",
+                    "樊祖芳",
+                    "5000.00",
+                    project_name="昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
+                    apply_type="支付申请",
+                    workflow_status="in_progress",
+                    counterparty_name="北京雪迪龙科技股份有限公司",
+                    reason="申请支付昭通烟厂现场服务费：5000元",
+                    detail_fields={
+                        "申请日期": "2026-04-16",
+                        "开户行": "中国建设银行北京沙河支行",
+                        "收款账号": "11001016000059263662",
+                    },
+                ),
+            ],
+            payment_repository=payment_repository,
+        )
+
+        progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
+        completed_payload = service.list_rows(page_size=20)
+
+        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-real"])
+        self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
+        self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
+
     def test_page_size_limit_protects_first_screen_slo(self) -> None:
         service = self._service(
             oa_records=[
@@ -437,6 +502,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         project_name: str = "测试项目",
         apply_type: str = "报销",
         workflow_status: str | None = "completed",
+        counterparty_name: str = "测试供应商",
+        reason: str = "测试付款",
         detail_fields: dict[str, object] | None = None,
     ) -> OAApplicationRecord:
         return OAApplicationRecord(
@@ -448,8 +515,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             project_name=project_name,
             apply_type=apply_type,
             amount=amount,
-            counterparty_name="测试供应商",
-            reason="测试付款",
+            counterparty_name=counterparty_name,
+            reason=reason,
             relation_code="",
             relation_label="",
             relation_tone="",

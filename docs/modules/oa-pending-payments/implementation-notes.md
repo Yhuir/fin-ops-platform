@@ -13,6 +13,38 @@
 - 验证命令：本轮最终说明列出完整命令。
 - 未测风险：本地没有真实生产 OA/Mongo/MySQL/PostgreSQL 数据，无法直接确认截图中那条记录的生产 `flow_id`、active relation 占用和写回错误；发布后需要用该月份调用 auto-reconcile 接口查看 `skippedAutoMatches`。
 
+## 2026-06-22 - 自动匹配 relation 持久化闭环
+
+- 目标：修复生产 `威斯达昆明信息技术有限责任公司 / 163000 / 2026-02` 自动匹配返回成功后，页面 read model 仍显示未关联支出流水，且重复执行 auto-reconcile 仍继续返回相同 3 条自动匹配的问题。
+- 影响范围：`Application._oa_pending_payment_command_service` 的 Workbench relation command service 组装、OA 待付款自动匹配 relation 持久化、重复执行幂等性和 read model 刷新；匹配规则、前端 API contract、OA MySQL 写回逻辑不变。
+- 关键决策：真实原因不是规则不匹配，也不是 OA 支付状态未写回。生产验证显示目标 `flow_id=69a262c6db8c0a3633bd74a2` 已经 `pay_status=1`，但 `active_relations_for_row_ids` 查不到 `oa-pay-69a262c6db8c0a3633bd74a2` / `txn_imported_1185` 的 active relation，read model 因没有持久化 relation 继续判定“未关联支出流水”。OA 待付款命令服务原来注入默认 `_workbench_relation_command_service()`，该默认 repository 只更新当前进程内存 snapshot；不像 Workbench 主路由那样在路由层另行调用 `_persist_workbench_pair_relations`。现在 OA 待付款命令服务注入 `repository=self._state_store`，让自动确认 relation 同步落持久层，worker/read model 和后续进程都能读到。
+- 文档影响：更新本实施记录和 `tests.md`；产品口径、匹配规则、状态机和接口字段不变。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_api.py::OaPendingPaymentApiTests::test_auto_reconcile_persists_relation_and_reload_is_noop`，断言第一次 auto-reconcile 后 state store 持久化 OA-bank relation；用同一 data dir 重建应用后再次 auto-reconcile 必须 `autoMatchedCount=0`、`writebackCount=0`、不重复写回。
+- 生产验证：发布 release `main-6652abe4-20260622124730` 后，目标自动匹配 relation `OA-PAY-63d72411227871d3` 已持久化，row_ids 为 `oa-pay-69a262c6db8c0a3633bd74a2` 与 `txn_imported_1185`；重建应用实例后 active relation 可读，重复 auto-reconcile 返回 `autoMatchedCount=0`、`writebackCount=0`；`oa_pending_payment:2026-02` read model fresh，目标行 `paymentStatus=paid`，`bankTransaction.primaryBankTransactionId=txn_imported_1185`，金额 `163000.00`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：未跑浏览器端截图验证；后端生产 read model payload 已确认页面表格使用的 `bankTransaction` 字段完整。
+
+## 2026-06-22 - 进行中 OA 自动匹配投影源闭环
+
+- 目标：修复生产 `威斯达昆明信息技术有限责任公司 / 163000 / 2026-02` 页面 fresh 展示进行中 OA，但页面级 auto-reconcile 没有自动关联同名同额支出流水的问题。
+- 影响范围：`Application._oa_pending_payment_projection` 的服务组装缓存边界、`OaPendingPaymentCommandService.auto_reconcile_bank_transactions` 的 in-progress OA 输入、应用层 API 回归测试和本模块测试矩阵；匹配规则、API endpoint、read model freshness 语义不变。
+- 关键决策：真实原因不是 OA-bank 规则不匹配。生产诊断显示 read model 中目标 OA `oa-pay-69a262c6db8c0a3633bd74a2` fresh 存在，支出流水 `txn_imported_1185` eligible；但命令服务的 payment-admitted projection 被生产启动时显式传入的 `PostgresOAProjectionAdapter` 缓存污染，实时扫描 `in_progress_records=0`。显式 `source_adapter` 创建的 OA 待付款投影现在只作为调用点局部对象，不写入默认 lazy projection 缓存；自动匹配命令默认 lazy path 会重新使用 Mongo-backed source adapter，确保与页面 in-progress OA 可见性一致。
+- 文档影响：更新本实施记录和 `tests.md`；产品口径、状态机、匹配规则和 read model freshness 语义不变。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_api.py::OaPendingPaymentApiTests::test_auto_reconcile_uses_payment_admitted_source_after_completed_projection_cache`，复现生产初始化顺序：先用 completed/Postgres 投影创建显式 projection，再执行 auto-reconcile，断言仍能读取 payment-admitted in-progress OA 并生成 `oa_bank_exact_amount` 写回。
+- 验证命令：本轮最终说明列出完整命令。
+- 生产验证：发布 release `main-6652abe4-20260622124730` 后，目标 2026-02 样本能生成并确认 `oa_bank_exact_amount`；详见上方 relation 持久化闭环验证。
+- 未测风险：未跑浏览器端截图验证。
+
+## 2026-06-22 - 已完成 OA 的进行中影子行去重
+
+- 目标：修复生产 `云南心诚环保科技有限公司 / 7000 / 2026-04` 在“进行中 OA”中显示未配对，但真实 completed 行已关联支出流水的重复展示问题。
+- 影响范围：`OaPendingPaymentQueryService` 的 in-progress 视图过滤、`invoice-usage-collection` 重建 `oa_pending_payment` read model 的结果、服务层回归测试和本模块测试矩阵；Workbench relation、自动匹配规则和前端 API contract 不变。
+- 关键决策：真实原因不是金额/对方名/日期规则失败。生产中旧 in-progress 行使用 Mongo 旧 row id（如 `oa-pay-69e5c2a3...`），真实 completed 行使用请求号 row id（如 `oa-pay-2094`），两者业务字段相同但 row id 不同；completed 行已通过 Workbench 自动决策关联 `txn_imported_1521` 并判定 `paid`。查询服务现在用月份、类型、申请人、项目、对方、金额、申请日期、开户行、收款账号和事由组成业务指纹，in-progress payment-admitted 记录如果已存在对应 completed 指纹，就作为影子行排除。
+- 文档影响：更新本实施记录和 `tests.md`；产品口径不变，仍是 completed/in-progress 两视图，只是避免同一业务单跨投影重复展示。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_in_progress_view_hides_payment_admitted_shadow_when_completed_projection_has_same_business_record`。
+- 生产验证：发布 release `main-6652abe4-20260622115629` 后重建 `oa_pending_payment:2026-04`，rows API 返回 `in_progress.total=0`、`summary.viewCounts.in_progress=0`；completed 视图保留 `oa-pay-2094`，付款状态 `paid`，支出流水 `txn_imported_1521`。
+- 未测风险：业务指纹是高置信去重，不替代未来更强的 OA canonical identity；若真实业务允许同日同申请人同项目同对方同金额同账号同事由的两张不同付款申请，需引入更稳定的 OA 跨状态 identity。
+
 ## 2026-06-22 - 刷新态分页与自动写回幂等闭环
 
 - 目标：修复 OA 待付款核对页 rows read model 刷新中时分页显示 `NaN-NaN / undefined`，并避免已有 active 支出流水 relation 且 OA 已写回时，页面级自动写回每次进入页面都重复入队刷新，导致用户长期看到“数据正在刷新”。

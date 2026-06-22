@@ -681,7 +681,47 @@ class OaPendingPaymentQueryService:
         records = [record for record in records if isinstance(record, OAApplicationRecord)]
         if view_mode == VIEW_MODE_IN_PROGRESS:
             records = self._filter_records_by_payment_status_admission(records)
+            records = self._exclude_completed_shadow_records(records, month=month)
         return {record.id: record for record in records if isinstance(record, OAApplicationRecord)}
+
+    def _exclude_completed_shadow_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        month: str | None,
+    ) -> list[OAApplicationRecord]:
+        if not records:
+            return []
+        completed_fingerprints = self._completed_oa_duplicate_fingerprints(month=month)
+        if not completed_fingerprints:
+            return records
+        filtered: list[OAApplicationRecord] = []
+        for record in records:
+            fingerprint = _oa_duplicate_fingerprint(record)
+            if fingerprint is None or fingerprint not in completed_fingerprints:
+                filtered.append(record)
+        return filtered
+
+    def _completed_oa_duplicate_fingerprints(self, *, month: str | None) -> set[tuple[str, ...]]:
+        projection = self._oa_projection
+        if projection is None:
+            return set()
+        list_all = getattr(projection, "list_all_application_records", None)
+        if not callable(list_all):
+            return set()
+        normalized_month = str(month or "").strip()
+        fingerprints: set[tuple[str, ...]] = set()
+        for record in list(list_all() or []):
+            if not isinstance(record, OAApplicationRecord):
+                continue
+            if normalized_month and normalized_month != "all" and not str(record.month or "").startswith(normalized_month[:7]):
+                continue
+            if not self._record_matches_view_mode(record, VIEW_MODE_COMPLETED):
+                continue
+            fingerprint = _oa_duplicate_fingerprint(record)
+            if fingerprint is not None:
+                fingerprints.add(fingerprint)
+        return fingerprints
 
     def _all_view_oa_records_by_id(self, *, month: str | None) -> dict[str, OAApplicationRecord]:
         records = self._oa_records_by_id(month=month, view_mode=VIEW_MODE_COMPLETED)
@@ -1223,6 +1263,74 @@ def _oa_time_text(value: Any) -> str:
     if _looks_like_datetime(normalized):
         return normalized[:19]
     return normalized
+
+
+def _oa_duplicate_fingerprint(record: OAApplicationRecord) -> tuple[str, ...] | None:
+    amount = _money(record.amount) if _parse_decimal(record.amount) is not None else ""
+    counterparty_name = _normalized_oa_text(record.counterparty_name)
+    payee_account = _normalized_account_text(_first_oa_detail_text(record, ("收款账号", "收款账户", "银行账号")))
+    reason = _normalized_oa_text(record.reason)
+    if not amount or not reason or not (counterparty_name or payee_account):
+        return None
+    return (
+        _normalized_month(record.month),
+        _normalized_oa_text(record.apply_type),
+        _normalized_oa_text(record.applicant),
+        _normalized_oa_text(record.project_name_display or record.project_name),
+        counterparty_name,
+        amount,
+        _oa_application_date(record),
+        _normalized_oa_text(_first_oa_detail_text(record, ("开户行", "收款银行"))),
+        payee_account,
+        reason,
+    )
+
+
+def _oa_application_date(record: OAApplicationRecord) -> str:
+    for field in (
+        "申请日期",
+        "申请时间",
+        "提交时间",
+        "创建时间",
+        "单据日期",
+        "日期",
+        "applicationTime",
+        "application_time",
+        "applyTime",
+        "apply_time",
+        "createdAt",
+        "created_at",
+    ):
+        text = _oa_time_text(_oa_detail_value(record, field))
+        if text:
+            return text[:10]
+    return ""
+
+
+def _first_oa_detail_text(record: OAApplicationRecord, fields: tuple[str, ...]) -> str:
+    for field in fields:
+        text = _normalized_oa_text(_oa_detail_value(record, field))
+        if text:
+            return text
+    return ""
+
+
+def _oa_detail_value(record: OAApplicationRecord, field: str) -> Any:
+    detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
+    return detail_fields.get(field)
+
+
+def _normalized_month(value: Any) -> str:
+    text = _normalized_oa_text(value)
+    return text[:7] if len(text) >= 7 else text
+
+
+def _normalized_oa_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalized_account_text(value: Any) -> str:
+    return "".join(str(value or "").strip().split())
 
 
 def _looks_like_datetime(value: str) -> bool:

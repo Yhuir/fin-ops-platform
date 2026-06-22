@@ -9456,7 +9456,7 @@ class Application:
             import_service=self._import_service,
             oa_projection=self._oa_pending_payment_projection(),
             completed_oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
-            relation_command_service=self._workbench_relation_command_service(),
+            relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
@@ -9471,13 +9471,17 @@ class Application:
         source_adapter: object | None = None,
         use_lazy_source: bool = True,
     ) -> PaymentAdmittedOAProjectionAdapter:
+        # Explicit source projections are request/builder scoped; caching them can hide current in-progress OA from writes.
+        if source_adapter is not None or not use_lazy_source:
+            return PaymentAdmittedOAProjectionAdapter(
+                source_adapter=source_adapter,
+                payment_status_repository=self._oa_payment_status_repository(),
+            )
         projection = getattr(self, "_oa_pending_payment_projection_instance", None)
         if isinstance(projection, PaymentAdmittedOAProjectionAdapter):
             return projection
-        if source_adapter is None and use_lazy_source:
-            source_adapter = self._oa_pending_payment_source_adapter()
         projection = PaymentAdmittedOAProjectionAdapter(
-            source_adapter=source_adapter,
+            source_adapter=self._oa_pending_payment_source_adapter(),
             payment_status_repository=self._oa_payment_status_repository(),
         )
         self._oa_pending_payment_projection_instance = projection
