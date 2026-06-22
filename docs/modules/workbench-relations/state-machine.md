@@ -6,6 +6,8 @@
 
 Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动 decision/candidate 和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
 
+confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirmed` OA+银行、OA+发票、银行+发票两栏 relation 必须继续作为 `app.workbench_pair_relations.status='active'` 分发给下游，`workbench_relation` 可读为 `relation_status='linked'`；但关联台 active generation 应把这类 partial relation 发布为 canonical `case:<case_id>` open/candidate group，等待第三栏补齐。只有 OA + 银行 + 发票三栏完整，或 no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation、processed/closed exception 等显式业务例外，才能进入关联台 paired zone。
+
 页面和 downstream read model 不能把以下内容当作 confirmed relation：
 
 - 前端 `workbenchRelationUpdated` event。

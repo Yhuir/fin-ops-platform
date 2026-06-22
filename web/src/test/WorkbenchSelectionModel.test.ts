@@ -59,4 +59,37 @@ describe("buildWorkbenchSelectionContext", () => {
       invoice: 1,
     });
   });
+
+  test("open zone selection keeps a manual two-pane relation as one selectable group", () => {
+    const sourceGroup: WorkbenchCandidateGroup = {
+      id: "case:CASE-PARTIAL",
+      groupType: "open",
+      rawGroupType: "candidate",
+      relationMode: "manual_confirmed",
+      matchConfidence: "medium",
+      reason: "confirmed_partial_relation",
+      rows: {
+        oa: [row("oa-partial", "oa")],
+        bank: [row("bank-partial", "bank")],
+        invoice: [],
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [sourceGroup.rows.bank[0]],
+      sourceGroups: [sourceGroup],
+      zoneId: "open",
+    });
+
+    expect(context.explicitRows.map((record) => record.id)).toEqual(["bank-partial"]);
+    expect(context.includedRowIds).toEqual(["bank-partial", "oa-partial"]);
+    expect([...context.relatedRowIdSet]).toEqual(["oa-partial"]);
+    expect(context.summary).toMatchObject({
+      explicitTotal: 1,
+      total: 2,
+      oa: 1,
+      bank: 1,
+      invoice: 0,
+    });
+  });
 });

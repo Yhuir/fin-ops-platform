@@ -222,6 +222,14 @@ export type AutoReconcileOaPendingPaymentBankTransactionsResponse = {
   autoMatchedCount?: number;
   writebackCount?: number;
   autoMatchedRelations?: Array<Record<string, unknown>>;
+  skippedAutoMatches?: Array<{
+    oaRowIds?: string[];
+    bankTransactionIds?: string[];
+    ruleCode?: string;
+    errorCode?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+  }>;
   oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
   readModelRefresh?: {
     scopeKeys?: string[];

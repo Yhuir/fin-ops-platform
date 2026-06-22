@@ -1235,8 +1235,6 @@ class WorkbenchCandidateGroupingService:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if self._is_turnover_manual_closure_group(group):
             return row_type_count >= 3 and self._is_confirmed_active_relation_group(group)
-        if row_type_count >= 2 and self._is_confirmed_active_relation_group(group):
-            return True
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
             relation_codes = {
                 str(row.get("invoice_relation", {}).get("code", ""))

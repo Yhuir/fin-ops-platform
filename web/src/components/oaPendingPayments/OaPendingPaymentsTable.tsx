@@ -867,7 +867,8 @@ function PaginationControls({
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
 }) {
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const safeTotal = safeCount(total);
+  const totalPages = Math.max(1, Math.ceil(safeTotal / Math.max(pageSize, 1)));
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   return (
     <div className="oa-pending-payments-pagination">
@@ -883,7 +884,7 @@ function PaginationControls({
           ))}
         </select>
       </label>
-      <span className="oa-pending-payments-pagination-range">{displayedRange(currentPage, pageSize, total)}</span>
+      <span className="oa-pending-payments-pagination-range">{displayedRange(currentPage, pageSize, safeTotal)}</span>
       <span className="oa-pending-payments-pagination-actions">
         <button disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)} type="button">上一页</button>
         <button disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)} type="button">下一页</button>
@@ -921,14 +922,19 @@ function optionLabel(option: OaPendingPaymentFilterOption) {
 }
 
 function displayedRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) {
+  const safeTotal = safeCount(total);
+  if (safeTotal <= 0) {
     return "0-0 / 0";
   }
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const totalPages = Math.max(1, Math.ceil(safeTotal / Math.max(pageSize, 1)));
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   const from = (currentPage - 1) * pageSize + 1;
-  const to = Math.min(currentPage * pageSize, total);
-  return `${from}-${to} / ${total}`;
+  const to = Math.min(currentPage * pageSize, safeTotal);
+  return `${from}-${to} / ${safeTotal}`;
+}
+
+function safeCount(value: number) {
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function firstColumnInGroup(columnId: string) {

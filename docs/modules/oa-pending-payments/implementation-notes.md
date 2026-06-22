@@ -3,6 +3,26 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-22 - 自动匹配跳过诊断
+
+- 目标：排查“金额、对方名和日期看似满足规则但未自动配对”的进行中 OA 场景，补齐自动匹配失败的可观测性。
+- 影响范围：`OaPendingPaymentCommandService.auto_reconcile_bank_transactions` 响应、前端 `AutoReconcileOaPendingPaymentBankTransactionsResponse` 类型、command service 回归测试和本模块测试矩阵；自动匹配业务规则不变。
+- 关键决策：规则层已能对“云南心诚环保科技有限公司 / 7000 / 2026-04-16 -> 2026-04-23”生成 `oa_bank_exact_amount` 候选；当候选在确认 relation、解析 `flow_id` 或 OA MySQL 写回阶段失败时，后端不再静默吞掉，而是在 `skippedAutoMatches` 返回 OA/流水 row、规则码、错误码、消息和 details，便于现场判断是 row 占用、`flow_id` 缺失、写回不可用还是 relation 冲突。
+- 文档影响：更新本实施记录和 `tests.md`；产品口径、状态机和 read model freshness 语义不变。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_command_service.py::OaPendingPaymentCommandServiceTests::test_auto_reconcile_reports_skipped_exact_match_when_flow_id_is_missing`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地没有真实生产 OA/Mongo/MySQL/PostgreSQL 数据，无法直接确认截图中那条记录的生产 `flow_id`、active relation 占用和写回错误；发布后需要用该月份调用 auto-reconcile 接口查看 `skippedAutoMatches`。
+
+## 2026-06-22 - 刷新态分页与自动写回幂等闭环
+
+- 目标：修复 OA 待付款核对页 rows read model 刷新中时分页显示 `NaN-NaN / undefined`，并避免已有 active 支出流水 relation 且 OA 已写回时，页面级自动写回每次进入页面都重复入队刷新，导致用户长期看到“数据正在刷新”。
+- 影响范围：`OaPendingPaymentsPage`、`OaPendingPaymentsTable`、`OaPendingPaymentReadModelService.refreshing_rows_payload`、`OaPendingPaymentCommandService` 自动写回分支、组件/API/command 回归测试和本模块测试矩阵；业务匹配规则、read model freshness gate 和 API endpoint 不变。
+- 关键决策：刷新态 payload 也必须返回稳定 `summary.rowCount=0` 与 `summary.viewCounts` shape；前端分页只信任有限数值并把缺失/非数值 total 归零，不用 `0 || undefined` 这类 truthy fallback。已有 relation 的自动写回先读取同一 `flow_id` 当前支付状态，已经 `pay_status=1` 时视为 no-op，不增加 `writebackCount`、不返回写回记录、不触发 read model refresh。
+- 文档影响：更新本实施记录和 `tests.md` 历史 bug 回归库；长期产品/API 口径不变。
+- 测试覆盖：后端 command 测试覆盖“active relation 且 OA 已写回”no-op，不重复 mark-paid 或入队；API 测试覆盖 rows/filter-options refreshing payload summary shape；前端 Vitest 覆盖 refreshing rows 空 summary 时不显示真实空态，也不渲染 `NaN` 或 `undefined` 分页。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_command_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_payment_status_service -v`；`cd web && npx vitest run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npm run build`。
+- 未测风险：本地自动化没有连接真实 OA MySQL/PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实环境仍需在发布后确认 App Health 的 `oa_pending_payment` read model 从 refreshing 回到 fresh，且 rows 分页不再出现 `NaN/undefined`。
+
 ## 2026-06-22 - 写后 operation barrier
 
 - 目标：修复写操作成功后前端立即刷新 rows，可能读到旧 `oa_pending_payment` read model 的缺口。该记录创建时覆盖进行中 OA `confirm-paid`、`link-bank-transactions` 和支出流水无需开票规则保存；2026-06-22 自动匹配/写回上线后，前端主写回入口由 auto-reconcile 替代 `confirm-paid`。

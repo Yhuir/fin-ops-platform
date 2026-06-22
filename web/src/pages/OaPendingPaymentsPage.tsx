@@ -132,6 +132,17 @@ function readModelStatusTitle(status: string) {
   return "OA 待付款核对数据正在刷新";
 }
 
+function finiteCount(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallbackRowCount: number): OaPendingPaymentSummary {
+  return {
+    ...(summary ?? {}),
+    rowCount: finiteCount(summary?.rowCount, fallbackRowCount),
+  };
+}
+
 export default function OaPendingPaymentsPage() {
   const { canMutateData } = useSessionPermissions();
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
@@ -181,9 +192,10 @@ export default function OaPendingPaymentsPage() {
         if (requestId !== requestIdRef.current) {
           return;
         }
+        const payloadTotal = finiteCount(payload.pagination?.total);
         setRows(payload.rows ?? []);
-        setTotal(payload.pagination?.total ?? 0);
-        setSummary(payload.summary ?? { rowCount: payload.pagination?.total ?? 0 });
+        setTotal(payloadTotal);
+        setSummary(normalizeSummary(payload.summary, payloadTotal));
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
         setReadModelStatus(readModelStatusFromPayloads(payload, optionsPayload));
@@ -463,7 +475,7 @@ export default function OaPendingPaymentsPage() {
                   rows={rows}
                   page={query.page}
                   pageSize={query.pageSize}
-                  total={total || summary.rowCount}
+                  total={total}
                   keywordDraft={keywordDraft}
                   filterConfigs={filterConfigs}
                   filterOptions={filterOptions}

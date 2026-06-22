@@ -49,6 +49,16 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_reads_only_active_generation tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_includes_active_generation_freshness_contract tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_group_detail_api_returns_full_group -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards tests.test_workbench_query_facade tests.test_workbench_sql_runtime -v`。
 - 未测风险：本地没有连接真实生产数据库或真实浏览器；发布后仍需 authenticated HTTP/worker drain smoke 验证旧 projection 已收敛。
 
+## 2026-06-22 - 普通两栏 confirmed relation 留在未配对区
+
+- 目标：修复关联台“已配对”区域出现大量普通 OA+银行、OA+发票、银行+发票两栏 `manual_confirmed` relation 的问题。任意两栏确认仍然允许，但只能表达 partial relation，等待第三栏补齐。
+- 真实原因：`WorkbenchCandidateGroupingService._paired_group_has_enough_row_types()` 曾用 `row_type_count >= 2 and confirmed active relation` 作为宽泛 paired 条件，把 canonical active relation ownership 和三栏闭环展示混为一谈。confirm-link operation projection 也默认把确认后的 relation 放入 `paired_groups`，导致写后投影与 active generation 新规则不一致。
+- 关键决策：`app.workbench_pair_relations.status='active'` 继续是 confirmed fact，用于 row occupation、撤回、审计和下游 `workbench_relation` linked distribution；关联台 paired/open 分区由 active generation/grouping 后端 policy 决定，前端不做本地重排。普通 `manual_confirmed` 两栏 relation 保留 canonical `case:<case_id>` open/candidate group；OA + 银行 + 发票三栏完整进入 paired；no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation 和 processed/closed exception 等显式例外保持 paired。
+- 文档影响：更新本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 状态机，撤销 2026-06-21 “普通 active relation 两栏进 paired”的历史错误口径。
+- 测试覆盖：新增/更新普通 OA+银行、OA+发票、银行+发票 active relation 留 open，三栏 active relation 留 paired，SQL projection canonical open owner，confirm-link 两栏 operation projection 走 `open_groups`、三栏走 `paired_groups`，前端 API mapper 和 selection model 对 open manual partial relation 的回归。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地未连接真实生产数据库；发布后需要重建受影响 Workbench month/all scope，并用只读 SQL 或页面 smoke 确认两栏 relation 从 paired 收敛到 canonical open group，且撤回预览仍走 `withdraw_relation`。
+
 ## 2026-06-22 - 外部往来闭环三栏分区纠偏
 
 - 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域，并被显示成“完全关联”的问题。
@@ -96,15 +106,15 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_oa_attachment_invoice_item_ids_close_three_way_candidate -q`。
 - 未测风险：本地测试覆盖 matching root cause；发布后必须重跑 matching dirty scope 和 Workbench month/all scope，并用生产 SQL 验证目标 group 从 open 三栏附着变成 paired 三方 decision。
 
-## 2026-06-21 - 已确认 active relation 两栏分区修复
+## 2026-06-21 - 已确认 active relation 两栏分区修复（已被 2026-06-22 撤销）
 
 - 目标：修复关联台未配对区仍残留已确认 OA+银行 relation 的问题；这些行带 `完全关联`/`手动确认` 等事实字段，但因为缺少发票栏被分组层按“两栏不完整”降回 open。
 - 影响范围：`WorkbenchCandidateGroupingService` 的 paired/open 分区、Workbench month/all active generation 重建结果、关联台页面分区展示；不改变 relation 写入口、自动匹配规则、发票补齐规则或下游页面事实源。
-- 关键决策：统一事实源仍是 `app.workbench_pair_relations.status='active'`。已确认 active relation 的 ownership 优先于三栏展示完整度；同一 `case_id` 下带非 `automatic_decision` `relation_mode` 且 relation code 为 `fully_linked` 的多栏 relation，即使只有 OA+银行，也必须留在 paired 区。没有 `relation_mode` 的旧 `case_id`/展示 tag 污染行仍退回 open，纯 `automatic_decision` 仍是候选，不被读侧提升为 confirmed fact。
+- 关键决策（历史错误）：当时把已确认 active relation 的 ownership 优先级提升为 paired zone 规则，认为同一 `case_id` 下带非 `automatic_decision` `relation_mode` 且 relation code 为 `fully_linked` 的多栏 relation，即使只有 OA+银行，也必须留在 paired 区。该结论已在 2026-06-22 撤销；当前规则要求普通两栏 `manual_confirmed` active relation 留在 canonical open/candidate，只有三栏完整或显式例外进入 paired。
 - 文档影响：更新本模块 README 和测试矩阵，明确 canonical active relation、display tag、automatic decision 三者的分区优先级。
-- 测试覆盖：新增 `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_paired_section`，并保留 `test_demotes_existing_two_type_case_id_rows_back_to_open_section` 作为旧显示污染负面回归。
+- 测试覆盖（历史，已由 2026-06-22 普通两栏 open 测试替换）：当时新增 `test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_paired_section`；当前测试名和断言已反转为 open。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_candidate_grouping.py -q -k 'confirmed_active_oa_bank_relation_without_invoice or demotes_existing_two_type_case_id_rows_back_to_open_section or preserves_automatic_match_label_for_candidate_paired_groups'`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_candidate_grouping.py tests/test_workbench_sql_runtime.py tests/test_workbench_relation_sql_projection.py -q`。
-- 未测风险：本地验证证明分区代码正确；发布后仍需用生产 read model 重建受影响 Workbench month/all scope，并用只读 SQL 验证 open 区不再残留 manual confirmed active relation。
+- 未测风险：该历史验证不再代表当前口径；以 2026-06-22 新记录和最终验证为准。
 
 ## 2026-06-21 - 批量账务 active relation 投影归属修复
 

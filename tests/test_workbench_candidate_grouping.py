@@ -2049,7 +2049,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["group_type"], "candidate")
         self.assertEqual(group["match_confidence"], "medium")
 
-    def test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_paired_section(self) -> None:
+    def test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_open_section(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -2091,16 +2091,141 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["open_count"], 0)
-        group = payload["paired"]["groups"][0]
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        self.assertEqual(payload["paired"]["groups"], [])
+        group = payload["open"]["groups"][0]
         self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-OA-BANK")
-        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-confirmed-001"])
         self.assertCountEqual(
             [row["id"] for row in group["bank_rows"]],
             ["bk-confirmed-001", "bk-confirmed-002"],
         )
+        self.assertTrue(all(row["status"] == "open" for row in [*group["oa_rows"], *group["bank_rows"]]))
+
+    def test_keeps_confirmed_active_oa_invoice_relation_without_bank_in_open_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-confirmed-invoice-001",
+                    "type": "oa",
+                    "case_id": "CASE-CONFIRMED-OA-INVOICE",
+                    "relation_mode": "manual_confirmed",
+                    "amount": "880.00",
+                    "counterparty_name": "发票供应商",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": "iv-confirmed-001",
+                    "type": "invoice",
+                    "case_id": "CASE-CONFIRMED-OA-INVOICE",
+                    "relation_mode": "manual_confirmed",
+                    "total_with_tax": "880.00",
+                    "seller_name": "发票供应商",
+                    "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-OA-INVOICE")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-confirmed-invoice-001"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-confirmed-001"])
+
+    def test_keeps_confirmed_active_bank_invoice_relation_without_oa_in_open_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-confirmed-invoice-001",
+                    "type": "bank",
+                    "case_id": "CASE-CONFIRMED-BANK-INVOICE",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "640.00",
+                    "credit_amount": "",
+                    "counterparty_name": "银行发票供应商",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-confirmed-bank-001",
+                    "type": "invoice",
+                    "case_id": "CASE-CONFIRMED-BANK-INVOICE",
+                    "relation_mode": "manual_confirmed",
+                    "total_with_tax": "640.00",
+                    "seller_name": "银行发票供应商",
+                    "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-BANK-INVOICE")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-confirmed-invoice-001"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-confirmed-bank-001"])
+
+    def test_keeps_confirmed_active_three_pane_relation_in_paired_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-confirmed-three-001",
+                    "type": "oa",
+                    "case_id": "CASE-CONFIRMED-THREE",
+                    "relation_mode": "manual_confirmed",
+                    "amount": "520.00",
+                    "counterparty_name": "三栏供应商",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-confirmed-three-001",
+                    "type": "bank",
+                    "case_id": "CASE-CONFIRMED-THREE",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "520.00",
+                    "credit_amount": "",
+                    "counterparty_name": "三栏供应商",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-confirmed-three-001",
+                    "type": "invoice",
+                    "case_id": "CASE-CONFIRMED-THREE",
+                    "relation_mode": "manual_confirmed",
+                    "total_with_tax": "520.00",
+                    "seller_name": "三栏供应商",
+                    "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-THREE")
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
 
     def test_demotes_single_type_paired_invoice_group_back_to_open(self) -> None:
         service = WorkbenchCandidateGroupingService()

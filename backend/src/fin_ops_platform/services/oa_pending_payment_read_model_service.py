@@ -194,7 +194,7 @@ class OaPendingPaymentReadModelService:
         payload: dict[str, Any] = {
             "rows": [],
             "pagination": {"page": 1, "pageSize": 50, "total": 0},
-            "summary": {},
+            "summary": {"rowCount": 0, "viewCounts": {"completed": 0, "in_progress": 0}},
             "filterConfig": [],
             "read_model_status": "refreshing",
             "readModelStatus": "refreshing",

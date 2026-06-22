@@ -131,6 +131,14 @@ class FakeCommandService:
             "autoMatchedCount": 1,
             "writebackCount": 1,
             "autoMatchedRelations": [{"oaRowIds": ["oa-api"], "bankTransactionIds": ["bank-api"]}],
+            "skippedAutoMatches": [
+                {
+                    "oaRowIds": ["oa-skipped"],
+                    "bankTransactionIds": ["bank-skipped"],
+                    "ruleCode": "oa_bank_exact_amount",
+                    "errorCode": "oa_flow_id_not_found",
+                }
+            ],
             "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
             "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
         }
@@ -291,6 +299,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["autoMatchedCount"], 1)
         self.assertEqual(payload["writebackCount"], 1)
+        self.assertEqual(payload["skippedAutoMatches"][0]["errorCode"], "oa_flow_id_not_found")
         self.assertEqual(command_service.link_calls, [({"auto_reconcile": {"month": "2026-06"}}, "tester")])
 
     def test_bank_transaction_candidates_route_delegates_to_command_service(self) -> None:
@@ -484,6 +493,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(payload["summary"]["rowCount"], 0)
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 0, "in_progress": 0})
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_sql_repository_unavailable")])
 
     def test_production_rows_source_version_stale_enqueues_refresh_without_stale_rows(self) -> None:
@@ -576,6 +587,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["summary"]["rowCount"], 0)
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 0, "in_progress": 0})
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_miss")])
 
     def test_production_all_scope_fresh_rows_do_not_require_all_scope_row_or_enqueue_refresh(self) -> None:

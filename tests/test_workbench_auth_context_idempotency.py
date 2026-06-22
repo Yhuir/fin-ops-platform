@@ -323,6 +323,7 @@ def _new_facade(
     scope_keys_for_row_ids: object | None = None,
     scope_keys_for_rows: object | None = None,
     resolve_rows_for_amount_check: object | None = None,
+    resolved_row_types_for_row_ids: object | None = None,
 ) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
     return WorkbenchWriteFacade(
@@ -333,7 +334,9 @@ def _new_facade(
         candidate_match_service=candidate_match_service or object(),
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=lambda values: [str(value) for value in values],
-        resolved_row_types_for_row_ids=lambda row_ids, **_: ["oa" if str(row_id).startswith("oa") else "bank" for row_id in row_ids],
+        resolved_row_types_for_row_ids=resolved_row_types_for_row_ids or (
+            lambda row_ids, **_: ["oa" if str(row_id).startswith("oa") else "bank" for row_id in row_ids]
+        ),
         can_confirm_link_row_types=lambda **_: True,
         expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
         amount_check_for_row_ids=lambda *_, **__: {},
@@ -445,6 +448,87 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
             ],
         )
+
+    def test_confirm_link_two_pane_operation_projection_uses_open_groups(self) -> None:
+        def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
+            relation = relations[0]
+            return [
+                {
+                    "group_id": f"case:{relation['case_id']}",
+                    "group_type": relation["relation_mode"],
+                    "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                    "bank_rows": [{"id": "bank-1", "type": "bank"}],
+                    "invoice_rows": [],
+                }
+            ]
+
+        facade = _new_facade(
+            confirm_uow=_RecordingUoW(),
+            relation_groups=relation_groups,
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {"id": "oa-1", "type": "oa"},
+                {"id": "bank-1", "type": "bank"},
+            ],
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:two-pane-open-projection",
+            },
+            request_id="req-confirm-two-pane-open-projection",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        projection_after = result.payload["operation_projection"]["after"]
+        self.assertEqual(projection_after["paired_groups"], [])
+        self.assertEqual(projection_after["open_groups"][0]["group_id"], "case:CASE-NEW")
+
+    def test_confirm_link_three_pane_operation_projection_uses_paired_groups(self) -> None:
+        def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
+            relation = relations[0]
+            return [
+                {
+                    "group_id": f"case:{relation['case_id']}",
+                    "group_type": relation["relation_mode"],
+                    "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                    "bank_rows": [{"id": "bank-1", "type": "bank"}],
+                    "invoice_rows": [{"id": "inv-1", "type": "invoice"}],
+                }
+            ]
+
+        facade = _new_facade(
+            confirm_uow=_RecordingUoW(),
+            relation_groups=relation_groups,
+            resolved_row_types_for_row_ids=lambda row_ids, **_: [
+                "oa" if str(row_id).startswith("oa") else "invoice" if str(row_id).startswith("inv") else "bank"
+                for row_id in row_ids
+            ],
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {"id": "oa-1", "type": "oa"},
+                {"id": "bank-1", "type": "bank"},
+                {"id": "inv-1", "type": "invoice"},
+            ],
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1", "inv-1"],
+                "idempotency_key": "confirm:three-pane-paired-projection",
+            },
+            request_id="req-confirm-three-pane-paired-projection",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        projection_after = result.payload["operation_projection"]["after"]
+        self.assertEqual(projection_after["open_groups"], [])
+        self.assertEqual(projection_after["paired_groups"][0]["group_id"], "case:CASE-NEW")
 
     def test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month(self) -> None:
         uow = _RecordingUoW()

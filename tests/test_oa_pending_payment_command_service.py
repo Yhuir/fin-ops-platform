@@ -7,7 +7,7 @@ from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError
 
@@ -25,8 +25,14 @@ class StaticOAProjection:
 
 
 class FakePaymentStatusRepository:
-    def __init__(self, *, flow_id: str | None = "507f1f77bcf86cd799439001") -> None:
+    def __init__(
+        self,
+        *,
+        flow_id: str | None = "507f1f77bcf86cd799439001",
+        pay_status: int | None = PAY_STATUS_PENDING,
+    ) -> None:
         self.flow_id = flow_id
+        self.pay_status = pay_status
         self.resolved_records: list[str] = []
         self.marked_flow_ids: list[str] = []
 
@@ -35,7 +41,9 @@ class FakePaymentStatusRepository:
         return self.flow_id
 
     def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
-        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
+        if self.pay_status is None:
+            return None
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=self.pay_status)
 
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
         self.marked_flow_ids.append(flow_id)
@@ -268,7 +276,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         )
 
     def test_auto_reconcile_writes_completed_oa_when_existing_relation_is_paid(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439020")
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439020", pay_status=PAY_STATUS_PENDING)
         relation_command = FakeRelationCommandService(
             [
                 {
@@ -295,6 +303,82 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["writebackCount"], 1)
         self.assertEqual(payload["oaPaymentWritebacks"][0]["oaRowId"], "oa-completed-paid")
         self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439020"])
+        self.assertEqual(relation_command.confirm_calls, [])
+
+    def test_auto_reconcile_existing_paid_relation_is_noop_when_oa_is_already_written(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439021", pay_status=PAY_STATUS_PAID)
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-completed",
+                    "row_ids": ["oa-completed-paid", "bank-completed"],
+                    "row_types": ["oa", "bank"],
+                    "relation_mode": "manual_confirmed",
+                    "amount_check": {"matched": True},
+                    "month_scope": "2026-06",
+                }
+            ]
+        )
+        refresh_calls: list[tuple[str, str, str]] = []
+        service = _service(
+            oa_records=[],
+            completed_oa_records=[_oa("oa-completed-paid", "100.00", workflow_status="completed")],
+            transactions=[_bank("bank-completed", "100.00")],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+            refresh_calls=refresh_calls,
+        )
+
+        payload = service.auto_reconcile_bank_transactions({"month": "2026-06"}, actor_id="tester")
+
+        self.assertEqual(payload["autoMatchedCount"], 0)
+        self.assertEqual(payload["writebackCount"], 0)
+        self.assertEqual(payload["oaPaymentWritebacks"], [])
+        self.assertEqual(payload["readModelRefresh"]["enqueued"], False)
+        self.assertEqual(payment_repository.marked_flow_ids, [])
+        self.assertEqual(refresh_calls, [])
+        self.assertEqual(relation_command.confirm_calls, [])
+
+    def test_auto_reconcile_reports_skipped_exact_match_when_flow_id_is_missing(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id=None)
+        relation_command = FakeRelationCommandService()
+        service = _service(
+            oa_records=[
+                _oa(
+                    "oa-xincheng-7000",
+                    "7000.00",
+                    workflow_status="in_progress",
+                    month="2026-04",
+                    counterparty_name="云南心诚环保科技有限公司",
+                    applicant="樊祖芳",
+                    project_name="昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
+                    reason="申请支付昭通烟厂能源系统维护项目：环保数采仪1套，W5100HB-IIIPro，品牌;万维,合同金额：7000元，全额付款7000元。",
+                    application_date="2026-04-16",
+                )
+            ],
+            transactions=[
+                _bank(
+                    "bank-xincheng-7000",
+                    "7000.00",
+                    counterparty_name="云南心诚环保科技有限公司",
+                    txn_date="2026-04-23",
+                    trade_time="2026-04-23 17:17:57",
+                )
+            ],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        payload = service.auto_reconcile_bank_transactions({"month": "2026-04"}, actor_id="tester")
+
+        self.assertEqual(payload["autoMatchedCount"], 0)
+        self.assertEqual(payload["writebackCount"], 0)
+        self.assertEqual(len(payload["skippedAutoMatches"]), 1)
+        skipped = payload["skippedAutoMatches"][0]
+        self.assertEqual(skipped["oaRowIds"], ["oa-xincheng-7000"])
+        self.assertEqual(skipped["bankTransactionIds"], ["bank-xincheng-7000"])
+        self.assertEqual(skipped["ruleCode"], "oa_bank_exact_amount")
+        self.assertEqual(skipped["errorCode"], "oa_flow_id_not_found")
         self.assertEqual(relation_command.confirm_calls, [])
 
     def test_link_bank_transactions_rejects_income_bank(self) -> None:
@@ -422,23 +506,38 @@ def _service(
     )
 
 
-def _oa(record_id: str, amount: str, *, workflow_status: str) -> OAApplicationRecord:
+def _oa(
+    record_id: str,
+    amount: str,
+    *,
+    workflow_status: str,
+    month: str = "2026-06",
+    counterparty_name: str = "测试供应商",
+    applicant: str = "刘际涛",
+    project_name: str = "测试项目",
+    reason: str = "测试付款",
+    application_date: str = "2026-06-17",
+) -> OAApplicationRecord:
     return OAApplicationRecord(
         id=record_id,
-        month="2026-06",
+        month=month,
         section="open",
         case_id=None,
-        applicant="刘际涛",
-        project_name="测试项目",
+        applicant=applicant,
+        project_name=project_name,
         apply_type="支付申请",
         amount=amount,
-        counterparty_name="测试供应商",
-        reason="测试付款",
+        counterparty_name=counterparty_name,
+        reason=reason,
         relation_code="pending_match",
         relation_label="待找流水",
         relation_tone="warn",
         workflow_status=workflow_status,
-        detail_fields={"流程实例ID": "proc-from-record", "Mongo文档ID": record_id.removeprefix("oa-pay-")},
+        detail_fields={
+            "流程实例ID": "proc-from-record",
+            "Mongo文档ID": record_id.removeprefix("oa-pay-"),
+            "申请日期": application_date,
+        },
     )
 
 
@@ -447,17 +546,20 @@ def _bank(
     amount: str,
     *,
     direction: TransactionDirection = TransactionDirection.OUTFLOW,
+    counterparty_name: str = "测试供应商",
+    txn_date: str = "2026-06-17",
+    trade_time: str = "2026-06-17 10:00:00",
 ) -> BankTransaction:
     signed_amount = -Decimal(amount) if direction == TransactionDirection.OUTFLOW else Decimal(amount)
     return BankTransaction(
         id=bank_id,
         account_no="622200001234",
         txn_direction=direction,
-        counterparty_name_raw="测试供应商",
+        counterparty_name_raw=counterparty_name,
         amount=Decimal(amount),
         signed_amount=signed_amount,
-        txn_date="2026-06-17",
-        trade_time="2026-06-17 10:00:00",
+        txn_date=txn_date,
+        trade_time=trade_time,
         imported_bank_name="测试银行",
         imported_bank_last4="1234",
     )

@@ -1353,7 +1353,7 @@ describe("OA pending payments page", () => {
         ...rowsPayload,
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
-        summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
+        summary: {},
         readModelStatus: "refreshing",
         read_model_status: "refreshing",
         read_model_stale_reasons: ["oa_pending_payment_source_version_missing"],
@@ -1365,6 +1365,8 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
     expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
+    expect(within(page).getByText("0-0 / 0")).toBeInTheDocument();
+    expect(within(page).queryByText(/NaN|undefined/)).not.toBeInTheDocument();
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText(/oa_pending_payment_source_version_missing/)).not.toBeInTheDocument();
   });

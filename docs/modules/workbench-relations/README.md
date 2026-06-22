@@ -55,6 +55,8 @@
 
 `workbench_relation` 是跨页面 relation distribution read model。它从 `app.workbench_pair_relations` 读取 active 手工关系，同时从 `read_model.workbench_reconciliation_decisions` 补充分发已 paired 的自动决策和未配对区 open/proposed 候选。自动决策只作为候选或展示上下文，不是已确认写事实，不能被页面当作 active relation 写模型。
 
+`relation_status='linked'` 和关联台 paired zone 不是同一个概念。普通 `manual_confirmed` 两栏 active relation 仍应向下游分发为 linked，用于已建立关系、row 占用和撤回事实；但关联台页面必须把它展示在 canonical `case:<case_id>` open/candidate group 中，等待第三栏补齐。只有三栏完整或显式业务例外才进入 paired zone。
+
 distribution payload 必须保留关系展示语义：`relation_status='linked'` 表示已确认或已 paired 的关系上下文；`relation_status='candidate'` 表示关联台未配对候选，只能用于页面展示候选证据，不得作为 confirmed fact、支付完成判断或 row 占用事实。下游 mapper 不得把 candidate 硬编码成 `status='active'`。
 
 `read_model.workbench_reconciliation_decisions` 的写入、规则版本过期和 missing 清理会改变 relation distribution，同时也会改变 Workbench 主 active generation 的 open/paired 分组。因此这些事务内 writer 必须同时入队 `workbench_relation` 和主 `workbench` month scope refresh；只刷新 relation 会让下游 relation fresh 但关联台继续发布旧 generation。

@@ -913,12 +913,35 @@ class WorkbenchWriteFacade:
             "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             "amount_check": dict(amount_check or {}),
         }
+        after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
+        if self._confirm_link_projection_is_paired(row_types=row_types, amount_check=amount_check):
+            paired_groups = after_groups
+            open_groups: list[dict[str, object]] = []
+        else:
+            paired_groups = []
+            open_groups = after_groups
         return {
             "after": {
-                "paired_groups": self._relation_groups([after_relation], selected_rows=selected_rows),
-                "open_groups": [],
+                "paired_groups": paired_groups,
+                "open_groups": open_groups,
             }
         }
+
+    @staticmethod
+    def _confirm_link_projection_is_paired(
+        *,
+        row_types: list[str],
+        amount_check: dict[str, object],
+    ) -> bool:
+        normalized_types = {
+            str(row_type or "").strip()
+            for row_type in list(row_types or [])
+            if str(row_type or "").strip()
+        }
+        if {"oa", "bank", "invoice"}.issubset(normalized_types):
+            return True
+        external_etc_batch_id = str((amount_check or {}).get("external_etc_batch_id") or "").strip()
+        return bool(external_etc_batch_id and {"oa", "bank"}.issubset(normalized_types))
 
     @staticmethod
     def _operation_affected_scope_keys(result: dict[str, object]) -> list[str]:

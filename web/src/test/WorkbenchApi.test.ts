@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   applyWorkbenchException,
+  confirmWorkbenchLink,
   fetchWorkbench,
   fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
@@ -174,6 +175,77 @@ describe("workbench api bank amount mapping", () => {
     const payload = await fetchWorkbench("all");
 
     expect(payload.open.groups[0].canWithdraw).toBe(false);
+  });
+
+  test("maps two-pane confirm operation projection as an open manual partial relation", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          action: "confirm_link",
+          month: "2026-05",
+          affected_row_ids: ["oa-partial", "bank-partial"],
+          affected_months: ["2026-05"],
+          affected_scope_keys: ["2026-05"],
+          freshness_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
+          operation_projection: {
+            after: {
+              paired_groups: [],
+              open_groups: [
+                {
+                  group_id: "case:CASE-PARTIAL",
+                  group_type: "candidate",
+                  relation_mode: "manual_confirmed",
+                  match_confidence: "medium",
+                  reason: "confirmed_partial_relation",
+                  oa_rows: [
+                    {
+                      id: "oa-partial",
+                      type: "oa",
+                      applicant: "刘际涛",
+                      amount: "400.00",
+                      counterparty_name: "云南溯源科技",
+                      oa_bank_relation: { code: "manual_confirmed", label: "已关联流水", tone: "success" },
+                    },
+                  ],
+                  bank_rows: [
+                    {
+                      id: "bank-partial",
+                      type: "bank",
+                      trade_time: "2026-05-02 10:30",
+                      debit_amount: "400.00",
+                      counterparty_name: "云南溯源科技",
+                      invoice_relation: { code: "manual_confirmed", label: "已关联OA", tone: "success" },
+                    },
+                  ],
+                  invoice_rows: [],
+                },
+              ],
+            },
+          },
+          message: "已确认 2 条记录关联。",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await confirmWorkbenchLink({
+      month: "2026-05",
+      rowIds: ["oa-partial", "bank-partial"],
+      caseId: "CASE-PARTIAL",
+    });
+
+    expect(result.operationProjection?.after.pairedGroups).toEqual([]);
+    expect(result.operationProjection?.after.openGroups).toHaveLength(1);
+    expect(result.operationProjection?.after.openGroups[0]).toMatchObject({
+      id: "case:CASE-PARTIAL",
+      groupType: "open",
+      rawGroupType: "candidate",
+      relationMode: "manual_confirmed",
+    });
+    expect(result.operationProjection?.after.openGroups[0].rows.oa.map((row) => row.id)).toEqual(["oa-partial"]);
+    expect(result.operationProjection?.after.openGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
+    expect(result.operationProjection?.after.openGroups[0].rows.invoice).toEqual([]);
   });
 
   test("loads initial workbench page from summary and zone group endpoints", async () => {

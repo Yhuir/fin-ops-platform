@@ -1568,6 +1568,54 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["total_with_tax"], "144.50")
         self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
 
+    def test_sql_projection_keeps_active_manual_oa_bank_relation_open_until_invoice_exists(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-exp-2046": {
+                "id": "oa-exp-2046",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "4200.00",
+                "applicant": "刘树刚",
+                "project_name": "云南溯源科技",
+                "apply_type": "日常报销",
+            },
+            "txn_imported_1387": {
+                "id": "txn_imported_1387",
+                "type": "bank",
+                "source_kind": "bank",
+                "status": "open",
+                "debit_amount": "4200.00",
+                "counterparty_name": "普通供应商",
+                "trade_time": "2026-03-12 10:16:00",
+                "summary": "报销",
+            },
+        }
+        relation = {
+            "case_id": "CASE-MANUAL-PARTIAL",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["txn_imported_1387", "oa-exp-2046"],
+            "row_types": ["bank", "oa"],
+        }
+
+        payload = builder._group_payload("2026-03", rows_by_id, [relation])
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 1)
+        group = open_groups[0]
+        self.assertEqual(group["group_id"], "case:CASE-MANUAL-PARTIAL")
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-2046"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1387"])
+        self.assertTrue(all(row["status"] == "open" for row in [*group["oa_rows"], *group["bank_rows"]]))
+        self.assertTrue(all(row["case_id"] == "CASE-MANUAL-PARTIAL" for row in [*group["oa_rows"], *group["bank_rows"]]))
+
     def test_sql_projection_keeps_active_batch_accounting_oa_bank_relation_paired(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
