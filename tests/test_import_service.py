@@ -50,6 +50,33 @@ class BulkInvoiceIdentityRepository:
         return []
 
 
+class SubmittedEtcIdentityRepository(BulkInvoiceIdentityRepository):
+    def __init__(self, *, etc_invoice: object) -> None:
+        super().__init__(invoices=[])
+        self.etc_invoice = etc_invoice
+        self.submitted_lookup_calls = 0
+        self.link_calls: list[dict[str, object]] = []
+
+    def find_submitted_etc_invoice_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+        invoice_no: str | None = None,
+        invoice_code: str | None = None,
+        digital_invoice_no: str | None = None,
+    ) -> object | None:
+        self.submitted_lookup_calls += 1
+        expected_invoice_no = getattr(self.etc_invoice, "invoice_number", None)
+        if canonical_key == expected_invoice_no or digital_invoice_no == expected_invoice_no or invoice_no == expected_invoice_no:
+            return self.etc_invoice
+        return None
+
+    def upsert_etc_batch_invoice_link(self, **kwargs: object) -> dict[str, object]:
+        self.link_calls.append(dict(kwargs))
+        return {"id": "etc-link-1", **kwargs}
+
+
 class ImportNormalizationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.counterparty = Counterparty(
@@ -770,6 +797,72 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             ["etc_import", "manual_invoice_import"],
         )
         self.assertEqual(merged.source_links[1]["batch_id"], preview.id)
+
+    def test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later(self) -> None:
+        etc_invoice = type(
+            "EtcInvoice",
+            (),
+            {
+                "id": "etc_invoice_0028",
+                "invoice_number": "26537912570200055449",
+                "issue_date": "2026-02-28",
+                "seller_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+                "seller_tax_no": "9153000077859986X2",
+                "buyer_name": "云南溯源科技有限公司",
+                "buyer_tax_no": "915300007194052520",
+                "total_amount": Decimal("19.19"),
+                "tax_amount": Decimal("0.56"),
+                "tax_rate": "3%",
+                "import_batch_id": "etc_batch_hist_20260413_241125",
+                "current_batch_id": "etc_business_batch_hist_20260413_241125",
+                "last_batch_id": "etc_business_batch_hist_20260413_241125",
+                "status": "submitted",
+            },
+        )()
+        repository = SubmittedEtcIdentityRepository(etc_invoice=etc_invoice)
+        service = ImportNormalizationService(fact_repository=repository)
+
+        preview = service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="进项全量发票查询导出结果1-6.22.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "digital_invoice_no": "26537912570200055449",
+                    "seller_tax_no": "9153000077859986X2",
+                    "seller_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+                    "invoice_date": "2026-02-28",
+                    "amount": "18.63",
+                    "tax_amount": "0.56",
+                    "total_with_tax": "19.19",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+
+        confirmed = service.confirm_import(preview.id)
+
+        self.assertEqual(confirmed.success_count, 1)
+        self.assertEqual(repository.submitted_lookup_calls, 1)
+        invoices = service.list_invoices()
+        self.assertEqual(len(invoices), 1)
+        imported = invoices[0]
+        self.assertEqual(imported.etc_invoice_id, "etc_invoice_0028")
+        self.assertEqual(imported.workbench_visibility, "hidden_after_etc_submission")
+        self.assertIn("ETC", imported.tags)
+        self.assertEqual(len(repository.link_calls), 1)
+        self.assertEqual(repository.link_calls[0]["invoice_id"], imported.id)
+        self.assertEqual(repository.link_calls[0]["etc_invoice_id"], "etc_invoice_0028")
+        self.assertEqual(repository.link_calls[0]["business_batch_id"], "etc_business_batch_hist_20260413_241125")
+        self.assertEqual(repository.link_calls[0]["link_source"], "formal_invoice_import")
+        self.assertEqual(repository.link_calls[0]["confidence"], "strict")
+        self.assertEqual(
+            [link["source_type"] for link in imported.source_links],
+            ["manual_invoice_import", "etc_invoice_import"],
+        )
 
     def test_input_invoice_import_marks_etc_tag_when_source_or_tags_indicate_etc(self) -> None:
         preview = self.service.preview_import(

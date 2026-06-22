@@ -15,6 +15,7 @@ from fin_ops_platform.domain.models import (
     ImportedBatchRowResult,
     Invoice,
 )
+from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInvoiceLinkService
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -115,6 +116,7 @@ class ImportNormalizationService:
         existing_transactions: list[BankTransaction] | None = None,
         id_registry: Any | None = None,
         fact_repository: Any | None = None,
+        etc_batch_invoice_link_service: Any | None = None,
         identity_policy: FinancialObjectIdentityPolicy | None = None,
         dedup_decision_service: ObjectDedupDecisionService | None = None,
     ) -> None:
@@ -125,6 +127,9 @@ class ImportNormalizationService:
         self._counterparty_counter = 0
         self._id_registry = id_registry
         self._fact_repository = fact_repository
+        self._etc_batch_invoice_link_service = etc_batch_invoice_link_service
+        if self._etc_batch_invoice_link_service is None and hasattr(fact_repository, "upsert_etc_batch_invoice_link"):
+            self._etc_batch_invoice_link_service = EtcBatchInvoiceLinkService(repository=fact_repository)
         self._object_identity_policy = identity_policy or FinancialObjectIdentityPolicy()
 
         self._batches: dict[str, ImportPreview] = {}
@@ -1052,6 +1057,7 @@ class ImportNormalizationService:
         if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
             invoice = self._build_invoice_from_normalized(batch_type, row_result.batch_id, normalized)
             self._register_invoice(invoice)
+            self._link_submitted_etc_metadata_if_present(invoice, normalized)
             row_result.linked_object_type = "invoice"
             row_result.linked_object_id = invoice.id
         else:
@@ -1074,6 +1080,7 @@ class ImportNormalizationService:
         invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
         invoice.source_batch_id = row_result.batch_id
         self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
+        self._link_submitted_etc_metadata_if_present(invoice, normalized)
 
     def _persist_duplicate_row(
         self,
@@ -1089,6 +1096,7 @@ class ImportNormalizationService:
         if invoice is None:
             return
         self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
+        self._link_submitted_etc_metadata_if_present(invoice, normalized)
 
     def _build_invoice_from_normalized(
         self,
@@ -1242,7 +1250,9 @@ class ImportNormalizationService:
         invoice_number = self._string_or_none(getattr(etc_invoice, "invoice_number", None))
         seller_name = self._string_or_none(getattr(etc_invoice, "seller_name", None))
         buyer_name = self._string_or_none(getattr(etc_invoice, "buyer_name", None))
-        amount = self._parse_decimal(getattr(etc_invoice, "total_amount", None)) or ZERO
+        amount_without_tax = self._parse_decimal(getattr(etc_invoice, "amount_without_tax", None))
+        total_amount = self._parse_decimal(getattr(etc_invoice, "total_amount", None))
+        amount = amount_without_tax if amount_without_tax is not None else total_amount or ZERO
         normalized: dict[str, Any] = {
             "counterparty_name": seller_name or invoice_number or "ETC发票",
             "normalized_counterparty_name": normalize_name(seller_name or invoice_number or "ETC发票"),
@@ -1256,7 +1266,7 @@ class ImportNormalizationService:
             "buyer_tax_no": self._string_or_none(getattr(etc_invoice, "buyer_tax_no", None)),
             "buyer_name": buyer_name,
             "tax_amount": self._format_decimal(self._parse_decimal(getattr(etc_invoice, "tax_amount", None)) or ZERO),
-            "total_with_tax": self._format_decimal(amount),
+            "total_with_tax": self._format_decimal(total_amount if total_amount is not None else amount),
             "tax_rate": self._string_or_none(getattr(etc_invoice, "tax_rate", None)),
             "invoice_source": "ETC导入",
             "invoice_kind": "ETC发票",
@@ -1540,6 +1550,76 @@ class ImportNormalizationService:
             if invoice.source_unique_key:
                 self._invoice_unique_index[invoice.source_unique_key] = invoice.id
         self._clear_weak_invoice_fingerprint_when_canonical(invoice)
+
+    def _link_submitted_etc_metadata_if_present(self, invoice: Invoice, normalized: dict[str, Any]) -> None:
+        invoice_type = getattr(invoice, "invoice_type", None)
+        invoice_type_value = getattr(invoice_type, "value", invoice_type)
+        if str(invoice_type_value or "") != InvoiceType.INPUT.value:
+            return
+        finder = getattr(self._fact_repository, "find_submitted_etc_invoice_by_identity", None)
+        if not callable(finder):
+            return
+        etc_invoice = finder(
+            canonical_key=self._string_or_none(normalized.get("source_unique_key")),
+            suspected_key=self._string_or_none(normalized.get("data_fingerprint")),
+            invoice_no=self._string_or_none(normalized.get("invoice_no")),
+            invoice_code=self._string_or_none(normalized.get("invoice_code")),
+            digital_invoice_no=self._string_or_none(normalized.get("digital_invoice_no")),
+        )
+        if etc_invoice is None:
+            return
+        etc_normalized = self._normalize_etc_invoice(etc_invoice)
+        if not self._submitted_etc_metadata_matches_formal_invoice(normalized, etc_normalized):
+            return
+        self._merge_invoice_from_etc_normalized(invoice, etc_normalized)
+        self._record_submitted_etc_batch_invoice_link(invoice, etc_invoice, normalized, etc_normalized)
+
+    def _record_submitted_etc_batch_invoice_link(
+        self,
+        invoice: Invoice,
+        etc_invoice: Any,
+        normalized: dict[str, Any],
+        etc_normalized: dict[str, Any],
+    ) -> None:
+        link_service = self._etc_batch_invoice_link_service
+        linker = getattr(link_service, "link_submitted_invoice", None)
+        if not callable(linker):
+            return
+        linker(
+            invoice=invoice,
+            etc_invoice=etc_invoice,
+            link_source="formal_invoice_import",
+            confidence="strict",
+            raw_payload={
+                "match": "submitted_etc_identity",
+                "formal_invoice_source_unique_key": normalized.get("source_unique_key"),
+                "formal_invoice_no": normalized.get("digital_invoice_no") or normalized.get("invoice_no"),
+                "etc_invoice_id": etc_normalized.get("etc_invoice_id"),
+            },
+        )
+
+    def _submitted_etc_metadata_matches_formal_invoice(
+        self,
+        normalized: dict[str, Any],
+        etc_normalized: dict[str, Any],
+    ) -> bool:
+        formal_number = self._string_or_none(normalized.get("digital_invoice_no") or normalized.get("invoice_no"))
+        etc_number = self._string_or_none(etc_normalized.get("digital_invoice_no") or etc_normalized.get("invoice_no"))
+        if not formal_number or formal_number != etc_number:
+            return False
+        if self._string_or_none(normalized.get("invoice_date")) != self._string_or_none(etc_normalized.get("invoice_date")):
+            return False
+        for field_name in ("tax_amount", "total_with_tax"):
+            formal_amount = self._parse_decimal(normalized.get(field_name))
+            etc_amount = self._parse_decimal(etc_normalized.get(field_name))
+            if formal_amount is not None and etc_amount is not None and formal_amount != etc_amount:
+                return False
+        for field_name in ("seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no"):
+            formal_value = self._string_or_none(normalized.get(field_name))
+            etc_value = self._string_or_none(etc_normalized.get(field_name))
+            if formal_value and etc_value and formal_value != etc_value:
+                return False
+        return True
 
     def _build_etc_invoice_source_link(self, normalized: dict[str, Any]) -> dict[str, str]:
         return {

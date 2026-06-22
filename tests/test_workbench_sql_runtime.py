@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from http import HTTPStatus
 from io import StringIO
 from types import SimpleNamespace
@@ -59,6 +60,63 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
 
         self.assertEqual(payload, {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"})
 
+    def test_sql_oa_row_promotes_application_time_when_completed_time_is_placeholder(self) -> None:
+        row = WorkbenchSqlProjectionBuilder._oa_row_from_sql(
+            {
+                "row_id": "oa-pay-application-time",
+                "applicant": "刘树刚",
+                "application_date": "2026-01-01",
+                "project_name": "云南溯源科技",
+                "amount": "1872.93",
+                "status": "open",
+                "workflow_status": "completed",
+                "normalized_payload": {
+                    "apply_type": "支付申请",
+                    "reason": "ETC过路费",
+                    "detail_fields": {
+                        "审批完成时间": "—",
+                        "申请日期": "2026-01-14 14:04:00",
+                    },
+                },
+            }
+        )
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["apply_time"], "2026-01-14 14:04:00")
+        self.assertEqual(row["application_time"], "2026-01-14 14:04:00")
+        self.assertEqual(row["application_date"], "2026-01-14 14:04:00")
+        self.assertIsNone(row["completed_at"])
+
+    def test_invoice_rows_excludes_visible_formal_invoices_already_bound_to_submitted_etc_batches(self) -> None:
+        connection = InvoiceRowsSqlCaptureConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._invoice_rows("2026-02")
+
+        self.assertEqual(rows, [])
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        sql, _params = connection.fetch_all_calls[0]
+        self.assertIn("app.etc_batch_invoice_links", sql)
+        self.assertIn("link_status = 'active'", sql)
+        self.assertIn("app.etc_invoices", sql)
+        self.assertIn("app.etc_business_batches", sql)
+        self.assertIn("manually_marked_submitted", sql)
+
+    def test_etc_invoice_summary_rows_prefer_link_table_source(self) -> None:
+        connection = EtcSummaryLinkTableConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._etc_invoice_summary_rows(month="2026-02")
+
+        self.assertEqual(list(rows), ["etc_business_batch_hist_20260413_241125"])
+        summary = rows["etc_business_batch_hist_20260413_241125"]
+        self.assertEqual(summary["source_kind"], "etc_invoice_summary")
+        self.assertEqual(summary["etc_invoice_count"], 1)
+        self.assertEqual(summary["amount_value"], "19.19")
+        self.assertIn("app.etc_batch_invoice_links", connection.fetch_all_calls[0][0])
+        self.assertEqual(connection.fetch_all_calls[0][1], ("2026-02-01",))
+
 
 class WorkbenchSqlReadConnection:
     def __init__(
@@ -95,6 +153,52 @@ class WorkbenchSqlReadConnection:
                     "source_kind": "bank_transaction",
                     "status": "open",
                     "payload": {"id": "bank-row-1"},
+                }
+            ]
+        return []
+
+
+class InvoiceRowsSqlCaptureConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return []
+
+
+class EtcSummaryLinkTableConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from app.etc_batch_invoice_links" in normalized:
+            return [
+                {
+                    "external_etc_batch_id": "etc_business_batch_hist_20260413_241125",
+                    "business_batch_id": "etc_business_batch_hist_20260413_241125",
+                    "business_invoice_count": 1,
+                    "business_total_amount": Decimal("19.19"),
+                    "business_batch_payload": {"total_amount": "19.19", "etc_invoice_count": 1},
+                    "row_id": "invoice-link-table",
+                    "invoice_type": "进项发票",
+                    "invoice_no": "26537912570200055449",
+                    "invoice_code": None,
+                    "digital_invoice_no": "26537912570200055449",
+                    "invoice_date": "2026-02-28",
+                    "counterparty_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+                    "seller_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "amount": Decimal("18.63"),
+                    "tax_rate": "3%",
+                    "tax_amount": Decimal("0.56"),
+                    "total_with_tax": Decimal("19.19"),
+                    "status": "pending",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "raw_payload": {},
                 }
             ]
         return []
@@ -1591,6 +1695,36 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows["oa-exp-in-progress"]["workflow_status"], "in_progress")
         self.assertEqual(rows["oa-exp-in-progress"]["source_kind"], "oa")
 
+    def test_sql_projection_oa_row_keeps_header_amount_but_exposes_detail_sum_for_reconciliation(self) -> None:
+        row = {
+            "row_id": "oa-exp-daily-2038",
+            "applicant": "刘涵静",
+            "application_date": "2026-03-02",
+            "project_name": "云南溯源科技",
+            "amount": "2308.02",
+            "normalized_payload": {
+                "amount_source": "header",
+                "amount_mismatch": {
+                    "header_amount": "2308.02",
+                    "detail_sum": "2038.02",
+                    "difference": "270.00",
+                },
+                "detail_fields": {
+                    "金额来源": "主表总金额",
+                    "明细金额合计": "2038.02",
+                    "金额差异": "主表总金额 2308.02；明细合计 2038.02；差异 270.00",
+                },
+            },
+            "raw_payload": {},
+        }
+
+        payload = WorkbenchSqlProjectionBuilder._oa_row_from_sql(row)
+
+        assert payload is not None
+        self.assertEqual(payload["amount"], "2308.02")
+        self.assertEqual(payload["reconciliation_amount"], "2038.02")
+        self.assertEqual(payload["amount_source"], "header")
+
     def test_sql_projection_attaches_existing_etc_summary_to_active_relation(self) -> None:
         connection = EtcSummaryProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
@@ -1694,6 +1828,83 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1387"])
         self.assertTrue(all(row["status"] == "open" for row in [*group["oa_rows"], *group["bank_rows"]]))
         self.assertTrue(all(row["case_id"] == "CASE-MANUAL-PARTIAL" for row in [*group["oa_rows"], *group["bank_rows"]]))
+
+    def test_sql_projection_emits_source_oa_for_deterministic_multi_oa_relation_alignment(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-29350": {
+                "id": "oa-29350",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "29350.00",
+                "project_name": "大理卷烟厂余热综合利用项目",
+            },
+            "oa-88050": {
+                "id": "oa-88050",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "88050.00",
+                "project_name": "大理卷烟厂余热综合利用项目",
+            },
+            "bank-29350": {
+                "id": "bank-29350",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "status": "open",
+                "debit_amount": "29350.00",
+                "counterparty_name": "云南辰飞机电工程有限公司",
+            },
+            "bank-60000": {
+                "id": "bank-60000",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "status": "open",
+                "debit_amount": "60000.00",
+                "counterparty_name": "云南辰飞机电工程有限公司",
+            },
+            "bank-28050": {
+                "id": "bank-28050",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "status": "open",
+                "debit_amount": "28050.00",
+                "counterparty_name": "云南辰飞机电工程有限公司",
+            },
+            "invoice-117400": {
+                "id": "invoice-117400",
+                "type": "invoice",
+                "source_kind": "manual_invoice_import",
+                "status": "open",
+                "amount": "117400.00",
+                "seller_name": "云南辰飞机电工程有限公司",
+            },
+        }
+        relation = {
+            "case_id": "CASE-MULTI-OA-ALIGNMENT",
+            "relation_mode": "manual_confirmed",
+            "row_ids": list(rows_by_id),
+            "row_types": ["oa", "oa", "bank", "bank", "bank", "invoice"],
+            "amount_check": {"status": "matched"},
+        }
+
+        payload = builder._group_payload("2026-05", rows_by_id, [relation])
+
+        groups = payload["paired"]["groups"]
+        self.assertEqual(len(groups), 1)
+        bank_rows = {row["id"]: row for row in groups[0]["bank_rows"]}
+        self.assertEqual(bank_rows["bank-29350"]["source_oa_id"], "oa-29350")
+        self.assertEqual(bank_rows["bank-29350"]["source_oa_row_id"], "oa-29350")
+        self.assertEqual(bank_rows["bank-60000"]["source_oa_id"], "oa-88050")
+        self.assertEqual(bank_rows["bank-28050"]["source_oa_id"], "oa-88050")
+        self.assertEqual(
+            bank_rows["bank-60000"]["special_metadata"]["row_alignment"]["links"][1]["bank_row_ids"],
+            ["bank-60000", "bank-28050"],
+        )
 
     def test_sql_projection_keeps_active_batch_accounting_oa_bank_relation_paired(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(

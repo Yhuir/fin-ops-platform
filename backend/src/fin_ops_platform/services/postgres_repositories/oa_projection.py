@@ -17,7 +17,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 
-OA_PROJECTION_SYNC_VERSION = "2026-06-17-workflow-status-v1"
+OA_PROJECTION_SYNC_VERSION = "2026-06-22-application-date-v1"
 COMPLETED_WORKFLOW_STATUS_SQL = "(workflow_status is null or workflow_status = '' or workflow_status = 'completed')"
 
 
@@ -28,6 +28,27 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _record_application_date(record: OAApplicationRecord) -> str | None:
+    detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
+    for value in (
+        detail_fields.get("申请日期"),
+        detail_fields.get("申请时间"),
+        getattr(record, "application_date", None),
+        getattr(record, "apply_time", None),
+        record.month,
+    ):
+        normalized = text(value)
+        if not normalized or normalized in {"—", "--", "None"}:
+            continue
+        match = re.match(r"^(\d{4}-\d{2}-\d{2})", normalized)
+        if match:
+            return match.group(1)
+        month = month_start(normalized)
+        if month:
+            return month
+    return None
 
 
 class PostgresOAProjectionRepository:
@@ -79,7 +100,7 @@ class PostgresOAProjectionRepository:
                         record.section,
                         text(record.workflow_status),
                         record.applicant,
-                        month_start(record.month),
+                        _record_application_date(record),
                         record.project_name,
                         decimal_text(record.amount),
                         "CNY",

@@ -29,6 +29,15 @@ class StaticOAProjection:
         return [record for record in self.records if record.id in wanted]
 
 
+class PartialListOAProjection(StaticOAProjection):
+    def __init__(self, listed_records: list[OAApplicationRecord], lookup_records: list[OAApplicationRecord]) -> None:
+        super().__init__(lookup_records)
+        self.listed_records = list(listed_records)
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        return list(self.listed_records)
+
+
 class FakePaymentStatusRepository:
     def __init__(self, *, flow_ids: dict[str, str], paid_flow_ids: set[str]) -> None:
         self.flow_ids = dict(flow_ids)
@@ -82,6 +91,58 @@ class FakePendingRelationService:
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_relation_group_loads_all_oa_members_from_projection_lookup_and_suppresses_standalone_rows(self) -> None:
+        banks = [
+            self._bank("bank-group-a", "469600.00"),
+            self._bank("bank-group-b", "64996.69"),
+            self._bank("bank-group-c", "23053.31"),
+            self._bank("bank-group-d", "29350.00"),
+        ]
+        invoice = self._invoice("inv-group-multi-bank", "SD-MULTI", "云南鹏源科技有限公司", "587000.00")
+        oa_records = [
+            self._oa("oa-group-primary", "樊祖芳", "469600.00", reason="80%尾款"),
+            self._oa("oa-group-reserve", "樊祖芳", "29350.00", reason="5%质保金"),
+            self._oa("oa-group-advance", "樊祖芳", "88050.00", reason="15%预付款"),
+        ]
+        pair_service = WorkbenchPairRelationService()
+        self._relation(
+            pair_service,
+            "case-multi-oa-bank",
+            [*[record.id for record in oa_records], *[bank.id for bank in banks], invoice.id],
+            matched=True,
+        )
+        projection = PartialListOAProjection([oa_records[0]], oa_records)
+        service = OaPendingPaymentQueryService(
+            import_service=ImportNormalizationService(
+                existing_transactions=banks,
+                existing_invoices=[invoice],
+            ),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service,
+                transactions=banks,
+                invoices=[invoice],
+                oa_projection=projection,
+            ),
+            oa_projection=projection,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["oa"]["amount"], "587000.00")
+        self.assertEqual(row["oa"]["relationCount"], 3)
+        self.assertEqual(row["oa"]["detailMode"], "list")
+        self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], [
+            "oa-group-primary",
+            "oa-group-reserve",
+            "oa-group-advance",
+        ])
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "587000.00")
+        self.assertEqual(row["bankTransaction"]["relationCount"], 4)
+        self.assertEqual(row["bankTransaction"]["detailMode"], "list")
+
     def test_active_relation_group_returns_one_row_with_aggregated_totals(self) -> None:
         bank_group = self._bank("bank-group", "4450.00")
         invoice_group = self._invoice("inv-group", "SD-GROUP", "住宿供应商", "4450.00")

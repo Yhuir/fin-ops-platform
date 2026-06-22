@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-22 - OA projection 保留真实申请日期
+
+- 目标：修复下游 Workbench SQL active generation 只能拿到 OA 月初日期，导致关联台申请人时间 chip 在部分 OA 行缺失或退化的问题。
+- 影响范围：`PostgresOAProjectionRepository.upsert_application_records(...)` 的 `app.oa_applications.application_date` 写入、`OA_PROJECTION_SYNC_VERSION`、Workbench SQL projection source freshness；不修改 OA 原始 Mongo，只调整本系统投影。
+- 关键决策：`application_date` 应优先来自 `OAApplicationRecord.detail_fields["申请日期"]` / `申请时间` 的真实日期部分，只有缺失时才用 `record.month` 兜底。同步版本 bump 后，后续 OA sync 会让相关 read model stale 并重投。
+- 文档影响：同步本实施记录；关联台模块记录 applicant chip 的消费 contract。
+- 测试覆盖：`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_projection_application_date_uses_record_detail_date_not_month_start`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service -v`。
+- 未测风险：未连接真实 OA/生产 PostgreSQL 回放历史数据；发布后需观察 OA sync 和 Workbench worker drain，确认目标月份 active generation 已重建。
+
 ## 2026-06-22 - OA 会话校验短暂超时自动重试
 
 - 目标：修复 OA iframe / 前端首次进入时 `/api/session/me` 因代理、后端或 OA 用户信息服务短暂慢响应而在 10 秒后直接显示“会话校验失败”的问题。

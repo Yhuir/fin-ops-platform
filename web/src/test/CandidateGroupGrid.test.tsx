@@ -828,6 +828,86 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(siblingSegment).queryByText("云南辰飞机电工程有限公司")).not.toBeInTheDocument();
   });
 
+  test("aligns unlinked same-amount and sum-matched rows inside a multi-OA group", () => {
+    const makeBankRow = (id: string, amount: string, counterparty: string): WorkbenchRecord => {
+      const baseRecord = createBankRecord();
+      return {
+        ...baseRecord,
+        id,
+        caseId: "CASE-MULTI-OA-AMOUNT-FALLBACK",
+        amount,
+        counterparty,
+        tableValues: {
+          ...baseRecord.tableValues,
+          amount,
+          counterparty,
+          direction: "支出",
+        },
+      };
+    };
+    const oa29350 = createOaRecord("oa-exp-29350", "樊祖芳", "29350");
+    const oa88050 = createOaRecord("oa-exp-88050", "樊祖芳", "88050");
+    const bank29350 = makeBankRow("bank-29350", "29350", "云南辰飞机电工程有限公司");
+    const bank64996 = makeBankRow("bank-64996", "64996.69", "云南辰飞机电工程有限公司");
+    const bank23053 = makeBankRow("bank-23053", "23053.31", "云南辰飞机电工程有限公司");
+    const invoice29350Base = createInvoiceRecord("invoice-29350", "INV-29350");
+    const invoice29350 = {
+      ...invoice29350Base,
+      amount: "29350",
+      tableValues: {
+        ...invoice29350Base.tableValues,
+        amount: "29350",
+        grossAmount: "29350",
+      },
+    };
+    const group: WorkbenchCandidateGroup = {
+      id: "case:CASE-MULTI-OA-AMOUNT-FALLBACK",
+      groupType: "paired",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa29350, oa88050],
+        bank: [bank64996, bank23053, bank29350],
+        invoice: [invoice29350],
+      },
+    };
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const exactAmountSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-oa-exp-29350",
+    );
+    expect(within(exactAmountSegment).getAllByText("29350").length).toBeGreaterThanOrEqual(3);
+    expect(within(exactAmountSegment).queryByText("64996.69")).not.toBeInTheDocument();
+    expect(within(exactAmountSegment).queryByText("23053.31")).not.toBeInTheDocument();
+
+    const sumAmountSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-MULTI-OA-AMOUNT-FALLBACK-oa-exp-88050",
+    );
+    expect(within(sumAmountSegment).getByText("88050")).toBeInTheDocument();
+    expect(within(sumAmountSegment).getByText("64996.69")).toBeInTheDocument();
+    expect(within(sumAmountSegment).getByText("23053.31")).toBeInTheDocument();
+    expect(within(sumAmountSegment).queryByText("INV-29350")).not.toBeInTheDocument();
+  });
+
   test("renders no-OA summary rows collapsed by default and expands to original bank detail rows", () => {
     renderNoOaGrid();
     const bankCell = screen.getByTestId("candidate-scroll-paired-no-oa-bank-batch:NOOA-202603-FEE-bank");

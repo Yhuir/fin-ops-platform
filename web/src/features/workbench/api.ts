@@ -1289,26 +1289,27 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
     return {
       applicant: toDisplayValue(row.applicant),
       applicationTime: toWorkbenchDateTimeDisplayValue(
-        detailFields["审批完成时间"]
-          ?? summaryFields["审批完成时间"]
-          ?? row.apply_time
-          ?? row.application_time
-          ?? row.completed_at
-          ?? row.submitted_at
-          ?? row.modified_time
-          ?? row.modifiedTime
-          ?? detailFields["申请时间"]
-          ?? summaryFields["申请时间"]
-          ?? row.application_date
-          ?? row.apply_date
-          ?? row.date
-          ?? row.created_at
-          ?? row.updated_at
-          ?? detailFields["申请日期"]
-          ?? summaryFields["申请日期"]
-          ?? detailFields["创建时间"]
-          ?? summaryFields["申请日期"]
-          ?? summaryFields["创建时间"],
+        firstNonPlaceholderDisplayValue(
+          row.apply_time,
+          row.application_time,
+          detailFields["申请时间"],
+          summaryFields["申请时间"],
+          row.application_date,
+          row.apply_date,
+          detailFields["申请日期"],
+          summaryFields["申请日期"],
+          row.date,
+          row.completed_at,
+          detailFields["审批完成时间"],
+          summaryFields["审批完成时间"],
+          row.submitted_at,
+          row.modified_time,
+          row.modifiedTime,
+          row.created_at,
+          row.updated_at,
+          detailFields["创建时间"],
+          summaryFields["创建时间"],
+        ),
       ),
       projectName: toDisplayValue(row.project_name_display ?? row.project_name),
       applicationType: toDisplayValue(row.apply_type),

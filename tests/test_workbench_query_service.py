@@ -631,6 +631,13 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertIsNone(oa_row["case_id"])
         self.assertIn("多明细", oa_row["tags"])
         self.assertIn("金额差异", oa_row["tags"])
+        self.assertEqual(oa_row["amount"], "1549.00")
+        self.assertEqual(oa_row["reconciliation_amount"], "1500.00")
+        self.assertEqual(oa_row["amount_source"], "header")
+        self.assertEqual(
+            oa_row["amount_mismatch"],
+            {"header_amount": "1549.00", "detail_sum": "1500.00", "difference": "49.00"},
+        )
 
         detail_fields = oa_row["detail_fields"]
         self.assertEqual(detail_fields["金额来源"], "主表总金额")

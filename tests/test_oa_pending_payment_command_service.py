@@ -422,6 +422,38 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439020"])
         self.assertEqual(relation_command.confirm_calls, [])
 
+    def test_auto_reconcile_writes_completed_oa_from_explicit_relation_ids_when_row_types_are_missing(self) -> None:
+        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439022", pay_status=PAY_STATUS_PENDING)
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-completed-explicit",
+                    "row_ids": ["oa-completed-explicit", "bank-completed-explicit"],
+                    "row_types": [],
+                    "oa_row_ids": ["oa-completed-explicit"],
+                    "bank_transaction_ids": ["bank-completed-explicit"],
+                    "relation_mode": "manual_confirmed",
+                    "amount_check": {"matched": True},
+                    "month_scope": "2026-06",
+                }
+            ]
+        )
+        service = _service(
+            oa_records=[],
+            completed_oa_records=[_oa("oa-completed-explicit", "100.00", workflow_status="completed")],
+            transactions=[_bank("bank-completed-explicit", "100.00")],
+            relation_command=relation_command,
+            payment_repository=payment_repository,
+        )
+
+        payload = service.auto_reconcile_bank_transactions({"month": "2026-06"}, actor_id="tester")
+
+        self.assertEqual(payload["autoMatchedCount"], 0)
+        self.assertEqual(payload["writebackCount"], 1)
+        self.assertEqual(payload["oaPaymentWritebacks"][0]["oaRowId"], "oa-completed-explicit")
+        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439022"])
+        self.assertEqual(relation_command.confirm_calls, [])
+
     def test_auto_reconcile_existing_paid_relation_is_noop_when_oa_is_already_written(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439021", pay_status=PAY_STATUS_PAID)
         relation_command = FakeRelationCommandService(

@@ -15,6 +15,10 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     OA_BANK_SUM_WEAK_TOKENS,
     WorkbenchFreeMatchingEngine,
 )
+from fin_ops_platform.services.workbench_invoice_direction import (
+    invoice_counterparty_field_from_row,
+    invoice_flow_direction_from_row,
+)
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_OPEN,
     DECISION_STATUS_PAIRED,
@@ -50,7 +54,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-06-21-oa-attachment-item-parent-v1"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-06-23-invoice-direction-normalization-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",
@@ -1175,8 +1179,9 @@ class WorkbenchMatchingRules:
         if row_type in {"oa", "bank"}:
             value = self._string_value(row.get("counterparty_name"))
             return normalize_name(value) if value else None
-        invoice_type = self._string_value(row.get("invoice_type")) or ""
-        party_field = "buyer_name" if "销" in invoice_type else "seller_name"
+        party_field = invoice_counterparty_field_from_row(row)
+        if party_field is None:
+            return None
         value = self._string_value(row.get(party_field))
         return normalize_name(value) if value else None
 
@@ -1193,8 +1198,7 @@ class WorkbenchMatchingRules:
             if credit is not None and credit > ZERO:
                 return "inflow"
             return None
-        invoice_type = self._string_value(row.get("invoice_type")) or ""
-        return "inflow" if "销" in invoice_type else "outflow"
+        return invoice_flow_direction_from_row(row)
 
     def _amount(self, row: dict[str, Any]) -> Decimal | None:
         if row.get("type") == "bank":

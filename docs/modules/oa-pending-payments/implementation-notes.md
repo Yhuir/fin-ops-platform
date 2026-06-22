@@ -3,6 +3,26 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-23 - 多 OA 多流水 relation 聚合成员补全
+
+- 目标：修复 OA 待付款核对中同一 Workbench active relation 已包含多条 OA 与多条支出流水时，OA 侧可能只显示主 OA 金额、缺少 `+N`，并把支出合计大于主 OA 金额误判为 `pending_review` 的场景。
+- 影响范围：`OaPendingPaymentQueryService` relation group 构建、`DistributedInvoiceRelationContext` OA row lookup 使用、服务层回归测试和本模块测试矩阵；前端 API contract 不变，继续消费 `oa.relationCount/detailMode/summaries` 与 `bankTransaction.relationCount/detailMode/summaries`。
+- 关键决策：relation 分组时不能只使用当前视图首轮 `list_all_application_records()` 中已经枚举到的主 OA；必须基于 relation 的 OA row ids 通过 OA projection lookup 补齐同一 relation 内可权威读取的 OA records，再计算 OA 合计、付款状态和 `+N`。进入聚合行的 OA 成员继续作为同一 relation owner，不再生成 standalone OA pending row。
+- 文档影响：更新 `tests.md`；产品/API 长期口径不变，这是对既有“多 OA/多流水 relation 聚合成一行”合同的补漏。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_relation_group_loads_all_oa_members_from_projection_lookup_and_suppresses_standalone_rows`，复现 list-all 只返回主 OA 但 relation lookup 能读出 3 条 OA 的场景，断言 rows 只返回 1 条聚合行、OA 合计 `587000.00`、OA `relationCount=3`、流水 `relationCount=4` 且付款状态为 `paid`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地 synthetic projection 不替代真实生产 OA Mongo/Postgres projection、真实 worker drain 和截图样本 read model 重建；发布后需要用该 relation 样本确认 rows payload 的 `oa.summaries` 完整并且页面显示 OA `+2`。
+
+## 2026-06-22 - completed OA 已匹配流水自动写回补漏
+
+- 目标：修复 OA 待付款核对页 completed OA 已显示支出流水配对但 `oaPaymentWriteback` 仍为“未写回”的场景，并处理截图中自动写回请求被 `/fin-ops/api/*` SPA HTML fallback 吞掉后无法命中后端 API 的问题。
+- 影响范围：`OaPendingPaymentCommandService` active relation ID 解析、共享 `apiClient` HTML fallback、`OaPendingPaymentsPage` 自动写回失败后的重试行为、command/api/page 前端测试和本模块状态机/测试矩阵；业务口径不变，仍是 completed/in-progress 已有有效支出流水 active relation 且金额相等时自动写回 `t_payment_simple.pay_status=1`。
+- 关键决策：自动写回处理 existing active relation 时，不能只依赖 `row_ids/row_types` 同时存在；部分 relation/distribution payload 可能有 `oa_row_ids`、`bank_transaction_ids` 或 camelCase 字段但 `row_types` 为空。命令服务现在先读显式 OA/银行 ID 字段，再按 `row_ids` 和 row id 前缀推断类型，避免静默跳过 completed 写回。前端 API fallback 同时兼容根 `/api/*` 和 `/fin-ops/api/*` 返回 HTML 的路径错配；自动写回请求失败后不把 scope 永久标记完成，用户刷新后可重试。
+- 文档影响：更新 `state-machine.md` 和 `tests.md`；部署长期口径仍要求 Nginx `/api/`、`/fin-ops/api/`、`/fin-ops-api/` 都返回 JSON API，不应依赖前端 fallback 作为唯一修复。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_command_service.py::OaPendingPaymentCommandServiceTests::test_auto_reconcile_writes_completed_oa_from_explicit_relation_ids_when_row_types_are_missing`；新增 `web/src/test/apiClient.test.ts::falls back to canonical fin-ops API prefix when a fin-ops relative API request returns HTML`；新增 `web/src/test/OaPendingPaymentsPage.test.tsx::retries auto reconcile after a failed attempt when the user refreshes rows`；既有 API/page 回归继续覆盖 auto-reconcile 路由、写后 barrier 和页面自动写回。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地没有真实 OA MySQL、生产 Nginx、真实 OA/Mongo/PostgreSQL/RabbitMQ worker drain；发布后仍需用截图中 completed OA 样本确认 `/fin-ops-api/api/oa-pending-payments/auto-reconcile-bank-transactions` 返回 JSON，`t_payment_simple.flow_id` 对应记录变为 `pay_status=1`，read model fresh 后页面显示“已写回”。
+
 ## 2026-06-22 - 自动匹配等待 read model fresh 与 API fallback
 
 - 目标：修复 OA 待付款核对页在 rows/read model 仍显示“同步中”时仍立即触发后台自动匹配/写回，并且当根 `/api/*` 请求被前端 HTML fallback 吞掉时把 `接口返回了 HTML 页面` 错误直接暴露给用户的问题。

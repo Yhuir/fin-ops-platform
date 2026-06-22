@@ -23,6 +23,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
     OaPendingPaymentRelationRepositoryError,
 )
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 RefreshCallback = Callable[[str], object]
@@ -829,28 +830,54 @@ def _payload_list(payload: dict[str, Any], *keys: str) -> list[str]:
 
 
 def _relation_bank_ids(relation: dict[str, Any]) -> list[str]:
-    bank_ids: list[str] = []
-    row_ids = list(relation.get("row_ids") or [])
-    row_types = list(relation.get("row_types") or [])
-    for index, row_id in enumerate(row_ids):
-        row_type = clean_string(row_types[index] if index < len(row_types) else "")
-        normalized_row_id = clean_string(row_id)
-        if row_type == "bank" and normalized_row_id and normalized_row_id not in bank_ids:
-            bank_ids.append(normalized_row_id)
-    return bank_ids
+    explicit_ids = _relation_text_list(
+        relation,
+        "bank_transaction_ids",
+        "bankTransactionIds",
+        "bank_row_ids",
+        "bankRowIds",
+    )
+    if explicit_ids:
+        return explicit_ids
+    return _relation_typed_ids(relation, "bank")
 
 
 def _relation_oa_ids(relations: list[dict[str, Any]]) -> list[str]:
     oa_ids: list[str] = []
     for relation in relations:
-        row_ids = list(relation.get("row_ids") or [])
-        row_types = list(relation.get("row_types") or [])
-        for index, row_id in enumerate(row_ids):
-            row_type = clean_string(row_types[index] if index < len(row_types) else "")
-            normalized_row_id = clean_string(row_id)
-            if row_type == "oa" and normalized_row_id and normalized_row_id not in oa_ids:
-                oa_ids.append(normalized_row_id)
+        relation_oa_ids = _relation_text_list(relation, "oa_row_ids", "oaRowIds")
+        if not relation_oa_ids:
+            relation_oa_ids = _relation_typed_ids(relation, "oa")
+        for oa_id in relation_oa_ids:
+            if oa_id not in oa_ids:
+                oa_ids.append(oa_id)
     return oa_ids
+
+
+def _relation_typed_ids(relation: dict[str, Any], expected_type: str) -> list[str]:
+    ids: list[str] = []
+    row_ids = _relation_text_list(relation, "row_ids", "rowIds")
+    row_types = _relation_text_list(relation, "row_types", "rowTypes")
+    for index, row_id in enumerate(row_ids):
+        row_type = clean_string(row_types[index] if index < len(row_types) else "")
+        if not row_type:
+            row_type = row_type_for_workbench_row_id(row_id)
+        if row_type == expected_type and row_id not in ids:
+            ids.append(row_id)
+    return ids
+
+
+def _relation_text_list(relation: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        raw_values = relation.get(key)
+        if not isinstance(raw_values, list):
+            continue
+        for raw_value in raw_values:
+            normalized = clean_string(raw_value or "")
+            if normalized and normalized not in values:
+                values.append(normalized)
+    return values
 
 
 def _relation_contains_bank_ids(relation: dict[str, Any], bank_transaction_ids: list[str]) -> bool:
@@ -885,9 +912,15 @@ def _dedupe_relations(relations: Any) -> list[dict[str, Any]]:
     for relation in relations:
         if not isinstance(relation, dict):
             continue
-        key = clean_string(relation.get("case_id") or "") or "|".join(
+        key = clean_string(
+            relation.get("case_id")
+            or relation.get("caseId")
+            or relation.get("relation_id")
+            or relation.get("relationId")
+            or ""
+        ) or "|".join(
             f"{row_type}:{row_id}"
-            for row_id, row_type in zip(list(relation.get("row_ids") or []), list(relation.get("row_types") or []))
+            for row_id, row_type in zip(_relation_text_list(relation, "row_ids", "rowIds"), _relation_text_list(relation, "row_types", "rowTypes"))
         )
         if not key or key in seen:
             continue

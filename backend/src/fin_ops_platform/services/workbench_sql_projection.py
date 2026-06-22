@@ -37,6 +37,7 @@ from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
 )
+from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
@@ -46,7 +47,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-oa-pending-bank-claim-exclusion-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-23-relation-row-alignment-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -310,7 +311,7 @@ class WorkbenchSqlProjectionBuilder:
             return []
         rows = self._connection.fetch_all(
             """
-            select row_id, applicant, application_date, project_name, amount, status, workflow_status, normalized_payload, raw_payload
+            select row_id, applicant, application_date, approved_at, project_name, amount, status, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             where row_id = any(%s)
             order by row_id
@@ -322,7 +323,7 @@ class WorkbenchSqlProjectionBuilder:
     def _legacy_oa_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
-            select row_id, applicant, application_date, project_name, amount, status, normalized_payload, raw_payload
+            select row_id, applicant, application_date, approved_at, project_name, amount, status, normalized_payload, raw_payload
             from app.oa_applications
             where scope_month = %s::date
               and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
@@ -343,6 +344,11 @@ class WorkbenchSqlProjectionBuilder:
         row_id = str(row.get("row_id") or payload.get("id") or "").strip()
         if not row_id:
             return None
+        detail_fields = payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {}
+        summary_fields = payload.get("summary_fields") if isinstance(payload.get("summary_fields"), dict) else {}
+        amount_mismatch = payload.get("amount_mismatch") if isinstance(payload.get("amount_mismatch"), dict) else None
+        apply_time = _oa_application_time(row, payload, detail_fields, summary_fields)
+        completed_at = _oa_completed_time(row, payload, detail_fields, summary_fields)
         return {
             "id": row_id,
             "type": "oa",
@@ -350,12 +356,19 @@ class WorkbenchSqlProjectionBuilder:
             "status": "open",
             "workflow_status": row.get("workflow_status") or payload.get("workflow_status"),
             "applicant": row.get("applicant") or payload.get("applicant"),
+            "apply_time": apply_time,
+            "application_time": apply_time,
+            "application_date": apply_time,
+            "completed_at": completed_at,
             "date": _date_text(row.get("application_date") or payload.get("date")),
             "project_name": row.get("project_name") or payload.get("project_name"),
             "amount": str(row.get("amount") or payload.get("amount") or ""),
+            "amount_source": payload.get("amount_source") or detail_fields.get("金额来源"),
+            "amount_mismatch": amount_mismatch,
+            "reconciliation_amount": _oa_reconciliation_amount(payload, detail_fields),
             "reason": payload.get("reason"),
-            "summary_fields": payload.get("summary_fields") if isinstance(payload.get("summary_fields"), dict) else {},
-            "detail_fields": payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {},
+            "summary_fields": summary_fields,
+            "detail_fields": detail_fields,
         }
 
     def _bank_rows(
@@ -456,17 +469,18 @@ class WorkbenchSqlProjectionBuilder:
 
     def _invoice_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
-            """
+            f"""
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
                    workbench_visibility, tags, source_links, raw_payload
-            from app.invoices
-            where invoice_month = %s::date
-              and status <> 'deleted'
-              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+            from app.invoices invoices
+            where invoices.invoice_month = %s::date
+              and invoices.status <> 'deleted'
+              and coalesce(invoices.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(invoices.raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+              {self._submitted_etc_overlap_exclusion_sql("invoices")}
             order by invoice_date desc nulls last, row_id
             """,
             (month_start(month),),
@@ -482,22 +496,59 @@ class WorkbenchSqlProjectionBuilder:
         if not normalized_row_ids:
             return []
         rows = self._connection.fetch_all(
-            """
+            f"""
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
                    workbench_visibility, tags, source_links, raw_payload
-            from app.invoices
-            where coalesce(legacy_mongo_id, id::text) = any(%s)
-              and status <> 'deleted'
-              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+            from app.invoices invoices
+            where coalesce(invoices.legacy_mongo_id, invoices.id::text) = any(%s)
+              and invoices.status <> 'deleted'
+              and coalesce(invoices.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(invoices.raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+              {self._submitted_etc_overlap_exclusion_sql("invoices")}
             order by invoice_date desc nulls last, row_id
             """,
             (normalized_row_ids,),
         )
         return [payload for row in rows if (payload := self._invoice_row_from_sql(row))]
+
+    @staticmethod
+    def _submitted_etc_overlap_exclusion_sql(invoice_alias: str) -> str:
+        return f"""
+              and not exists (
+                  select 1
+                  from app.etc_batch_invoice_links etc_batch_invoice_links
+                  where etc_batch_invoice_links.link_status = 'active'
+                    and etc_batch_invoice_links.invoice_id = {invoice_alias}.id
+              )
+              and not exists (
+                  select 1
+                  from app.etc_invoices etc_invoices
+                  left join app.etc_business_batches etc_business_batches
+                    on etc_business_batches.business_batch_id = etc_invoices.business_batch_id
+                  where (
+                          (
+                              nullif(coalesce({invoice_alias}.digital_invoice_no, {invoice_alias}.invoice_no), '') is not null
+                          and etc_invoices.invoice_no = coalesce({invoice_alias}.digital_invoice_no, {invoice_alias}.invoice_no)
+                          )
+                       or (
+                              nullif({invoice_alias}.invoice_code, '') is not null
+                          and nullif({invoice_alias}.invoice_no, '') is not null
+                          and etc_invoices.invoice_code = {invoice_alias}.invoice_code
+                          and etc_invoices.invoice_no = {invoice_alias}.invoice_no
+                          )
+                  )
+                    and (
+                          etc_business_batches.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                       or (
+                              etc_invoices.status = 'submitted'
+                          and coalesce(etc_business_batches.status, '') <> 'deleted'
+                          )
+                    )
+              )
+        """
 
     def _invoice_row_from_sql(self, row: dict[str, Any]) -> dict[str, Any] | None:
         row_id = str(row.get("row_id") or "").strip()
@@ -726,6 +777,11 @@ class WorkbenchSqlProjectionBuilder:
                     row["tags"] = tags
                 if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
                     self._apply_no_oa_relation_metadata(row, relation)
+            self._apply_relation_row_alignment(
+                working_rows_by_id,
+                relation,
+                relation_row_ids=relation_row_ids,
+            )
             if case_id and external_etc_batch_id:
                 summary_row = etc_summary_rows_by_external_batch_id.get(external_etc_batch_id)
                 if summary_row:
@@ -779,6 +835,45 @@ class WorkbenchSqlProjectionBuilder:
         grouped["oa_attachment_invoice_parser_version"] = MongoOAAdapter._attachment_invoice_cache_parser_version()
         grouped["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
         return grouped
+
+    def _apply_relation_row_alignment(
+        self,
+        rows_by_id: dict[str, dict[str, Any]],
+        relation: dict[str, Any],
+        *,
+        relation_row_ids: list[str],
+    ) -> None:
+        if not relation_row_ids:
+            return
+        relation_for_alignment = {
+            **relation,
+            "row_ids": relation_row_ids,
+        }
+        alignment = WorkbenchRelationAlignmentService().align_relation(
+            rows_by_id=rows_by_id,
+            relation=relation_for_alignment,
+        )
+        if not alignment.get("links") and not alignment.get("unresolved_row_ids"):
+            return
+        for row_id in relation_row_ids:
+            row = rows_by_id.get(row_id)
+            if not isinstance(row, dict):
+                continue
+            metadata = row.get("special_metadata")
+            row["special_metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
+            row["special_metadata"]["row_alignment"] = deepcopy(alignment)
+        for link in list(alignment.get("links") or []):
+            if not isinstance(link, dict):
+                continue
+            oa_row_id = str(link.get("oa_row_id") or "").strip()
+            if not oa_row_id:
+                continue
+            for row_id in [*list(link.get("bank_row_ids") or []), *list(link.get("invoice_row_ids") or [])]:
+                row = rows_by_id.get(str(row_id))
+                if not isinstance(row, dict):
+                    continue
+                row["source_oa_id"] = oa_row_id
+                row["source_oa_row_id"] = oa_row_id
 
     def _apply_reconciliation_decisions_to_rows(
         self,
@@ -1119,6 +1214,34 @@ class WorkbenchSqlProjectionBuilder:
             filters.append("submitted_batches.external_etc_batch_id <> all(%s)")
             params.append(sorted(normalized_excluded_external_batch_ids))
         where_clause = "\n              and ".join(filters)
+        invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}
+
+        def append_summary_source_row(row: dict[str, Any], *, batch_payload: dict[str, Any] | None = None) -> None:
+            external_batch_id = str(row.get("external_etc_batch_id") or "").strip()
+            if not external_batch_id:
+                return
+            existing_keys = {
+                self._etc_invoice_summary_invoice_identity(existing)
+                for existing in invoices_by_external_batch_id[external_batch_id]
+            }
+            invoice_key = self._etc_invoice_summary_invoice_identity(row)
+            if invoice_key not in existing_keys:
+                invoices_by_external_batch_id[external_batch_id].append(row)
+            if batch_payload:
+                existing_payload = batch_payload_by_external_batch_id.get(external_batch_id, {})
+                batch_payload_by_external_batch_id[external_batch_id] = {**existing_payload, **batch_payload}
+
+        for row in self._etc_invoice_summary_link_rows(
+            normalized_month,
+            normalized_external_batch_ids,
+            normalized_excluded_external_batch_ids,
+        ):
+            append_summary_source_row(
+                row,
+                batch_payload=self._etc_business_summary_batch_payload(row),
+            )
+
         rows = self._connection.fetch_all(
             f"""
             with submitted_batches as (
@@ -1159,24 +1282,6 @@ class WorkbenchSqlProjectionBuilder:
             """,
             tuple(params),
         )
-        invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}
-
-        def append_summary_source_row(row: dict[str, Any], *, batch_payload: dict[str, Any] | None = None) -> None:
-            external_batch_id = str(row.get("external_etc_batch_id") or "").strip()
-            if not external_batch_id:
-                return
-            existing_keys = {
-                self._etc_invoice_summary_invoice_identity(existing)
-                for existing in invoices_by_external_batch_id[external_batch_id]
-            }
-            invoice_key = self._etc_invoice_summary_invoice_identity(row)
-            if invoice_key not in existing_keys:
-                invoices_by_external_batch_id[external_batch_id].append(row)
-            if batch_payload:
-                existing_payload = batch_payload_by_external_batch_id.get(external_batch_id, {})
-                batch_payload_by_external_batch_id[external_batch_id] = {**existing_payload, **batch_payload}
-
         for row in rows:
             batch_payload = row_payload(row, "batch_payload")
             append_summary_source_row(row, batch_payload=batch_payload if isinstance(batch_payload, dict) else None)
@@ -1274,6 +1379,70 @@ class WorkbenchSqlProjectionBuilder:
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
+
+    def _etc_invoice_summary_link_rows(
+        self,
+        month: str,
+        external_batch_ids: set[str],
+        excluded_external_batch_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        batch_id_expr = """
+            coalesce(
+                nullif(business_batches.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                links.business_batch_id
+            )
+        """
+        filters = ["links.link_status = 'active'", "invoices.status <> 'deleted'"]
+        params: list[Any] = []
+        if month:
+            filters.append("invoices.invoice_month = %s::date")
+            params.append(month_start(month))
+        if external_batch_ids:
+            filters.append(f"{batch_id_expr} = any(%s)")
+            params.append(sorted(external_batch_ids))
+        if excluded_external_batch_ids:
+            filters.append(f"{batch_id_expr} <> all(%s)")
+            params.append(sorted(excluded_external_batch_ids))
+        rows = self._connection.fetch_all(
+            f"""
+            select
+                {batch_id_expr} as external_etc_batch_id,
+                links.business_batch_id,
+                business_batches.invoice_count as business_invoice_count,
+                business_batches.total_amount as business_total_amount,
+                coalesce(business_batches.raw_payload->'normalized_payload', '{{}}'::jsonb) as business_batch_payload,
+                coalesce(invoices.legacy_mongo_id, invoices.id::text) as row_id,
+                invoices.invoice_type,
+                invoices.invoice_no,
+                invoices.invoice_code,
+                invoices.digital_invoice_no,
+                invoices.invoice_date,
+                invoices.counterparty_name,
+                invoices.seller_name,
+                invoices.seller_tax_no,
+                invoices.buyer_name,
+                invoices.buyer_tax_no,
+                invoices.amount,
+                invoices.tax_rate,
+                invoices.tax_amount,
+                invoices.total_with_tax,
+                invoices.status,
+                invoices.workbench_visibility,
+                invoices.raw_payload
+            from app.etc_batch_invoice_links links
+            join app.invoices invoices
+              on invoices.id = links.invoice_id
+            left join app.etc_business_batches business_batches
+              on business_batches.business_batch_id = links.business_batch_id
+            where {" and ".join(filters)}
+            order by external_etc_batch_id, invoices.invoice_date, row_id
+            """,
+            tuple(params),
+        )
+        return list(rows)
 
     @staticmethod
     def _etc_business_summary_filters(
@@ -1590,6 +1759,53 @@ def _text_or_none(value: object) -> str | None:
     return normalized
 
 
+def _oa_application_time(
+    row: dict[str, Any],
+    payload: dict[str, Any],
+    detail_fields: dict[str, Any],
+    summary_fields: dict[str, Any],
+) -> str | None:
+    return _first_text_or_none(
+        payload.get("apply_time"),
+        payload.get("application_time"),
+        detail_fields.get("申请时间"),
+        summary_fields.get("申请时间"),
+        payload.get("application_date"),
+        payload.get("apply_date"),
+        detail_fields.get("申请日期"),
+        summary_fields.get("申请日期"),
+        row.get("application_date"),
+        payload.get("date"),
+        payload.get("created_at"),
+        payload.get("updated_at"),
+    )
+
+
+def _oa_completed_time(
+    row: dict[str, Any],
+    payload: dict[str, Any],
+    detail_fields: dict[str, Any],
+    summary_fields: dict[str, Any],
+) -> str | None:
+    return _first_text_or_none(
+        payload.get("completed_at"),
+        detail_fields.get("审批完成时间"),
+        summary_fields.get("审批完成时间"),
+        payload.get("submitted_at"),
+        payload.get("modified_time"),
+        payload.get("modifiedTime"),
+        row.get("approved_at"),
+    )
+
+
+def _first_text_or_none(*values: object) -> str | None:
+    for value in values:
+        normalized = _text_or_none(value)
+        if normalized:
+            return normalized
+    return None
+
+
 def _text_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1658,6 +1874,23 @@ def _decimal_or_none(value: object) -> Decimal | None:
         return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _oa_reconciliation_amount(payload: dict[str, Any], detail_fields: dict[str, Any]) -> str | None:
+    explicit_amount = payload.get("reconciliation_amount")
+    if explicit_amount not in (None, "", "--", "—"):
+        parsed = _decimal_or_none(explicit_amount)
+        return f"{parsed:.2f}" if parsed is not None else str(explicit_amount)
+    amount_source = str(payload.get("amount_source") or detail_fields.get("金额来源") or "").strip()
+    if amount_source not in {"header", "主表总金额"}:
+        return None
+    amount_mismatch = payload.get("amount_mismatch")
+    if not isinstance(amount_mismatch, dict) and "金额差异" not in detail_fields:
+        return None
+    detail_sum = amount_mismatch.get("detail_sum") if isinstance(amount_mismatch, dict) else None
+    detail_sum = detail_sum or detail_fields.get("明细金额合计")
+    parsed = _decimal_or_none(detail_sum)
+    return f"{parsed:.2f}" if parsed is not None else (str(detail_sum).strip() or None)
 
 
 def _nonzero_decimal_or_none(value: object) -> Decimal | None:

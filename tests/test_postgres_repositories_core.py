@@ -519,6 +519,116 @@ def test_find_invoices_by_identity_keys_uses_single_bulk_lookup() -> None:
     assert "data_fingerprint = any(%s)" in connection.fetch_all_sql[0]
 
 
+class SubmittedEtcInvoiceIdentityConnection:
+    def __init__(self) -> None:
+        self.fetch_one_sql: list[str] = []
+        self.fetch_one_params: list[tuple] = []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetch_one_sql.append(" ".join(sql.lower().split()))
+        self.fetch_one_params.append(params)
+        return {
+            "etc_invoice_id": "etc_invoice_0028",
+            "invoice_no": "26537912570200055449",
+            "invoice_code": None,
+            "invoice_date": "2026-02-28",
+            "seller_name": "云南国道主干线昆明绕城高速公路建设有限公司",
+            "seller_tax_no": "9153000077859986X2",
+            "buyer_name": "云南溯源科技有限公司",
+            "buyer_tax_no": "915300007194052520",
+            "amount": Decimal("18.63"),
+            "tax_amount": Decimal("0.56"),
+            "total_with_tax": Decimal("19.19"),
+            "tax_rate": "3%",
+            "batch_id": "etc_batch_hist_20260413_241125",
+            "business_batch_id": "etc_business_batch_hist_20260413_241125",
+            "status": "submitted",
+            "business_batch_status": "manually_marked_submitted",
+        }
+
+
+def test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata() -> None:
+    connection = SubmittedEtcInvoiceIdentityConnection()
+    repository = PostgresCoreRepository(connection)
+
+    invoice = repository.find_submitted_etc_invoice_by_identity(
+        canonical_key="26537912570200055449",
+        digital_invoice_no="26537912570200055449",
+    )
+
+    assert invoice is not None
+    assert invoice.id == "etc_invoice_0028"
+    assert invoice.invoice_number == "26537912570200055449"
+    assert invoice.issue_date == "2026-02-28"
+    assert invoice.amount_without_tax == Decimal("18.63")
+    assert invoice.tax_amount == Decimal("0.56")
+    assert invoice.total_amount == Decimal("19.19")
+    assert invoice.current_batch_id == "etc_business_batch_hist_20260413_241125"
+    assert connection.fetch_one_params == [
+        (
+            ["26537912570200055449", "26537912570200055449"],
+            None,
+            None,
+            None,
+            None,
+        )
+    ]
+    assert "from app.etc_invoices" in connection.fetch_one_sql[0]
+    assert "manually_marked_submitted" in connection.fetch_one_sql[0]
+    assert "coalesce(etc_business_batches.status, '') <> 'deleted'" in connection.fetch_one_sql[0]
+
+
+class EtcBatchInvoiceLinkConnection:
+    def __init__(self) -> None:
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        return {
+            "id": "link-uuid-1",
+            "tenant_id": "default",
+            "business_batch_id": "etc_business_batch_hist_20260413_241125",
+            "etc_invoice_id": "etc_invoice_0028",
+            "invoice_id": "invoice-uuid-1",
+            "identity_key": "26537912570200055449",
+            "link_status": "active",
+            "link_source": "formal_invoice_import",
+            "confidence": "strict",
+        }
+
+
+def test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity() -> None:
+    connection = EtcBatchInvoiceLinkConnection()
+    repository = PostgresCoreRepository(connection)
+
+    link = repository.upsert_etc_batch_invoice_link(
+        invoice_id="a6181d79-c3eb-4e20-bbd2-719215ed161d",
+        business_batch_id="etc_business_batch_hist_20260413_241125",
+        etc_invoice_id="etc_invoice_0028",
+        invoice_no="26537912570200055449",
+        digital_invoice_no="26537912570200055449",
+        invoice_date="2026-02-28",
+        link_source="formal_invoice_import",
+        confidence="strict",
+        raw_payload={"reason": "unit"},
+    )
+
+    sql, params = connection.fetch_one_calls[0]
+    assert link["id"] == "link-uuid-1"
+    assert "insert into app.etc_batch_invoice_links" in sql
+    assert "on conflict (tenant_id, business_batch_id, identity_key) where link_status = 'active'" in sql
+    assert "select id from app.invoices where legacy_mongo_id = %s or id::text = %s" in sql
+    assert params[0] == "a6181d79-c3eb-4e20-bbd2-719215ed161d"
+    assert params[1] == "a6181d79-c3eb-4e20-bbd2-719215ed161d"
+    assert params[2] == "default"
+    assert params[3] == "etc_business_batch_hist_20260413_241125"
+    assert params[4] == "etc_invoice_0028"
+    assert params[5] == "26537912570200055449"
+    assert params[10] == "formal_invoice_import"
+    assert params[11] == "strict"
+
+
 class NotificationConnection:
     def __init__(self) -> None:
         self.executed_sql: list[str] = []

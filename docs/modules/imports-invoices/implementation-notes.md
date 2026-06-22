@@ -26,6 +26,28 @@
 
 ## 历史记录
 
+## 2026-06-23 - ETC 批次发票 link table 最小接入
+
+- 目标：把正式发票导入后的 submitted ETC metadata 回挂从单纯 `etc_invoice_id/raw_payload` 扩展为 `app.etc_batch_invoice_links` 批次归属事实，开始收敛“一张真实发票一行 canonical invoice、批次关系进 link table”的长期架构。
+- 影响范围：新增 `EtcBatchInvoiceLinkService`、PostgreSQL link table migration/repository upsert、`ImportNormalizationService` 反向链接路径、关联台 open invoice SQL 排除路径。
+- 关键决策：导入服务在严格匹配 submitted/manual-submitted ETC metadata 后仍会写入兼容 metadata，但同时通过 link service 幂等 upsert `tenant_id + business_batch_id + identity_key` 的 active link。未执行历史 backfill，因此旧数据仍由 Phase A 兼容查询保护。
+- 文档影响：同步 Phase 18 GSD 和 ETC/关联台模块；reset/backfill/runbook 留到 Phase C。
+- 测试覆盖：新增 `tests/test_etc_batch_invoice_link_service.py`、migration/repository upsert 测试，并更新导入反向链接测试要求写 link table。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py tests/test_etc_batch_invoice_link_service.py tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests tests/test_postgres_migrations.py -q`。
+- 未测风险：尚未执行生产 migration/backfill/apply；真实库现有 overlap row set 仍需 Phase C dry-run/backfill 后才能完全切到 link table。
+- 后续事项：Phase C 增加 backfill/rollback 工具，并更新清空发票池 runbook。
+
+## 2026-06-23 - 已提交 ETC 批次后的正式发票导入反向链接
+
+- 目标：修复历史 ETC 批次先存在、随后清空/重建发票池并导入正式进项发票时，同一真实发票同时作为 ETC 批次明细和普通 open 发票出现在关联台的问题。
+- 影响范围：`ImportNormalizationService` 正式发票 upsert 后的 metadata 合并、PostgreSQL 发票 identity 查询、关联台 open invoice SQL 投影，以及 dry-run-first 生产修复工具。
+- 关键决策：`app.invoices` 仍是一张真实发票一行的 canonical pool；Phase A 不新增 schema，而是在正式发票导入后按强身份查找 submitted/manual-submitted ETC metadata，只有发票号、日期、金额、税额、购销方等严格匹配时才把 ETC metadata 回挂到 canonical invoice 并隐藏其 open 发票视图。ETC ZIP/批次导入本身仍不得创建新的 canonical invoice。
+- 文档影响：同步发票导入、关联台和 ETC 票据模块记录；Phase B 会继续把批次归属迁到 `app.etc_batch_invoice_links`。
+- 测试覆盖：新增 `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later`，并配合 repository、Workbench SQL 和修复工具测试覆盖同一生产事故形状。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_service.py tests/test_postgres_repositories_core.py::test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests tests/test_repair_submitted_etc_invoice_overlaps_tool.py -q`。
+- 未测风险：尚未执行生产 `--apply`；当前真实库 dry-run 仍有 112 条自动修复候选和 1 条日期不一致人工判定候选，必须经用户确认 exact row set、reason、operator 和回滚方式后才能写库。
+- 后续事项：Phase B 新增 `app.etc_batch_invoice_links` 后，把反向链接从 `etc_invoice_id/raw_payload` 过渡到 link table 事实源。
+
 ## 2026-06-21 - 导入 preview/confirm 轻量化与批量查重
 
 - 目标：修复发票导入 preview/confirm/read model 链路中的两个性能瓶颈：preview/confirm 每行远程查重，以及 preview 保存整份 workbench 关系快照并触发 read model 刷新。

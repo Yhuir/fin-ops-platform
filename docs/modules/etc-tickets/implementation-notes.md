@@ -28,6 +28,39 @@
 
 ## 历史记录
 
+## 2026-06-23 - ETC batch invoice link backfill 闭环
+
+- 目标：补齐 Phase C 历史迁移工具，让已存在的 submitted/manual-submitted ETC 批次能够从 `app.etc_invoices` 与 canonical `app.invoices` dry-run 回填到 `app.etc_batch_invoice_links`。
+- 影响范围：新增 `backfill_etc_batch_invoice_links` dry-run/apply 工具，Workbench ETC summary 优先读取 link table，invoice reset/runbook 明确 link table 边界。
+- 关键决策：`app.etc_invoices` 继续保留为源 metadata/审计和迁移 fallback；批次 membership 以 `app.etc_batch_invoice_links` 为准。backfill 只自动写入发票号、日期、金额、购销方等 strict 一致的候选，mismatch 进入人工审核清单。
+- 文档影响：同步发票池清理 runbook、data reset 边界、关联台实施记录和 Phase 18 GSD。
+- 测试覆盖：`tests/test_backfill_etc_batch_invoice_links_tool.py` 覆盖 dry-run 分类、apply reason/operator guard、rollback plan 与 Workbench scope；Workbench summary 测试覆盖 link table 优先读取。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_backfill_etc_batch_invoice_links_tool.py tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_etc_invoice_summary_rows_prefer_link_table_source -q`。
+- 未测风险：未对生产库执行 `--apply`；真实 backfill 需要用户确认 row set、reason、operator、回滚计划和刷新范围。
+- 后续事项：生产迁移后可逐步收缩旧 `app.etc_invoices` summary fallback，但删除 fallback 前必须先证明所有 submitted ETC 批次都有 active link。
+
+## 2026-06-23 - ETC 批次发票关系事实源表
+
+- 目标：新增 `app.etc_batch_invoice_links`，让 ETC business batch 与 canonical invoice 的 membership 成为独立事实源，不再长期把 `app.etc_invoices` 当作关联台发票事实。
+- 影响范围：PostgreSQL migration `0074_etc_batch_invoice_links.sql`、`PostgresCoreRepository.upsert_etc_batch_invoice_link`、`EtcBatchInvoiceLinkService`、正式发票导入反向链接、关联台 open invoice 排除。
+- 关键决策：link table 用 active partial unique 约束保证同一 tenant + business batch + identity 只有一条 active link，同一 tenant + business batch + invoice 也只有一条 active link；`app.etc_invoices` 在迁移期保留为 ETC 源数据/审计与 fallback。
+- 文档影响：同步 Phase 18 GSD、导入和关联台模块。
+- 测试覆盖：新增 service 测试、repository upsert 测试和 migration 清单/表清单测试；导入和 Workbench 测试已要求写/读 link table。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_batch_invoice_link_service.py tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity tests/test_postgres_migrations.py -q`。
+- 未测风险：未 backfill 历史 `app.etc_invoices`/`app.invoices.etc_invoice_id`/relation metadata 到 link table；未执行生产 migration。
+- 后续事项：Phase C 实现 backfill dry-run/apply/rollback、reset 边界和 runbook。
+
+## 2026-06-23 - submitted ETC 发票与统一发票池重叠审计
+
+- 目标：解释并控制“历史 ETC 批次发票”和“统一发票池正式进项发票”重叠造成的关联台双行问题，为 Phase 18 的长期 link table 迁移提供生产 dry-run 证据。
+- 影响范围：ETC metadata 的 submitted/manual-submitted 状态、正式发票反向链接、关联台 ETC summary/open invoice 投影，以及 `repair_submitted_etc_invoice_overlaps` 运维工具。
+- 关键决策：Phase A 保留 `app.etc_invoices` 作为迁移期 ETC 源数据/导入审计，不把它当作新的发票池事实源；严格匹配的重叠项只用于回挂 canonical invoice 和隐藏普通 open 发票行。Phase B 再新增 `app.etc_batch_invoice_links` 作为批次归属事实源，避免 `app.etc_invoices` 与 `app.invoices` 长期竞争。
+- 文档影响：同步发票导入、关联台和 Phase 18 GSD 文件。
+- 测试覆盖：新增 `tests/test_repair_submitted_etc_invoice_overlaps_tool.py`，覆盖 dry-run 分类、apply 只处理严格匹配候选、reason/operator 必填和 Workbench scope enqueue。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_repair_submitted_etc_invoice_overlaps_tool.py -q`；真实库 dry-run：`PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_submitted_etc_invoice_overlaps --json --limit 3`。
+- 未测风险：真实库 dry-run 当前返回 `attention`，因为存在 1 条日期不一致人工判定候选；未执行任何生产写入。
+- 后续事项：执行 Phase B/C 前，不应删除 `app.etc_invoices`；先落地 link table、backfill、读取路径迁移和 reset/runbook 后，再判断旧表的长期保留或降级策略。
+
 ## 2026-06-21 - 信用卡流水最近同金额兜底配对
 
 - 目标：按新的双侧核对口径，尽量让 ETC 信用卡流水都有配对关系；在强日期窗口内没有票根时，自动选择同金额的最近剩余票根作为推荐配对。

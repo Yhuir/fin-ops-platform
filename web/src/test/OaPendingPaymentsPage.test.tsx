@@ -461,7 +461,9 @@ function installOaPendingPaymentsFetch(overrides?: {
   operationBarrierDelay?: Promise<void>;
   rulesCanSave?: boolean;
   autoReconcilePayload?: Record<string, unknown>;
+  autoReconcileResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
 }) {
+  const autoReconcileResponses = [...(overrides?.autoReconcileResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
@@ -517,14 +519,16 @@ function installOaPendingPaymentsFetch(overrides?: {
       });
     }
     if (url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
-      return new Response(JSON.stringify(overrides?.autoReconcilePayload ?? {
+      const scriptedResponse = autoReconcileResponses.shift();
+      const status = scriptedResponse?.status ?? (init?.method === "POST" ? 200 : 405);
+      return new Response(JSON.stringify(scriptedResponse?.payload ?? overrides?.autoReconcilePayload ?? {
         success: true,
         action: "oa_pending_payment_auto_reconcile_bank_transactions",
         autoMatchedCount: 0,
         writebackCount: 0,
         readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
       }), {
-        status: init?.method === "POST" ? 200 : 405,
+        status,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -1196,6 +1200,43 @@ describe("OA pending payments page", () => {
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
+  });
+
+  test("retries auto reconcile after a failed attempt when the user refreshes rows", async () => {
+    const fetchMock = installOaPendingPaymentsFetch({
+      autoReconcileResponses: [
+        {
+          status: 503,
+          payload: {
+            error: "temporary_api_error",
+            message: "自动匹配和写回暂不可用。",
+          },
+        },
+        {
+          status: 200,
+          payload: {
+            success: true,
+            action: "oa_pending_payment_auto_reconcile_bank_transactions",
+            autoMatchedCount: 0,
+            writebackCount: 0,
+            readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 2 },
+          },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
+    expect(await within(page).findByText("自动匹配和写回暂不可用。")).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+
+    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(2));
+    await waitFor(() => expect(within(page).queryByText("自动匹配和写回暂不可用。")).not.toBeInTheDocument());
   });
 
   test("does not auto reconcile while OA pending payment read model is still refreshing", async () => {

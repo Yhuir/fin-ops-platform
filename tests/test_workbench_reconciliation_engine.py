@@ -270,6 +270,49 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         self.assertEqual(decisions[0]["direction"], "income")
         self.assertEqual(decisions[0]["row_ids"], ["txn-income-13440", "inv-output-13440"])
 
+    def test_income_bank_english_output_invoice_decision_is_persisted(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=WorkbenchPairRelationService(),
+        ).run_scope(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "txn-income-output-english",
+                    "type": "bank",
+                    "month": "2026-02",
+                    "credit_amount": "13440.00",
+                    "debit_amount": "",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "外协收入",
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "inv-output-english",
+                    "type": "invoice",
+                    "month": "2026-02",
+                    "issue_date": "2026-02-20",
+                    "total_with_tax": "13440.00",
+                    "invoice_type": "output",
+                    "seller_name": "云南溯源科技有限公司",
+                    "buyer_name": "北京长征高科技有限公司",
+                }
+            ],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-02")
+        self.assertEqual(summary["paired_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(decisions[0]["rule_code"], "bank_invoice_exact_amount")
+        self.assertEqual(decisions[0]["direction"], "income")
+        self.assertEqual(decisions[0]["row_ids"], ["txn-income-output-english", "inv-output-english"])
+
     def test_income_bank_output_invoice_sum_decision_is_persisted(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
 

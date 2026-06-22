@@ -405,12 +405,51 @@ def _scope_group_issues(
                         details={"payload_relation_mode": payload_mode, "relation_mode": relation_mode},
                     )
                 )
+            if (
+                require_complete
+                and _relation_has_multiple_oa_rows(row_types)
+                and row_type == "bank"
+                and not _payload_source_oa_id(row_payload_dict)
+            ):
+                issues.append(
+                    RelationDisplayIssue(
+                        severity="error",
+                        code="relation_bank_row_missing_source_oa_alignment",
+                        message="A bank row in a multi-OA active relation is missing row-level source OA alignment evidence.",
+                        case_id=case_id,
+                        scope_key=scope_key,
+                        row_id=row_id,
+                        row_type=row_type,
+                        details={
+                            "relation_mode": relation_mode,
+                            "expected_fields": ["source_oa_id", "source_oa_row_id", "derived_from_oa_id"],
+                        },
+                    )
+                )
     return issues
 
 
 def _row_type_at(row_types: list[str], index: int) -> str:
     if index < len(row_types):
         return row_types[index]
+    return ""
+
+
+def _relation_has_multiple_oa_rows(row_types: list[str]) -> bool:
+    return sum(1 for row_type in row_types if str(row_type or "").strip() == "oa") >= 2
+
+
+def _payload_source_oa_id(payload: dict[str, Any]) -> str:
+    for key in ("source_oa_id", "source_oa_row_id", "derived_from_oa_id", "oa_row_id", "oa_id"):
+        value = text(payload.get(key))
+        if value:
+            return value
+    detail_fields = payload.get("detail_fields")
+    if isinstance(detail_fields, dict):
+        for key in ("source_oa_id", "source_oa_row_id", "derived_from_oa_id", "oa_row_id", "oa_id"):
+            value = text(detail_fields.get(key))
+            if value:
+                return value
     return ""
 
 

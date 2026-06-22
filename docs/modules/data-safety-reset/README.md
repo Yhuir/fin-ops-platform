@@ -39,7 +39,7 @@
 | 动作 | 主要删除/清理 | 必须保留或保护 | 主要 fan-out |
 | --- | --- | --- | --- |
 | `reset_bank_transactions` | 银行流水导入、银行相关 workbench/matching/read model 状态、银行导入文件 | 发票事实、`form_data_db.form_data`、app settings、import metadata | 银行明细、关联台、往来款、成本、search、App Status |
-| `reset_invoices` | 进/销项发票导入、税金认证记录、发票相关 workbench/matching/read model 状态、发票导入文件 | 银行流水事实、OA 源数据、app settings、import metadata | 待找发票、税金、进项/销项/OA 待付款、成本、关联台、App Status |
+| `reset_invoices` | 进/销项发票导入、税金认证记录、发票相关 workbench/matching/read model 状态、发票导入文件、指向被删除发票的 active ETC batch invoice links | 银行流水事实、OA 源数据、ETC 源 metadata/附件审计、app settings、import metadata | 待找发票、税金、进项/销项/OA 待付款、成本、关联台、ETC summary link backfill、App Status |
 | `reset_oa_and_rebuild` | OA 衍生 workbench override/relation/read model，随后按保留策略重建 OA 投影和匹配 | 纯银行+发票关系、OA 附件发票解析缓存、受保护目标 | OA 待付款、进项使用、关联台、ETC、成本、search、App Status |
 
 受保护目标由 `SettingsDataResetService.protected_targets()` 统一暴露，目前包括：
@@ -55,6 +55,7 @@
 
 - 权限和身份：必须是管理员；重置前必须校验当前 OA 密码；响应和 job payload 不得回显密码。
 - 数据事实：PostgreSQL app facts 是主事实源；OA Mongo 只读；旧 app Mongo 只作迁移/审计参考，不能覆盖 PostgreSQL。
+- 发票事实：`app.invoices` 是唯一 canonical 发票池；`app.etc_batch_invoice_links` 是 ETC 批次到 canonical invoice 的关系事实；`app.etc_invoices` 只保留 ETC ZIP/PDF/XML 源 metadata、附件和审计。`reset_invoices` 不能留下指向旧 invoice id 的 active link，重导后必须通过 dry-run/backfill 恢复有效 link 再刷新关联台。
 - 文件/对象：导入文件删除必须和 state store 清理一致；失败要保留可诊断 job 状态。
 - Read model/cache：重置后不能把旧 read model 或 Redis cache 显示为 fresh。
 - Worker/job：后台 job 必须可恢复进度、可查询 active、失败进入 App Health attention。

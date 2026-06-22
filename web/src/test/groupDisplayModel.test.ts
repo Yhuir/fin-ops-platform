@@ -74,6 +74,28 @@ function buildAttachmentInvoiceRow(id: string, sourceOaId: string, amount = "100
   };
 }
 
+function buildInvoiceRow(id: string, amount = "100.00"): WorkbenchRecord {
+  return {
+    id,
+    caseId: "case-source-segment",
+    recordType: "invoice",
+    label: `invoice-${id}`,
+    status: "待处理",
+    statusCode: "open",
+    statusTone: "warn",
+    exceptionHandled: false,
+    amount,
+    counterparty: `seller-${id}`,
+    tableValues: {
+      sellerName: `seller-${id}`,
+      amount,
+    },
+    detailFields: [],
+    actionVariant: "detail-only",
+    availableActions: ["detail"],
+  };
+}
+
 function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGroup {
   return {
     id,
@@ -117,6 +139,37 @@ describe("groupDisplayModel time filter", () => {
     expect(segments?.[1].rows.oa).toEqual([oa292]);
     expect(segments?.[1].rows.invoice).toEqual([invoice292]);
     expect(segments?.every((segment) => segment.rows.bank.length === 0)).toBe(true);
+  });
+
+  test("builds amount fallback display segments for unlinked rows in multi-OA groups", () => {
+    const oa469600 = buildOaRow("oa-exp-469600", "469600");
+    const oa29350 = buildOaRow("oa-exp-29350", "29350");
+    const oa88050 = buildOaRow("oa-exp-88050", "88050");
+    const bank469600 = { ...buildBankRow("bank-469600", "2026-05-13 11:42"), amount: "469600" };
+    const bank29350 = { ...buildBankRow("bank-29350", "2026-03-27 15:03"), amount: "29350" };
+    const bank64996 = { ...buildBankRow("bank-64996", "2026-04-23 15:28"), amount: "64996.69" };
+    const bank23053 = { ...buildBankRow("bank-23053", "2026-04-23 15:28"), amount: "23053.31" };
+    const invoice29350 = buildInvoiceRow("invoice-29350", "29350");
+    const group: WorkbenchCandidateGroup = {
+      id: "case:amount-fallback-segment",
+      groupType: "paired",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa469600, oa29350, oa88050],
+        bank: [bank469600, bank64996, bank23053, bank29350],
+        invoice: [invoice29350],
+      },
+    };
+
+    const segments = buildWorkbenchGroupDisplaySegments(group);
+
+    expect(segments?.map((segment) => segment.id)).toEqual(["oa-exp-469600", "oa-exp-29350", "oa-exp-88050"]);
+    expect(segments?.[0].rows.bank).toEqual([bank469600]);
+    expect(segments?.[1].rows.bank).toEqual([bank29350]);
+    expect(segments?.[1].rows.invoice).toEqual([invoice29350]);
+    expect(segments?.[2].rows.bank).toEqual([bank64996, bank23053]);
   });
 
   test("dedupes repeated paginated groups for paired and open zones", () => {

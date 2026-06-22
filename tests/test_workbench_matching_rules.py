@@ -923,6 +923,38 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(candidate["invoice_row_ids"], ["invoice-output-052520"])
         self.assertEqual(candidate["special_metadata"]["workbench_reconciliation_decision"]["match_shape"], "bank_invoice")
 
+    def test_legacy_candidates_use_english_output_invoice_buyer_as_counterparty(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                bank_row(
+                    "bank-income-english-output",
+                    "13440.00",
+                    counterparty_name="北京长征高科技有限公司",
+                    direction="inflow",
+                    trade_time="2026-02-11 11:49:39",
+                )
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-output-english",
+                    "13440.00",
+                    seller_name="云南溯源科技有限公司",
+                    buyer_name="北京长征高科技有限公司",
+                    invoice_type="output",
+                    issue_date="2026-02-11",
+                    total_with_tax="13440.00",
+                )
+            ],
+        )
+
+        candidate = find_candidate(candidates, "bank_invoice_exact_amount")
+        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertEqual(candidate["candidate_type"], "bank_invoice")
+        self.assertEqual(candidate["bank_row_ids"], ["bank-income-english-output"])
+        self.assertEqual(candidate["invoice_row_ids"], ["invoice-output-english"])
+
     def test_legacy_candidates_auto_close_income_bank_output_invoice_sum(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-02",

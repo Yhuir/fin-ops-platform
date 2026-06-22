@@ -117,6 +117,146 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertTrue(decision.payment_amount_closed)
         self.assertTrue(decision.invoice_amount_closed)
 
+    def test_english_output_invoice_does_not_create_false_expense_three_way_conflict(self) -> None:
+        selected_oa = {
+            "id": "oa-pay-2065",
+            "type": "oa",
+            "month": "2026-03",
+            "amount": "5200.00",
+            "project_name": "云南溯源科技",
+            "reason": "实用新型专利转让费（两件）",
+            "counterparty_name": "云南力科知识产权有限公司",
+        }
+        selected_bank = {
+            "id": "txn_imported_1415",
+            "type": "bank",
+            "month": "2026-03",
+            "trade_time": "2026-03-27 15:01:48",
+            "debit_amount": "5200.00",
+            "credit_amount": "",
+            "counterparty_name": "云南力科知识产权有限公司",
+            "summary": "实用新型专利转让费",
+            "remark": "实用新型专利转让费",
+        }
+        selected_invoice = {
+            "id": "inv_imported_0086",
+            "type": "invoice",
+            "month": "2026-03",
+            "invoice_date": "2026-03-27",
+            "total_with_tax": "5200.00",
+            "invoice_type": "input",
+            "seller_name": "云南力科知识产权有限公司",
+            "buyer_name": "云南溯源科技有限公司",
+        }
+
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                {
+                    "id": "oa-pay-1982",
+                    "type": "oa",
+                    "month": "2026-03",
+                    "amount": "400.00",
+                    "project_name": "云南溯源科技",
+                    "reason": "继续教育培训费 A证 B证",
+                    "counterparty_name": "云南建筑技术发展中心",
+                },
+                selected_oa,
+                {
+                    "id": "oa-pay-2105",
+                    "type": "oa",
+                    "month": "2026-03",
+                    "amount": "2000.00",
+                    "project_name": "云南溯源科技",
+                    "reason": "电表货款",
+                    "counterparty_name": "江阴市溯高美电气有限公司",
+                },
+            ],
+            [
+                bank("txn_imported_1258", "400.00", counterparty="云南建筑技术发展中心"),
+                selected_bank,
+                bank("txn_imported_1513", "2000.00", counterparty="江阴市溯高美电气有限公司"),
+            ],
+            [
+                selected_invoice,
+                {
+                    "id": "inv_imported_0373",
+                    "type": "invoice",
+                    "month": "2026-03",
+                    "invoice_date": "2026-05-27",
+                    "total_with_tax": "7600.00",
+                    "invoice_type": "output",
+                    "seller_name": "云南溯源科技有限公司",
+                    "buyer_name": "西安扶摇电子科技有限公司",
+                },
+            ],
+        )
+
+        paired = [
+            decision
+            for decision in decisions
+            if decision.row_ids == ("oa-pay-2065", "txn_imported_1415", "inv_imported_0086")
+        ]
+        self.assertEqual(len(paired), 1)
+        self.assertEqual(paired[0].display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(paired[0].rule_code, "oa_bank_invoice_exact_amount")
+        self.assertNotIn("multiple_three_way_candidates", {b["code"] for d in decisions for b in d.blockers})
+
+    def test_english_output_invoice_matches_income_bank_by_buyer(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [],
+            [
+                {
+                    "id": "txn-income-1",
+                    "type": "bank",
+                    "month": "2026-03",
+                    "debit_amount": "",
+                    "credit_amount": "100.00",
+                    "counterparty_name": "客户A",
+                    "summary": "客户A 回款",
+                }
+            ],
+            [
+                {
+                    "id": "inv-output-1",
+                    "type": "invoice",
+                    "month": "2026-03",
+                    "invoice_date": "2026-03-10",
+                    "total_with_tax": "100.00",
+                    "invoice_type": "output",
+                    "seller_name": "云南溯源科技有限公司",
+                    "buyer_name": "客户A",
+                }
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decisions[0].rule_code, "bank_invoice_exact_amount")
+        self.assertEqual(decisions[0].direction, "income")
+
+    def test_unknown_invoice_type_is_not_defaulted_to_expenditure(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [oa("oa-1", "100.00", reason="供应商A 服务费")],
+            [bank("bank-1", "100.00", counterparty="供应商A")],
+            [
+                {
+                    "id": "inv-unknown",
+                    "type": "invoice",
+                    "month": "2026-03",
+                    "invoice_date": "2026-03-10",
+                    "total_with_tax": "100.00",
+                    "invoice_type": "电子普通发票",
+                    "seller_name": "供应商A",
+                }
+            ],
+        )
+
+        self.assertTrue(decisions)
+        self.assertFalse(any("inv-unknown" in decision.row_ids for decision in decisions))
+
     def test_oa_bank_multiple_invoices_unique_exact_sum_is_paired(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",

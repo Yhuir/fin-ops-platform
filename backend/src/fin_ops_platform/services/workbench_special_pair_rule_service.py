@@ -11,6 +11,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     managed_no_oa_batch_type_for_mode,
     workbench_mode_may_auto_close,
 )
+from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 from fin_ops_platform.services.workbench_special_rule_detectors import (
     CASH_COUNTERPARTY_KEYWORDS,
     CASH_FULL_TEXT_KEYWORDS,
@@ -457,8 +458,7 @@ class WorkbenchSpecialPairRuleService:
                 return "inflow"
             return None
         if row_type == "invoice":
-            invoice_type = self._string_value(row.get("invoice_type")) or ""
-            return "inflow" if "销" in invoice_type else "outflow"
+            return invoice_flow_direction_from_row(row)
         apply_type = self._string_value(row.get("apply_type")) or ""
         return "inflow" if ("收" in apply_type and "付" not in apply_type) else "outflow"
 

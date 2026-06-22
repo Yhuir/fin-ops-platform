@@ -4,10 +4,17 @@ import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+from fin_ops_platform.services.postgres_repositories.oa_projection import _record_application_date
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OaProjectionSyncServiceTests(unittest.TestCase):
+    def test_projection_application_date_uses_record_detail_date_not_month_start(self) -> None:
+        record = _oa("oa-pay-application-date", "2026-01", workflow_status="completed")
+        record.detail_fields["申请日期"] = "2026-01-14 14:04:00"
+
+        self.assertEqual(_record_application_date(record), "2026-01-14")
+
     def test_month_sync_with_no_source_records_clears_existing_projection_scope(self) -> None:
         source_adapter = FakeSourceAdapter(months=[], records_by_month={"2026-06": []})
         projection_repository = FakeProjectionRepository()

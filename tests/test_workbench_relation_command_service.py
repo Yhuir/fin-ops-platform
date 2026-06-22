@@ -278,6 +278,40 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(saved_relation["evidence"]["row_count"], 1)
         self.assertEqual(saved_relation["display_tags"], ["免OA", "手续费"])
 
+    def test_confirm_relation_preserves_explicit_row_alignment_metadata(self) -> None:
+        repository = FakeRelationRepository()
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=FakeRelationFacade(),
+        )
+        row_alignment = {
+            "version": 1,
+            "source": "manual_selection",
+            "links": [
+                {
+                    "oa_row_id": "oa-88050",
+                    "bank_row_ids": ["bank-60000", "bank-28050"],
+                    "invoice_row_ids": [],
+                    "evidence": ["manual_selection"],
+                }
+            ],
+            "unresolved_row_ids": [],
+        }
+
+        result = service.confirm_relation(
+            case_id="case-row-alignment",
+            row_ids=["oa-88050", "bank-60000", "bank-28050"],
+            row_types=["oa", "bank", "bank"],
+            relation_mode="manual_confirmed",
+            actor_id="finance-user",
+            month_scope="2026-05",
+            special_metadata={"row_alignment": row_alignment},
+        )
+
+        self.assertEqual(result["relation"]["special_metadata"]["row_alignment"], row_alignment)
+        saved_relation = repository.save_calls[0]["snapshot"]["pair_relations"]["case-row-alignment"]
+        self.assertEqual(saved_relation["special_metadata"]["row_alignment"], row_alignment)
+
     def test_confirm_relation_replays_same_idempotency_key_without_second_save(self) -> None:
         repository = FakeRelationRepository()
         service = WorkbenchRelationCommandService(

@@ -101,6 +101,35 @@ describe("apiClient", () => {
     ]);
   });
 
+  test("falls back to canonical fin-ops API prefix when a fin-ops relative API request returns HTML", async () => {
+    vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops/");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response("<!doctype html><html><body>fin-ops shell</body></html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const { apiRequestJson } = await import("../features/apiClient");
+
+    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/auto-reconcile-bank-transactions", {
+      method: "POST",
+      body: "{}",
+    })).resolves.toEqual({ ok: true });
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+      "/fin-ops/api/oa-pending-payments/auto-reconcile-bank-transactions",
+      "/fin-ops-api/api/oa-pending-payments/auto-reconcile-bank-transactions",
+    ]);
+  });
+
   test("surfaces structured API errors with status and error code", async () => {
     vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops-api/");
     vi.resetModules();

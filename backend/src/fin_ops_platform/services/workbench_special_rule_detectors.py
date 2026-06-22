@@ -8,6 +8,7 @@ from typing import Any
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_DEFINITIONS
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.live_workbench_service import INTERNAL_TRANSFER_MATCH_WINDOW, clean_account_no
+from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
 
 ZERO = Decimal("0.00")
@@ -417,8 +418,7 @@ class WorkbenchSpecialRuleDetector:
                 return "inflow"
             return None
         if row_type == "invoice":
-            invoice_type = self._string_value(row.get("invoice_type")) or ""
-            return "inflow" if "销" in invoice_type else "outflow"
+            return invoice_flow_direction_from_row(row)
         apply_type = self._string_value(row.get("apply_type")) or ""
         return "inflow" if ("收" in apply_type and "付" not in apply_type) else "outflow"
 

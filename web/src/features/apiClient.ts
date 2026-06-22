@@ -158,10 +158,16 @@ function finOpsApiFallbackUrl(resolvedUrl: string): string | null {
     return null;
   }
   const parsedUrl = new URL(resolvedUrl, window.location.origin);
-  if (parsedUrl.origin !== window.location.origin || !parsedUrl.pathname.startsWith("/api/")) {
+  if (parsedUrl.origin !== window.location.origin) {
     return null;
   }
-  parsedUrl.pathname = `/fin-ops-api${parsedUrl.pathname}`;
+  if (parsedUrl.pathname.startsWith("/api/")) {
+    parsedUrl.pathname = `/fin-ops-api${parsedUrl.pathname}`;
+  } else if (parsedUrl.pathname.startsWith("/fin-ops/api/")) {
+    parsedUrl.pathname = `/fin-ops-api${parsedUrl.pathname.slice("/fin-ops".length)}`;
+  } else {
+    return null;
+  }
   if (/^https?:\/\//i.test(resolvedUrl)) {
     return parsedUrl.toString();
   }

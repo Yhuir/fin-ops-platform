@@ -29,6 +29,84 @@
 
 ## 历史记录
 
+## 2026-06-23 - ETC summary 优先读取 batch invoice links
+
+- 目标：完成 Phase C 读取路径迁移，让关联台 ETC summary 优先以 `app.etc_batch_invoice_links` + canonical `app.invoices` 生成明细，避免 `app.etc_invoices` 与统一发票池长期竞争为发票事实源。
+- 影响范围：`WorkbenchSqlProjectionBuilder._etc_invoice_summary_rows`、历史 submitted ETC summary、open invoice 排除和 Phase C backfill 工具。
+- 关键决策：先读 active link table，再用旧 submission/biz ETC metadata 路径补充尚未 backfill 的历史数据；同一发票 identity 去重时 link table 先占位。删除旧 fallback 前必须先完成生产 backfill 和 smoke。
+- 文档影响：同步 ETC 模块、发票池清理 runbook 和 Phase 18 GSD。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_etc_invoice_summary_rows_prefer_link_table_source` 断言 link table 是 ETC summary 的优先来源。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_etc_invoice_summary_rows_prefer_link_table_source -q`。
+- 未测风险：未重建生产 active generation；发布后需刷新受影响 Workbench month/all scope 并回看截图中 ETC 批次。
+- 后续事项：生产 `app.etc_batch_invoice_links` 覆盖所有 submitted 批次后，规划移除旧 ETC metadata summary fallback。
+
+## 2026-06-23 - ETC batch invoice links 接入 open invoice 排除
+
+- 目标：让关联台优先以 `app.etc_batch_invoice_links` 判断 ETC 批次归属，避免继续依赖 `app.etc_invoices` 与正式发票身份 join 作为长期事实源。
+- 影响范围：`WorkbenchSqlProjectionBuilder._submitted_etc_overlap_exclusion_sql`、Phase 18 migration/repository/service，以及现有 ETC summary 兼容路径。
+- 关键决策：Phase B 只把 link table 作为普通 open invoice row 的排除事实源，并保留旧 `app.etc_invoices` fallback；ETC summary 读取仍在 Phase C 迁移，避免一次性改动 summary 展开、relation metadata 和历史批次回放。
+- 文档影响：同步测试矩阵和 Phase 18 记录。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_invoice_rows_excludes_visible_formal_invoices_already_bound_to_submitted_etc_batches` 现在同时要求 SQL 包含 `app.etc_batch_invoice_links` 与旧 ETC fallback。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests -q`。
+- 未测风险：尚未把 `_etc_invoice_summary_rows` 的事实源切到 link table，也未重建生产 active generation。
+- 后续事项：Phase C backfill 后迁移 ETC summary 读取路径，再跑 Workbench rebuild/smoke。
+
+## 2026-06-23 - submitted ETC 批次重叠发票 open 区防线
+
+- 目标：即使历史 ETC metadata 尚未完全迁入统一 link table，也要阻止已属于 submitted/manual-submitted ETC 批次的正式发票作为普通 open invoice row 出现在关联台，避免截图中的同一真实发票双行。
+- 影响范围：`WorkbenchSqlProjectionBuilder` 的 open invoice SQL、row-by-id SQL、ETC summary 与正式发票并存场景，以及 Phase 18 dry-run 修复工具的 Workbench scope enqueue。
+- 关键决策：Phase A 的 SQL 防线只排除 submitted/manual-submitted/closed ETC business batch 下严格同身份的 canonical 发票 open 行，不改变 `etc_invoice_summary` 的生成逻辑；这保证历史批次仍能作为汇总发票展示，但同一真实发票不会在普通进项发票列再次出现。Phase B 会把排除事实源从 `app.etc_invoices` 迁到 `app.etc_batch_invoice_links`。
+- 文档影响：同步本模块测试矩阵和 Phase 18 GSD 审计记录。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_invoice_rows_excludes_visible_formal_invoices_already_bound_to_submitted_etc_batches`，断言 open invoice SQL 包含 submitted ETC overlap 排除条件。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests -q`。
+- 未测风险：未在生产执行 repair apply；当前真实库 dry-run 仅证明待处理 row set 和受影响 Workbench scopes。
+- 后续事项：Phase B 新增 `app.etc_batch_invoice_links` 后，Workbench open invoice 排除和 ETC summary 都应改读 link table。
+
+## 2026-06-23 - 发票方向归一化修复英文 output 伪冲突
+
+- 目标：修复生产中英文 `invoice_type=output` 销项发票被自动匹配当作支出侧发票，导致正确 OA + 银行流水 + 进项发票三方闭合被 `multiple_three_way_candidates` 伪冲突挡住的问题。
+- 真实原因：`WorkbenchFreeMatchingEngine`、legacy `WorkbenchMatchingRules`、special matching 和 candidate grouping 等路径都用“发票类型包含中文 `销` 则收入，否则支出”的本地判断；生产正式发票事实源实际存储 `input/output`，因此 `output` 被误判为支出侧，且 legacy counterparty 选择也会把销项发票错误按卖方匹配。
+- 影响范围：新增 `workbench_invoice_direction` 统一 helper；接入 free matching、legacy matching、special rule detectors/service、candidate grouping 和 amount check；bump `workbench_matching_rules_version` 为 `2026-06-23-invoice-direction-normalization-v1`，由 matching dirty scope source-version 自愈触发生产重建。
+- 关键决策：`input`、`进项*` 和 `source_kind=oa_attachment_invoice` 归为支出侧；`output`、`销项*` 归为收入侧并使用买方作为收入流水匹配对方；未知发票类型 fail closed，不再默认支出。OA 附件发票来源是已有受控输入事实，缺 `invoice_type` 时仍按 input 处理以保留附件三方闭合。
+- 文档影响：更新本模块 README、state-machine、tests 和本实施记录；GSD quick prompt 落在 `.planning/quick/20260623-workbench-invoice-direction-normalization/`。
+- 测试覆盖：新增生产事故形状回归、英文 output 收入流水配对、unknown fail closed、legacy counterparty 英文 output、reconciliation decision 持久化和 amount check unknown 防静默 matched 测试；同时运行 candidate grouping、matching orchestrator、matching dirty scope worker 与 dirty queue 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine tests.test_workbench_matching_rules tests.test_workbench_reconciliation_engine tests.test_workbench_amount_check_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping tests.test_workbench_matching_orchestrator -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_dirty_scope_worker tests.test_workbench_reconciliation_dirty_queue -v`。
+- 未测风险：未在本地执行真实生产 worker 写入重建；发布后需由常驻 `workbench-matching` worker 按新规则版本把 completed scope 重投 dirty，再刷新 Workbench active generation。不得手工改 decision 表替代重建。
+- 后续事项：如未来导入层新增 `sales_invoice`、`purchase_invoice` 之外的新枚举，必须先扩展统一 helper 和测试；未知枚举保持 fail closed。
+
+## 2026-06-23 - 多 OA 大组缺 source 时按唯一金额分段展示
+
+- 目标：修复关联台已配对大组内缺少 `sourceOaId` 的 OA、银行流水和发票没有同排的问题；例如 29350 OA 应与 29350 流水/发票同行，88050 OA 应与两条合计 88050 的流水同行。
+- 真实原因：`buildWorkbenchGroupDisplaySegments` 只在银行/发票 row 带有效 `sourceOaId` 且可归一到组内 OA 时才生成横向分段；截图中的相关银行流水没有 source link，因此函数返回 `null`，组件退回整组顺序渲染。
+- 影响范围：前端关联台 group display model 和 `CandidateGroupGrid` 渲染；不改变后端 relation、read model、matching decision、确认/撤回逻辑或 API payload。
+- 关键决策：source OA 仍是首选证据；缺 source OA 时只在同一个已返回 group 内做展示 fallback，先按唯一精确金额匹配，再按唯一 2 到 6 条金额合计闭合匹配；金额不唯一、无法唯一闭合或只能靠顺序/位置判断的行保持 group-level。
+- 文档影响：同步本模块 README、state-machine、tests 和 implementation notes。
+- 测试覆盖：新增 `web/src/test/groupDisplayModel.test.ts::builds amount fallback display segments for unlinked rows in multi-OA groups` 覆盖模型分段；新增 `web/src/test/CandidateGroupGrid.test.tsx::aligns unlinked same-amount and sum-matched rows inside a multi-OA group` 覆盖组件渲染。
+- 验证命令：`cd web && npm test -- --run src/test/groupDisplayModel.test.ts`；`cd web && npm test -- --run src/test/groupDisplayModel.test.ts src/test/CandidateGroupGrid.test.tsx`。
+- 未测风险：未连接生产数据回放截图中的真实 active generation；若生产 payload 中金额字段不是标准数字字符串，fallback 会保守跳过并保持 group-level。
+
+## 2026-06-22 - OA 申请人时间 chip 统一使用申请时间 contract
+
+- 目标：修复关联台 OA 栏申请人下方有些行显示时间 chip、有些行不显示的问题。
+- 真实原因：前端 `applicationTime` mapper 曾优先读取 `detail_fields.审批完成时间`，并用 nullish fallback；当 OA 同步把缺失完成时间写成占位符 `—` 时，后续真实 `申请日期` 被挡住。SQL active generation 也只输出 `date`，没有把 OA 申请时间提升为顶层 `apply_time` / `application_time` contract；OA projection 写库还把 `application_date` 存成 `record.month` 月初，放大了新旧数据不一致。
+- 影响范围：Workbench OA row DTO、SQL active generation schema/source freshness、OA projection sync version、前端 Workbench API mapper；不改变 OA 原始库、不改申请人列视觉结构、不用前端猜测时间。
+- 关键决策：申请时间/申请日期是 applicant chip 的首选事实，审批完成/修改时间只作为兜底；`—`、`--` 等占位符必须视为缺失。后端 SQL 投影显式输出顶层时间字段并 bump schema；OA projection sync 使用 `detail_fields.申请日期` 写 `app.oa_applications.application_date`，并 bump `OA_PROJECTION_SYNC_VERSION` 触发后续重投。
+- 文档影响：同步本模块 README、tests 和 implementation notes；OA projection 行为由 `oa-integration` 模块实施记录同步说明。
+- 测试覆盖：`web/src/test/WorkbenchApi.test.ts` 覆盖占位完成时间不再挡住申请日期；`tests/test_workbench_sql_runtime.py` 覆盖 SQL OA row 顶层时间 contract；`tests/test_oa_projection_sync_service.py` 覆盖 projection 写库日期不再退化成月初。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests.test_sql_oa_row_promotes_application_time_when_completed_time_is_placeholder tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_projection_application_date_uses_record_detail_date_not_month_start -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests tests.test_workbench_query_service -v`；`cd web && npm test -- --run src/test/WorkbenchApi.test.ts`。
+- 未测风险：本地未连接生产 PostgreSQL 重建 active generation；发布后需让 OA projection sync / Workbench worker 重建相关 month/all scope，旧 active generation 才会带上新的顶层时间字段。
+
+## 2026-06-22 - 关联预览 OA 主表金额差异使用明细合计核对
+
+- 目标：修复关联预览中 OA 与流水实际金额一致，但页面显示“金额不一致 / 差额 270.00”的问题。
+- 真实原因：日常报销聚合 OA row 的 `amount` 保留 OA 主表总金额，用于展示和审计；当 OA 解析已记录 `amount_source=header` 且主表金额与明细合计存在差异时，关联预览金额核对仍直接使用 `amount`，没有使用可付款/可核销的明细合计。
+- 影响范围：`WorkbenchAmountCheckService` 的 OA 金额取值、`WorkbenchQueryService` 的 OA row payload、Workbench SQL active generation 的 OA row payload；不改变 OA 表格展示金额、不删除“金额差异”标签，也不放宽真实金额不一致的备注要求。
+- 关键决策：新增/使用 `reconciliation_amount` 作为关联核对金额。新 OA row 由 query service 显式写出该字段；SQL projection 和金额核对服务兼容旧 read model，只要 `detail_fields` 中存在“金额来源=主表总金额”“明细金额合计”和“金额差异”，也按明细合计核对。
+- 文档影响：同步本模块 README、tests 和 implementation notes。
+- 测试覆盖：`tests/test_workbench_amount_check_service.py` 覆盖显式 `reconciliation_amount` 与旧详情字段兼容；`tests/test_workbench_query_service.py` 覆盖 OA row 保留主表 `amount` 并暴露 `reconciliation_amount`；`tests/test_workbench_sql_runtime.py` 覆盖 SQL projection 同口径。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_amount_check_service tests.test_workbench_query_service.WorkbenchQueryServiceTests.test_aggregated_expense_claim_row_exposes_detail_fields_tags_and_multiple_attachment_invoices tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_oa_row_keeps_header_amount_but_exposes_detail_sum_for_reconciliation -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_and_submit_require_note_for_amount_mismatch tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_batch_accounting_mismatch_note_projects_to_paired_bank_row -v`。
+- 未测风险：未连接生产 PostgreSQL 回放真实 2026-03 数据；发布后需要重建对应 Workbench scope 并用截图中的 OA/流水重新打开确认预览。
+
 ## 2026-06-22 - 关联预览确认不再等待主 Workbench generation
 
 - 目标：修复关联台内选择 OA 和多条流水后点击确认关联，关系已写入但弹窗报“关联台最新数据同步超过 10 秒，当前状态：refreshing”的问题。
@@ -514,6 +592,16 @@
 - 测试覆盖：新增 `test_personal_advance_repayment_delegates_relation_write_to_command_service`、`test_personal_advance_repayment_fails_fast_without_relation_command_service`、`test_workbench_personal_advance_repayment_uses_relation_command_boundary`，并运行既有个人暂借款 API 成功/失败回归。
 - 验证命令：见 `workbench-relations` Phase 7H 记录。
 - 未测风险：其他 exception application relation mode 族仍待单独迁移，不能与个人暂借款混为同一切片。
+
+## 2026-06-23 - 多 OA active relation 后端行级归属证据闭环
+
+- 目标：把三栏配对区域多 OA 大组内的同源同排能力从前端 fallback 提升为后端事实源，避免 active relation 只有大组 `row_ids` 而缺少 bank/invoice 对应 OA 的 row-level evidence。
+- 影响范围：`WorkbenchRelationAlignmentService`、`WorkbenchSqlProjectionBuilder._group_payload`、Workbench SQL projection schema version、`audit_workbench_relation_display`、Workbench API mapper、关联台三栏分段展示。
+- 关键决策：后端只发布可证明归属。证据优先保留 OA 附件发票 `derived_from_oa_id` 并归一 `oa-exp-*:item:*` 到父 OA；银行流水先做唯一同金额，再做唯一 2 到 6 条金额合计闭合。重复金额或多个可选组合不猜测，写入 unresolved/diagnostics 并由审计暴露。前端继续 source-first，金额 fallback 只作为同一 group 内的展示兜底。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和 `docs/dev/api-contracts.md`。
+- 测试覆盖：新增 `tests/test_workbench_relation_alignment_service.py`；新增 SQL projection、relation command metadata、audit tool 和前端 API mapper 回归。
+- 验证命令：`python -m pytest tests/test_workbench_relation_alignment_service.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_emits_source_oa_for_deterministic_multi_oa_relation_alignment tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_confirm_relation_preserves_explicit_row_alignment_metadata tests/test_audit_workbench_relation_display_tool.py`；`cd web && npm test -- --run src/test/WorkbenchApi.test.ts src/test/groupDisplayModel.test.ts src/test/CandidateGroupGrid.test.tsx`。
+- 未测风险：未连接真实生产 PostgreSQL 回放截图 case；发布前需要先跑只读 relation display audit，并让 Workbench active generation 按新 schema 重建。歧义金额关系不会自动修复，必须人工确认或由上游写入显式 `row_alignment`。
 
 ## 2026-06-12 - confirm/cancel relation command 写入口收敛
 

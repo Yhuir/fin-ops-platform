@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row, normalize_invoice_kind_from_row
+
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
@@ -104,7 +106,7 @@ class WorkbenchAmountCheckService:
         status = "matched"
         requires_note = False
 
-        if direction == "unknown" and (has_direction_gap or not directions or has_direction_conflict):
+        if has_direction_gap or has_direction_conflict or (direction == "unknown" and not directions):
             status = "unknown"
             requires_note = True
         elif direction != "unknown" and len(comparable) >= 2:
@@ -214,8 +216,12 @@ class WorkbenchAmountCheckService:
                 return "receipt"
             return None
         if row_type == "invoice":
-            invoice_type = str(row.get("invoice_type") or "")
-            return "receipt" if "销" in invoice_type or invoice_type == "output" else "payment"
+            direction = invoice_flow_direction_from_row(row)
+            if direction == "inflow":
+                return "receipt"
+            if direction == "outflow":
+                return "payment"
+            return None
         return None
 
     def _bank_direction(self, row: dict[str, Any]) -> str | None:
@@ -234,11 +240,10 @@ class WorkbenchAmountCheckService:
 
     def _invoice_direction(self, row: dict[str, Any]) -> str | None:
         invoice_direction = str(row.get("invoice_direction") or "").lower()
-        invoice_type = str(row.get("invoice_type") or "").lower()
-        combined = f"{invoice_direction} {invoice_type}"
-        if invoice_direction in {"input", "expense"} or "input" in invoice_type or "进项" in combined:
+        invoice_kind = normalize_invoice_kind_from_row(row)
+        if invoice_direction in {"input", "expense"} or invoice_kind == "input":
             return "input"
-        if invoice_direction in {"output", "income"} or "output" in invoice_type or "销项" in combined:
+        if invoice_direction in {"output", "income"} or invoice_kind == "output":
             return "output"
         return None
 
@@ -321,12 +326,34 @@ class WorkbenchAmountCheckService:
             return self._decimal(row.get("credit_amount") or row.get("amount"))
         if row_type == "invoice":
             return self._decimal(row.get("total_with_tax") or row.get("amount"))
+        if row_type == "oa":
+            reconciliation_amount = self._oa_reconciliation_amount(row)
+            if reconciliation_amount is not None:
+                return reconciliation_amount
         return self._decimal(
             row.get("amount")
             or row.get("reimbursement_amount")
             or row.get("payment_amount")
             or row.get("apply_amount")
         )
+
+    def _oa_reconciliation_amount(self, row: dict[str, Any]) -> Decimal | None:
+        explicit_amount = self._decimal(row.get("reconciliation_amount"))
+        if explicit_amount is not None:
+            return explicit_amount
+
+        detail_fields = row.get("detail_fields") or row.get("_detail_fields")
+        if not isinstance(detail_fields, dict):
+            return None
+        amount_source = str(row.get("amount_source") or detail_fields.get("金额来源") or "").strip()
+        if amount_source not in {"header", "主表总金额"}:
+            return None
+        if "金额差异" not in detail_fields and not isinstance(row.get("amount_mismatch"), dict):
+            return None
+        detail_sum = self._decimal(detail_fields.get("明细金额合计"))
+        if detail_sum is None:
+            return None
+        return detail_sum
 
     @staticmethod
     def _format_amount(value: Decimal | None) -> str | None:

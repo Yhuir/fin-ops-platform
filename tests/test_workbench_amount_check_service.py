@@ -95,6 +95,26 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_total"], "100.00")
         self.assertEqual(result["invoice_total"], "100.00")
 
+    def test_unknown_invoice_type_is_not_defaulted_to_payment_direction(self) -> None:
+        result = self.service.check(
+            {
+                "oa": [self._oa_row("100")],
+                "bank": [self._bank_row("100")],
+                "invoice": [
+                    {
+                        "type": "invoice",
+                        "id": "inv-unknown",
+                        "invoice_type": "电子普通发票",
+                        "total_with_tax": "100",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(result["status"], "unknown")
+        self.assertTrue(result["requires_note"])
+        self.assertEqual(result["invoice_total"], "100.00")
+
     def test_missing_total_remains_null_when_persistable(self) -> None:
         result = self.service.check(
             {
@@ -131,13 +151,53 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_amount"], "300000.00")
         self.assertEqual(result["amount_delta"], "0.00")
 
+    def test_oa_reconciliation_amount_overrides_header_amount_for_preview_check(self) -> None:
+        result = self.service.check(
+            {
+                "oa": [self._oa_row("2308.02", reconciliation_amount="2038.02")],
+                "bank": [self._bank_row("2038.02")],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertFalse(result["requires_note"])
+        self.assertEqual(result["oa_total"], "2038.02")
+        self.assertEqual(result["bank_total"], "2038.02")
+        self.assertEqual(result["amount_delta"], "0.00")
+
+    def test_legacy_oa_detail_sum_is_used_when_header_amount_has_recorded_mismatch(self) -> None:
+        oa_row = self._oa_row("2308.02")
+        oa_row["detail_fields"] = {
+            "金额来源": "主表总金额",
+            "明细金额合计": "2038.02",
+            "金额差异": "主表总金额 2308.02；明细合计 2038.02；差异 270.00",
+        }
+
+        result = self.service.check(
+            {
+                "oa": [oa_row],
+                "bank": [self._bank_row("2038.02")],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertFalse(result["requires_note"])
+        self.assertEqual(result["oa_total"], "2038.02")
+        self.assertEqual(result["bank_total"], "2038.02")
+        self.assertEqual(result["amount_delta"], "0.00")
+
     @staticmethod
-    def _oa_row(amount: str) -> dict[str, str]:
-        return {
+    def _oa_row(amount: str, *, reconciliation_amount: str | None = None) -> dict[str, str]:
+        row = {
             "type": "oa",
             "apply_type": "付款",
             "amount": amount,
         }
+        if reconciliation_amount is not None:
+            row["reconciliation_amount"] = reconciliation_amount
+        return row
 
     @staticmethod
     def _bank_row(amount: str) -> dict[str, str]:

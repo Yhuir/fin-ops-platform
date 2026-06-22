@@ -16,6 +16,10 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_source_ids,
 )
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
+from fin_ops_platform.services.workbench_invoice_direction import (
+    invoice_counterparty_field_from_row,
+    invoice_flow_direction_from_row,
+)
 
 
 ZERO = Decimal("0.00")
@@ -1598,8 +1602,7 @@ class WorkbenchCandidateGroupingService:
             if credit_amount is not None and credit_amount > ZERO:
                 return "inflow"
             return None
-        invoice_type = self._string_value(row.get("invoice_type")) or ""
-        return "inflow" if "销" in invoice_type else "outflow"
+        return invoice_flow_direction_from_row(row)
 
     def _counterparty(self, row: dict[str, Any]) -> str | None:
         row_type = row["type"]
@@ -1607,8 +1610,10 @@ class WorkbenchCandidateGroupingService:
             value = self._string_value(row.get("counterparty_name"))
             return normalize_name(value) if value else None
 
-        invoice_type = self._string_value(row.get("invoice_type")) or ""
-        value = self._string_value(row.get("buyer_name" if "销" in invoice_type else "seller_name"))
+        party_field = invoice_counterparty_field_from_row(row)
+        if party_field is None:
+            return None
+        value = self._string_value(row.get(party_field))
         return normalize_name(value) if value else None
 
     def _amount(self, row: dict[str, Any]) -> Decimal | None:

@@ -12,7 +12,7 @@
 | 前端 API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、`batch_type`、snake_case/camelCase、`preview_stale` 错误映射、job/session shape |
 | HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}`、legacy `/imports/preview`、`/imports/confirm` | files/session API 与 legacy JSON API 并存；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
-| Normalization core | `ImportNormalizationService` | input/output invoice identity、digital invoice number fallback、重复/疑似重复、已存在 ETC-linked canonical invoice 合并、source links、tags |
+| Normalization core | `ImportNormalizationService` | input/output invoice identity、digital invoice number fallback、重复/疑似重复、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、source links、tags |
 | Import processing | `ImportProcessingService` | file confirm job 后必须执行发票生命周期、tax/cost/workbench scope 计算和 state persistence |
 | Derived lifecycle | `DerivedDataLifecycleService` | `invoice_import_confirmed` 必须先刷新 `invoice_lifecycle`，再影响待找发票、税金、进项/销项/OA 待付款、成本、搜索 |
 | Read model / worker | `runtime_worker_handlers.py`、runtime queue、App Status registries、`write_operation_slo_audit` | import job 成功不等于下游 fresh；worker/readiness 失败必须在 App Status 暴露；真实发票确认后应能审计到 Workbench、Workbench relation、invoice lifecycle、search、待找发票、OA 待付款、成本统计和税金抵扣 refresh scopes；进项使用/销项收款按本次导入方向命中刷新，未命中方向在审计中为 `skipped` |
@@ -33,6 +33,7 @@
 - 240 行合成发票同文件重复组必须只产生一个 confirmable representative，其余进入 duplicate audit / skipped count。
 - input/output invoice identity 必须覆盖稳定号码、占位电子发票号、弱 fingerprint、跨批次重复、批内重复。
 - ETC 来源或 tag 指向 ETC 时，input invoice import 只允许合并已存在 canonical invoice，不能因为 ETC metadata/ZIP 来源创建新的统一发票池事实。
+- 正式进项发票晚于历史 submitted/manual-submitted ETC 批次导入时，必须按强身份把 ETC metadata 反向链接到同一 canonical invoice，并幂等写入 `app.etc_batch_invoice_links`；严格匹配失败时不得自动隐藏或合并。
 - confirm 必须跳过重复行、更新 source status、持久化 source links，并对 later preview batch 的重复保持幂等。
 - `invoice_import_confirmed` 必须刷新 Workbench、Workbench relation/matching、invoice lifecycle、tax offset、cost statistics 和 search。
 - `invoice_import_confirmed` 的进项使用/销项收款 read model 必须按文件方向收窄：input-only 只刷新 `input_invoice_usage`，output-only 只刷新 `output_invoice_collection`，混合导入按各自文件月份分别刷新。
@@ -42,7 +43,7 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_preview_audit.py` | 覆盖发票 identity、重复/疑似重复、占位电子发票号 fallback、已存在 ETC-linked canonical invoice 合并、批内/跨批重复、source links。 |
+| 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_preview_audit.py` | 覆盖发票 identity、重复/疑似重复、占位电子发票号 fallback、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、批内/跨批重复、source links。 |
 | 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py`、`tests/test_derived_data_lifecycle_service.py` | 覆盖 file/session preview/confirm、stale preview、job queue、retry/original file retention、derived lifecycle fan-out。 |
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、下游 read model status/source version 字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_tax_offset_api.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、tax month cache invalidation、App Status/readiness，并用 `invoice_import_confirmed` write-operation profile 防止真实发票确认少刷新下游 read model 时仍被判定闭环。 |
@@ -59,6 +60,7 @@
 | 弱 fingerprint 被误用导致不同发票合并 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_upsert_etc_invoice_does_not_reuse_weak_fingerprint_when_invoice_number_changed` |
 | 既有 canonical invoice 读取时保留过期弱 fingerprint | `tests/test_import_service.py::ImportNormalizationServiceTests::test_existing_canonical_invoice_drops_weak_fingerprint_on_load` |
 | 历史 ETC-linked canonical invoice 与 input invoice import 重复 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_merges_existing_etc_canonical_invoice_without_duplicate` |
+| 历史 submitted ETC 批次先存在，正式进项发票后导入导致关联台重复散票 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later`、`tests/test_etc_batch_invoice_link_service.py`、`tests/test_postgres_repositories_core.py::test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata`、`tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_invoice_rows_excludes_visible_formal_invoices_already_bound_to_submitted_etc_batches`、`tests/test_repair_submitted_etc_invoice_overlaps_tool.py` |
 | 预览后源事实变化仍允许确认 | `tests/test_import_file_service.py::ImportFileServiceTests::test_confirm_session_rejects_stale_preview_when_existing_records_change`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | 大重复组被全部当作可确认行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row` |
 | 发票导入路由重挂载丢失预览或选择 | `web/src/test/ImportCenterPage.test.tsx` 中 invoice import session restore / navigating away tests |
@@ -89,7 +91,7 @@
 - 240 行同文件重复发票 -> preview audit 只保留一个 confirmable representative -> duplicate group 展示 240 行，skipped count 为 239。
 - 预览后手工导入或另一个导入批次改变发票事实 -> 当前 confirm 返回 `preview_stale` -> 前端要求重新预览。
 - 发票导入确认 -> 关联台 read model invalidation -> matching/candidate 重新生成，不使用旧 cache。
-- input invoice import 与历史 ETC-linked canonical invoice 相遇 -> 只更新同一 canonical invoice 并保留 ETC tag；ETC ZIP 本身不得创建新的 canonical invoice。
+- input invoice import 与历史 ETC-linked canonical invoice 或 submitted ETC metadata 相遇 -> 严格匹配时只更新同一 canonical invoice、保留 ETC tag 并从关联台普通 open 发票视图隐藏；ETC ZIP 本身不得创建新的 canonical invoice。
 
 ## 现有验证命令
 

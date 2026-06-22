@@ -164,12 +164,16 @@ export default function OaPendingPaymentsPage() {
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const requestIdRef = useRef(0);
   const autoReconcileCompletedKeysRef = useRef<Set<string>>(new Set()).current;
+  const autoReconcileFailedKeysRef = useRef<Set<string>>(new Set()).current;
   const autoReconcilePromisesRef = useRef<Map<string, Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse>>>(new Map()).current;
   const loadRowsRef = useRef<(mode: "reset" | "refresh", signal?: AbortSignal) => void>(() => undefined);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    if (mode === "refresh") {
+      autoReconcileFailedKeysRef.delete(query.month || "all");
+    }
     if (mode === "reset") {
       setLoading(true);
     } else {
@@ -216,7 +220,7 @@ export default function OaPendingPaymentsPage() {
           setRefreshing(false);
         }
       });
-  }, [query]);
+  }, [autoReconcileFailedKeysRef, query]);
 
   useEffect(() => {
     loadRowsRef.current = loadRows;
@@ -236,7 +240,7 @@ export default function OaPendingPaymentsPage() {
       return undefined;
     }
     const scopeKey = query.month || "all";
-    if (autoReconcileCompletedKeysRef.has(scopeKey)) {
+    if (autoReconcileCompletedKeysRef.has(scopeKey) || autoReconcileFailedKeysRef.has(scopeKey)) {
       return undefined;
     }
     let reconcilePromise = autoReconcilePromisesRef.get(scopeKey);
@@ -273,7 +277,7 @@ export default function OaPendingPaymentsPage() {
         }
       } catch (caught: unknown) {
         if (active) {
-          autoReconcileCompletedKeysRef.add(scopeKey);
+          autoReconcileFailedKeysRef.add(scopeKey);
           setActionError(caught instanceof Error ? caught.message : "自动匹配和写回失败。");
         }
       }
@@ -283,6 +287,7 @@ export default function OaPendingPaymentsPage() {
     };
   }, [
     autoReconcileCompletedKeysRef,
+    autoReconcileFailedKeysRef,
     autoReconcilePromisesRef,
     canMutateData,
     error,

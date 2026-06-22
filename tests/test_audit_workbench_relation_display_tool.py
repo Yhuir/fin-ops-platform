@@ -97,6 +97,34 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("relation_row_payload_case_mismatch", issue_codes)
         self.assertGreater(report["summary"]["blocking_issue_count"], 0)
 
+    def test_reports_multi_oa_relation_bank_row_missing_source_alignment(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                relations=[
+                    {
+                        "case_id": "case-multi-oa",
+                        "relation_mode": "manual_confirmed",
+                        "status": "active",
+                        "row_ids": ["oa-29350", "oa-88050", "bank-29350"],
+                        "row_types": ["oa", "oa", "bank"],
+                        "month_scope": "2026-05-01",
+                        "updated_at": "2026-06-23 09:00:00+08",
+                        "raw_payload": {},
+                    }
+                ],
+                generations=[_generation("all", "2026-06-23 09:05:00+08")],
+                group_rows=[
+                    _group_row("all", "oa-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                    _group_row("all", "oa-88050", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                    _group_row("all", "bank-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                ],
+            )
+        )
+
+        issue_codes = {issue["code"] for issue in report["issues"]}
+        self.assertIn("relation_bank_row_missing_source_oa_alignment", issue_codes)
+        self.assertGreater(report["summary"]["blocking_issue_count"], 0)
+
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 
@@ -160,7 +188,12 @@ def _group_row(
     payload_case_id: str = "case-a",
     relation_mode: str = "manual_confirmed",
 ) -> dict[str, object]:
-    pane = "bank" if row_id.startswith("bank") else "invoice"
+    if row_id.startswith("bank"):
+        pane = "bank"
+    elif row_id.startswith("oa"):
+        pane = "oa"
+    else:
+        pane = "invoice"
     return {
         "scope_key": scope_key,
         "generation_id": f"workbench:{scope_key}:001",

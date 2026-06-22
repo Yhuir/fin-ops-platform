@@ -4,6 +4,7 @@ from dataclasses import is_dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
+from types import SimpleNamespace
 from typing import Any
 
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection, TransactionStatus
@@ -412,6 +413,212 @@ class PostgresCoreRepository:
             """
         )
         return [self._invoice_from_row(row) for row in rows]
+
+    def find_submitted_etc_invoice_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+        invoice_no: str | None = None,
+        invoice_code: str | None = None,
+        digital_invoice_no: str | None = None,
+    ) -> object | None:
+        candidates = [
+            self._text(digital_invoice_no),
+            self._text(invoice_no),
+            self._text(canonical_key),
+        ]
+        invoice_numbers = [value for value in candidates if value and "|" not in value and ":" not in value]
+        normalized_invoice_code = self._text(invoice_code)
+        normalized_invoice_no = self._text(invoice_no)
+        if not invoice_numbers and not (normalized_invoice_code and normalized_invoice_no):
+            return None
+        row = self._connection.fetch_one(
+            """
+            select
+                etc_invoices.etc_invoice_id,
+                etc_invoices.invoice_no,
+                etc_invoices.invoice_code,
+                etc_invoices.invoice_date::text,
+                etc_invoices.seller_name,
+                nullif(etc_invoices.raw_payload->'normalized_payload'->>'seller_tax_no', '') as seller_tax_no,
+                etc_invoices.buyer_name,
+                nullif(etc_invoices.raw_payload->'normalized_payload'->>'buyer_tax_no', '') as buyer_tax_no,
+                etc_invoices.amount,
+                etc_invoices.tax_amount,
+                etc_invoices.total_with_tax,
+                nullif(etc_invoices.raw_payload->'normalized_payload'->>'tax_rate', '') as tax_rate,
+                etc_invoices.batch_id,
+                etc_invoices.business_batch_id,
+                etc_invoices.status,
+                etc_business_batches.status as business_batch_status
+            from app.etc_invoices etc_invoices
+            left join app.etc_business_batches etc_business_batches
+              on etc_business_batches.business_batch_id = etc_invoices.business_batch_id
+            where (
+                    etc_invoices.invoice_no = any(%s)
+                 or (
+                        %s is not null
+                    and %s is not null
+                    and etc_invoices.invoice_code = %s
+                    and etc_invoices.invoice_no = %s
+                 )
+            )
+              and (
+                    etc_business_batches.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                 or (
+                        etc_invoices.status = 'submitted'
+                    and coalesce(etc_business_batches.status, '') <> 'deleted'
+                 )
+              )
+            order by etc_invoices.updated_at desc, etc_invoices.created_at desc
+            limit 1
+            """,
+            (
+                invoice_numbers,
+                normalized_invoice_code,
+                normalized_invoice_no,
+                normalized_invoice_code,
+                normalized_invoice_no,
+            ),
+        )
+        if not row:
+            return None
+        return SimpleNamespace(
+            id=self._text(row.get("etc_invoice_id")),
+            invoice_number=self._text(row.get("invoice_no")),
+            issue_date=self._date_text(row.get("invoice_date")),
+            passage_start_date=None,
+            passage_end_date=None,
+            plate_number=None,
+            vehicle_type=None,
+            seller_name=self._text(row.get("seller_name")),
+            seller_tax_no=self._text(row.get("seller_tax_no")),
+            buyer_name=self._text(row.get("buyer_name")),
+            buyer_tax_no=self._text(row.get("buyer_tax_no")),
+            amount_without_tax=row.get("amount"),
+            tax_amount=row.get("tax_amount"),
+            total_amount=row.get("total_with_tax"),
+            tax_rate=self._text(row.get("tax_rate")),
+            import_batch_id=self._text(row.get("batch_id")),
+            business_batch_id=self._text(row.get("business_batch_id")),
+            current_batch_id=self._text(row.get("business_batch_id")),
+            last_batch_id=self._text(row.get("business_batch_id")),
+            status=self._text(row.get("status")),
+        )
+
+    def upsert_etc_batch_invoice_link(
+        self,
+        *,
+        invoice_id: str,
+        business_batch_id: str,
+        etc_invoice_id: str | None = None,
+        invoice_no: str | None = None,
+        invoice_code: str | None = None,
+        digital_invoice_no: str | None = None,
+        invoice_date: str | None = None,
+        link_source: str = "formal_invoice_import",
+        confidence: str = "strict",
+        raw_payload: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_invoice_id = self._text(invoice_id)
+        normalized_business_batch_id = self._text(business_batch_id)
+        identity_key = self._etc_batch_invoice_identity_key(
+            invoice_no=invoice_no,
+            invoice_code=invoice_code,
+            digital_invoice_no=digital_invoice_no,
+        )
+        if not normalized_invoice_id:
+            raise ValueError("invoice_id is required for ETC batch invoice link")
+        if not normalized_business_batch_id:
+            raise ValueError("business_batch_id is required for ETC batch invoice link")
+        if not identity_key:
+            raise ValueError("invoice identity is required for ETC batch invoice link")
+        row = self._connection.fetch_one(
+            """
+            with resolved_invoice as (
+                select id
+                from app.invoices
+                where legacy_mongo_id = %s or id::text = %s
+                limit 1
+            ),
+            upserted as (
+                insert into app.etc_batch_invoice_links(
+                    tenant_id, business_batch_id, etc_invoice_id, invoice_id,
+                    identity_key, invoice_no, invoice_code, digital_invoice_no, invoice_date,
+                    link_status, link_source, confidence, raw_payload
+                )
+                select
+                    %s, %s, %s, resolved_invoice.id,
+                    %s, %s, %s, %s, %s::date,
+                    'active', %s, %s, %s
+                from resolved_invoice
+                on conflict (tenant_id, business_batch_id, identity_key) where link_status = 'active'
+                do update set
+                    invoice_id = excluded.invoice_id,
+                    etc_invoice_id = coalesce(excluded.etc_invoice_id, app.etc_batch_invoice_links.etc_invoice_id),
+                    invoice_no = excluded.invoice_no,
+                    invoice_code = excluded.invoice_code,
+                    digital_invoice_no = excluded.digital_invoice_no,
+                    invoice_date = excluded.invoice_date,
+                    link_source = excluded.link_source,
+                    confidence = excluded.confidence,
+                    raw_payload = coalesce(app.etc_batch_invoice_links.raw_payload, '{}'::jsonb)
+                        || coalesce(excluded.raw_payload, '{}'::jsonb),
+                    updated_at = now()
+                returning
+                    id::text,
+                    tenant_id,
+                    business_batch_id,
+                    etc_invoice_id,
+                    invoice_id::text,
+                    identity_key,
+                    invoice_no,
+                    invoice_code,
+                    digital_invoice_no,
+                    invoice_date::text,
+                    link_status,
+                    link_source,
+                    confidence,
+                    raw_payload
+            )
+            select * from upserted
+            """,
+            (
+                normalized_invoice_id,
+                normalized_invoice_id,
+                self._text(tenant_id) or "default",
+                normalized_business_batch_id,
+                self._text(etc_invoice_id),
+                identity_key,
+                self._text(invoice_no),
+                self._text(invoice_code),
+                self._text(digital_invoice_no),
+                self._date_text(invoice_date),
+                self._text(link_source) or "formal_invoice_import",
+                self._text(confidence) or "strict",
+                _jsonb(raw_payload or {}),
+            ),
+        )
+        return dict(row) if row else None
+
+    @classmethod
+    def _etc_batch_invoice_identity_key(
+        cls,
+        *,
+        invoice_no: str | None = None,
+        invoice_code: str | None = None,
+        digital_invoice_no: str | None = None,
+    ) -> str | None:
+        digital = cls._text(digital_invoice_no)
+        if digital:
+            return digital
+        code = cls._text(invoice_code)
+        number = cls._text(invoice_no)
+        if code and number:
+            return f"{code}:{number}"
+        return number
 
     def get_transaction(self, transaction_id: str) -> BankTransaction | None:
         normalized_transaction_id = self._text(transaction_id)

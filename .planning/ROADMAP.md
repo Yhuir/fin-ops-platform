@@ -9,6 +9,7 @@ This roadmap preserves a single global codebase map while creating isolated GSD 
 **Phase Numbering:**
 
 - Integer phases (0-17): Cross-page baseline first, then page-specific analysis and planning work for every registered app page.
+- Phase 18: Cross-module repair/evolution work that closes the canonical invoice + ETC batch-link boundary after the page-analysis phases exposed the issue.
 - Decimal phases (2.1, 2.2): Urgent insertions between existing phases.
 
 ## Phase Details
@@ -303,6 +304,26 @@ Plans:
 
 - [ ] TBD (run /gsd-plan-phase 17 to break down)
 
+### Phase 18: 发票池与 ETC 批次关系闭环：生产修复、事实源边界和历史迁移
+
+**Goal:** Close the duplicate-invoice defect caused by formal invoice imports overlapping submitted ETC batch history, then evolve the architecture so `app.invoices` is the single canonical invoice pool and ETC batch membership is represented by an explicit link fact instead of by duplicate workbench rows.
+**Requirements**: INV-ETC-01, INV-ETC-02, INV-ETC-03, INV-ETC-04, INV-ETC-05, INV-ETC-06
+**Depends on:** Phase 0 cross-page dependency baseline, Phase 4 reconciliation workbench, Phase 12 ETC ticket management, Phase 16 invoice import, Phase 17 ETC invoice import, and current module docs.
+**Canonical refs:** `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/imports-invoices/README.md`, `docs/modules/imports-invoices/tests.md`, `docs/modules/imports-etc-invoices/README.md`, `docs/modules/imports-etc-invoices/tests.md`, `docs/modules/etc-tickets/README.md`, `docs/modules/etc-tickets/tests.md`, `docs/modules/data-safety-reset/README.md`, `docs/modules/read-models/README.md`, `docs/modules/runtime-workers/README.md`, `backend/src/fin_ops_platform/postgres/migrations/0002_core_imports_invoices_bank.sql`, `backend/src/fin_ops_platform/postgres/migrations/0005_tax_etc_turnover_settings_jobs.sql`, `backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py`, `backend/src/fin_ops_platform/services/workbench_sql_projection.py`
+**Success Criteria** (what must be TRUE):
+  1. Phase A production stabilization prevents submitted ETC batch invoices from appearing as separate open invoice rows in the reconciliation workbench when the same real invoice exists in `app.invoices`.
+  2. Phase A includes a dry-run-first database repair plan that classifies current overlap rows, preserves auditability, refreshes affected read models, and does not delete production data without an explicit apply gate.
+  3. Phase B introduces `app.etc_batch_invoice_links` as the canonical ETC batch membership fact while preserving `app.invoices` as one real invoice per active row.
+  4. Phase B keeps `app.etc_invoices` only as ETC source/import metadata during migration, not as a competing workbench invoice fact source.
+  5. Phase C backfills historical links, removes or deprecates duplicate old paths, updates reset semantics, and documents the final long-term boundary.
+  6. Excel full-mirror reconciliation is rerun before data apply: `发票基础信息` invoice identities, `信息汇总表` line rows, DB pool count, missing/extra identities, and field mismatches are all explicitly reported.
+  7. Tests cover business core, service/repository, API/read-model/workbench display, import/regression, and at least one cross-module integration flow before completion.
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 18-PLAN — Execute Phase A-C as a gated master workflow driven by `18-GOAL-PROMPT.md`; implementation is closed, production apply remains gated by explicit user approval.
+
 ---
 
 ## Progress
@@ -330,5 +351,6 @@ Phase 0 is the shared baseline and must be completed before page implementation 
 | 15. 银行流水导入 | 0/0 | Not started | - |
 | 16. 发票导入 | 0/0 | Not started | - |
 | 17. ETC发票导入 | 0/0 | Not started | - |
+| 18. 发票池与 ETC 批次关系闭环 | 1/1 | Implementation complete, apply gated | 2026-06-23 |
 
 ---

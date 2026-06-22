@@ -9,7 +9,7 @@
 - 最终审阅版执行包位于 `.runtime/backups/invoice-pool-audit/20260621031938/cleanup_dry_run/final_cleanup_runbook.md` 和 `.runtime/backups/invoice-pool-audit/20260621031938/cleanup_dry_run/final_cleanup_execution_review.sql`；当前均为只读审阅材料，不是可直接执行脚本。
 - dry-run 口径：正式发票 identity 优先使用 `digital_invoice_no`、20 位 `invoice_no`、`invoice_code + invoice_no`，最后才是税号/日期/金额 fallback。
 - 当前 dry-run 结论：两份正式 Excel 共 391 个 identity；`app.invoices` 当前 638 行、614 个正式 identity；非 Excel 污染 225 行，Excel 内重复 22 行，targeted cleanup 后可到 391 行。
-- 推荐清理方式是先完整 reset canonical invoice pool，再从两份正式 Excel 重导，最后重建 read model 和 Workbench active generation。
+- 推荐清理方式是先完整 reset canonical invoice pool，再从两份正式 Excel 重导，随后 dry-run/回填 `app.etc_batch_invoice_links`，最后重建 read model 和 Workbench active generation。
 
 ## 工具
 
@@ -113,7 +113,15 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.invoice_pool_cleanup \
 - `app.input_invoice_usage_oa_reverse_batches.invoice_ids` 当前引用旧 `oa-att-inv-*` 发票 id。清理时必须选择归档这些历史污染批次；不能留下失效 invoice id，也不能把污染 id 继续带入统一发票池。
 - `read_model.workbench_relation_groups` 当前保存旧 invoice id 数组。Workbench 使用 active generation 发布模型，清理后必须通过正式重建/刷新流程恢复，不能只删除普通 read model 行。
 
-`app.etc_invoices` 不在第一阶段删除范围。它应作为 ETC ZIP/PDF/XML metadata/附件关系迁移或退役对象处理，不得再写入 `app.invoices` 创建 canonical invoice。
+`app.etc_invoices` 不在第一阶段删除范围。它应作为 ETC ZIP/PDF/XML metadata/附件关系迁移或退役对象处理，不得再写入 `app.invoices` 创建 canonical invoice。ETC 批次和 canonical invoice 的归属事实源是 `app.etc_batch_invoice_links`；清空或重建 `app.invoices` 后，不能留下指向已删除 invoice id 的 active link，也不能只依赖 `app.etc_invoices` 让关联台判断批次 membership。
+
+清空发票池后的 ETC 闭环必须按以下顺序执行：
+
+1. 备份 `app.invoices`、`app.etc_invoices`、`app.etc_business_batches`、`app.etc_batch_invoice_links`、Workbench relation/read model 相关表。
+2. 删除或标记失效指向旧 invoice id 的 active `app.etc_batch_invoice_links`，保留备份作为回滚证据。
+3. 通过正式导入链路重导 Excel，不用临时 SQL 写 `app.invoices`。
+4. 运行 `fin_ops_platform.tools.backfill_etc_batch_invoice_links --json --limit 0` 做计数级 dry-run，再用 `--limit <auto_backfill_count>` 输出完整 strict auto-backfill row set；只有完整 row set 经用户确认后，才允许带 `--apply --reason --operator` 写回 link table。CLI 会拒绝在候选示例不完整时执行 `--apply`。
+5. 重建/刷新受影响 Workbench scope，确认 submitted ETC 批次只以 `etc_invoice_summary` 展示，不再泄漏普通 open invoice row。
 
 历史版本可能已经在 `app.invoices` 中留下 ETC-created canonical 污染。执行清理时只能把 `invoice_source='ETC导入'`、`invoice_kind='ETC发票'` 且没有非 ETC source link 的行视为 legacy 污染候选；通过正式 Excel 导入或 OA 附件受控创建的 canonical invoice 必须保留，最多移除旧 ETC source link / batch id。
 
@@ -135,6 +143,8 @@ pg_dump "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL}}" \
   --file="${BACKUP_DIR}/invoice_fact_tables.dump" \
   --table=app.invoices \
   --table=app.etc_invoices \
+  --table=app.etc_business_batches \
+  --table=app.etc_batch_invoice_links \
   --table=app.import_batches \
   --table=app.import_batch_rows \
   --table=app.oa_attachments \
@@ -151,6 +161,8 @@ pg_dump "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL}}" \
   --file="${BACKUP_DIR}/invoice_related_schema.sql" \
   --table=app.invoices \
   --table=app.etc_invoices \
+  --table=app.etc_business_batches \
+  --table=app.etc_batch_invoice_links \
   --table=app.input_invoice_usage_oa_reverse_batches \
   --table=read_model.invoice_lifecycle_rows \
   --table=read_model.input_invoice_usage_rows \
@@ -235,6 +247,8 @@ ImportNormalizationService.confirm_import(...)
 - 进项 371 行，销项 20 行。
 - Excel 391 个 identity 全部存在，缺失 0。
 - `app.invoices` 中 ETC-only canonical 污染为 0。
+- active `app.etc_batch_invoice_links` 不引用已删除或缺失的 `app.invoices.id`。
+- 已提交 ETC 批次对应发票在关联台只通过 `etc_invoice_summary` 出现，不同时作为普通 open invoice row 出现。
 - 同一两份 Excel 再次导入不会新增重复发票。
 - 相关 read model 和 Workbench active generation fresh，且不再引用清理前旧 invoice id。
 

@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_matches_oa
+from fin_ops_platform.services.workbench_invoice_direction import invoice_workbench_direction_from_row
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_OPEN,
     DECISION_STATUS_PAIRED,
@@ -25,7 +26,7 @@ from fin_ops_platform.services.workbench_scheduled_payment_evidence import (
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-06-21-oa-attachment-item-parent-v1"
+RULE_VERSION = "2026-06-23-invoice-direction-normalization-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
@@ -1211,8 +1212,7 @@ class WorkbenchFreeMatchingEngine:
                 return "income"
             return ""
         if row_type == "invoice":
-            invoice_type = str(row.get("invoice_type") or "").strip()
-            return "income" if "销" in invoice_type else "expenditure"
+            return invoice_workbench_direction_from_row(row) or ""
         return ""
 
     def _amount(self, row_type: str, row: dict[str, Any]) -> Decimal | None:

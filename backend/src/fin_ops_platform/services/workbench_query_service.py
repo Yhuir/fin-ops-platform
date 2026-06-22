@@ -333,6 +333,11 @@ class WorkbenchQueryService:
             )
         )
         case_id = record.case_id or None
+        apply_time = self._first_oa_time_value(
+            detail_fields.get("申请时间"),
+            detail_fields.get("申请日期"),
+        )
+        completed_at = self._first_oa_time_value(detail_fields.get("审批完成时间"))
         tags = self._oa_row_tags(
             existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),
@@ -342,6 +347,7 @@ class WorkbenchQueryService:
             has_multiple_expense_items=len(self._expense_items(record)) > 1,
             has_amount_mismatch=self._amount_mismatch(record) is not None,
         )
+        reconciliation_amount = self._oa_reconciliation_amount(record, detail_fields)
         return {
             "id": record.id,
             "type": "oa",
@@ -353,7 +359,14 @@ class WorkbenchQueryService:
             "expense_type": record.expense_type,
             "expense_content": record.expense_content,
             "apply_type": record.apply_type,
+            "apply_time": apply_time,
+            "application_time": apply_time,
+            "application_date": apply_time,
+            "completed_at": completed_at,
             "amount": record.amount,
+            "amount_source": getattr(record, "amount_source", None),
+            "amount_mismatch": self._amount_mismatch(record),
+            "reconciliation_amount": reconciliation_amount,
             "counterparty_name": record.counterparty_name,
             "reason": record.reason,
             "oa_bank_relation": relation,
@@ -508,6 +521,33 @@ class WorkbenchQueryService:
                 f"明细合计 {mismatch.get('detail_sum') or '—'}；"
                 f"差异 {mismatch.get('difference') or '—'}"
             )
+
+    @classmethod
+    def _oa_reconciliation_amount(
+        cls,
+        record: OAApplicationRecord | object,
+        detail_fields: dict[str, Any],
+    ) -> str | None:
+        amount_source = str(getattr(record, "amount_source", "") or "").strip()
+        mismatch = cls._amount_mismatch(record)
+        if amount_source != "header" or mismatch is None:
+            return None
+        detail_sum = str(mismatch.get("detail_sum") or detail_fields.get("明细金额合计") or "").strip()
+        if not detail_sum:
+            return None
+        normalized = detail_sum.replace(",", "").replace("，", "")
+        try:
+            return f"{Decimal(normalized).quantize(Decimal('0.01')):.2f}"
+        except (InvalidOperation, ValueError):
+            return detail_sum
+
+    @staticmethod
+    def _first_oa_time_value(*values: Any) -> str | None:
+        for value in values:
+            normalized = str(value or "").strip()
+            if normalized and normalized not in {"—", "--", "None"}:
+                return normalized
+        return None
 
     @staticmethod
     def _unique_detail_values(values: Any) -> list[str]:

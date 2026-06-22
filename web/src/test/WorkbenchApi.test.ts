@@ -177,6 +177,66 @@ describe("workbench api bank amount mapping", () => {
     expect(payload.open.groups[0].canWithdraw).toBe(false);
   });
 
+  test("maps backend source OA alignment fields on bank rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-05",
+          summary: {
+            oa_count: 1,
+            bank_count: 1,
+            invoice_count: 1,
+            paired_count: 1,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "case:CASE-SOURCE-OA",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "confirmed_relation",
+                oa_rows: [
+                  {
+                    id: "oa-29350",
+                    type: "oa",
+                    amount: "29350.00",
+                    applicant: "樊祖芳",
+                    oa_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
+                  },
+                ],
+                bank_rows: [
+                  {
+                    id: "bank-29350",
+                    type: "bank",
+                    debit_amount: "29350.00",
+                    source_oa_id: "oa-29350",
+                    invoice_relation: { code: "fully_linked", label: "已关联OA", tone: "success" },
+                  },
+                ],
+                invoice_rows: [
+                  {
+                    id: "invoice-29350",
+                    type: "invoice",
+                    amount: "29350.00",
+                    invoice_bank_relation: { code: "fully_linked", label: "已关联流水", tone: "success" },
+                  },
+                ],
+              },
+            ],
+          },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-05");
+
+    expect(payload.paired.groups[0].rows.bank[0].sourceOaId).toBe("oa-29350");
+  });
+
   test("maps two-pane confirm operation projection as an open manual partial relation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -843,6 +903,59 @@ describe("workbench api bank amount mapping", () => {
                     type: "oa",
                     applicant: "刘树刚",
                     completed_at: "2026-01-14T14:04:00+08:00",
+                    project_name: "云南溯源科技",
+                    apply_type: "日常报销",
+                    amount: "1872.93",
+                    counterparty_name: "批量账务集中处理",
+                    reason: "ETC过路费",
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-01");
+
+    expect(payload.open.groups[0].rows.oa[0].tableValues.applicationTime).toBe("2026-01-14 14:04:00");
+  });
+
+  test("maps OA application date when completed time is a placeholder", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-01",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:oa-placeholder-completed-time",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "OA placeholder completed time",
+                oa_rows: [
+                  {
+                    id: "oa-placeholder-completed-time",
+                    type: "oa",
+                    applicant: "刘树刚",
+                    detail_fields: {
+                      "审批完成时间": "—",
+                      "申请日期": "2026-01-14 14:04:00",
+                    },
                     project_name: "云南溯源科技",
                     apply_type: "日常报销",
                     amount: "1872.93",

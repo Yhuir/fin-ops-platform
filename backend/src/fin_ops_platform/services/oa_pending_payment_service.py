@@ -462,8 +462,10 @@ class OaPendingPaymentQueryService:
         records = self._oa_records(month=month, view_mode=view_mode)
         record_ids = [record.id for record in records]
         context.preload_relation_rows(record_ids)
+        context.preload_oa_records_from_relations(record_ids)
         if view_mode == VIEW_MODE_IN_PROGRESS:
             context.add_distributed_relations(self._pending_relations_for_row_ids(record_ids))
+            context.preload_oa_records_from_relations(record_ids)
         oa_by_id = {record.id: record for record in records}
         bank_by_id = context.bank_transactions_by_id()
         invoices_by_id = self._input_invoices_by_id()
@@ -476,7 +478,7 @@ class OaPendingPaymentQueryService:
                 relation_id = _relation_row_identity(relation)
                 if not relation_id or relation_id in emitted_relation_ids:
                     continue
-                relation_records = self._relation_oa_records(relation, oa_by_id)
+                relation_records = self._relation_oa_records(relation, oa_by_id, context=context, view_mode=view_mode)
                 if not relation_records or record.id not in {item.id for item in relation_records}:
                     continue
                 row = self._relation_group_row(
@@ -559,12 +561,24 @@ class OaPendingPaymentQueryService:
     def _relation_oa_records(
         relation: dict[str, Any],
         oa_by_id: dict[str, OAApplicationRecord],
+        *,
+        context: DistributedInvoiceRelationContext,
+        view_mode: str,
     ) -> list[OAApplicationRecord]:
         oa_ids: list[str] = []
         for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
             if row_type == "oa" and row_id in oa_by_id and row_id not in oa_ids:
                 oa_ids.append(row_id)
-        return [oa_by_id[oa_id] for oa_id in oa_ids]
+            elif row_type == "oa" and row_id not in oa_by_id and row_id not in oa_ids:
+                oa_ids.append(row_id)
+        relation_records_by_id = dict(oa_by_id)
+        relation_records_by_id.update(context.oa_records_by_id(oa_ids))
+        return [
+            record
+            for oa_id in oa_ids
+            if (record := relation_records_by_id.get(oa_id)) is not None
+            and OaPendingPaymentQueryService._record_matches_view_mode(record, view_mode)
+        ]
 
     @staticmethod
     def _oa_group_payload(records: list[OAApplicationRecord], relation: dict[str, Any]) -> dict[str, Any]:
