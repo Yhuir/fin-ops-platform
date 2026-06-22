@@ -7,7 +7,7 @@
 - 页面进入 `/oa-pending-payments` 后必须出现 `oa-pending-payments-page` 和 `OA待付款核对表格`，不能停在 route loading。
 - rows、filter-options 和 detail 必须经过 `oa_pending_payment` read model fresh/source-version gate；非 fresh 只能展示 refreshing/unavailable 语义，不能用旧 rows 伪装 fresh。
 - `paymentStatus` 由后端 lifecycle/read model 给出，前端不得按金额字段自行推断。
-- candidate relation 只能作为证据/chip；只有 Workbench active linked relation 或用户确认写回后才能驱动已支付状态。
+- candidate relation 只能作为证据/chip；只有 Workbench active linked relation 或自动匹配/写回命令确认的 relation 才能驱动已支付状态和 OA MySQL 写回。
 - 表格在真实浏览器中不能出现横向溢出遮挡关键操作；详情 drawer、筛选菜单和规则 drawer 必须可打开/关闭。
 
 ## Spec ID
@@ -17,10 +17,10 @@
 | `OA-PENDING-E2E-001` | 打开 completed 视图 | 页面 ready；表格显示 OA、支付状态、流水、发票四组；首屏 rows/filter-options 请求成功；无横向滚动遮挡。 |
 | `OA-PENDING-E2E-002` | 搜索、筛选、排序 | 搜索关键字、支付状态、项目、发票方筛选和交易时间排序都进入 rows query；分页大小保持有界。 |
 | `OA-PENDING-E2E-003` | 打开 OA/流水/发票详情和规则抽屉 | 三类详情 drawer 展示对应事实；规则 drawer 请求待找发票规则；规则保存成功后必须等待 `oa_pending_payment` operation barrier fresh 再读取 rows；关闭后页面恢复。 |
-| `OA-PENDING-E2E-004` | candidate relation 负面语义 | candidate OA/流水/发票证据可以显示，但付款状态仍为 `支付少了`，不能出现确认已支付 mutation。 |
+| `OA-PENDING-E2E-004` | candidate relation 负面语义 | candidate OA/流水/发票证据可以显示，但付款状态仍为 `支付少了`，不能触发自动写回 mutation。 |
 | `OA-PENDING-E2E-005` | Workbench confirm -> OA pending linked fan-out | 关联台确认 OA+银行流水+进项发票后，返回 OA 待付款重新请求 rows；目标行从 `支付少了` 变为 `已支付`，候选标记消失，显示 `关联台已确认`、支出流水、发票号和金额。 |
-| `OA-PENDING-E2E-006` | in-progress OA 确认已支付写回 | 只有 eligible 进行中 OA 显示确认写回；点击后必须通过后端校验，等待 `oa_pending_payment` operation barrier fresh 后刷新写回状态，不允许重复提交或半写。 |
-| `OA-PENDING-E2E-007` | in-progress OA 关联支出流水 | 抽屉默认展示全部支出流水，已配对/已关联进行中 OA 行禁选；提交只创建 Workbench relation，不写 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
+| `OA-PENDING-E2E-006` | in-progress OA 自动匹配并写回 | 页面进入后自动调用匹配/写回接口； eligible 进行中 OA 与未配对支出流水匹配成功后必须刷新为 `已写回`；页面不得显示人工写回按钮；失败时保留 `未写回` 且显示错误，不允许半写。 |
+| `OA-PENDING-E2E-007` | in-progress OA 人工关联支出流水并自动写回 | 抽屉默认展示全部支出流水，已配对/已关联进行中 OA 行禁选；提交创建 Workbench relation，并在后端校验通过时自动写回 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
 | `OA-PENDING-E2E-008` | read model/detail 非 fresh | rows/detail refreshing/stale 时显示诊断或详情暂不可用；不能把空 rows 当真实空态。 |
 
 ## Read Model / Worker 合同

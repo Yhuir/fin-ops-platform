@@ -114,6 +114,9 @@ type ApiMockOptions = {
   oaPendingPaymentBankLinkDelayMs?: number;
   oaPendingPaymentBankLinkError?: boolean;
   oaPendingPaymentBankLinkFlow?: boolean;
+  oaPendingPaymentAutoReconcileDelayMs?: number;
+  oaPendingPaymentAutoReconcileError?: boolean;
+  oaPendingPaymentAutoReconcileFlow?: boolean;
   oaPendingPaymentConfirmPaidDelayMs?: number;
   oaPendingPaymentConfirmPaidError?: boolean;
   oaPendingPaymentConfirmPaidFlow?: boolean;
@@ -3498,7 +3501,7 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
           ? {
             code: "paid",
             label: "已支付",
-            reason: "支出流水已通过进行中 OA 关联抽屉建立 Workbench relation，仍需用户确认写回 OA。",
+            reason: "支出流水已通过进行中 OA 关联抽屉建立 Workbench relation，并已自动写回 OA。",
             severity: "success",
           }
           : {
@@ -3507,7 +3510,9 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
             reason: "未关联支出流水",
             severity: "warning",
           },
-        oaPaymentWriteback: { code: "not_written", label: "未写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
+        oaPaymentWriteback: linked
+          ? { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" }
+          : { code: "not_written", label: "未写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
         bankTransaction: linked
           ? {
             primaryBankTransactionId: "bank-link-e2e-001",
@@ -7936,7 +7941,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.oaPendingPaymentBankLinkFlow && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentBankLinkRowsPayload(oaPendingPaymentBankLinked));
       }
-      if (options.oaPendingPaymentConfirmPaidFlow && url.searchParams.get("view_mode") === "in_progress") {
+      if ((options.oaPendingPaymentAutoReconcileFlow ?? options.oaPendingPaymentConfirmPaidFlow) && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentConfirmPaidRowsPayload(oaPendingPaymentConfirmPaidConfirmed));
       }
       if (options.oaPendingPaymentRelationFanout) {
@@ -7982,7 +7987,60 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           status: "confirmed",
           origin: "oa_pending_payment_in_progress",
         },
+        autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
+        oaPaymentWritebacks: [
+          { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
+        ],
         readModelRefresh: { scopeKeys: ["oa_pending_payment:in_progress", "workbench:all"], enqueued: true, targetSeconds: 2 },
+      });
+    }
+
+    if (path === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
+      await delay(Math.max(0, options.oaPendingPaymentAutoReconcileDelayMs ?? options.oaPendingPaymentConfirmPaidDelayMs ?? 0));
+      if (options.oaPendingPaymentAutoReconcileError ?? options.oaPendingPaymentConfirmPaidError) {
+        return json(route, {
+          error: "oa_pending_payment_auto_reconcile_rejected",
+          message: "OA 自动匹配和写回校验失败，未写入支付状态。",
+          affected_oa_row_ids: [],
+          affected_bank_transaction_ids: [],
+          read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
+        }, 409);
+      }
+      if (options.oaPendingPaymentAutoReconcileFlow ?? options.oaPendingPaymentConfirmPaidFlow) {
+        oaPendingPaymentConfirmPaidConfirmed = true;
+        return json(route, {
+          success: true,
+          action: "oa_pending_payment_auto_reconcile_bank_transactions",
+          month: "all",
+          autoMatchedCount: 1,
+          writebackCount: 1,
+          autoMatchedRelations: [
+            {
+              oaRowIds: ["oa-confirm-paid-e2e-001"],
+              bankTransactionIds: ["bank-confirm-paid-e2e-001"],
+              ruleCode: "oa_bank_exact_amount",
+            },
+          ],
+          oaPaymentWritebacks: [
+            {
+              code: "written",
+              label: "已写回",
+              flowIds: ["flow-confirm-paid-e2e-001"],
+              syncStatus: "ready",
+            },
+          ],
+          readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+        });
+      }
+      return json(route, {
+        success: true,
+        action: "oa_pending_payment_auto_reconcile_bank_transactions",
+        month: "all",
+        autoMatchedCount: 0,
+        writebackCount: 0,
+        autoMatchedRelations: [],
+        oaPaymentWritebacks: [],
+        readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
       });
     }
 

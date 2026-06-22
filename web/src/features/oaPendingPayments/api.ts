@@ -7,8 +7,8 @@ import type {
   OaPendingPaymentQuery,
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
-  ConfirmOaPendingPaymentPaidRequest,
-  ConfirmOaPendingPaymentPaidResponse,
+  AutoReconcileOaPendingPaymentBankTransactionsRequest,
+  AutoReconcileOaPendingPaymentBankTransactionsResponse,
   LinkOaPendingPaymentBankTransactionsRequest,
   LinkOaPendingPaymentBankTransactionsResponse,
   OaPendingPaymentBankCandidateRelationStatus,
@@ -78,19 +78,19 @@ export async function fetchOaPendingPaymentDetail(
   );
 }
 
-export async function confirmOaPendingPaymentPaid(
-  request: ConfirmOaPendingPaymentPaidRequest,
-): Promise<ConfirmOaPendingPaymentPaidResponse> {
-  return apiRequestJson<ConfirmOaPendingPaymentPaidResponse>("/api/oa-pending-payments/confirm-paid", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      oa_row_id: request.oaRowId,
-      bank_transaction_id: request.bankTransactionId,
-      bank_transaction_ids: request.bankTransactionIds,
-      idempotency_key: request.idempotencyKey,
-    }),
-  });
+export async function autoReconcileOaPendingPaymentBankTransactions(
+  request: AutoReconcileOaPendingPaymentBankTransactionsRequest = {},
+): Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse> {
+  return apiRequestJson<AutoReconcileOaPendingPaymentBankTransactionsResponse>(
+    "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: request.month,
+      }),
+    },
+  );
 }
 
 export async function fetchOaPendingPaymentBankCandidates({

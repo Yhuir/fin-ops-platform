@@ -33,6 +33,8 @@ export type OaPendingPaymentOaSummary = {
   applicationTime: string;
   amount: string;
   detailAvailable: boolean;
+  reason?: string;
+  counterpartyName?: string;
   workflowStatus?: string;
   relationCount?: number;
   relationStatus?: string;
@@ -68,7 +70,10 @@ export type OaPendingPaymentStatus = {
 export type OaPendingPaymentWritebackStatus = {
   code: "written" | "not_written" | string;
   label: string;
+  flowId?: string;
   flowIds?: string[];
+  oaRowId?: string;
+  source?: string;
   syncStatus?: string;
 };
 
@@ -206,20 +211,18 @@ export type OaPendingPaymentQuery = {
   viewMode: OaPendingPaymentViewMode;
 };
 
-export type ConfirmOaPendingPaymentPaidRequest = {
-  oaRowId: string;
-  bankTransactionId?: string;
-  bankTransactionIds?: string[];
-  idempotencyKey?: string;
+export type AutoReconcileOaPendingPaymentBankTransactionsRequest = {
+  month?: string;
 };
 
-export type ConfirmOaPendingPaymentPaidResponse = {
+export type AutoReconcileOaPendingPaymentBankTransactionsResponse = {
   success: boolean;
   action?: string;
-  oaRowId?: string;
-  bankTransactionIds?: string[];
-  paymentStatus?: OaPendingPaymentStatus;
-  oaPaymentWriteback?: OaPendingPaymentWritebackStatus;
+  month?: string;
+  autoMatchedCount?: number;
+  writebackCount?: number;
+  autoMatchedRelations?: Array<Record<string, unknown>>;
+  oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
   readModelRefresh?: {
     scopeKeys?: string[];
     enqueued?: boolean;
@@ -269,6 +272,15 @@ export type LinkOaPendingPaymentBankTransactionsResponse = {
   oaRowIds?: string[];
   bankTransactionIds?: string[];
   relation?: Record<string, unknown>;
+  autoWriteback?: {
+    code?: string;
+    label?: string;
+    reason?: string;
+    matched?: boolean;
+    writebackCount?: number;
+  };
+  oaPaymentWriteback?: OaPendingPaymentWritebackStatus | null;
+  oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
   readModelRefresh?: {
     scopeKeys?: string[];
     enqueued?: boolean;

@@ -1,4 +1,4 @@
-import { ArrowUpDown, CheckCircle2, Filter, Info, Search } from "lucide-react";
+import { ArrowUpDown, Filter, Info, Search } from "lucide-react";
 import type { CSSProperties, MutableRefObject, ReactNode } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -37,10 +37,8 @@ type OaPendingPaymentsTableProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onOpenDetail: (target: OaPendingPaymentDetailTarget) => void;
-  onConfirmPaid?: (row: OaPendingPaymentRow) => void;
   selectedOaRowIds?: Set<string>;
   onToggleOaSelection?: (row: OaPendingPaymentRow) => void;
-  confirmingRowIds?: Set<string>;
   emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
@@ -133,10 +131,8 @@ export default function OaPendingPaymentsTable({
   onPageChange,
   onPageSizeChange,
   onOpenDetail,
-  onConfirmPaid,
   selectedOaRowIds = new Set(),
   onToggleOaSelection,
-  confirmingRowIds = new Set(),
   emptyStateMessage = "暂无 OA 待付款核对数据",
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
@@ -212,8 +208,6 @@ export default function OaPendingPaymentsTable({
             ) : rows.map((row) => {
               const hasBank = hasBankTransaction(row);
               const bankTarget = bankDetailTarget(row);
-              const confirming = confirmingRowIds.has(row.id);
-              const canConfirm = Boolean(onConfirmPaid) && canConfirmPaid(row);
               const selectable = Boolean(onToggleOaSelection) && canSelectOa(row);
               const rowOaIds = oaRowIds(row);
               const selected = rowOaIds.length > 0 && rowOaIds.every((oaId) => selectedOaRowIds.has(oaId));
@@ -253,6 +247,12 @@ export default function OaPendingPaymentsTable({
                           </span>
                         ) : null}
                       </div>
+                      <div className="oa-pending-payments-oa-grid__reason">
+                        <TextLine value={oaReasonDisplay(row)} />
+                      </div>
+                      <div className="oa-pending-payments-oa-grid__counterparty">
+                        <TextLine value={oaCounterpartyDisplay(row)} />
+                      </div>
                       <div className="oa-pending-payments-oa-grid__amount">
                         <span className="oa-pending-payments-oa-amount-row">
                           <TextLine numeric strong value={row.oa.amount} />
@@ -282,17 +282,6 @@ export default function OaPendingPaymentsTable({
                         <FinanceStatusTag tone={statusTone(row.paymentStatus.severity)}>
                           {paymentStatusLabel(row)}
                         </FinanceStatusTag>
-                        {canConfirm ? (
-                          <button
-                            className="oa-pending-payments-confirm-paid-button"
-                            disabled={confirming}
-                            onClick={() => onConfirmPaid?.(row)}
-                            type="button"
-                          >
-                            <CheckCircle2 aria-hidden="true" size={14} strokeWidth={2.2} />
-                            {confirming ? "确认中" : confirmPaidButtonLabel(row)}
-                          </button>
-                        ) : null}
                       </span>
                       <span className="oa-pending-payments-writeback-line">
                         <TableTag>{writebackLabel(row)}</TableTag>
@@ -456,6 +445,8 @@ function GroupedSubHeader({
           filterFields: [{ field: "oa_project_name", label: "项目名称" }],
           filterLabel: "项目",
         })}</span>
+        <span>申请事由</span>
+        <span>对方户名</span>
         <span className="oa-pending-payments-subheader-grid__amount">金额</span>
       </span>
     );
@@ -604,7 +595,7 @@ function OaColumnFilterMenu({
     }
     const rect = trigger.getBoundingClientRect();
     const panelWidth = Math.min(320, Math.max(240, window.innerWidth - 24));
-    const left = Math.min(Math.max(12, rect.right - panelWidth), window.innerWidth - panelWidth - 12);
+    const left = Math.min(Math.max(12, rect.left), window.innerWidth - panelWidth - 12);
     const top = Math.min(rect.bottom + 8, window.innerHeight - 88);
     setPanelStyle({
       left,
@@ -975,34 +966,28 @@ function counterpartyDisplay(row: OaPendingPaymentRow): string {
   return counterparty;
 }
 
-function bankTransactionIds(row: OaPendingPaymentRow): string[] {
-  const ids: string[] = [];
-  if (row.bankTransaction.primaryBankTransactionId) {
-    ids.push(row.bankTransaction.primaryBankTransactionId);
-  }
-  row.bankTransaction.summaries?.forEach((summary) => {
-    if (summary.bankTransactionId && !ids.includes(summary.bankTransactionId)) {
-      ids.push(summary.bankTransactionId);
+function firstNonEmpty(...values: Array<string | number | null | undefined>): string {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) {
+      return text;
     }
-  });
-  return ids;
+  }
+  return "";
 }
 
-function canConfirmPaid(row: OaPendingPaymentRow): boolean {
-  if (writebackWritten(row) || workflowStatusLabel(row) !== "进行中") {
-    return false;
-  }
-  if (row.paymentStatus.code === "paid") {
-    return bankTransactionIds(row).length > 0;
-  }
-  return hasCandidateBankRelation(row) && bankTransactionIds(row).length > 0;
+function oaReasonDisplay(row: OaPendingPaymentRow): string {
+  return firstNonEmpty(
+    row.oa.reason,
+    ...(row.oa.summaries ?? []).map((summary) => summary.reason),
+  );
 }
 
-function confirmPaidButtonLabel(row: OaPendingPaymentRow): string {
-  if (row.paymentStatus.code === "paid" && !hasAutomaticOrCandidateBankRelation(row)) {
-    return "写回 OA";
-  }
-  return "确认已支付并写回";
+function oaCounterpartyDisplay(row: OaPendingPaymentRow): string {
+  return firstNonEmpty(
+    row.oa.counterpartyName,
+    ...(row.oa.summaries ?? []).map((summary) => summary.counterpartyName),
+  );
 }
 
 function writebackWritten(row: OaPendingPaymentRow): boolean {
@@ -1148,12 +1133,6 @@ function hasCandidateOaRelation(row: OaPendingPaymentRow): boolean {
 function hasCandidateBankRelation(row: OaPendingPaymentRow): boolean {
   return isCandidateStatus(row.bankTransaction.relationStatus)
     || Boolean(row.bankTransaction.summaries?.some((summary) => isCandidateStatus(summary.relationStatus)));
-}
-
-function hasAutomaticOrCandidateBankRelation(row: OaPendingPaymentRow): boolean {
-  return hasCandidateBankRelation(row)
-    || row.bankTransaction.relationSource === "automatic_decision"
-    || Boolean(row.bankTransaction.summaries?.some((summary) => summary.relationSource === "automatic_decision"));
 }
 
 function hasCandidateInvoiceRelation(row: OaPendingPaymentRow): boolean {

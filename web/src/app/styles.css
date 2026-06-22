@@ -2069,19 +2069,19 @@ textarea {
 }
 
 .oa-pending-payments-col-oa {
-  width: 34%;
+  width: 40%;
 }
 
 .oa-pending-payments-col-bank {
-  width: 37%;
+  width: 39%;
 }
 
 .oa-pending-payments-col-invoice {
-  width: 20%;
+  width: 13%;
 }
 
 .oa-pending-payments-col-paymentStatus {
-  width: 9%;
+  width: 8%;
 }
 
 .oa-pending-payments-table-group-header,
@@ -2097,7 +2097,7 @@ textarea {
 .oa-pending-payments-table-group-header {
   top: 0;
   z-index: 4;
-  height: 33px;
+  height: 30px;
   font-weight: 900;
 }
 
@@ -2118,10 +2118,10 @@ textarea {
 }
 
 .oa-pending-payments-table-sub-header {
-  top: 33px;
+  top: 30px;
   z-index: 3;
-  min-height: 36px;
-  padding: 5px 6px;
+  min-height: 32px;
+  padding: 4px 4px;
   color: var(--fp-text-secondary);
   font-weight: 850;
   white-space: normal;
@@ -2148,12 +2148,12 @@ textarea {
   width: 100%;
   min-width: 0;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 4px;
+  font-size: 10px;
 }
 
 .oa-pending-payments-subheader-grid--oa {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr) minmax(58px, 0.7fr);
+  grid-template-columns: minmax(0, 0.73fr) minmax(0, 1.08fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(54px, 0.58fr);
 }
 
 .oa-pending-payments-subheader-grid--bank {
@@ -2182,11 +2182,11 @@ textarea {
 }
 
 .oa-pending-payments-table-cell {
-  padding: 6px 5px;
+  padding: 5px 4px;
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
-  font-size: 11px;
-  line-height: 1.32;
+  font-size: 10.5px;
+  line-height: 1.28;
   overflow-wrap: anywhere;
   vertical-align: top;
 }
@@ -2249,7 +2249,7 @@ textarea {
 }
 
 .oa-pending-payments-tag-row {
-  margin-top: 4px;
+  margin-top: 3px;
   flex-wrap: wrap;
 }
 
@@ -2257,8 +2257,8 @@ textarea {
   display: grid;
   min-width: 0;
   align-items: start;
-  gap: 5px;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr) minmax(58px, 0.7fr);
+  gap: 4px;
+  grid-template-columns: minmax(0, 0.73fr) minmax(0, 1.08fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(54px, 0.58fr);
 }
 
 .oa-pending-payments-bank-grid {
@@ -2271,6 +2271,8 @@ textarea {
 
 .oa-pending-payments-oa-grid__applicant,
 .oa-pending-payments-oa-grid__project,
+.oa-pending-payments-oa-grid__reason,
+.oa-pending-payments-oa-grid__counterparty,
 .oa-pending-payments-oa-grid__amount,
 .oa-pending-payments-bank-grid__counterparty,
 .oa-pending-payments-bank-grid__amount,
@@ -2310,7 +2312,7 @@ textarea {
 .oa-pending-payments-invoice-stack {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .oa-pending-payments-oa-amount-row {
@@ -2333,40 +2335,6 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 3px;
-}
-
-.oa-pending-payments-confirm-paid-button {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 3px;
-  border: 1px solid color-mix(in srgb, var(--fp-success) 38%, var(--fp-border));
-  border-radius: var(--fp-radius-sm);
-  background: color-mix(in srgb, var(--fp-success-soft) 72%, var(--fp-surface));
-  color: var(--fp-success-strong);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 850;
-  line-height: 1;
-  padding: 0 5px;
-  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.oa-pending-payments-confirm-paid-button:hover:not(:disabled),
-.oa-pending-payments-confirm-paid-button:focus-visible {
-  border-color: var(--fp-success);
-  background: var(--fp-success-soft);
-  outline: none;
-}
-
-.oa-pending-payments-confirm-paid-button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.oa-pending-payments-confirm-paid-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
 }
 
 .oa-pending-payments-writeback-line {
@@ -2426,7 +2394,7 @@ textarea {
   font-size: 10px;
   font-weight: 750;
   line-height: 1.2;
-  padding: 0 5px;
+  padding: 0 4px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
@@ -2440,7 +2408,7 @@ textarea {
   display: inline-flex;
   flex: 0 0 auto;
   width: 20px;
-  height: 20px;
+  height: 19px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;

@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 1 of 18 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
 Status: Ready to discuss/plan page-specific phases using Phase 0 as required baseline
-Last activity: 2026-06-22 - Completed quick task 260622-bta: 银行流水模板别名识别
+Last activity: 2026-06-22 - Completed quick task 260622-oal: OA 待付款表格 OA 区域五列压缩
 
 Progress: [█░░░░░░░░░] 6%
 
@@ -82,6 +82,8 @@ None yet.
 | 260621-n7i | 银行明细页面时间选择器简化为按年/按月和全部 | 2026-06-21 | — | [260621-n7i-bank-details-date-picker](./quick/260621-n7i-bank-details-date-picker/) |
 | 260621-ssv | 免 OA 流水栏行级银行明细标签 | 2026-06-21 | — | [260621-ssv-oa-ui](./quick/260621-ssv-oa-ui/) |
 | 260622-bta | 银行流水模板别名识别 | 2026-06-22 | — | [260622-bta-bank-import-template-aliases](./quick/260622-bta-bank-import-template-aliases/) |
+| 260622-oaw | OA 待付款自动匹配和自动写回 | 2026-06-22 | — | [260622-oaw-oa-pending-auto-writeback](./quick/260622-oaw-oa-pending-auto-writeback/) |
+| 260622-oal | OA 待付款表格 OA 区域五列压缩 | 2026-06-22 | — | [260622-oal-oa-pending-layout](./quick/260622-oal-oa-pending-layout/) |
 
 ## Deferred Items
 

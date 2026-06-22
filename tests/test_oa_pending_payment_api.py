@@ -117,6 +117,21 @@ class FakeCommandService:
             "oaRowIds": payload.get("oa_row_ids") or payload.get("oaRowIds") or [],
             "bankTransactionIds": payload.get("bank_transaction_ids") or payload.get("bankTransactionIds") or [],
             "relation": {"status": "confirmed"},
+            "autoWriteback": {"code": "written", "label": "已写回", "matched": True, "writebackCount": 1},
+            "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
+            "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
+        }
+
+    def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        self.link_calls.append(({"auto_reconcile": dict(payload)}, actor_id))
+        return {
+            "success": True,
+            "action": "oa_pending_payment_auto_reconcile_bank_transactions",
+            "month": payload.get("month") or "all",
+            "autoMatchedCount": 1,
+            "writebackCount": 1,
+            "autoMatchedRelations": [{"oaRowIds": ["oa-api"], "bankTransactionIds": ["bank-api"]}],
+            "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
             "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
         }
 
@@ -248,7 +263,35 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertTrue(payload["success"])
         self.assertEqual(payload["action"], "oa_pending_payment_link_bank_transactions")
+        self.assertEqual(payload["autoWriteback"]["label"], "已写回")
         self.assertEqual(command_service.link_calls, [({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}, "tester")])
+
+    def test_auto_reconcile_route_delegates_to_command_service_with_write_actor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            service = OaPendingPaymentQueryService(
+                import_service=ImportNormalizationService(),
+                oa_projection=StaticOAProjection([]),
+            )
+            command_service = FakeCommandService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(
+                service,
+                command_service=command_service,
+            )
+            app._workbench_write_auth_context = lambda _headers: ("tester", "default")  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+                body=json.dumps({"month": "2026-06"}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["autoMatchedCount"], 1)
+        self.assertEqual(payload["writebackCount"], 1)
+        self.assertEqual(command_service.link_calls, [({"auto_reconcile": {"month": "2026-06"}}, "tester")])
 
     def test_bank_transaction_candidates_route_delegates_to_command_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

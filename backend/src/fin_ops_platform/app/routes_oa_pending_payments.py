@@ -80,6 +80,11 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment command service is not configured.")
         return self._command_service.link_bank_transactions(payload, actor_id=actor_id)
 
+    def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        if self._command_service is None:
+            raise RuntimeError("OA pending payment command service is not configured.")
+        return self._command_service.auto_reconcile_bank_transactions(payload, actor_id=actor_id)
+
     def bank_transaction_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
         if self._command_service is None:
             raise RuntimeError("OA pending payment command service is not configured.")

@@ -25,6 +25,8 @@ const rowsPayload = {
         applicationTime: "2026-01-03",
         amount: "10000.00",
         detailAvailable: true,
+        reason: "红河卷烟厂运维服务保证金",
+        counterpartyName: "中招国际招标有限公司云南分公司",
         workflowStatus: "completed",
       },
       paymentStatus: {
@@ -458,6 +460,7 @@ function installOaPendingPaymentsFetch(overrides?: {
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
   operationBarrierDelay?: Promise<void>;
   rulesCanSave?: boolean;
+  autoReconcilePayload?: Record<string, unknown>;
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -513,6 +516,18 @@ function installOaPendingPaymentsFetch(overrides?: {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
+      return new Response(JSON.stringify(overrides?.autoReconcilePayload ?? {
+        success: true,
+        action: "oa_pending_payment_auto_reconcile_bank_transactions",
+        autoMatchedCount: 0,
+        writebackCount: 0,
+        readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
+      }), {
+        status: init?.method === "POST" ? 200 : 405,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
       return new Response(JSON.stringify({
         rows: [
@@ -552,6 +567,8 @@ function installOaPendingPaymentsFetch(overrides?: {
         oaRowIds: ["oa-candidate"],
         bankTransactionIds: ["bank-drawer-001"],
         relation: { status: "confirmed" },
+        autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
+        oaPaymentWritebacks: [{ code: "written", label: "已写回", flowId: "proc-candidate", syncStatus: "ready" }],
         readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
       }), {
         status: init?.method === "POST" ? 200 : 405,
@@ -725,10 +742,10 @@ function rulesSaveRequests(fetchMock: ReturnType<typeof installOaPendingPayments
   });
 }
 
-function confirmPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+function autoReconcileRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
   return fetchMock.mock.calls.filter(([input]) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    return url.pathname === "/api/oa-pending-payments/confirm-paid";
+    return url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions";
   });
 }
 
@@ -826,8 +843,9 @@ describe("OA pending payments page", () => {
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
     const paginationButton = cssRule(styles, ".oa-pending-payments-pagination-actions button");
     const viewToggle = cssRule(styles, ".oa-pending-payments-view-toggle");
-    const confirmButton = cssRule(styles, ".oa-pending-payments-confirm-paid-button");
     const writebackLine = cssRule(styles, ".oa-pending-payments-writeback-line");
+    const tableCell = cssRule(styles, ".oa-pending-payments-table-cell");
+    const invoiceColumn = cssRule(styles, ".oa-pending-payments-col-invoice");
     const statusColumn = cssRule(styles, ".oa-pending-payments-col-paymentStatus");
     const oaGrid = cssRule(styles, ".oa-pending-payments-oa-grid");
     const bankGrid = cssRule(styles, ".oa-pending-payments-bank-grid");
@@ -848,11 +866,12 @@ describe("OA pending payments page", () => {
     expect(sortButton).toContain("var(--motion-fast)");
     expect(paginationButton).toContain("var(--motion-fast)");
     expect(viewToggle).toContain("display: inline-flex");
-    expect(confirmButton).toContain("var(--fp-success");
     expect(writebackLine).toContain("flex-wrap: wrap");
-    expect(statusColumn).toContain("width: 9%");
+    expect(tableCell).toContain("font-size: 10.5px");
+    expect(invoiceColumn).toContain("width: 13%");
+    expect(statusColumn).toContain("width: 8%");
     expect(oaGrid).toContain("display: grid");
-    expect(oaGrid).toContain("grid-template-columns");
+    expect(oaGrid).toContain("grid-template-columns: minmax(0, 0.73fr)");
     expect(bankGrid).toContain("display: grid");
     expect(bankGrid).toContain("grid-template-columns");
     expect(invoiceStack).toContain("display: grid");
@@ -945,7 +964,7 @@ describe("OA pending payments page", () => {
     }
     expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
     const subHeader = within(page).getAllByRole("row")[1];
-    for (const label of ["申请人", "项目", "金额", "状态", "写回", "对方户名", "流水摘要", "发票号", "发票方", "日期"]) {
+    for (const label of ["申请人", "项目", "申请事由", "金额", "状态", "写回", "对方户名", "流水摘要", "发票号", "发票方", "日期"]) {
       expect(within(subHeader).getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(within(subHeader).queryByText("OA")).not.toBeInTheDocument();
@@ -985,6 +1004,8 @@ describe("OA pending payments page", () => {
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__applicant")).toHaveTextContent("流程状态：已完成");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("红河卷烟厂能源管理系统运维服务");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("2026-01-03");
+    expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__reason")).toHaveTextContent("红河卷烟厂运维服务保证金");
+    expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__counterparty")).toHaveTextContent("中招国际招标有限公司云南分公司");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__amount")).toHaveTextContent("10000.00");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("中招国际招标有限公司云南分公司");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).not.toHaveTextContent("对方户名：");
@@ -1012,7 +1033,7 @@ describe("OA pending payments page", () => {
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("候选")).toBeInTheDocument();
     expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
-    expect(within(candidateRow).getByRole("button", { name: "确认已支付并写回" })).toBeInTheDocument();
+    expect(within(candidateRow).queryByRole("button", { name: "确认已支付并写回" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
@@ -1095,7 +1116,7 @@ describe("OA pending payments page", () => {
     });
   });
 
-  test("switches to in-progress OA view and confirms candidate bank payment", async () => {
+  test("switches to in-progress OA view and links bank payment with automatic writeback", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -1119,19 +1140,7 @@ describe("OA pending payments page", () => {
     expect(within(page).getByRole("button", { name: "开票日期 排序" })).toBeInTheDocument();
     const candidateCells = candidateRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(candidateCells[3]?.textContent?.trim()).toBe("-");
-    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付并写回" }));
-
-    await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));
-    const [, init] = confirmPaidRequests(fetchMock)[0];
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      oa_row_id: "oa-candidate",
-      bank_transaction_ids: ["bank-candidate-004"],
-    });
-    expect(await within(page).findByText("已确认支付并写回 OA。")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
-    });
+    expect(within(candidateRow).queryByRole("button", { name: "确认已支付并写回" })).not.toBeInTheDocument();
 
     await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
@@ -1149,31 +1158,32 @@ describe("OA pending payments page", () => {
       oa_row_ids: ["oa-candidate"],
       bank_transaction_ids: ["bank-drawer-001"],
     });
-    expect(await within(page).findByText("已关联支出流水，等待核对表刷新。")).toBeInTheDocument();
+    expect(await within(page).findByText("已关联支出流水并写回 OA，等待核对表刷新。")).toBeInTheDocument();
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
   });
 
-  test("waits for the OA pending payment barrier before reloading after confirm-paid", async () => {
+  test("waits for the OA pending payment barrier before reloading after auto reconcile", async () => {
     const barrier = deferred();
-    const fetchMock = installOaPendingPaymentsFetch({ operationBarrierDelay: barrier.promise });
-    const user = userEvent.setup();
+    const fetchMock = installOaPendingPaymentsFetch({
+      operationBarrierDelay: barrier.promise,
+      autoReconcilePayload: {
+        success: true,
+        action: "oa_pending_payment_auto_reconcile_bank_transactions",
+        autoMatchedCount: 1,
+        writebackCount: 1,
+        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+      },
+    });
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
-    await waitFor(() => {
-      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
-    });
     const rowsBeforeMutation = rowsRequests(fetchMock).length;
 
-    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
-    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付并写回" }));
-
-    await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));
+    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
     expect(JSON.parse(String(barrierInit?.body))).toEqual({

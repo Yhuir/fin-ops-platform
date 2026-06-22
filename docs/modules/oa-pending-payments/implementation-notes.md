@@ -3,13 +3,32 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
-## 2026-06-22 - confirm-paid/link-bank/rules 写后 operation barrier
+## 2026-06-22 - 写后 operation barrier
 
-- 目标：修复进行中 OA `confirm-paid`、`link-bank-transactions` 和支出流水无需开票规则保存成功后前端立即刷新 rows，可能读到旧 `oa_pending_payment` read model 的缺口。
+- 目标：修复写操作成功后前端立即刷新 rows，可能读到旧 `oa_pending_payment` read model 的缺口。该记录创建时覆盖进行中 OA `confirm-paid`、`link-bank-transactions` 和支出流水无需开票规则保存；2026-06-22 自动匹配/写回上线后，前端主写回入口由 auto-reconcile 替代 `confirm-paid`。
 - 影响范围：`OaPendingPaymentsPage`、`PendingInvoiceRulesDrawer` async callback contract、`operationBarrier` 前端 label、`OaPendingPaymentsPage.test.tsx` 和本模块测试矩阵；后端 API contract 不变，confirm/link 继续复用响应中的 `readModelRefresh.scopeKeys`。
 - 关键决策：前端写 API 成功后先用当前页面可见 scope 构造 `oa_pending_payment` operation barrier target，barrier fresh 后才 `loadRows("refresh")`；barrier blocked/timeout 属于 post-commit 同步未完成，只显示“后台同步尚未完成”，不把已成功写入渲染成操作失败，也不提前读取旧投影。
-- 测试覆盖：新增三个 Vitest 回归，分别锁定 confirm-paid、link-bank 和规则保存，在 barrier resolve 前不得增加 rows 请求，且 barrier request body 使用 `oa_pending_payment:all`。
+- 测试覆盖：新增/维护 Vitest 回归，锁定写回、link-bank 和规则保存，在 barrier resolve 前不得增加 rows 请求，且 barrier request body 使用 `oa_pending_payment:all`。
 - 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`。
+
+## 2026-06-22 - OA 自动匹配支出流水并自动写回
+
+- 目标：取消 OA 待付款页面的人工写回入口，让进行中 OA 自动匹配未配对支出流水；completed 和 in-progress 只要已有有效支出流水 active relation 且金额相等，都自动写回 `t_payment_simple.pay_status=1`。
+- 影响范围：`OaPendingPaymentCommandService`、`/api/oa-pending-payments/auto-reconcile-bank-transactions`、`link-bank-transactions` 响应、`OaPendingPaymentsPage` 自动 reconcile effect、`OaPendingPaymentsTable`、前端 API/types、Browser mock、模块/API/E2E 文档和相关测试。
+- 关键决策：自动匹配只复用关联台 OA-bank 精确金额/精确合计规则；不做模糊匹配。候选 relation 不写回；写回必须基于 Workbench active relation 或自动命令刚确认的 relation，并通过 outflow、金额相等和 `flow_id` 校验。支出流水抽屉保留为自动匹配失败后的人工兜底，但提交成功后同样自动写回。
+- 文档影响：更新 README、state-machine、tests、e2e-spec、e2e-coverage、implementation-notes 和 `docs/dev/api-contracts.md`。
+- 测试覆盖：后端 command/API 覆盖自动匹配未配对支出流水、已有 relation 写回、link-bank 自动写回和金额不匹配不写回；前端 Vitest 覆盖 auto-reconcile、无人工按钮、operation barrier、link-bank 写回消息；Playwright 覆盖自动写回成功/失败和抽屉关联后自动写回。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地 mock/单测不替代真实 OA MySQL、真实 OA Mongo 字段变体、真实 Workbench 大数据和生产 worker drain；需要 staging 用真实进行中 OA 与支出流水样本做 smoke。
+
+## 2026-06-22 - OA 待付款表格 OA 区域五列压缩
+
+- 目标：让 OA 大列内直接显示“申请人 / 项目 / 申请事由 / 对方户名 / 金额”，同时压缩申请人内部列和发票大列宽度，降低用户横向滚动成本。
+- 影响范围：`OaPendingPaymentsTable`、`OaPendingPaymentOaSummary` 前端类型、`styles.css` OA pending table 规则、`OaPendingPaymentsPage.test.tsx` 和本模块测试矩阵；后端 rows 已输出 `oa.reason` 与 `oa.counterpartyName`，API contract 不变。
+- 关键决策：不新增前端伪筛选字段；申请事由和对方户名只作为 OA payload 展示，若后端为空则显示 `-`。发票列继续纵向展示但从 20% 收窄到 13%，支付状态列收窄到 8%，OA 大列扩到 40% 以容纳五个内部字段。
+- 文档影响：更新本实施记录、`state-machine.md` 历史变更和 `tests.md` 布局回归口径。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，覆盖 OA 内部五列 DOM、申请事由/对方户名内容、压缩字号、发票列/支付状态列宽和 OA grid CSS contract；Browser e2e 继续覆盖真实 Chromium 无横向滚动。
+- 验证命令：本轮最终说明列出完整命令。
 
 ## 当前决策
 
@@ -22,9 +41,9 @@
 - `t_payment_simple.id` 不是 OA ID，只能作为支付状态记录诊断字段；支付状态展示、tab 统计和写回闭环都必须围绕同一 `flow_id`。
 - 页面切换按钮数量来自 rows `summary.viewCounts.completed/in_progress`，统计口径与当前搜索/筛选条件一致，并且使用同一批 `t_payment_simple.flow_id` 准入后的 OA。
 - completed 与 in_progress 视图展示同一套 OA、支付状态、支出流水和进项发票证据四分组表格；没有发票证据时发票列显示 `-`。
-- OA/支付状态/支出流水/发票是表格主体的固定四段：OA 单元格内按“申请人 / 项目 / 金额”三栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态、可用确认动作和“未写回/已写回”；发票列纵向展示发票号、发票方、日期 chip 和金额，不显示“价税合计”chip。表格优先避免横向滚动，必要时通过紧凑字号、紧凑 chip、换行和行高增长承载信息。
-- 进行中 OA 的候选流水不能自动写回；必须由用户点击“确认已支付”，后端校验 workflow/outflow/金额/flow_id 后确认 Workbench relation，并写回 OA MySQL `t_payment_simple.pay_status=1`。
-- 进行中 OA `confirm-paid`、`link-bank-transactions` 和规则保存成功后，页面必须先等待 `oa_pending_payment` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只能提示后台同步尚未完成，不能提前读旧投影或把已提交写入显示成操作失败。
+- OA/支付状态/支出流水/发票是表格主体的固定四段：OA 单元格内按“申请人 / 项目 / 申请事由 / 对方户名 / 金额”五栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态和“未写回/已写回”；发票列纵向展示发票号、发票方、日期 chip 和金额，不显示“价税合计”chip。表格优先避免横向滚动，必要时通过紧凑字号、紧凑 chip、换行和行高增长承载信息。
+- 进行中 OA 的候选流水不能写回；页面级自动匹配只接受关联台 OA-bank 精确金额/精确合计规则确认的无冲突匹配。已有 active relation 或自动确认 relation 通过 workflow/outflow/金额/flow_id 校验后，自动写回 OA MySQL `t_payment_simple.pay_status=1`。
+- 进行中 OA 自动匹配、`link-bank-transactions` 和规则保存成功后，页面必须先等待 `oa_pending_payment` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只能提示后台同步尚未完成，不能提前读旧投影或把已提交写入显示成操作失败。
 - OA MySQL `t_payment_simple.flow_id` 使用 OA Mongo `form_data._id`。该结论来自 2026-06-17 服务器实机脱敏验证：现有 `t_payment_simple.flow_id` 为 24 位 ObjectId 形态，能匹配 Mongo `_id`，未匹配 Flowable `PROC_INST_ID_`；流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为最终写回 ID。
 - 生产 rows、filter-options 和 detail 必须走 `OaPendingPaymentReadModelService` 的 freshness/source-version gate；非 fresh 返回 refreshing/unavailable 并入队 `oa_pending_payment.read_model.refresh`，不能 live scan。
 - `invoice-usage-collection` worker 同时负责 `input_invoice_usage`、`output_invoice_collection` 和 `oa_pending_payment` read model；OA all scope 只 fan-out month shards，不同步重建全量历史。

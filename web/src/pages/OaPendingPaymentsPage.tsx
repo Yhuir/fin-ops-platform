@@ -9,7 +9,7 @@ import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPay
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
-  confirmOaPendingPaymentPaid,
+  autoReconcileOaPendingPaymentBankTransactions,
   fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentFilterOptions,
@@ -29,7 +29,7 @@ import type {
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
   OaPendingPaymentViewMode,
-  ConfirmOaPendingPaymentPaidResponse,
+  AutoReconcileOaPendingPaymentBankTransactionsResponse,
   LinkOaPendingPaymentBankTransactionsResponse,
 } from "../features/oaPendingPayments/types";
 import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
@@ -145,13 +145,16 @@ export default function OaPendingPaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [confirmingRowIds, setConfirmingRowIds] = useState<Set<string>>(() => new Set());
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const requestIdRef = useRef(0);
+  const autoReconcileCompletedKeysRef = useRef<Set<string>>(new Set()).current;
+  const autoReconcilePromisesRef = useRef<Map<string, Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse>>>(new Map()).current;
+  const loadRowsRef = useRef<(mode: "reset" | "refresh", signal?: AbortSignal) => void>(() => undefined);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
@@ -204,10 +207,66 @@ export default function OaPendingPaymentsPage() {
   }, [query]);
 
   useEffect(() => {
+    loadRowsRef.current = loadRows;
+  }, [loadRows]);
+
+  useEffect(() => {
     const controller = new AbortController();
     loadRows("reset", controller.signal);
     return () => controller.abort();
   }, [loadRows]);
+
+  useEffect(() => {
+    if (!canMutateData) {
+      return undefined;
+    }
+    const scopeKey = query.month || "all";
+    if (autoReconcileCompletedKeysRef.has(scopeKey)) {
+      return undefined;
+    }
+    let reconcilePromise = autoReconcilePromisesRef.get(scopeKey);
+    if (!reconcilePromise) {
+      setActionError(null);
+      reconcilePromise = autoReconcileOaPendingPaymentBankTransactions({
+        month: query.month || undefined,
+      }).finally(() => {
+        autoReconcilePromisesRef.delete(scopeKey);
+      });
+      autoReconcilePromisesRef.set(scopeKey, reconcilePromise);
+    }
+    let active = true;
+    void (async () => {
+      try {
+        const result = await reconcilePromise;
+        if (!active) {
+          return;
+        }
+        autoReconcileCompletedKeysRef.add(scopeKey);
+        setActionError(null);
+        if (!autoReconcileChanged(result)) {
+          return;
+        }
+        const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, scopeKey);
+        if (!active) {
+          return;
+        }
+        if (synced) {
+          setFeedback(autoReconcileFeedback(result));
+          loadRowsRef.current("refresh");
+        } else {
+          setFeedback("自动匹配和写回已提交，后台同步尚未完成，请稍后刷新。");
+        }
+      } catch (caught: unknown) {
+        if (active) {
+          autoReconcileCompletedKeysRef.add(scopeKey);
+          setActionError(caught instanceof Error ? caught.message : "自动匹配和写回失败。");
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [autoReconcileCompletedKeysRef, autoReconcilePromisesRef, canMutateData, query.month]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
@@ -243,46 +302,6 @@ export default function OaPendingPaymentsPage() {
     setQuery((current) => ({ ...current, page: 1, viewMode }));
     setSelectedOaRowIds(new Set());
   }, []);
-
-  const handleConfirmPaid = useCallback((row: OaPendingPaymentRow) => {
-    if (!canMutateData) {
-      setError("当前账号仅支持查看和导出，不能确认或写回 OA 支付状态。");
-      return;
-    }
-    const oaRowId = row.oa.primaryOaId || row.oa.id;
-    const bankTransactionIds = confirmBankTransactionIds(row);
-    if (!oaRowId) {
-      setError("OA 行缺少可确认的 OA ID。");
-      return;
-    }
-    setConfirmingRowIds((current) => new Set(current).add(row.id));
-    setFeedback(null);
-    setError(null);
-    void (async () => {
-      try {
-        const payload: ConfirmOaPendingPaymentPaidResponse = await confirmOaPendingPaymentPaid({
-          oaRowId,
-          bankTransactionIds: bankTransactionIds.length > 0 ? bankTransactionIds : undefined,
-          idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionIds.join("-") || "active"}-${Date.now()}`,
-        });
-        const synced = await waitForOaPendingPaymentBarrier(payload.readModelRefresh, query.month || "all");
-        if (synced) {
-          setFeedback(payload.oaPaymentWriteback?.label === "已写回" ? "已确认支付并写回 OA。" : "已确认支付，等待 OA 写回状态刷新。");
-          loadRows("refresh");
-        } else {
-          setFeedback("已确认支付并写回 OA，后台同步尚未完成，请稍后刷新。");
-        }
-      } catch (caught: unknown) {
-        setError(caught instanceof Error ? caught.message : "确认已支付失败。");
-      } finally {
-        setConfirmingRowIds((current) => {
-          const next = new Set(current);
-          next.delete(row.id);
-          return next;
-        });
-      }
-    })();
-  }, [canMutateData, loadRows, query.month]);
 
   const handleToggleOaSelection = useCallback((row: OaPendingPaymentRow) => {
     const ids = selectableOaRowIds(row);
@@ -367,7 +386,8 @@ export default function OaPendingPaymentsPage() {
       </button>
     </div>
   ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
-  const isEmpty = !loading && !refreshing && !error && rows.length === 0;
+  const visibleError = error ?? actionError;
+  const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
@@ -410,9 +430,9 @@ export default function OaPendingPaymentsPage() {
                 </div>
               )}
             />
-            {error ? (
+            {visibleError ? (
               <div className="oa-pending-payments-alert" role="alert">
-                {error}
+                {visibleError}
               </div>
             ) : null}
             {feedback ? (
@@ -430,7 +450,7 @@ export default function OaPendingPaymentsPage() {
               <>
                 {!canMutateData ? (
                   <StatePanel compact tone="warning">
-                    当前账号仅支持查看和导出，不能确认写回 OA 或关联支出流水。
+                    当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。
                   </StatePanel>
                 ) : null}
                 {showReadModelState ? (
@@ -456,10 +476,8 @@ export default function OaPendingPaymentsPage() {
                   onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
-                  onConfirmPaid={canMutateData ? handleConfirmPaid : undefined}
                   selectedOaRowIds={selectedOaRowIds}
                   onToggleOaSelection={canMutateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
-                  confirmingRowIds={confirmingRowIds}
                   emptyStateMessage={
                     error
                       ? "OA 待付款核对加载失败，请点击刷新重试。"
@@ -503,17 +521,31 @@ function formatViewCount(count: number | null | undefined): string {
   return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
-function confirmBankTransactionIds(row: OaPendingPaymentRow): string[] {
-  const ids: string[] = [];
-  if (row.bankTransaction.primaryBankTransactionId) {
-    ids.push(row.bankTransaction.primaryBankTransactionId);
+function autoReconcileChanged(result: AutoReconcileOaPendingPaymentBankTransactionsResponse): boolean {
+  return Number(result.autoMatchedCount ?? 0) > 0 || Number(result.writebackCount ?? 0) > 0;
+}
+
+function autoReconcileFeedback(result: AutoReconcileOaPendingPaymentBankTransactionsResponse): string {
+  const matched = Number(result.autoMatchedCount ?? 0);
+  const written = Number(result.writebackCount ?? 0);
+  if (matched > 0 && written > 0) {
+    return `已自动匹配 ${matched} 组支出流水并写回 ${written} 条 OA。`;
   }
-  row.bankTransaction.summaries?.forEach((summary) => {
-    if (summary.bankTransactionId && !ids.includes(summary.bankTransactionId)) {
-      ids.push(summary.bankTransactionId);
-    }
-  });
-  return ids;
+  if (written > 0) {
+    return `已自动写回 ${written} 条 OA。`;
+  }
+  return `已自动匹配 ${matched} 组支出流水。`;
+}
+
+function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResponse): string {
+  if (
+    result.autoWriteback?.code === "written"
+    || result.oaPaymentWriteback?.code === "written"
+    || (result.oaPaymentWritebacks ?? []).some((item) => item.code === "written")
+  ) {
+    return "已关联支出流水并写回 OA，等待核对表刷新。";
+  }
+  return "已关联支出流水，等待核对表刷新。";
 }
 
 function selectableOaRowIds(row: OaPendingPaymentRow): string[] {
@@ -639,7 +671,7 @@ function OaBankLinkDrawer({
           bankTransactionIds: [...selectedBankIds],
           idempotencyKey: `oa-pending-link-${selectedOaRowIds.join("-")}-${[...selectedBankIds].join("-")}-${Date.now()}`,
         });
-        await onLinked("已关联支出流水，等待核对表刷新。", result);
+        await onLinked(linkBankSuccessMessage(result), result);
       } catch (caught: unknown) {
         onError(caught instanceof Error ? caught.message : "关联支出流水失败。");
       } finally {

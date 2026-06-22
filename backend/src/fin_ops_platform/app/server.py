@@ -1861,6 +1861,8 @@ class Application:
             return self._handle_api_oa_pending_payments_relation_details(row_id, query, headers)
         if method == "POST" and route_path == "/api/oa-pending-payments/confirm-paid":
             return self._handle_api_oa_pending_payments_confirm_paid(body, headers)
+        if method == "POST" and route_path == "/api/oa-pending-payments/auto-reconcile-bank-transactions":
+            return self._handle_api_oa_pending_payments_auto_reconcile_bank_transactions(body, headers)
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
             return self._handle_api_oa_pending_payments_link_bank_transactions(body, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/rows":
@@ -9453,6 +9455,7 @@ class Application:
         service = OaPendingPaymentCommandService(
             import_service=self._import_service,
             oa_projection=self._oa_pending_payment_projection(),
+            completed_oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
             relation_command_service=self._workbench_relation_command_service(),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
@@ -9617,6 +9620,35 @@ class Application:
         actor_id, _tenant_id = auth_context
         try:
             result = self._oa_pending_payment_routes().confirm_paid(payload, actor_id=actor_id)
+        except OaPendingPaymentError as exc:
+            return self._oa_pending_payment_error_response(exc)
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": {
+                        "code": "oa_pending_payment_command_unavailable",
+                        "message": str(exc),
+                        "details": {},
+                    }
+                },
+            )
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_oa_pending_payments_auto_reconcile_bank_transactions(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        auth_context = self._workbench_write_auth_context(headers)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, _tenant_id = auth_context
+        try:
+            result = self._oa_pending_payment_routes().auto_reconcile_bank_transactions(payload, actor_id=actor_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         except RuntimeError as exc:
