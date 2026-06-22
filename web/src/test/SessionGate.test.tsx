@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 import App from "../app/App";
@@ -47,7 +47,7 @@ describe("OA session gate", () => {
     expect(screen.getByText("请返回 OA 系统重新登录后再进入财务运营平台。")).toBeInTheDocument();
   });
 
-  test("bounds a hanging OA session check and lets the user retry through the session provider", async () => {
+  test("keeps validating and retries after a transient OA session timeout", async () => {
     vi.useFakeTimers();
     let requestCount = 0;
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
@@ -93,13 +93,11 @@ describe("OA session gate", () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
-    expect(screen.getByRole("heading", { name: "会话校验失败" })).toBeInTheDocument();
-    expect(screen.getByText("OA 会话校验超时，请检查网络或稍后重试。")).toBeInTheDocument();
+    expect(screen.getByText("正在验证 OA 会话...")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "会话校验失败" })).not.toBeInTheDocument();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "重新校验" }));
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1_000);
     });
 
     expect(screen.getByText("业务页面已加载")).toBeInTheDocument();

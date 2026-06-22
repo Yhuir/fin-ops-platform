@@ -31,6 +31,11 @@
 
 ## 本轮新增回归
 
+- `web/src/test/SessionGate.test.tsx`
+  - `keeps validating and retries after a transient OA session timeout`
+
+该测试补齐 OA iframe / 前端 bootstrap 的短暂超时回归：首次 `/api/session/me` 超时不能立刻显示“会话校验失败”，应保持验证态并自动重试；重试成功后进入业务页面。
+
 - `tests/test_target_oa_applicant_token_provider.py`
   - `test_http_error_uses_oa_message_without_exposing_password`
   - `test_network_failure_invalid_json_and_missing_token_are_failures`
@@ -41,6 +46,7 @@
 
 | 场景 | 回归入口 | 保护点 |
 | --- | --- | --- |
+| OA session 首次校验因代理/OA 慢响应短暂超时 | `web/src/test/SessionGate.test.tsx` | 首次 `request_timeout` 保持“正在验证 OA 会话...”并自动重试，不能立刻落到错误页；成功重试后进入业务页面。 |
 | OA Mongo 短暂断连导致页面误认为 fresh | `tests/test_mongo_oa_adapter.py` | 断连返回空结果但 read status 为 error，并进入 backoff。 |
 | OA lifecycle alias 导致附件发票 cross-OA blocker | 待补：`tests/test_mongo_oa_adapter.py`、`tests/test_audit_object_identity_tool.py`、alias policy/repository tests | `flowRequestId/processId` 缺失的进行中文档与带 `flowRequestId` 的已完成文档内容一致时，只能生成可审计 alias 候选；未批准 alias 仍 blocking，active alias 才可 canonicalize，且不得删除 OA 投影/cache。 |
 | OA sync API 在 HTTP 进程内直接同步 | `tests/test_oa_projection_sql_runtime.py` | 手动 sync API 只 enqueue worker job，不 inline sync。 |

@@ -2,6 +2,9 @@ import { createContext, startTransition, useContext, useEffect, useMemo, useStat
 
 import { fetchSessionMe, SessionApiError, type SessionPayload } from "../features/session/api";
 
+const SESSION_BOOTSTRAP_TIMEOUT_RETRY_LIMIT = 2;
+const SESSION_BOOTSTRAP_RETRY_DELAY_MS = 1_000;
+
 export type SessionState =
   | { status: "loading" }
   | { status: "authenticated"; session: SessionPayload }
@@ -34,33 +37,65 @@ function normalizeSessionFailure(error: unknown): Extract<SessionState, { status
   };
 }
 
+function shouldRetrySessionBootstrap(error: unknown, attempt: number) {
+  return (
+    error instanceof SessionApiError
+    && error.status === 0
+    && error.code === "request_timeout"
+    && attempt <= SESSION_BOOTSTRAP_TIMEOUT_RETRY_LIMIT
+  );
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
+    let activeController: AbortController | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
     startTransition(() => {
       setState({ status: "loading" });
     });
 
-    fetchSessionMe(controller.signal)
-      .then((session) => {
-        startTransition(() => {
-          setState(session.allowed ? { status: "authenticated", session } : { status: "forbidden", session });
+    const loadSession = () => {
+      attempt += 1;
+      const controller = new AbortController();
+      activeController = controller;
+
+      fetchSessionMe(controller.signal)
+        .then((session) => {
+          if (cancelled) {
+            return;
+          }
+          startTransition(() => {
+            setState(session.allowed ? { status: "authenticated", session } : { status: "forbidden", session });
+          });
+        })
+        .catch((error: unknown) => {
+          if (cancelled || (error instanceof DOMException && error.name === "AbortError")) {
+            return;
+          }
+          if (shouldRetrySessionBootstrap(error, attempt)) {
+            retryTimer = setTimeout(loadSession, SESSION_BOOTSTRAP_RETRY_DELAY_MS);
+            return;
+          }
+          startTransition(() => {
+            setState(normalizeSessionFailure(error));
+          });
         });
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        startTransition(() => {
-          setState(normalizeSessionFailure(error));
-        });
-      });
+    };
+
+    loadSession();
 
     return () => {
-      controller.abort();
+      cancelled = true;
+      activeController?.abort();
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+      }
     };
   }, [reloadKey]);
 

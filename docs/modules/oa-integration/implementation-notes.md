@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-22 - OA 会话校验短暂超时自动重试
+
+- 目标：修复 OA iframe / 前端首次进入时 `/api/session/me` 因代理、后端或 OA 用户信息服务短暂慢响应而在 10 秒后直接显示“会话校验失败”的问题。
+- 影响范围：前端 `SessionProvider` 会话 bootstrap 状态机、`SessionGate` 回归测试；后端 `/api/session/me` API contract 和 OA 权限模型不变。
+- 关键决策：只对前端 `request_timeout` 做自动重试，保持“正在验证 OA 会话...”状态；401、403、后端返回的 OA 身份服务错误仍按原错误态展示，避免掩盖真实未登录、无权限或配置错误。
+- 文档影响：更新 `oa-integration/tests.md`，登记 session 首次校验短暂超时回归。
+- 测试覆盖：更新 `web/src/test/SessionGate.test.tsx`，覆盖首次 session 请求超时后保持验证态并自动重试，重试成功后进入业务页面。
+- 验证命令：见本轮交付说明。
+- 未测风险：真实 OA 登录接口、同域 cookie、生产代理和冷启动耗时仍需 staging/生产前 smoke 证明；持续不可达场景仍会在重试耗尽后显示原错误页和手动重试入口。
+- 后续事项：发布前按关键 smoke flow 用真实 OA iframe 打开 `/fin-ops/?embedded=oa`，确认慢启动或刷新期间不会误落到会话失败页。
+
 ## 2026-06-21 - OA 附件发票 Promotion 设置化
 
 - 目标：避免用户清空统一发票池并手工重新导入 Excel 时，OA 附件 OCR 结果通过 OA 同步或关联台读路径重新写入 `app.invoices`。
