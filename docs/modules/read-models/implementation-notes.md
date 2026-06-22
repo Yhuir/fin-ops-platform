@@ -8,6 +8,7 @@
 - read model refresh 入队前由统一 scope policy/gateway 负责 normalize、validate 和 dedupe；`RuntimeQueueRepository` 继续只负责 PostgreSQL durable queue 持久化。
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
+- App Status read model registry、runtime worker registry、migration storage contract、critical SLO smoke 和 deploy env 模板必须通过本地测试交叉约束；新增 read model 不能只登记一个 registry。
 - authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。写操作同步门禁使用 operation-to-fresh p95 <= 1000ms、p99 <= 3000ms；历史 5 秒记录仅作为旧基线，不作为当前 closure 上限。
 - `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 
@@ -27,6 +28,36 @@
 ```
 
 ## 历史记录
+
+## 2026-06-22 - Production runtime parity guards
+
+- 目标：修复生产 schema、worker、RabbitMQ、Redis 与本地测试覆盖“各测各的”缺口，避免新增 read model 后只改 App Status 或 worker registry，漏掉 migration storage contract、critical SLO smoke、RabbitMQ dispatch 或 Redis/deploy env 模板。
+- 影响范围：`tests/test_runtime_worker_registry.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_postgres_migrations.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_runtime_redis.py`；不改变生产 runtime 行为，不连接生产数据库，不执行 mutating smoke。
+- 关键决策：现有架构不需要重写。PostgreSQL durable queue/readiness 仍是事实源；RabbitMQ 是 transport/wakeup；Redis 只缓存 fresh gate 后 payload。本轮只把本地 parity 门禁补硬：每个 App Status read model 必须匹配 required worker、refresh event、RabbitMQ dispatch event、critical SLO smoke scope 和明确的 migration storage contract。`read_model.bank_account_balances`、`read_model.invoice_lifecycle_rows/scopes` 纳入通用 migration 表基线。
+- 文档影响：同步 read-models、runtime-workers 测试矩阵和 `docs/operations/runtime-worker-governance.md`。
+- 测试覆盖：新增 `RuntimeWorkerRegistryTests.test_app_status_read_model_registry_matches_worker_and_rabbitmq_contracts`、`ReadModelSloSmokeTests.test_critical_only_plans_every_critical_app_status_read_model`、`PostgresMigrationSqlTests.test_app_status_read_model_storage_contracts_are_declared`、`DeployRuntimeExampleTests.test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq`、`RuntimeRedisTests.test_production_env_examples_match_runtime_redis_settings_contract`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_registry tests.test_read_model_slo_smoke tests.test_postgres_migrations tests.test_deploy_runtime_examples tests.test_runtime_redis -v`。
+- 未测风险：本地 guard 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；真实环境仍需 `bash scripts/verify.sh infra-smoke`，并在有真实 DB/RabbitMQ/env 时运行 dry-run/apply/preflight。
+
+## 2026-06-22 - Workbench all-scope active generation 读路径补齐
+
+- 目标：修复 Workbench all-scope 已发布 active generation 后，主读路径仍从 month snapshots 临时合成 payload/summary，导致 all scope 没有复用聚合发布时的业务不变量和 source version proof。
+- 影响范围：`PostgresReadModelRepository.get_workbench_view(scope_key="all")`、`_load_all_workbench_view(...)`、`_load_all_workbench_rows_page_view(...)`、`/api/workbench?month=all` 主视图与分页/过滤视图。
+- 关键决策：Workbench 保留 active generation 原子发布模型；`all` query scope 不是每次页面读取时重新拼 month shards。读路径在 active all generation 存在时必须读取 active all snapshot/summary，并携带 `active_generation_id`、`read_model_version` 和 `source_versions`。month snapshot 合成只保留为无 active all generation 时的 legacy fallback。
+- 文档影响：同步 read-models 和 reconciliation-workbench 模块文档；不改变 durable queue、dirty scope 或 Redis/RabbitMQ 边界。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reads_all_scope_view_from_active_generation_snapshot`、`test_repository_reads_all_scope_filtered_page_from_active_all_summary`；完整 Workbench SQL runtime 覆盖 all-scope 聚合、fallback、分页和 source-version 行为。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`。
+- 未测风险：本地未连接真实生产数据库和真实 HTTP；发布后需通过 authenticated all-scope HTTP freshness smoke 与 worker drain 观察确认旧 active generation 已替换。
+
+## 2026-06-22 - Workbench group detail freshness gate 补齐
+
+- 目标：修复 `GET /api/workbench/groups/detail` 从 SQL active generation 读取 group 后直接返回 `read_model_status=fresh`，缺少 source version 和 dirty-scope current-effective proof 的问题。
+- 影响范围：`WorkbenchQueryFacade.group_detail(...)`、`PostgresReadModelRepository.get_workbench_group_detail(...)`、direct fresh architecture guard、Workbench SQL runtime/API 测试。
+- 关键决策：Workbench 继续保留 active generation 原子发布模型，不改成普通 `ReadModelQueryGateway`；但 group detail 作为自管 freshness 入口，必须和 row detail 等价地携带 active generation `source_versions`、`read_model_status` 和 `read_model_version`。当 source versions stale 或同 scope dirty status 为 refreshing/stale 时，API 不返回旧 group，也不标 fresh，而是入队 `workbench` refresh 并返回带 `read_model_status`/`read_model_stale_reasons` 的 not-found 语义，防止前端展开旧详情。
+- 文档影响：同步 read-models 和 reconciliation-workbench 模块文档；长期 active generation 边界不变。
+- 测试覆盖：新增 `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_group_detail_stale_source_versions_do_not_return_stale_group`、`test_group_detail_refreshing_status_does_not_return_stale_group`；新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_group_detail_includes_active_generation_freshness_contract`；更新 direct fresh allowlist 理由。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_reads_only_active_generation tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_includes_active_generation_freshness_contract tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_group_detail_api_returns_full_group -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards tests.test_workbench_query_facade tests.test_workbench_sql_runtime -v`。
+- 未测风险：本地测试不连接真实生产 PostgreSQL/Redis/RabbitMQ；发布后仍需通过 authenticated HTTP/worker drain smoke 验证旧 active generation 是否已重建。
 
 ## 2026-06-21 - Read model dependency active 判定与 invalid scope 清理入口
 

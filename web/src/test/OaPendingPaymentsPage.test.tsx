@@ -456,6 +456,8 @@ const rowsPayload = {
 function installOaPendingPaymentsFetch(overrides?: {
   rowsPayload?: Record<string, unknown>;
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
+  operationBarrierDelay?: Promise<void>;
+  rulesCanSave?: boolean;
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -471,6 +473,29 @@ function installOaPendingPaymentsFetch(overrides?: {
       const readModelStatus = payload.readModelStatus ?? payload.read_model_status;
       return new Response(JSON.stringify(payload), {
         status: readModelStatus === "refreshing" ? 202 : 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/operation-barrier/status") {
+      await overrides?.operationBarrierDelay;
+      return new Response(JSON.stringify({
+        status: "fresh",
+        fresh: true,
+        targets: [
+          {
+            read_model_key: "oa_pending_payment",
+            scope_type: "oa_pending_payment",
+            scope_key: "all",
+            status: "fresh",
+            fresh: true,
+            blocking: false,
+            raw_status: "fresh",
+          },
+        ],
+        blocked_targets: [],
+        refreshing_targets: [],
+      }), {
+        status: init?.method === "POST" ? 200 : 405,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -658,6 +683,7 @@ function installOaPendingPaymentsFetch(overrides?: {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules") {
+      const canSave = overrides?.rulesCanSave ?? false;
       return new Response(JSON.stringify({
         version: 1,
         direction: "expense",
@@ -667,8 +693,9 @@ function installOaPendingPaymentsFetch(overrides?: {
           bank_statement_as_invoice: { tag_codes: [], tags: [] },
           no_invoice_required: { tag_codes: [], tags: [] },
         },
-        permissions: { can_save: false },
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+        permissions: { can_save: canSave },
+        read_model_status: "refreshing",
+      }), { status: init?.method === "PUT" ? 200 : 200, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify({}), {
       status: 200,
@@ -691,6 +718,13 @@ function rulesRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetc
     .filter((url) => url.pathname === "/api/pending-invoices/rules");
 }
 
+function rulesSaveRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls.filter(([input, init]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/pending-invoices/rules" && init?.method === "PUT";
+  });
+}
+
 function confirmPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
   return fetchMock.mock.calls.filter(([input]) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -709,6 +743,23 @@ function linkBankRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsF
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     return url.pathname === "/api/oa-pending-payments/link-bank-transactions";
   });
+}
+
+function operationBarrierRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/operation-barrier/status";
+  });
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function readWebSource(path: string) {
@@ -1104,6 +1155,76 @@ describe("OA pending payments page", () => {
     });
   });
 
+  test("waits for the OA pending payment barrier before reloading after confirm-paid", async () => {
+    const barrier = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({ operationBarrierDelay: barrier.promise });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
+    });
+    const rowsBeforeMutation = rowsRequests(fetchMock).length;
+
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付并写回" }));
+
+    await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
+    expect(JSON.parse(String(barrierInit?.body))).toEqual({
+      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
+
+    barrier.resolve();
+
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
+    });
+  });
+
+  test("waits for the OA pending payment barrier before reloading after bank link", async () => {
+    const barrier = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({ operationBarrierDelay: barrier.promise });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
+    });
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+    expect(await screen.findByRole("heading", { name: "关联支出流水" })).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /抽屉供应商/ }));
+    const rowsBeforeMutation = rowsRequests(fetchMock).length;
+
+    await user.click(screen.getByRole("button", { name: "确认关联 1 条流水" }));
+
+    await waitFor(() => expect(linkBankRequests(fetchMock)).toHaveLength(1));
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
+    expect(JSON.parse(String(barrierInit?.body))).toEqual({
+      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
+
+    barrier.resolve();
+
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
+    });
+  });
+
   test("opens OA, bank, relation drawers and reuses pending invoice rules endpoint", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
@@ -1163,6 +1284,35 @@ describe("OA pending payments page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "invoice";
     })).toBe(true);
+  });
+
+  test("waits for OA pending payment barrier before reloading after rule save", async () => {
+    const user = userEvent.setup();
+    const gate = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({
+      operationBarrierDelay: gate.promise,
+      rulesCanSave: true,
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+    const initialRowsRequests = rowsRequests(fetchMock).length;
+
+    await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
+    await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => expect(rulesSaveRequests(fetchMock)).toHaveLength(1));
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
+      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
+
+    gate.resolve();
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequests));
   });
 
   test("keeps pending invoice rules drawer stable during parent query refresh", async () => {

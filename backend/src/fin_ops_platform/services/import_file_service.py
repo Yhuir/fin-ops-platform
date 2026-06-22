@@ -66,10 +66,10 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "template_code": "ceb_transaction_detail",
         "label": "光大银行流水",
-        "file_extensions": [".xls"],
+        "file_extensions": [".xls", ".xlsx"],
         "record_type": "bank_transaction",
         "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["交易日期", "交易时间", "借方发生额", "贷方发生额", "账户余额", "对方名称", "对方账号"],
+        "required_headers": ["交易日期", "交易时间", "借方发生额/借方金额", "贷方发生额/贷方金额", "账户余额", "对方名称", "对方账号"],
     },
     {
         "template_code": "ccb_transaction_detail",
@@ -77,7 +77,7 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
         "file_extensions": [".xls"],
         "record_type": "bank_transaction",
         "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["账号", "账户名称", "交易时间", "借方发生额（支取）", "贷方发生额（收入）", "对方户名"],
+        "required_headers": ["账号/客户账号", "账户名称", "交易时间", "借方发生额（支取）", "贷方发生额（收入）", "对方户名"],
     },
     {
         "template_code": "cmbc_transaction_detail",
@@ -790,15 +790,7 @@ class TemplateDetector:
                 row_set
             ):
                 return "cmbc_transaction_detail"
-            if {
-                "账号",
-                "账户名称",
-                "交易时间",
-                "借方发生额（支取）",
-                "贷方发生额（收入）",
-                "对方户名",
-                "账户明细编号-交易流水号",
-            }.issubset(row_set):
+            if is_ccb_header_row(row_set):
                 return "ccb_transaction_detail"
             if is_ceb_header_row(row_set):
                 return "ceb_transaction_detail"
@@ -999,10 +991,7 @@ def parse_cmbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
 
 
 def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(
-        rows,
-        {"账号", "账户名称", "交易时间", "借方发生额（支取）", "贷方发生额（收入）", "对方户名", "账户明细编号-交易流水号"},
-    )
+    header_index = find_ccb_header_index(rows)
     header = rows[header_index]
     data_rows = []
     for row in rows[header_index + 1 :]:
@@ -1012,7 +1001,7 @@ def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
         trade_time = normalize_datetime_string(mapped.get("交易时间"))
         data_rows.append(
             {
-                "account_no": mapped.get("账号"),
+                "account_no": first_mapped_value(mapped, "账号", "客户账号"),
                 "account_name": mapped.get("账户名称"),
                 "trade_time": trade_time,
                 "pay_receive_time": trade_time,
@@ -1030,7 +1019,7 @@ def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "account_detail_no": mapped.get("账户明细编号-交易流水号"),
                 "enterprise_serial_no": mapped.get("企业流水号"),
                 "voucher_kind": mapped.get("凭证种类"),
-                "voucher_no": mapped.get("凭证号"),
+                "voucher_no": first_mapped_value(mapped, "凭证号", "凭证号码"),
                 "currency": mapped.get("币种") or "CNY",
             }
         )
@@ -1049,6 +1038,10 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
         if not any(mapped.values()):
             continue
         trade_time = normalize_datetime_string(f"{mapped.get('交易日期')} {mapped.get('交易时间')}")
+        debit_amount, credit_amount = normalize_signed_debit_credit_columns(
+            first_mapped_value(mapped, "借方发生额", "借方发生额（元）", "借方金额（支出）"),
+            first_mapped_value(mapped, "贷方发生额", "贷方发生额（元）", "贷方金额（收入）"),
+        )
         data_rows.append(
             {
                 "account_no": account_no,
@@ -1059,8 +1052,8 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "counterparty_name": mapped.get("对方名称") or "未知对手方",
                 "counterparty_account_no": mapped.get("对方账号"),
                 "counterparty_bank_name": mapped.get("对方银行"),
-                "credit_amount": first_mapped_value(mapped, "贷方发生额", "贷方发生额（元）"),
-                "debit_amount": first_mapped_value(mapped, "借方发生额", "借方发生额（元）"),
+                "credit_amount": credit_amount,
+                "debit_amount": debit_amount,
                 "balance": first_mapped_value(mapped, "账户余额", "账户余额（元）"),
                 "summary": mapped.get("摘要"),
                 "bank_text_fields": extract_bank_text_fields(mapped),
@@ -1111,9 +1104,23 @@ def parse_bocom_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
 def is_ceb_header_row(row_set: set[str]) -> bool:
     return (
         {"交易日期", "交易时间", "对方名称", "对方账号"}.issubset(row_set)
-        and bool({"借方发生额", "借方发生额（元）"} & row_set)
-        and bool({"贷方发生额", "贷方发生额（元）"} & row_set)
+        and bool({"借方发生额", "借方发生额（元）", "借方金额（支出）"} & row_set)
+        and bool({"贷方发生额", "贷方发生额（元）", "贷方金额（收入）"} & row_set)
         and bool({"账户余额", "账户余额（元）"} & row_set)
+    )
+
+
+def is_ccb_header_row(row_set: set[str]) -> bool:
+    return (
+        bool({"账号", "客户账号"} & row_set)
+        and {
+            "账户名称",
+            "交易时间",
+            "借方发生额（支取）",
+            "贷方发生额（收入）",
+            "对方户名",
+            "账户明细编号-交易流水号",
+        }.issubset(row_set)
     )
 
 
@@ -1132,6 +1139,13 @@ def is_bocom_header_row(row_set: set[str]) -> bool:
 def find_bocom_header_index(rows: list[list[str]]) -> int:
     for index, row in enumerate(rows):
         if is_bocom_header_row(set(normalize_row(row))):
+            return index
+    raise ValueError("无法识别文件模板。")
+
+
+def find_ccb_header_index(rows: list[list[str]]) -> int:
+    for index, row in enumerate(rows):
+        if is_ccb_header_row(set(normalize_row(row))):
             return index
     raise ValueError("无法识别文件模板。")
 
@@ -1204,6 +1218,16 @@ def first_mapped_value(mapped: dict[str, str], *keys: str) -> str | None:
         if value:
             return value
     return None
+
+
+def normalize_signed_debit_credit_columns(debit_amount: str | None, credit_amount: str | None) -> tuple[str | None, str | None]:
+    debit_text = clean(debit_amount)
+    credit_text = clean(credit_amount)
+    if debit_text.startswith("-") and not credit_text:
+        return None, debit_text[1:].strip()
+    if credit_text.startswith("-") and not debit_text:
+        return credit_text[1:].strip(), None
+    return debit_amount, credit_amount
 
 
 def extract_bank_text_fields(mapped: dict[str, str]) -> list[dict[str, str]]:

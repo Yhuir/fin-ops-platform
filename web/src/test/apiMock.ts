@@ -38,6 +38,8 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
+  operationBarrierDelay?: Promise<void>;
+  operationBarrierStatus?: Record<string, unknown>;
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
@@ -4643,15 +4645,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         templates: templateRegistry,
       },
     }),
-    "/api/operation-barrier/status": () => ({
-      body: {
-        status: "fresh",
-        fresh: true,
-        targets: [],
-        blocked_targets: [],
-        refreshing_targets: [],
-      },
-    }),
+    "/api/operation-barrier/status": async () => {
+      if (options.operationBarrierDelay) {
+        await options.operationBarrierDelay;
+      }
+      return {
+        body: options.operationBarrierStatus ?? {
+          status: "fresh",
+          fresh: true,
+          targets: [],
+          blocked_targets: [],
+          refreshing_targets: [],
+        },
+      };
+    },
     "/api/workbench": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {

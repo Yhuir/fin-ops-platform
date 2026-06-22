@@ -16,10 +16,15 @@
 | 部署、监控、恢复、worker/read model 运维 | `docs/operations/` |
 | 外部系统和原始业务源 | `docs/references/` |
 
+`.planning/` 不在当前事实源列表中。它只保存 GSD 工作区状态、阶段计划、debug 记录和历史执行上下文；采用其中任何结论前，必须用当前代码、测试和上表长期事实源重新验证。
+
+`docs/refactor-ui/` 是 `refactor-ui` 分支 UI 平台迁移专项工作区。该目录中的 prompt、master goal、state 和队列文件只约束 UI 迁移流程，不作为当前 app 后端、API、read model、worker 或生产运行事实源。
+
 ## 删除和归档规则
 
 - 不再新建过程性 prompt/spec/plan 堆积目录。
 - 不再把 Codex prompt、subagent prompt、阶段执行计划放入主文档树。
+- 不把 `.planning/` 中的 GSD 阶段计划、debug 记录或 prompt 复制成当前事实源；需要保留的结论必须先提炼成产品、架构、开发、运维或模块文档。
 - `docs/modules/*/implementation-notes.md` 只能记录提炼后的目标、决策、验收、风险和后续事项，不能保存原始 prompt。
 - 已完成的阶段文档如果没有当前运维或架构价值，直接删除；有价值的结论提炼到 `docs/app-architecture/`、`docs/dev/`、`docs/operations/` 或 `docs/references/`。
 - 原始业务需求只保留少量源文档，并明确“不作为当前验收标准”。

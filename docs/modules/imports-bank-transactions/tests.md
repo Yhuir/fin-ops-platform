@@ -25,6 +25,7 @@
 | 前端把 `preview_stale` 映射为“重新预览”提示 | covered | `file import confirm maps preview_stale to the refresh preview message` |
 | 损坏文件作为文件级错误，不中断整批预览 | covered | `test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch`、`test_preview_marks_corrupt_excel_as_file_level_error_instead_of_raising` |
 | 银行流水模板识别与真实银行 Excel 文本字段保留 | covered | `test_preview_files_recognizes_bank_statement_templates`、`test_bank_file_parsers_preserve_real_excel_text_field_contracts` |
+| 光大/建行真实导出表头别名识别 | covered | `test_preview_accepts_ceb_xlsx_statement_with_income_expense_amount_headers`、`test_parse_ccb_statement_accepts_customer_account_and_voucher_number_headers` |
 | 240 行合成银行流水同文件重复组只产生一个可确认代表，其余进入 duplicate audit | covered | `test_preview_bounds_large_bank_duplicate_group_to_one_confirmable_row` |
 | 选择银行映射持久化，检测账号冲突，银行别名/简称/法定名称不误报 | covered | `test_preview_persists_selected_bank_mapping_and_marks_conflict_against_detected_account`、`test_preview_does_not_mark_bank_*_as_conflict_when_last4_matches` |
 | preview stale 时拒绝 confirm | covered | `test_confirm_session_rejects_stale_preview_when_existing_records_change`、`test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
@@ -56,6 +57,7 @@
 | 损坏文件 | 单个损坏 Excel 不能中断整批预览；Browser 必须显示 file-level error，且 confirm 只提交正常文件 ID。 | covered |
 | 慢预览/大文件耗时 | 预览请求未完成时按钮必须显示“预览中...”，预览/清空/确认全部禁用，不能重复提交 preview 或中断成半状态。 | covered |
 | 原始文本列 | 银行流水导入必须保留摘要、备注、用途等原始文本列，不影响 identity | covered |
+| 光大/建行官方导出表头别名 | 光大 `借方金额（支出）` / `贷方金额（收入）`、光大负数支出/收入列回退行、建行 `客户账号` / `凭证号码` 必须识别为既有银行流水模板，不得做模糊猜列。 | fixed 2026-06-22 |
 | RabbitMQ confirm | 异步 confirm 只能传小 envelope，processor 由 worker 拉取事实 | covered |
 | App Status job mapping | 银行流水文件确认必须写入 `imports_bank_transactions` affected domain；generic `file_import` / `import.process.requested` fallback 不能误指发票页 | fixed 2026-06-16 |
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
@@ -128,7 +130,7 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 
 ## 未测风险
 
-- 真实银行多模板大文件、加密/损坏/超大 Excel、边界编码和历史生产文件样本仍需 staging smoke；本地慢预览只证明 UI 防重复提交，不证明真实大文件解析性能。
+- 真实银行多模板大文件、加密/损坏/超大 Excel、边界编码和历史生产文件样本仍需 staging smoke；本地慢预览只证明 UI 防重复提交，不证明真实大文件解析性能。本地已用用户提供的光大、建行、交行、民生、工行文件做 `FileImportService.preview_files` 只读 smoke，均返回 `preview_ready` 且文件级 `error_count=0`；整批仍有 1 条 audit/dedup skipped row，不属于模板或行格式错误。
 - 本地已覆盖 240 行合成 ICBC 重复组；它不替代真实银行多模板、加密文件、异常编码、超大 Excel 内存/耗时和历史生产样本 smoke。
 - 真实 PostgreSQL + RabbitMQ + Redis + systemd import worker drain、job retry、worker crash/restart、幂等重复确认仍需环境验证；`write_operation_slo_audit --operation bank_import_confirmed` 已有本地契约测试，并要求真实银行确认样本产生 recent `bank_account_balance` outbox rows，但仍需要 staging 中真实 recent outbox rows 和账户余额 API fresh gate 证据。
 - 下游页面最终展示依赖银行明细、关联台、成本统计等模块自己的 fresh/read model 回归；本模块 Browser e2e 已覆盖银行明细小样本导入行和成本统计 fresh read model 导入证据，不覆盖真实 worker drain、关联台/search 最终显示或大文件性能。

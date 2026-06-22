@@ -32,9 +32,9 @@ Spec-first Browser e2e 审计入口：
 | 税金试算核心规则 | P0 | `tests/test_tax_offset_service.py` | covered | 销项/进项/已认证/计划选择、锁定已认证进项、应纳/留抵结果。 |
 | 真实导入发票进入计划 | P0 | `tests/test_tax_offset_service.py`、`tests/test_tax_offset_api.py` | covered | 导入进项票、OA 附件发票 canonical promotion、空真实数据不返回硬编码计划行。 |
 | 已认证导入解析与去重 | P0 | `tests/test_tax_certified_import_service.py`、`tests/test_tax_offset_api.py` | covered | 文件解析、行级状态、唯一键 fallback、重复导入幂等。 |
-| 已认证 preview/confirm/job polling API | P0 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts` | covered | preview 权限、confirm 幂等、job payload contract、modal queued/running/completed。 |
+| 已认证 preview/confirm/job polling API | P0 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts` | covered | preview 权限、confirm 幂等、job payload contract、modal queued/running/completed；前端 confirm/job 成功后等待当前月份 `tax_offset` operation barrier，再刷新页面数据。 |
 | 权限 | P0 | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/tax-offset-flow.spec.ts` | covered | read endpoint 访问控制、preview/save 写权限、只读用户隐藏导入/保存；Browser 覆盖 read-export 可读不可写、forbidden/expired 零 tax protected API 和 admin 写入口可见。 |
-| 计划保存/idempotency/version conflict | P0 | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` | covered | 保存使用 read model scope/source versions，重复请求幂等，stale source 返回 conflict；Browser 覆盖 409 冲突错误可见、不显示保存成功、不刷新成伪成功且保存按钮可恢复。 |
+| 计划保存/idempotency/version conflict | P0 | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` | covered | 保存使用 read model scope/source versions，重复请求幂等，stale source 返回 conflict；Vitest 锁定保存成功后必须先等 `tax_offset` operation barrier，再重新读取 `/api/tax-offset`；Browser 覆盖 409 冲突错误可见、不显示保存成功、不刷新成伪成功且保存按钮可恢复。 |
 | API shape 与 metric | P1 | `tests/test_tax_offset_api.py`、`web/src/test/TaxApi.test.ts` | covered | month、calculate、summary、plan save、job mapper、structured metric。 |
 | read model service scope | P0 | `tests/test_tax_offset_read_model_service.py` | covered | 只允许月份 scope，schema mismatch 丢弃，deep copy，metadata 无 payload。 |
 | SQL read model / Redis cache | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_postgres_state_store.py` | covered | SQL rows 优先、Redis hit/miss/timeout、summary 小 payload、Postgres 不回退 runtime snapshot。 |
@@ -77,12 +77,13 @@ Spec-first Browser e2e 审计入口：
 | 2026-06-19 | 税金抵扣计划保存遇到 source/version conflict 时，页面可能误显示保存成功、刷新成伪成功或吞掉冲突错误。 | `web/e2e/tax-offset-flow.spec.ts`、`tests/test_tax_offset_api.py::test_tax_offset_plan_save_rejects_stale_source_versions` | covered |
 | 2026-06-19 | 税金抵扣权限只靠全局 role matrix，可能漏掉本页导入/保存入口、session gate 零 protected API 或 admin 写入口可见性。 | `web/e2e/tax-offset-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_tax_offset_api.py` | covered |
 | 2026-06-19 | 税金抵扣窄屏下 grid/flex 子项默认 `min-width:auto` 撑宽页面，导致共享横向滚动条失效，筛选弹层也可能被桌面 sidebar inset 推到 viewport 外；后续总 smoke 又发现共享筛选弹层在垂直空间不足时目标 checkbox 位于 viewport 外，已改为根据上下空间定位并让列表内部滚动。 | `web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts`、`web/src/test/WorkbenchPaneFilter.test.ts`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
+| 2026-06-22 | 计划保存或已认证发票导入成功后立即读取 `/api/tax-offset`，可能读到旧 `tax_offset` read model。 | `web/src/test/TaxOffsetPage.test.tsx::waits for tax offset barrier before reloading after plan save` | covered |
 
 ## 关键 smoke flows
 
 1. `发票导入确认 -> invoice_lifecycle refresh -> tax_offset dirty scope -> tax-offset worker -> tax_offset month fresh -> /tax-offset 页面展示`
 2. `已认证导入 preview -> 行级状态/计划内外拆分 -> confirm/job queued -> tax_certified_import_confirmed lifecycle -> tax_offset refresh -> 页面 summary 更新`
-3. `用户调整计划勾选 -> calculate -> summary 更新 -> save plan with scope/source versions -> stale version conflict 可见且不伪成功，或幂等成功且无保存失败/read model 失败残留`
+3. `用户调整计划勾选 -> calculate -> summary 更新 -> save plan with scope/source versions -> tax_offset operation barrier -> stale version conflict 可见且不伪成功，或幂等成功且无保存失败/read model 失败残留`
 4. `ETC 发票导入/业务批次变化 -> invoiceFactUpdated / lifecycle -> tax_offset refresh -> 页面重新读取`
 5. `pending invoice rules changed -> invoice_lifecycle -> tax_offset + cost_statistics + search refresh -> 不刷新 no_oa_bank_batch/bank_account_balance`
 6. `Browser e2e: /tax-offset -> 取消一张进项计划 -> calculate -> 保存计划 -> 页内已认证发票导入 preview/confirm -> 刷新已认证结果 drawer -> 无保存/导入/read model 失败残留`

@@ -11,6 +11,7 @@ DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
 WORKER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 DISPATCHER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example"
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
+RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 
 
@@ -73,6 +74,13 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("input_invoice_usage.read_model.refresh", env_example)
         self.assertIn("output_invoice_collection.read_model.refresh", env_example)
         self.assertIn("oa_pending_payment.read_model.refresh", env_example)
+
+    def test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq(self) -> None:
+        env_example = RABBITMQ_WORKER_ENV.read_text(encoding="utf-8")
+
+        self.assertNotRegex(env_example, r"(?m)^\s*FIN_OPS_QUEUE_BACKEND=", msg=env_example)
+        self.assertIn("RABBITMQ_URL=", env_example)
+        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=1", env_example)
 
     def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
         postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()

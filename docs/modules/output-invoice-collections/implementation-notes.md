@@ -10,7 +10,16 @@
 - 销项收款状态由 `InvoiceLifecyclePolicy` 统一判定，页面和 query service 不各自维护业务状态口径。
 - 手动状态、提醒、红蓝票关系和正式收据写入必须经过 lifecycle/receipt service；service 只接收 route 传入的 actor/tenant/权限结果，不读取 HTTP header/cookie。
 - PostgreSQL 写路径必须使用 transaction-bound queue writer 或等价 gateway，把事实写入和 `output_invoice_collection` dirty/outbox 收敛在同一边界。
+- 手动状态、提醒、红蓝票关系和正式收据写入成功后，页面必须先等待当前可见 scope 的 `output_invoice_collection` operation barrier fresh，再刷新 rows；barrier blocked/timeout 时不得提前读取旧投影。
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
+
+## 2026-06-22 - lifecycle 写后 operation barrier
+
+- 目标：修复销项收款 lifecycle 写接口成功后前端直接 `loadRows("refresh")`，可能读取旧 `output_invoice_collection` read model 的缺口。
+- 影响范围：`OutputInvoiceCollectionsPage`、状态/提醒 drawer、收据 preview/history drawer、operation barrier label、`OutputInvoiceCollectionsPage.test.tsx` 和本模块测试矩阵；后端 API contract 不变。
+- 关键决策：页面统一在 `handleLifecycleChanged` 中等待 `output_invoice_collection:{当前月份或 all}` operation barrier；相关 drawer 的 `onChanged` 支持异步等待。barrier 未 fresh 时不立即刷新 rows，避免旧投影覆盖用户刚完成的写入。
+- 测试覆盖：新增 Vitest 回归，锁定红蓝票确认 POST 成功后先请求 `output_invoice_collection:all` barrier，barrier resolve 前 rows 请求数不增加。
+- 验证命令：`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx src/test/OperationBarrierApi.test.ts`。
 
 ## 记录模板
 

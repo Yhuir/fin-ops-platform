@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.postgres import migrate
+from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 
 
 MIGRATIONS_DIR = Path("backend/src/fin_ops_platform/postgres/migrations")
@@ -164,6 +165,8 @@ EXPECTED_TABLES = [
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",
+    "read_model.invoice_lifecycle_rows",
+    "read_model.invoice_lifecycle_scopes",
     "read_model.input_invoice_usage_rows",
     "read_model.input_invoice_usage_scopes",
     "read_model.output_invoice_collection_rows",
@@ -172,6 +175,7 @@ EXPECTED_TABLES = [
     "read_model.oa_pending_payment_scopes",
     "read_model.bank_detail_rows",
     "read_model.bank_detail_scopes",
+    "read_model.bank_account_balances",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
@@ -179,6 +183,32 @@ EXPECTED_TABLES = [
     "read_model.no_oa_bank_batch_rows",
     "read_model.turnover_ledger_rows",
 ]
+READ_MODEL_STORAGE_CONTRACTS = {
+    "workbench": (
+        "read_model.workbench_generations",
+        "read_model.workbench_rows",
+        "read_model.workbench_groups",
+        "read_model.workbench_group_rows",
+        "read_model.workbench_summary",
+        "read_model.workbench_snapshots",
+    ),
+    "workbench_relation": ("read_model.workbench_reconciliation_decisions",),
+    "bank_detail": ("read_model.bank_detail_rows", "read_model.bank_detail_scopes"),
+    "bank_account_balance": ("read_model.bank_account_balances",),
+    "pending_invoice": ("read_model.pending_invoice_rows", "read_model.pending_invoice_scopes"),
+    "search": ("read_model.search_index_rows",),
+    "invoice_lifecycle": ("read_model.invoice_lifecycle_rows", "read_model.invoice_lifecycle_scopes"),
+    "input_invoice_usage": ("read_model.input_invoice_usage_rows", "read_model.input_invoice_usage_scopes"),
+    "output_invoice_collection": (
+        "read_model.output_invoice_collection_rows",
+        "read_model.output_invoice_collection_scopes",
+    ),
+    "oa_pending_payment": ("read_model.oa_pending_payment_rows", "read_model.oa_pending_payment_scopes"),
+    "cost_statistics": ("read_model.cost_statistics_read_models", "read_model.cost_statistics_rows"),
+    "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
+    "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
+    "turnover_ledger": ("read_model.turnover_ledger_rows",),
+}
 
 
 def migration_sql() -> str:
@@ -390,6 +420,18 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             self.assertIn(f"create schema if not exists {schema}", sql)
         for table in EXPECTED_TABLES:
             self.assertIn(f"create table if not exists {table}", sql)
+
+    def test_app_status_read_model_storage_contracts_are_declared(self) -> None:
+        sql = migration_sql().lower()
+        expected_tables = set(EXPECTED_TABLES)
+
+        self.assertEqual(set(READ_MODEL_STORAGE_CONTRACTS), set(APP_STATUS_READ_MODEL_REGISTRY))
+        for read_model_key, tables in READ_MODEL_STORAGE_CONTRACTS.items():
+            with self.subTest(read_model_key=read_model_key):
+                self.assertTrue(tables)
+                self.assertLessEqual(set(tables), expected_tables)
+                for table in tables:
+                    self.assertIn(f"create table if not exists {table}", sql)
 
     def test_sql_has_required_extensions_and_indexes(self) -> None:
         sql = migration_sql().lower()

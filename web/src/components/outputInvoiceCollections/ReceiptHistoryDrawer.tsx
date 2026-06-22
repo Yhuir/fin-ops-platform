@@ -12,7 +12,7 @@ type ReceiptHistoryDrawerProps = {
   loadHistory: (invoiceId: string) => Promise<OutputInvoiceReceiptHistoryResponse>;
   onVoidReceipt: (receiptId: string, reason: string) => Promise<void>;
   onReissueReceipt: (receiptId: string, reason: string) => Promise<void>;
-  onChanged?: () => void;
+  onChanged?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -83,7 +83,7 @@ export default function ReceiptHistoryDrawer({
     try {
       await onVoidReceipt(receiptId, actionReason);
       await reload();
-      onChanged?.();
+      await onChanged?.();
       return true;
     } catch (voidReason) {
       setError(voidReason instanceof Error ? voidReason.message : "作废收据失败");
@@ -99,7 +99,7 @@ export default function ReceiptHistoryDrawer({
     try {
       await onReissueReceipt(receiptId, actionReason);
       await reload();
-      onChanged?.();
+      await onChanged?.();
       return true;
     } catch (reissueReason) {
       setError(reissueReason instanceof Error ? reissueReason.message : "重开收据失败");

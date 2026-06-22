@@ -56,6 +56,14 @@ python -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command 
 event 或 worker instance 时，必须先更新 registry，再让 deploy/preflight/monitoring 从 registry
 推导。
 
+本地 parity 门禁必须把这些事实源绑在一起：
+
+- `APP_STATUS_READ_MODEL_REGISTRY` 中的每个 read model 必须有对应 required worker registration、refresh event、RabbitMQ dispatch event 和 SLO smoke 计划。
+- `tests/test_postgres_migrations.py` 的 read model storage contract 必须覆盖每个 App Status read model；新增 SQL projection 表时不能只写 migration 而不更新本地 schema 基线。
+- `read_model_slo_smoke --critical-only` 必须规划所有 critical App Status read model；dry-run 只证明 scope discovery，`--apply` 才证明真实 enqueue-to-fresh worker drain。
+- `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。
+- Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
+
 ## Read Model 查询合同
 
 页面读取 SQL read model 时，必须先经过统一 freshness/status 边界：

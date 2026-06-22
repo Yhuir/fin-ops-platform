@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-22 - 光大和建行真实流水表头别名识别
+
+- 目标：修复用户上传 5 份银行流水时光大和建行文件显示“无法识别”的问题。
+- 影响范围：`FileImportService` 的银行流水模板识别、光大/建行 parser 字段映射、银行流水导入 service/API 回归。
+- 关键决策：模板需要比当前实现更能容忍同一家银行的官方导出表头别名，但不能做宽泛模糊猜列；本次只增加明确白名单别名：光大 `借方金额（支出）` / `贷方金额（收入）`，建行 `客户账号` / `凭证号码`。光大失败转账回退行使用负数借方金额表达收入回退，本次只在单列负数时做符号归一，双列都有值时仍不猜测。
+- 文档影响：更新本模块 `tests.md`、本实施记录和 GSD quick task 记录；前端 API、状态机、read model/worker contract 不变。
+- 测试覆盖：新增 `test_preview_accepts_ceb_xlsx_statement_with_income_expense_amount_headers` 和 `test_parse_ccb_statement_accepts_customer_account_and_voucher_number_headers`；覆盖 service 层模板识别、parser 字段映射、负数金额方向归一和关键字段保留。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service.ImportFileServiceTests.test_preview_accepts_ceb_xlsx_statement_with_income_expense_amount_headers tests.test_import_file_service.ImportFileServiceTests.test_parse_ccb_statement_accepts_customer_account_and_voucher_number_headers -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_import_api tests.test_import_service tests.test_import_preview_audit -v`；本地只读 smoke 用用户提供 5 个文件跑 `FileImportService.preview_files`，均返回 `preview_ready` 且文件级 `error_count=0`。
+- 未测风险：未跑 Browser 上传/确认、后台 import worker drain 和下游 read model freshness；整批只读 preview 仍有 1 条 audit/dedup skipped row，不属于模板或行格式错误。
+- 后续事项：如果后续遇到同一行借贷双列都有金额、双列为负数或其它银行符号规则，应先明确业务含义并补 business core 测试，不应靠模糊猜测导入。
+
 ## 2026-06-19 - 银行导入成功路径 UI 错误残留 guard
 
 - 目标：补齐银行流水导入 Browser 成功链路的“假成功”检测，防止 confirm 或下游 fresh 成功后页面仍残留导入失败、后台导入失败、read model 失败等提示。

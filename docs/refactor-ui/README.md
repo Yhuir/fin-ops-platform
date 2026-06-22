@@ -1,5 +1,7 @@
 # UI 重构工作流总览
 
+> 本目录是 `refactor-ui` 分支 UI 平台迁移专项工作区。目录中的 prompt、master goal、state、迁移队列和执行记录只约束 UI 迁移流程；它们不作为当前 app 后端、API、read model、worker 或生产运行事实源，也不作为当前 `main` 分支业务状态事实源。处理当前 app 事实时，回到 `docs/index.md`、`docs/app-architecture/`、`docs/modules/`、`docs/product-specs/`、`docs/dev/` 和 `docs/operations/`。
+
 本文档是 `refactor-ui` 分支的 UI 平台迁移入口。目标是把非关联台前端 UI 从 MUI 迁移到 React 19 + HeroUI v3 + Tailwind CSS v4，同时保留现有业务功能、页面结构、用户可见操作入口和用户操作体感。
 
 ## 重构理念

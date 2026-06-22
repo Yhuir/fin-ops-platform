@@ -13,7 +13,7 @@ type ReceiptPreviewDrawerProps = {
   row: OutputInvoiceCollectionRow | null;
   loadPreview: (request: OutputInvoiceReceiptPreviewRequest) => Promise<OutputInvoiceReceiptPreviewResponse>;
   createReceipt?: (rowId: string, bankTransactionId: string) => Promise<void>;
-  onChanged?: () => void;
+  onChanged?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -75,7 +75,7 @@ export default function ReceiptPreviewDrawer({
     setError(null);
     try {
       await createReceipt(rowId, bankTransactionId);
-      onChanged?.();
+      await onChanged?.();
       onClose();
     } catch (createReason) {
       setError(createReason instanceof Error ? createReason.message : "正式收据创建失败");

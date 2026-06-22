@@ -102,7 +102,10 @@ const rowsPayload = {
 
 function installInputInvoiceUsageFetch(
   payload: unknown = rowsPayload,
-  options: { exportDownloadResponse?: (url: URL) => Response } = {},
+  options: {
+    exportDownloadResponse?: (url: URL) => Response;
+    operationBarrierDelay?: Promise<void>;
+  } = {},
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -333,6 +336,29 @@ function installInputInvoiceUsageFetch(
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/api/operation-barrier/status") {
+      if (options.operationBarrierDelay) {
+        await options.operationBarrierDelay;
+      }
+      return new Response(JSON.stringify({
+        status: "fresh",
+        fresh: true,
+        targets: [{
+          read_model_key: "input_invoice_usage",
+          scope_type: "input_invoice_usage",
+          scope_key: "all",
+          status: "fresh",
+          raw_status: "fresh",
+          fresh: true,
+          blocking: false,
+        }],
+        blocked_targets: [],
+        refreshing_targets: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response(JSON.stringify({}), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -346,6 +372,21 @@ function rowsRequests(fetchMock: ReturnType<typeof installInputInvoiceUsageFetch
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === "/api/input-invoice-usage/rows");
+}
+
+function operationBarrierRequests(fetchMock: ReturnType<typeof installInputInvoiceUsageFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/operation-barrier/status";
+  });
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 afterEach(() => {
@@ -868,6 +909,38 @@ describe("Input invoice usage page", () => {
     expect(await screen.findByText("陈秀云")).toBeInTheDocument();
     expect(screen.getAllByText("SD-INV-2026-0001").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("oa_reverse_batch_page")).not.toBeInTheDocument();
+  });
+
+  test("waits for input invoice usage barrier before reloading rows after OA reverse draft creation", async () => {
+    const user = userEvent.setup();
+    const gate = deferred();
+    const fetchMock = installInputInvoiceUsageFetch(rowsPayload, { operationBarrierDelay: gate.promise });
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
+    const initialRowsRequests = rowsRequests(fetchMock).length;
+
+    await user.click(within(page).getByRole("button", { name: "以发票反提 OA" }));
+    expect(await screen.findByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft";
+    })).toBe(true));
+    const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
+    expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toBeInTheDocument();
+
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
+      targets: [{ read_model_key: "input_invoice_usage", scope_key: "all" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
+
+    gate.resolve();
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequests));
   });
 
   test("restores column filters and sort from table session state", async () => {

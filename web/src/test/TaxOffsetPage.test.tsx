@@ -54,6 +54,28 @@ function expectProjectDialogContract(dialog: HTMLElement) {
   expect(dialog.closest(".MuiDialog-root")).toBeNull();
 }
 
+function requestUrl(input: RequestInfo | URL) {
+  return new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+}
+
+function taxOffsetMonthRequests(fetchMock: ReturnType<typeof installMockApiFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => requestUrl(input))
+    .filter((url) => url.pathname === "/api/tax-offset" && url.searchParams.get("month") === "2026-03");
+}
+
+function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/operation-barrier/status");
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("Tax offset workbench", () => {
   test("keeps tax offset premium visual polish scoped to project primitives", () => {
     const styles = readFileSync("src/app/styles.css", "utf8");
@@ -518,6 +540,32 @@ describe("Tax offset workbench", () => {
       },
       idempotency_key: "tax-offset-plan:2026-03:2026-03:ti-202603-001",
     });
+  });
+
+  test("waits for tax offset barrier before reloading after plan save", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    const gate = deferred();
+    const fetchMock = installMockApiFetch({ operationBarrierDelay: gate.promise });
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /11203491/ }));
+    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+    const initialTaxReads = taxOffsetMonthRequests(fetchMock).length;
+
+    await user.click(screen.getByRole("button", { name: "保存计划" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => input === "/api/tax-offset/plans")).toBe(true));
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
+      targets: [{ read_model_key: "tax_offset", scope_key: "2026-03" }],
+    });
+    expect(taxOffsetMonthRequests(fetchMock)).toHaveLength(initialTaxReads);
+
+    gate.resolve();
+    expect(await screen.findByText("已保存本月税金抵扣计划。")).toBeInTheDocument();
+    await waitFor(() => expect(taxOffsetMonthRequests(fetchMock).length).toBeGreaterThan(initialTaxReads));
   });
 
   test("does not trigger duplicate calculate on first load when server summary already matches default selection", async () => {
@@ -1264,6 +1312,23 @@ describe("Tax offset workbench", () => {
               },
             },
           },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/operation-barrier/status") {
+        return new Response(JSON.stringify({
+          status: "fresh",
+          fresh: true,
+          targets: [{
+            read_model_key: "tax_offset",
+            scope_type: "tax_offset",
+            scope_key: "2026-03",
+            status: "fresh",
+            raw_status: "fresh",
+            fresh: true,
+            blocking: false,
+          }],
+          blocked_targets: [],
+          refreshing_targets: [],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       throw new Error(`Unhandled request: ${url}`);

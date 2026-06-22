@@ -85,7 +85,7 @@ type OaReverseWorkspaceDrawerProps = {
   loadStagedDrafts?: () => Promise<InputInvoiceUsageOaReverseStagedDraftsResponse>;
   loadSubmittedHistory?: () => Promise<InputInvoiceUsageOaReverseSubmittedHistoryResponse>;
   manualStatus?: (batchId: string, request: ManualInputInvoiceUsageOaReverseStatusRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
-  onBatchChanged?: () => void;
+  onBatchChanged?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -224,11 +224,11 @@ export default function OaReverseWorkspaceDrawer({
     setError(null);
     setFeedback(null);
     action()
-      .then((nextBatch) => {
+      .then(async (nextBatch) => {
         setBatch(nextBatch);
         setFeedback(successMessage);
-        onBatchChanged?.();
         onSuccess?.(nextBatch);
+        await onBatchChanged?.();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : `${successMessage}失败。`);
@@ -284,19 +284,20 @@ export default function OaReverseWorkspaceDrawer({
       decision,
       reason: decision === "submitted" ? "用户确认已在 OA 系统提交该草稿" : "用户确认 OA 提交内容需修改并删除本次提交内容",
     })
-      .then((nextBatch) => {
+      .then(async (nextBatch) => {
         setConfirmationOpen(false);
         setStagedDrafts((current) => current.filter((item) => item.batchId !== targetBatch.batchId));
-        onBatchChanged?.();
         if (decision === "submitted") {
           setBatch(nextBatch);
           setFeedback("已进入已提交历史。");
           setActiveTab("submitted");
+          await onBatchChanged?.();
           return;
         }
         setBatch(null);
         setFeedback("已清除暂存批次，返回待处理后可重新创建 OA 草稿。");
         setActiveTab("pending");
+        await onBatchChanged?.();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "OA 提交状态确认失败。");

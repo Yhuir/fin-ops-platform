@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-22 - confirm-paid/link-bank/rules 写后 operation barrier
+
+- 目标：修复进行中 OA `confirm-paid`、`link-bank-transactions` 和支出流水无需开票规则保存成功后前端立即刷新 rows，可能读到旧 `oa_pending_payment` read model 的缺口。
+- 影响范围：`OaPendingPaymentsPage`、`PendingInvoiceRulesDrawer` async callback contract、`operationBarrier` 前端 label、`OaPendingPaymentsPage.test.tsx` 和本模块测试矩阵；后端 API contract 不变，confirm/link 继续复用响应中的 `readModelRefresh.scopeKeys`。
+- 关键决策：前端写 API 成功后先用当前页面可见 scope 构造 `oa_pending_payment` operation barrier target，barrier fresh 后才 `loadRows("refresh")`；barrier blocked/timeout 属于 post-commit 同步未完成，只显示“后台同步尚未完成”，不把已成功写入渲染成操作失败，也不提前读取旧投影。
+- 测试覆盖：新增三个 Vitest 回归，分别锁定 confirm-paid、link-bank 和规则保存，在 barrier resolve 前不得增加 rows 请求，且 barrier request body 使用 `oa_pending_payment:all`。
+- 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`。
+
 ## 当前决策
 
 - OA 待付款列表以 OA application 为主行；银行流水、进项发票和 relation 只是付款证据或详情证据。
@@ -16,6 +24,7 @@
 - completed 与 in_progress 视图展示同一套 OA、支付状态、支出流水和进项发票证据四分组表格；没有发票证据时发票列显示 `-`。
 - OA/支付状态/支出流水/发票是表格主体的固定四段：OA 单元格内按“申请人 / 项目 / 金额”三栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态、可用确认动作和“未写回/已写回”；发票列纵向展示发票号、发票方、日期 chip 和金额，不显示“价税合计”chip。表格优先避免横向滚动，必要时通过紧凑字号、紧凑 chip、换行和行高增长承载信息。
 - 进行中 OA 的候选流水不能自动写回；必须由用户点击“确认已支付”，后端校验 workflow/outflow/金额/flow_id 后确认 Workbench relation，并写回 OA MySQL `t_payment_simple.pay_status=1`。
+- 进行中 OA `confirm-paid`、`link-bank-transactions` 和规则保存成功后，页面必须先等待 `oa_pending_payment` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只能提示后台同步尚未完成，不能提前读旧投影或把已提交写入显示成操作失败。
 - OA MySQL `t_payment_simple.flow_id` 使用 OA Mongo `form_data._id`。该结论来自 2026-06-17 服务器实机脱敏验证：现有 `t_payment_simple.flow_id` 为 24 位 ObjectId 形态，能匹配 Mongo `_id`，未匹配 Flowable `PROC_INST_ID_`；流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为最终写回 ID。
 - 生产 rows、filter-options 和 detail 必须走 `OaPendingPaymentReadModelService` 的 freshness/source-version gate；非 fresh 返回 refreshing/unavailable 并入队 `oa_pending_payment.read_model.refresh`，不能 live scan。
 - `invoice-usage-collection` worker 同时负责 `input_invoice_usage`、`output_invoice_collection` 和 `oa_pending_payment` read model；OA all scope 只 fan-out month shards，不同步重建全量历史。

@@ -9,7 +9,7 @@ type PendingInvoiceRulesDrawerProps = {
   saveRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
   title?: string;
   refreshToken?: number;
-  onSaved: (payload: PendingInvoiceRulesPayload) => void;
+  onSaved: (payload: PendingInvoiceRulesPayload) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -139,7 +139,7 @@ export default function PendingInvoiceRulesDrawer({
       setPayload(savedPayload);
       setBaselinePayload(savedPayload);
       setRefreshNotice(savedPayload.readModelStatus === "refreshing" ? "规则已保存，相关数据正在刷新。" : "规则已保存。");
-      onSaved(savedPayload);
+      await onSaved(savedPayload);
     } catch (reason) {
       setError(resolveRuleSaveErrorMessage(reason));
     } finally {

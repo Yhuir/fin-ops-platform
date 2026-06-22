@@ -14,6 +14,7 @@ from fin_ops_platform.services.runtime_monitoring import READ_MODEL_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_worker_registry import (
     rabbitmq_dispatch_event_types,
+    read_model_event_types,
     registration_by_instance_name,
     required_worker_instance_names,
     worker_check_command_args,
@@ -128,6 +129,23 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         registry_events = set(rabbitmq_dispatch_event_types())
 
         self.assertLessEqual(set(READ_MODEL_EVENT_TYPES), registry_events)
+
+    def test_app_status_read_model_registry_matches_worker_and_rabbitmq_contracts(self) -> None:
+        registrations = registration_by_instance_name()
+        read_model_events = read_model_event_types()
+        dispatch_events = set(rabbitmq_dispatch_event_types())
+
+        for read_model_key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
+            with self.subTest(read_model_key=read_model_key):
+                self.assertIn(definition.worker_instance, registrations)
+                registration = registrations[definition.worker_instance]
+                self.assertTrue(registration.required)
+                self.assertIn(definition.refresh_event_type, registration.event_types)
+                self.assertIn(definition.refresh_event_type, dispatch_events)
+                self.assertEqual(
+                    read_model_events.get(definition.refresh_event_type),
+                    (definition.key, definition.scope_type),
+                )
 
     def test_worker_kind_inference_uses_registry_for_optional_workers(self) -> None:
         args = worker_app.build_parser().parse_args(["--enable-bank-account-balance-read-model-refresh"])

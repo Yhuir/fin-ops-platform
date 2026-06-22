@@ -10,6 +10,7 @@
 - `bank_detail:all` 是显式 fan-out 命令，不是 downstream `*_read_model_not_fresh` 可自动推导的稳定 freshness 依赖 scope；下游 all-scope event 只能等待或补投可识别的具体月份 shard。
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
 - Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
+- App Status read model registry、runtime worker registry、RabbitMQ dispatch、SLO smoke、migration storage contract 和 Redis/deploy env 模板必须保持本地 parity；生产 worker/read model 不允许新增第二套手写清单。
 
 ## 记录模板
 
@@ -27,6 +28,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-22 - Production runtime parity guard
+
+- 目标：防止生产 schema、worker、RabbitMQ、Redis 与本地测试覆盖再次分叉。历史问题不是某个 worker/Redis/RabbitMQ 事实源重写，而是多个 registry、migration 和 env 模板缺少交叉断言，新增 read model 容易只改一处。
+- 影响范围：runtime worker registry、read model SLO smoke、PostgreSQL migration table baseline、RabbitMQ deploy env、Redis runtime env contract；不改变 worker loop、queue schema、RabbitMQ envelope 或 Redis helper 行为。
+- 关键决策：继续保持 PostgreSQL durable queue/readiness 为状态事实源，RabbitMQ 只做 transport/wakeup，Redis 只做 fresh gate 后 cache。新增本地门禁要求 `APP_STATUS_READ_MODEL_REGISTRY` 每个 key 都能映射到 required worker、refresh event、RabbitMQ dispatch event、critical SLO smoke scope 和 migration storage contract；共享 `fin-ops.rabbitmq-worker.env` 不得设置 `FIN_OPS_QUEUE_BACKEND`，只能 per-worker 灰度；Redis 模板变量必须和 `RuntimeRedisSettings.from_env()` 对齐。
+- 文档影响：同步本记录、runtime-workers/read-models 测试矩阵和 worker/read model 运维治理文档。
+- 测试覆盖：新增 `tests/test_runtime_worker_registry.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_postgres_migrations.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_runtime_redis.py` 中的 parity guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_registry tests.test_read_model_slo_smoke tests.test_postgres_migrations tests.test_deploy_runtime_examples tests.test_runtime_redis -v`。
+- 未测风险：本地 guard 不连接真实 broker、Redis、systemd 或生产 PostgreSQL；真实 drain 仍由 `infra-smoke`、RabbitMQ staging preflight 和生产/staging read model SLO smoke 证明。
 
 ## 2026-06-21 - Same-scope parent dependency 长退避防止 all 聚合抢占
 

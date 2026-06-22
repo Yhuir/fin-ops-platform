@@ -361,6 +361,31 @@ class WorkbenchQueryFacade:
                     "group_id": group_id,
                 },
             )
+        group_scope_key = str(group.get("scope_key") or scope_key)
+        stale_reasons = self._stale_reasons(group.get("source_versions"), scope_key=group_scope_key)
+        group_status = "stale" if stale_reasons else str(group.get("read_model_status") or "fresh")
+        if group_status != "fresh":
+            reason = "api_group_detail_source_versions_stale" if stale_reasons else "api_group_detail_stale"
+            self._enqueue_refresh(group_scope_key, reason=reason)
+            self._emit_status_metric(
+                endpoint="/api/workbench/groups/detail",
+                scope_key=group_scope_key,
+                read_model_status=group_status,
+                reason="sql_status",
+            )
+            payload: dict[str, object] = {
+                "error": "workbench_group_not_found",
+                "scope_key": scope_key,
+                "zone": zone,
+                "group_id": group_id,
+                "read_model_status": group_status,
+            }
+            if stale_reasons:
+                payload["read_model_stale_reasons"] = [
+                    *list(group.get("read_model_stale_reasons") if isinstance(group.get("read_model_stale_reasons"), list) else []),
+                    *stale_reasons,
+                ]
+            return WorkbenchQueryResult(HTTPStatus.NOT_FOUND, payload)
         return WorkbenchQueryResult(
             HTTPStatus.OK,
             {

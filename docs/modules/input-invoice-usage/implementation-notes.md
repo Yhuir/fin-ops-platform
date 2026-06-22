@@ -15,6 +15,7 @@
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
 - 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
+- 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，页面必须先等待当前 scope 的 `input_invoice_usage` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只提示后台同步未完成，不能提前读旧投影。
 - `以发票反提 OA` 的草稿提交确认弹窗可以由用户取消；取消、父页面重渲染和 preview reload 都不能清空当前草稿 batch，状态为 `oa_draft_created` 的 batch 必须出现在 `暂存` 页签。暂存列表不展示 OA 草稿链接，只展示两项处理动作。
 - OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA candidate 也不是可创建候选，展示 `候选oa` chip、禁用勾选。drawer 支持 `全部/已经关联oa/候选oa/未关联oa` 表头筛选。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
@@ -35,6 +36,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-22 - 写后等待 input_invoice_usage operation barrier
+
+- 目标：修复支付规则保存、OA reverse 草稿创建和 manual status 写成功后前端立即 `loadRows("refresh")`，可能读到旧 `input_invoice_usage` projection 的缺口。
+- 影响范围：`InputInvoiceUsagePage`、`PaymentStatusRulesDrawer`、`OaReverseWorkspaceDrawer`、operation barrier label、`InputInvoiceUsagePage.test.tsx` 和本模块测试矩阵；后端业务 contract 不变。
+- 关键决策：父页面集中用当前 `month || all` 构造 `input_invoice_usage` barrier target；drawer 的 `onSaved` / `onBatchChanged` 改为可 await。barrier fresh 后才刷新 rows；barrier blocked/timeout 是 post-commit 同步未完成，不读取旧投影。
+- 文档影响：更新本实施记录、`tests.md` 和 Spec-first E2E 覆盖说明。
+- 测试覆盖：新增 Vitest 回归，证明 OA reverse draft 创建后 barrier resolve 前 rows 请求数不增加，request body 为 `input_invoice_usage:all`；既有支付规则/OA reverse drawer 测试继续保护保存和弹窗交互。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx src/test/OperationBarrierApi.test.ts`。
+- 未测风险：本地 Vitest 只证明页面等待 barrier，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
 
 ## 2026-06-21 - 支付状态规则抽屉第一阶段 UI 闭环
 

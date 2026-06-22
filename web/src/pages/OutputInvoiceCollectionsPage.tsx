@@ -16,6 +16,7 @@ import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/Receip
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   cancelOutputInvoiceCollectionReminder,
   downloadOutputInvoiceCollectionExport,
@@ -457,9 +458,17 @@ export default function OutputInvoiceCollectionsPage() {
     return code ? [{ code, label }] : [];
   }, [collectionStatusRow, manualStatusOptions]);
 
-  const handleLifecycleChanged = useCallback(() => {
-    loadRows("refresh");
-  }, [loadRows]);
+  const handleLifecycleChanged = useCallback(async () => {
+    try {
+      await waitForOperationFreshness(
+        operationBarrierTargets("output_invoice_collection", [query.month || "all"]),
+      );
+      loadRows("refresh");
+    } catch {
+      // The write already committed. Do not immediately reread a projection that
+      // the runtime has reported as not yet fresh.
+    }
+  }, [loadRows, query.month]);
 
   const exportRequest = useMemo(() => ({
     page: query.page,

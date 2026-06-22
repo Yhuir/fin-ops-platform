@@ -62,8 +62,12 @@ type WaitForOperationFreshnessOptions = {
 
 const READ_MODEL_LABELS: Record<string, string> = {
   bank_detail: "银行流水",
+  input_invoice_usage: "进项发票使用情况",
   no_oa_bank_batch: "无 OA 银行批次",
+  oa_pending_payment: "OA 待付款核对",
+  output_invoice_collection: "销项发票收款情况",
   pending_invoice: "待处理发票",
+  tax_offset: "税金抵扣",
   turnover_ledger: "往来款台账",
   workbench: "关联台",
   workbench_relation: "关联关系",

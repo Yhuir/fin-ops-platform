@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+COMMON_ENV_EXAMPLE = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
+SECRETS_ENV_EXAMPLE = REPO_ROOT / "deploy/oa/env/fin-ops.secrets.env.example"
 
 
 class FakeRedisClient:
@@ -50,6 +56,36 @@ class RuntimeRedisTests(unittest.TestCase):
             settings = RuntimeRedisSettings.from_env()
 
         self.assertFalse(settings.enabled)
+
+    def test_production_env_examples_match_runtime_redis_settings_contract(self) -> None:
+        common_env = COMMON_ENV_EXAMPLE.read_text(encoding="utf-8")
+        secrets_env = SECRETS_ENV_EXAMPLE.read_text(encoding="utf-8")
+
+        for name in (
+            "FIN_OPS_REDIS_KEY_PREFIX",
+            "FIN_OPS_REDIS_WAKEUP_CHANNEL",
+            "FIN_OPS_REDIS_DEFAULT_TTL_SECONDS",
+        ):
+            self.assertIn(f"{name}=", common_env)
+        self.assertIn("FIN_OPS_REDIS_URL=", secrets_env)
+
+        with patch.dict(
+            os.environ,
+            {
+                "FIN_OPS_REDIS_URL": "redis://127.0.0.1:6379/0",
+                "FIN_OPS_REDIS_KEY_PREFIX": "finops-prod",
+                "FIN_OPS_REDIS_WAKEUP_CHANNEL": "finops:runtime:wakeup:prod",
+                "FIN_OPS_REDIS_DEFAULT_TTL_SECONDS": "45",
+            },
+            clear=True,
+        ):
+            settings = RuntimeRedisSettings.from_env()
+
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.url, "redis://127.0.0.1:6379/0")
+        self.assertEqual(settings.key_prefix, "finops-prod")
+        self.assertEqual(settings.wakeup_channel, "finops:runtime:wakeup:prod")
+        self.assertEqual(settings.default_ttl_seconds, 45)
 
     def test_disabled_helper_is_noop_so_postgres_polling_can_continue(self) -> None:
         helper = RuntimeRedisHelper.disabled()

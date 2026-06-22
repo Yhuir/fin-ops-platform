@@ -198,7 +198,7 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "backend/src/fin_ops_platform/services/workbench_query_facade.py",
         "WorkbenchQueryFacade.group_detail",
         "dict read_model_status=fresh",
-    ): (1, "facade returns group detail from SQL active generation repository."),
+    ): (1, "facade returns group detail only after SQL active generation source/status gate passes."),
     (
         "backend/src/fin_ops_platform/services/workbench_query_facade.py",
         "WorkbenchQueryFacade._cached_groups_payload",

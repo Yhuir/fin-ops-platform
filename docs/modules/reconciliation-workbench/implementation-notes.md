@@ -29,6 +29,26 @@
 
 ## 历史记录
 
+## 2026-06-22 - Workbench all view 使用 active all generation
+
+- 目标：修复 `GET /api/workbench?month=all` 主视图和分页视图在 `workbench:all` active generation 已发布时仍从 month snapshots 临时合成 payload/summary 的问题。
+- 影响范围：`PostgresReadModelRepository.get_workbench_view(scope_key="all")`、未分页 all 主视图、分页/过滤 all rows page、Workbench all-scope source_versions freshness 证明。
+- 关键决策：all-scope 聚合器已经承担唯一 visible owner、paired/open 抑制、active relation occupancy 和 `workbench_matching_rules_version` 聚合；读路径必须消费已发布的 active all generation。未分页 all 先读 active all snapshot；分页/过滤 all 先读 active all summary，再通过 bounded `workbench_rows` page query 取行。只有没有 active all generation 时保留旧 month snapshot 合成 fallback，避免历史本地/测试环境直接不可用。
+- 文档影响：同步本模块 README/tests 和 read-models 模块实施/回归记录。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reads_all_scope_view_from_active_generation_snapshot`、`test_repository_reads_all_scope_filtered_page_from_active_all_summary`；保留 legacy fallback 回归 `test_repository_synthesizes_all_workbench_view_from_month_snapshots`、`test_repository_ignores_stale_all_workbench_snapshot_and_synthesizes_from_months`、`test_repository_reads_all_scope_filtered_page_without_full_snapshot_payloads`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`。
+- 未测风险：本地未连接真实生产 PostgreSQL/Redis/RabbitMQ；发布后需要 authenticated `/api/workbench?month=all` HTTP smoke 和 worker drain 观察，确认 active all generation 已重建且页面返回 fresh。
+
+## 2026-06-22 - Group detail freshness gate 补齐
+
+- 目标：修复关联台 group detail 接口在 active generation stale 或 dirty scope refreshing 时仍返回旧 group 并标 fresh 的问题。
+- 影响范围：`GET /api/workbench/groups/detail`、`WorkbenchQueryFacade.group_detail(...)`、`PostgresReadModelRepository.get_workbench_group_detail(...)`、group detail 展开完整组详情的前端调用链。
+- 关键决策：Workbench active generation 仍是展示事实源，但 group detail 不能只因来自 active generation 就视为 fresh。SQL repository 必须带出 active generation `source_versions`、`read_model_status` 和 `read_model_version`；facade 必须复用 Workbench source-version stale gate。non-fresh 时不返回旧 group，而是入队 Workbench refresh，并返回带 `read_model_status` 的 not-found 语义，让前端停止展开旧详情。
+- 文档影响：同步本模块 README/tests，并在 read-models 模块记录通用回归。
+- 测试覆盖：`tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_group_detail_stale_source_versions_do_not_return_stale_group`、`test_group_detail_refreshing_status_does_not_return_stale_group`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_group_detail_includes_active_generation_freshness_contract`、`tests/test_read_model_architecture_guards.py`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_reads_only_active_generation tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_includes_active_generation_freshness_contract tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_group_detail_api_returns_full_group -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards tests.test_workbench_query_facade tests.test_workbench_sql_runtime -v`。
+- 未测风险：本地没有连接真实生产数据库或真实浏览器；发布后仍需 authenticated HTTP/worker drain smoke 验证旧 projection 已收敛。
+
 ## 2026-06-22 - 外部往来闭环三栏分区纠偏
 
 - 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域，并被显示成“完全关联”的问题。

@@ -29,7 +29,10 @@ import type {
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
   OaPendingPaymentViewMode,
+  ConfirmOaPendingPaymentPaidResponse,
+  LinkOaPendingPaymentBankTransactionsResponse,
 } from "../features/oaPendingPayments/types";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
 const initialQuery: OaPendingPaymentQuery = {
@@ -81,6 +84,42 @@ function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): str
 
 function isReadModelFresh(status: string) {
   return status === "fresh";
+}
+
+type OaPendingPaymentReadModelRefresh = {
+  scopeKeys?: string[];
+};
+
+function normalizedRefreshScopeKeys(refresh: OaPendingPaymentReadModelRefresh | undefined) {
+  return Array.from(new Set(
+    (refresh?.scopeKeys ?? [])
+      .map((scopeKey) => String(scopeKey).trim())
+      .filter(Boolean),
+  ));
+}
+
+function oaPendingPaymentBarrierTargets(refresh: OaPendingPaymentReadModelRefresh | undefined, currentScopeKey: string) {
+  const visibleScopeKey = currentScopeKey.trim() || "all";
+  const refreshScopeKeys = normalizedRefreshScopeKeys(refresh);
+  if (refreshScopeKeys.includes(visibleScopeKey)) {
+    return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
+  }
+  if (visibleScopeKey === "all" && refreshScopeKeys.length > 0) {
+    return operationBarrierTargets("oa_pending_payment", refreshScopeKeys);
+  }
+  return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
+}
+
+async function waitForOaPendingPaymentBarrier(
+  refresh: OaPendingPaymentReadModelRefresh | undefined,
+  currentScopeKey: string,
+) {
+  try {
+    await waitForOperationFreshness(oaPendingPaymentBarrierTargets(refresh, currentScopeKey));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readModelStatusTitle(status: string) {
@@ -219,26 +258,31 @@ export default function OaPendingPaymentsPage() {
     setConfirmingRowIds((current) => new Set(current).add(row.id));
     setFeedback(null);
     setError(null);
-    confirmOaPendingPaymentPaid({
-      oaRowId,
-      bankTransactionIds: bankTransactionIds.length > 0 ? bankTransactionIds : undefined,
-      idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionIds.join("-") || "active"}-${Date.now()}`,
-    })
-      .then((payload) => {
-        setFeedback(payload.oaPaymentWriteback?.label === "已写回" ? "已确认支付并写回 OA。" : "已确认支付，等待 OA 写回状态刷新。");
-        loadRows("refresh");
-      })
-      .catch((caught: unknown) => {
+    void (async () => {
+      try {
+        const payload: ConfirmOaPendingPaymentPaidResponse = await confirmOaPendingPaymentPaid({
+          oaRowId,
+          bankTransactionIds: bankTransactionIds.length > 0 ? bankTransactionIds : undefined,
+          idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionIds.join("-") || "active"}-${Date.now()}`,
+        });
+        const synced = await waitForOaPendingPaymentBarrier(payload.readModelRefresh, query.month || "all");
+        if (synced) {
+          setFeedback(payload.oaPaymentWriteback?.label === "已写回" ? "已确认支付并写回 OA。" : "已确认支付，等待 OA 写回状态刷新。");
+          loadRows("refresh");
+        } else {
+          setFeedback("已确认支付并写回 OA，后台同步尚未完成，请稍后刷新。");
+        }
+      } catch (caught: unknown) {
         setError(caught instanceof Error ? caught.message : "确认已支付失败。");
-      })
-      .finally(() => {
+      } finally {
         setConfirmingRowIds((current) => {
           const next = new Set(current);
           next.delete(row.id);
           return next;
         });
-      });
-  }, [canMutateData, loadRows]);
+      }
+    })();
+  }, [canMutateData, loadRows, query.month]);
 
   const handleToggleOaSelection = useCallback((row: OaPendingPaymentRow) => {
     const ids = selectableOaRowIds(row);
@@ -259,12 +303,18 @@ export default function OaPendingPaymentsPage() {
     });
   }, []);
 
-  const handleBankLinkSuccess = useCallback((message: string) => {
-    setFeedback(message);
+  const handleBankLinkSuccess = useCallback(async (
+    message: string,
+    result: LinkOaPendingPaymentBankTransactionsResponse,
+  ) => {
+    const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, query.month || "all");
+    setFeedback(synced ? message : "已关联支出流水，后台同步尚未完成，请稍后刷新。");
     setSelectedOaRowIds(new Set());
     setBankLinkDrawerOpen(false);
-    loadRows("refresh");
-  }, [loadRows]);
+    if (synced) {
+      loadRows("refresh");
+    }
+  }, [loadRows, query.month]);
 
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
@@ -272,6 +322,15 @@ export default function OaPendingPaymentsPage() {
     (payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, "expense"),
     [],
   );
+
+  const handleRulesSaved = useCallback(async () => {
+    const synced = await waitForOaPendingPaymentBarrier(undefined, query.month || "all");
+    if (synced) {
+      loadRows("refresh");
+    } else {
+      setFeedback("规则已保存，OA 待付款核对后台同步尚未完成，请稍后刷新。");
+    }
+  }, [loadRows, query.month]);
 
   const actions = useMemo(() => (
     <div className="oa-pending-payments-actions">
@@ -426,7 +485,7 @@ export default function OaPendingPaymentsPage() {
         loadRules={loadExpensePendingInvoiceRules}
         saveRules={saveExpensePendingInvoiceRules}
         title="支出流水无需开票规则设置"
-        onSaved={() => loadRows("refresh")}
+        onSaved={handleRulesSaved}
         onClose={() => setRulesOpen(false)}
       />
       <OaBankLinkDrawer
@@ -503,7 +562,7 @@ function OaBankLinkDrawer({
 }: {
   open: boolean;
   selectedOaRowIds: string[];
-  onLinked: (message: string) => void;
+  onLinked: (message: string, result: LinkOaPendingPaymentBankTransactionsResponse) => Promise<void> | void;
   onError: (message: string) => void;
   onClose: () => void;
 }) {
@@ -573,16 +632,20 @@ function OaBankLinkDrawer({
       return;
     }
     setSubmitting(true);
-    linkOaPendingPaymentBankTransactions({
-      oaRowIds: selectedOaRowIds,
-      bankTransactionIds: [...selectedBankIds],
-      idempotencyKey: `oa-pending-link-${selectedOaRowIds.join("-")}-${[...selectedBankIds].join("-")}-${Date.now()}`,
-    })
-      .then(() => onLinked("已关联支出流水，等待核对表刷新。"))
-      .catch((caught: unknown) => {
+    void (async () => {
+      try {
+        const result = await linkOaPendingPaymentBankTransactions({
+          oaRowIds: selectedOaRowIds,
+          bankTransactionIds: [...selectedBankIds],
+          idempotencyKey: `oa-pending-link-${selectedOaRowIds.join("-")}-${[...selectedBankIds].join("-")}-${Date.now()}`,
+        });
+        await onLinked("已关联支出流水，等待核对表刷新。", result);
+      } catch (caught: unknown) {
         onError(caught instanceof Error ? caught.message : "关联支出流水失败。");
-      })
-      .finally(() => setSubmitting(false));
+      } finally {
+        setSubmitting(false);
+      }
+    })();
   };
 
   if (!open) {

@@ -72,13 +72,29 @@ run_docs() {
     docs/dev/spec-first-e2e-inventory.md \
     docs/dev/testing-closure-state.md \
     docs/dev/testing-closure-dependency-map.md \
-    docs/modules/README.md
+    docs/modules/README.md \
+    .planning/README.md
   do
     if [[ ! -f "$required" ]]; then
       echo "Missing required documentation file: $required" >&2
       exit 1
     fi
   done
+
+  if ! rg -q "不作为当前需求、架构、API 或验收事实源" .planning/README.md; then
+    echo ".planning/README.md must state that GSD records are not current facts." >&2
+    exit 1
+  fi
+
+  if ! rg -q "不作为当前 app 后端、API、read model、worker 或生产运行事实源" docs/refactor-ui/README.md; then
+    echo "docs/refactor-ui/README.md must scope prompt/state files to UI migration only." >&2
+    exit 1
+  fi
+
+  if ! rg -q "\.planning/.*不作为当前需求、架构、API 或验收事实源" docs/index.md; then
+    echo "docs/index.md must document the .planning fact-source boundary." >&2
+    exit 1
+  fi
 
   while IFS= read -r module_readme; do
     module_dir="$(dirname "$module_readme")"

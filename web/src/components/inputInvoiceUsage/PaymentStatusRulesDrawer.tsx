@@ -33,7 +33,7 @@ type PaymentStatusRulesDrawerProps = {
   open: boolean;
   loadRules: () => Promise<PaymentStatusRulesPayload>;
   saveRules?: (request: SaveInputInvoiceUsagePaymentStatusRulesRequest) => Promise<InputInvoiceUsagePaymentStatusRulesResponse | PaymentStatusRulesPayload>;
-  onSaved?: () => void;
+  onSaved?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -126,12 +126,12 @@ export default function PaymentStatusRulesDrawer({
         label: item.label.trim(),
       })),
     })
-      .then((nextPayload) => {
+      .then(async (nextPayload) => {
         setPayload(nextPayload);
         setDraftRules(cloneRules(nextPayload.rules));
         setDraftPendingDirections(nextPayload.pendingDirections.map((item) => ({ ...item })));
         setFeedback("规则已保存，正在刷新进项发票使用情况。");
-        onSaved?.();
+        await onSaved?.();
       })
       .catch((caught) => {
         if (isVersionConflict(caught)) {

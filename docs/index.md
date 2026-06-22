@@ -2,6 +2,13 @@
 
 这棵文档树按“入口短、专题深、过程文档不保留”的原则整理。当前有效文档只放在长期目录里；历史 prompt、旧计划和阶段执行记录不再作为当前需求、架构或验收依据。
 
+## 事实源边界
+
+- 当前产品、架构、API、read model、worker、部署和测试事实只以本页列出的长期文档入口为准。
+- `.planning/` 是 GSD 执行工作区和历史执行记录，不作为当前需求、架构、API 或验收事实源；仍有价值的结论必须先提炼到 `docs/` 的长期事实源后才能作为依据。
+- `docs/refactor-ui/` 是 `refactor-ui` 分支 UI 平台迁移的专项工作区。该目录中的 prompt、master goal、state 或迁移队列只约束对应 UI 迁移流程，不作为当前 `main` 分支的后端、API、read model、worker 或生产运行事实源。
+- `docs/modules/*/implementation-notes.md` 只保存提炼后的目标、决策、验收、风险和后续事项；读取到历史记录时，必须回到模块 `README.md`、`state-machine.md`、`tests.md` 以及产品/架构/开发/运维长期事实源确认当前事实。
+
 ## 快速入口
 
 - 项目总览：`../README.md`
@@ -23,7 +30,7 @@
 | `dev/` | 开发者入口、接口契约、测试、本地运行 |
 | `operations/` | 部署、数据安全、worker/read model、监控告警 |
 | `references/` | 仓库布局、外部系统、原始业务源和迁移历史摘要 |
-| `refactor-ui/` | `refactor-ui` 分支 UI 平台迁移工作流、状态机、切片 prompt、基线清单、平台栈迁移、测试迁移、模块队列和表格排版系统 |
+| `refactor-ui/` | `refactor-ui` 分支 UI 平台迁移专项工作区；其中 prompt/state 只约束 UI 迁移流程，不替代当前 app 长期事实源 |
 
 ## 推荐阅读路径
 
@@ -81,6 +88,8 @@
 4. 如模块文档链接到产品、架构、开发或运维长期事实源，以长期事实源为准并同步维护
 
 ### UI 平台迁移
+
+仅在处理 `refactor-ui` 分支或 UI 平台迁移任务时读取本路径。处理当前 app 后端、API、read model、worker、生产运行或业务状态时，不从该目录的 prompt/state 文件推导事实。
 
 1. `refactor-ui/README.md`
 2. `refactor-ui/refactor_ui_state.md`

@@ -100,6 +100,75 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(repository.calls, [{"scope_key": "all", "row_id": "oa-pay-1976"}])
 
+    def test_group_detail_stale_source_versions_do_not_return_stale_group(self) -> None:
+        class Repository:
+            def get_workbench_group_detail(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "group_id": "case:1",
+                    "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                    "source_versions": {"builder": "old"},
+                    "read_model_status": "fresh",
+                }
+
+        def stale_reasons(_source_versions: object, *, scope_key: str | None = None) -> list[str]:
+            return ["source_version_mismatch"]
+
+        queue = QueueRecorder()
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.group_detail("all", zone="open", group_id="case:1")
+
+        self.assertEqual(result.status_code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(result.payload["read_model_status"], "stale")
+        self.assertEqual(result.payload["read_model_stale_reasons"], ["source_version_mismatch"])
+        self.assertNotIn("group", result.payload)
+        self.assertEqual(queue.refreshes, [("all", "api_group_detail_source_versions_stale")])
+        self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/groups/detail")
+        self.assertEqual(metrics.calls[0]["read_model_status"], "stale")
+
+    def test_group_detail_refreshing_status_does_not_return_stale_group(self) -> None:
+        class Repository:
+            def get_workbench_group_detail(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "group_id": "case:1",
+                    "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "refreshing",
+                }
+
+        queue = QueueRecorder()
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.group_detail("all", zone="open", group_id="case:1")
+
+        self.assertEqual(result.status_code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertNotIn("group", result.payload)
+        self.assertEqual(queue.refreshes, [("all", "api_group_detail_stale")])
+        self.assertEqual(metrics.calls[0]["read_model_status"], "refreshing")
+
     def test_summary_missing_payload_enqueues_refresh_without_application_dependency(self) -> None:
         class Repository:
             def get_workbench_summary(self, **_kwargs: object) -> None:

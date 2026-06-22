@@ -16,6 +16,7 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -364,14 +365,29 @@ export default function TaxOffsetPage() {
     ?? planFeedback
     ?? null;
 
+  const waitForTaxOffsetBarrier = useCallback(async () => {
+    try {
+      await waitForOperationFreshness(operationBarrierTargets("tax_offset", [currentMonth]));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [currentMonth]);
+
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
+      const synced = await waitForTaxOffsetBarrier();
+      if (!synced) {
+        setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，后台同步尚未完成，请稍后刷新。`);
+        setPlanFeedback(null);
+        return;
+      }
       await loadMonthData("refresh");
       setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
       setPlanFeedback(null);
     },
-    [loadMonthData],
+    [loadMonthData, waitForTaxOffsetBarrier],
   );
 
   const handleSavePlan = useCallback(async () => {
@@ -391,6 +407,11 @@ export default function TaxOffsetPage() {
         expectedSourceVersions: monthData.sourceVersions,
         idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
       });
+      const synced = await waitForTaxOffsetBarrier();
+      if (!synced) {
+        setPlanFeedback("已保存本月税金抵扣计划，后台同步尚未完成，请稍后刷新。");
+        return;
+      }
       setPlanFeedback("已保存本月税金抵扣计划。");
       await loadMonthData("refresh");
     } catch (error) {
@@ -404,7 +425,7 @@ export default function TaxOffsetPage() {
         setIsSavingPlan(false);
       }
     }
-  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary]);
+  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary, waitForTaxOffsetBarrier]);
 
   return (
     <PageScaffold

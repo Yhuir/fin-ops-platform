@@ -260,6 +260,24 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertIn("turnover_ledger", planned_keys)
         self.assertIn("bank_account_balance", planned_keys)
 
+    def test_critical_only_plans_every_critical_app_status_read_model(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            FakeConnection(),
+            apply=False,
+            critical_only=True,
+        )
+
+        critical_keys = {
+            key
+            for key, definition in read_model_slo_smoke.APP_STATUS_READ_MODEL_REGISTRY.items()
+            if definition.critical
+        }
+        planned_keys = {item["read_model_key"] for item in report["planned_scopes"]}
+
+        self.assertEqual(planned_keys, critical_keys)
+        self.assertEqual(report["missing_read_model_keys"], [])
+        self.assertGreaterEqual(report["planned_scope_count"], len(critical_keys))
+
     def test_pending_invoice_smoke_includes_page_first_screen_aggregate_scope(self) -> None:
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),

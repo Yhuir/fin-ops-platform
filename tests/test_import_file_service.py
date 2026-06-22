@@ -574,6 +574,141 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.success_count, 1)
         self.assertFalse(preview_file.bank_selection_conflict)
 
+    def test_preview_accepts_ceb_xlsx_statement_with_income_expense_amount_headers(self) -> None:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["中国光大银行对公账户对账单"])
+        sheet.append(["查询日期：2026-06-18 14:54:01"])
+        sheet.append(["交易日期：20260101-20260617", "借贷方向：全部", "币种：人民币"])
+        sheet.append(["账号：39610188000598826", "账户名称：云南溯源科技有限公司"])
+        sheet.append(["借方（支出）笔数汇总：30", "借方（支出）金额汇总：6,519,680.73"])
+        sheet.append(["贷方（收入）笔数汇总：13", "贷方（收入）金额汇总：6,435,123.74"])
+        sheet.append([
+            "交易日期",
+            "交易时间",
+            "借方金额（支出）",
+            "贷方金额（收入）",
+            "账户余额",
+            "对方账号",
+            "对方名称",
+            "摘要",
+            "对方银行",
+            "凭证号",
+            "流水号",
+        ])
+        sheet.append([
+            "2026-06-16",
+            "10:34:29",
+            "",
+            "748.00",
+            "192,872.59",
+            "8111901012800374721",
+            "云南钢晟商贸有限公司",
+            "货款",
+            "中信银行股份有限公司",
+            "901309005688",
+            "202606169013090056880000000001",
+        ])
+        sheet.append([
+            "2026-06-10",
+            "17:37:20",
+            "-17,626.82",
+            "",
+            "195,920.59",
+            "9902001850796325",
+            "云南溯源科技有限公司",
+            "网银跨行汇款失败，原交易流水号：901317033905，收款行拒绝原因：账号、户名不符",
+            "中国民生银行",
+            "",
+            "901a66024449",
+        ])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name="光大明细20260101-20260617.xlsx",
+                    content=buffer.getvalue(),
+                    selected_bank_mapping_id="bank_mapping_ceb_8826",
+                    selected_bank_name="光大银行",
+                    selected_bank_short_name="光大",
+                    selected_bank_last4="8826",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "ceb_transaction_detail")
+        self.assertEqual(preview_file.detected_bank_name, "光大银行")
+        self.assertEqual(preview_file.detected_last4, "8826")
+        self.assertEqual(preview_file.row_count, 2)
+        self.assertEqual(preview_file.success_count, 2)
+        self.assertEqual(preview_file.error_count, 0)
+        self.assertEqual(preview_file.normalized_rows[0]["txn_direction"], "inflow")
+        self.assertEqual(preview_file.normalized_rows[0]["amount"], "748.00")
+        self.assertEqual(preview_file.normalized_rows[0]["counterparty_bank_name"], "中信银行股份有限公司")
+        self.assertEqual(preview_file.normalized_rows[1]["txn_direction"], "inflow")
+        self.assertEqual(preview_file.normalized_rows[1]["amount"], "17626.82")
+        self.assertFalse(preview_file.bank_selection_conflict)
+
+    def test_parse_ccb_statement_accepts_customer_account_and_voucher_number_headers(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        parsed = service._parse_rows(
+            rows=[
+                [
+                    "客户账号",
+                    "账户名称",
+                    "交易时间",
+                    "借方发生额（支取）",
+                    "贷方发生额（收入）",
+                    "余额",
+                    "币种",
+                    "对方户名",
+                    "对方账号",
+                    "对方开户机构",
+                    "记账日期",
+                    "摘要",
+                    "备注",
+                    "账户明细编号-交易流水号",
+                    "企业流水号",
+                    "凭证种类",
+                    "凭证号码",
+                ],
+                [
+                    "53001905038050548106",
+                    "云南溯源科技有限公司",
+                    "2026010309:00:13",
+                    "6868.55",
+                    "0",
+                    "154699",
+                    "人民币元",
+                    "刘树刚",
+                    "6217003860012460901",
+                    "",
+                    "20260103",
+                    "电子转账",
+                    "代购公车款",
+                    "13286-5309050388V2M1WGPI2",
+                    "",
+                    "电子转账凭证",
+                    "108095854700",
+                ],
+            ],
+        )
+
+        self.assertEqual(parsed.template_code, "ccb_transaction_detail")
+        self.assertEqual(parsed.batch_type.value, "bank_transaction")
+        self.assertEqual(parsed.rows[0]["account_no"], "53001905038050548106")
+        self.assertEqual(parsed.rows[0]["voucher_no"], "108095854700")
+        self.assertEqual(parsed.rows[0]["counterparty_name"], "刘树刚")
+
     def test_preview_accepts_bocom_transaction_detail_statement(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)

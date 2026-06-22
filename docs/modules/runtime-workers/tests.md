@@ -30,7 +30,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | 无 handler / 无 event type 不误 claim | P0 | `tests/test_runtime_worker.py` | covered | 防止 worker 注册错误时吞事件。 |
 | Heartbeat 写入与 required worker mismatch | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_worker_registry.py` | covered | 覆盖 instance、kind、event type mismatch。 |
 | 高频 read model 专用 consumer | P0 | `tests/test_runtime_worker_registry.py` | covered | `search`、`search-secondary`、`search-tertiary`、`pending-invoice`、`cost-statistics`、`tax-offset`、`invoice-lifecycle-secondary` 必须保留 required RabbitMQ eligible worker，避免 SLO 退化回 combined worker 串行 drain。 |
-| Registry / manifest / deploy env 同步 | P0 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_runtime_convergence_closure.py` | covered | 防止新增 worker 没进 manifest 或 deploy helper。 |
+| Registry / manifest / deploy env 同步 | P0 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_postgres_migrations.py`、`tests/test_runtime_redis.py`、`tests/test_runtime_convergence_closure.py` | covered | 防止新增 worker/read model 只改一处：App Status read model 必须匹配 required worker、RabbitMQ dispatch event、SLO smoke scope、migration storage contract 和 Redis/env 模板。 |
 | Read model refresh scope 归一化、校验、去重 | P0 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered | 成本统计旧裸月份/裸 `all` 已有回归覆盖。 |
 | Readiness reporter 记录 fresh/failed/mismatch/refreshing | P0 | `tests/test_read_model_readiness_reporter.py`、`tests/test_app_status_readiness_backfill.py` | covered | 覆盖 handler wrapper 和禁止 fan-out 父 scope 伪 fresh。 |
 | App Health runtime snapshot | P0 | `tests/test_runtime_monitoring.py` | covered | 覆盖 backlog、failed job、stale dirty scope、worker metrics。 |
@@ -60,6 +60,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
+| 2026-06-22 | 生产 schema/worker/RabbitMQ/Redis 已有单独测试，但没有跨 registry 门禁；新增 read model 可能只更新 App Status 或 worker registry，漏掉 migration storage contract、critical SLO smoke 或 deploy env，导致本地测试通过、生产运行面缺 worker/schema/transport/cache 配置。 | `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_app_status_read_model_registry_matches_worker_and_rabbitmq_contracts`、`tests/test_read_model_slo_smoke.py::ReadModelSloSmokeTests::test_critical_only_plans_every_critical_app_status_read_model`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_app_status_read_model_storage_contracts_are_declared`、`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq`、`tests/test_runtime_redis.py::RuntimeRedisTests::test_production_env_examples_match_runtime_redis_settings_contract` | covered |
 | 2026-06-10 | Worker lifecycle 向 `cost_statistics.read_model.refresh` 投递裸月份/裸 `all`，SQL projection 拒绝 scope。 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered |
 | 2026-06-10 | 非事务 producer 可能绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。 | `tests/test_platform_runtime_boundary_guards.py::test_read_model_refresh_producers_use_scope_gateway_boundary` | covered |
 | 2026-06-11 | 静态 boundary guard 误把 OA 登录 JSON 响应字段 `Admin-Token` 判定为 service 解析 HTTP cookie/header。 | `tests/test_platform_runtime_boundary_guards.py::test_services_do_not_import_http_auth_boundary_or_parse_cookie_token_headers`、`tests/test_target_oa_applicant_token_provider.py` | covered |
@@ -106,7 +107,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 ```bash
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_worker_registry tests.test_runtime_queue tests.test_runtime_monitoring -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract tests.test_read_model_readiness_reporter -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_queue_ops tests.test_runtime_state_policy tests.test_deploy_runtime_examples -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_queue_ops tests.test_runtime_state_policy tests.test_deploy_runtime_examples tests.test_runtime_redis -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_app_status_readiness_backfill -v
 bash scripts/verify.sh docs
 ```

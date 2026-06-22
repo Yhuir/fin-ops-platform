@@ -16,7 +16,7 @@ type CollectionStatusReminderDrawerProps = {
   onSaveReminder: (rowId: string, payload: OutputInvoiceCollectionReminderUpdateRequest) => Promise<void>;
   onClearStatus: (rowId: string, expectedVersion: number) => Promise<void>;
   onCancelReminder: (rowId: string, reminderId: string) => Promise<void>;
-  onChanged?: () => void;
+  onChanged?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -78,7 +78,7 @@ export default function CollectionStatusReminderDrawer({
           note: reminderNote,
         });
       }
-      onChanged?.();
+      await onChanged?.();
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存失败");

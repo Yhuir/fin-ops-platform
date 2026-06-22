@@ -8,6 +8,7 @@
 - 税金抵扣认证状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 和认证导入事实共同决定，页面不私有定义认证状态。
 - `tax_offset` read model 只物化月份 scope `YYYY-MM`；`all` refresh 只用于 fan-out 月份 shard，不写普通 tax offset payload。
 - 税金抵扣计划保存必须校验 `read_model_scope_key`、`source_versions` 和 `idempotency_key`；source mismatch 返回 conflict，不能基于旧 read model 保存。
+- 税金抵扣计划保存成功、已认证发票导入 confirm/job 成功后，页面必须先等待当前月份 `tax_offset` operation barrier fresh，再重新读取 `/api/tax-offset`；barrier blocked/timeout 只提示后台同步尚未完成，不能提前读旧投影。
 - 进项计划行只从 canonical invoice facts 读取；OA 附件正式发票必须先 promotion 到 Invoice repository / `app.invoices`，`app.oa_attachment_invoice_cache` 只作为解析缓存，不是税金抵扣事实源。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖税额试算、已认证导入、权限、计划保存、SQL read model、Redis cache、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 - 2026-06-19 Spec-first 基线补齐：新增 `e2e-spec.md` / `e2e-coverage.md`，并用 Browser smoke 覆盖 Workbench relation -> tax offset fresh read model fan-out。
@@ -31,6 +32,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-22 - 保存/认证导入写后等待 tax_offset operation barrier
+
+- 目标：修复税金抵扣计划保存和已认证发票导入成功后前端立即重新读取 `/api/tax-offset`，可能读到旧 `tax_offset` projection 的缺口。
+- 影响范围：`TaxOffsetPage`、operation barrier label、`TaxOffsetPage.test.tsx`、通用 `apiMock` barrier delay 和本模块测试矩阵；后端 API contract 不变。
+- 关键决策：页面用当前月份构造 `tax_offset` operation barrier target。保存计划或认证导入写成功后，barrier fresh 才 `loadMonthData("refresh")`；barrier blocked/timeout 只展示“后台同步尚未完成”，不读取旧投影。
+- 文档影响：更新本实施记录、`tests.md`、`e2e-spec.md` 和 `e2e-coverage.md`。
+- 测试覆盖：新增 Vitest 回归，证明保存计划后 barrier resolve 前 `/api/tax-offset?month=2026-03` 请求数不增加；排队导入自定义 mock 补齐 barrier fresh。
+- 验证命令：`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx src/test/OperationBarrierApi.test.ts`。
+- 未测风险：本地 Vitest 证明页面等待 barrier，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain。
 
 ## 2026-06-19 - 税金抵扣成功写流 UI 错误残留 guard
 

@@ -100,6 +100,75 @@ class WorkbenchSqlReadConnection:
         return []
 
 
+class ActiveAllWorkbenchSnapshotConnection(WorkbenchSqlReadConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
+            return {"generation_id": "gen-all-active"}
+        if "from read_model.workbench_snapshots" in normalized and "generation_id = %s" in normalized:
+            return {
+                "scope_key": "all",
+                "generation_id": "gen-all-active",
+                "cache_status": "fresh",
+                "generated_at": "2026-05-22T10:00:00+00:00",
+                "source_versions": {"source_version": 17, "workbench_matching_rules_version": "rules-v2"},
+                "row_count": 3,
+                "payload": {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {
+                        "oa_count": 1,
+                        "bank_count": 1,
+                        "invoice_count": 1,
+                        "paired_count": 1,
+                        "open_count": 0,
+                        "exception_count": 0,
+                    },
+                    "open": {"groups": []},
+                    "paired": {
+                        "groups": [
+                            {
+                                "group_id": "case:active-all",
+                                "oa_rows": [{"id": "oa-active-all"}],
+                                "bank_rows": [{"id": "bank-active-all"}],
+                                "invoice_rows": [{"id": "invoice-active-all"}],
+                            }
+                        ]
+                    },
+                },
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_snapshots" in normalized and "scope_key <> 'all'" in normalized:
+            return [
+                {
+                    "scope_key": "2026-04",
+                    "row_count": 99,
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "payload": {
+                        "payload": {
+                            "summary": {
+                                "oa_count": 99,
+                                "bank_count": 0,
+                                "invoice_count": 0,
+                                "paired_count": 0,
+                                "open_count": 99,
+                            },
+                            "open": {"groups": [{"oa_rows": [{"id": "legacy-month"}], "bank_rows": [], "invoice_rows": []}]},
+                            "paired": {"groups": []},
+                        }
+                    },
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
 class ReadModelRefreshTransactionConnection:
     def __init__(self) -> None:
         self.fetch_one_params: list[tuple] = []
@@ -145,6 +214,57 @@ class WorkbenchAllRowsPageConnection(WorkbenchSqlReadConnection):
                     "summary": {"oa_count": 10, "bank_count": 20, "invoice_count": 30, "paired_count": 40, "open_count": 50},
                 },
             ]
+        if "from read_model.workbench_rows" in normalized:
+            return [
+                {
+                    "row_id": "oa-att-inv-1",
+                    "source_kind": "oa_attachment_invoice",
+                    "status": "paired",
+                    "payload": {"id": "oa-att-inv-1", "source_kind": "oa_attachment_invoice"},
+                }
+            ]
+        return []
+
+
+class ActiveAllRowsPageConnection(WorkbenchAllRowsPageConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
+            return {"generation_id": "gen-all-active"}
+        if "from read_model.workbench_summary" in normalized:
+            return {
+                "scope_key": "all",
+                "generation_id": "gen-all-active",
+                "payload": {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {
+                        "oa_count": 1,
+                        "bank_count": 1,
+                        "invoice_count": 1,
+                        "paired_count": 1,
+                        "open_count": 0,
+                        "exception_count": 0,
+                    },
+                    "generated_at": "2026-05-22T10:00:00+00:00",
+                },
+                "generated_at": "2026-05-22T10:00:00+00:00",
+                "source_versions": {"source_version": 17, "workbench_matching_rules_version": "rules-v2"},
+            }
+        if "count(*) as total_count" in normalized:
+            return {"total_count": 1}
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_snapshots" in normalized and "scope_key <> 'all'" in normalized:
+            raise AssertionError("active all-scope rows_page must use active all summary instead of month snapshots")
+        if "from job.read_model_dirty_scopes" in normalized:
+            return []
         if "from read_model.workbench_rows" in normalized:
             return [
                 {
@@ -371,6 +491,24 @@ class SwitchingActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnect
         if "from read_model.workbench_generations" in normalized and "select generation_id" in normalized:
             self.fetch_one_calls.append((normalized, params))
             return {"generation_id": "gen-active"}
+        if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized and "gen.source_versions" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "group_id": "case:1",
+                "zone": "open",
+                "scope_key": "all",
+                "generation_id": "gen-active",
+                "source_versions": {"source_version": 12},
+                "payload": {
+                    "group_id": "case:1",
+                    "group_type": "candidate",
+                    "match_confidence": "medium",
+                    "reason": "detail",
+                    "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                },
+            }
         if "from read_model.workbench_generations" in normalized and "select source_versions" in normalized:
             self.fetch_one_calls.append((normalized, params))
             if "generation_id = %s" in normalized:
@@ -1729,6 +1867,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(view["payload"]["open"]["groups"]), 1)
         self.assertEqual(len(view["payload"]["paired"]["groups"]), 1)
 
+    def test_repository_reads_all_scope_view_from_active_generation_snapshot(self) -> None:
+        connection = ActiveAllWorkbenchSnapshotConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_workbench_view(scope_key="all")
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        self.assertEqual(view["active_generation_id"], "gen-all-active")
+        self.assertEqual(view["read_model_version"], "gen-all-active")
+        self.assertEqual(view["row_count"], 3)
+        self.assertEqual(view["source_versions"]["workbench_matching_rules_version"], "rules-v2")
+        self.assertEqual(view["payload"]["paired"]["groups"][0]["group_id"], "case:active-all")
+        self.assertFalse(
+            any(
+                "from read_model.workbench_snapshots" in sql and "scope_key <> 'all'" in sql
+                for sql, _params in all_queries
+            )
+        )
+
     def test_repository_dedupes_all_scope_groups_by_row_identity(self) -> None:
         duplicate_paired_group = {
             "group_id": "case:CASE-DUPLICATE-1",
@@ -1840,6 +1997,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(
             any(
                 "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_reads_all_scope_filtered_page_from_active_all_summary(self) -> None:
+        connection = ActiveAllRowsPageConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_workbench_view(
+            scope_key="all",
+            page=1,
+            page_size=50,
+            source_kind="oa_attachment_invoice",
+        )
+
+        self.assertEqual(view["payload"]["summary"]["oa_count"], 1)
+        self.assertEqual(view["source_versions"]["workbench_matching_rules_version"], "rules-v2")
+        self.assertEqual(view["refresh_status"], "fresh")
+        self.assertEqual(view["rows_page"]["rows"][0]["id"], "oa-att-inv-1")
+        self.assertFalse(
+            any(
+                "from read_model.workbench_snapshots" in sql and "scope_key <> 'all'" in sql
                 for sql, _params in connection.fetch_all_calls
             )
         )
@@ -2848,6 +3027,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any(
                 "from read_model.workbench_groups" in sql
                 and "generation_id = %s" in sql
+                and "gen-active" in params
+                for sql, params in connection.fetch_one_calls
+            )
+        )
+
+    def test_repository_group_detail_includes_active_generation_freshness_contract(self) -> None:
+        connection = SwitchingActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="case:1")
+
+        self.assertIsNotNone(group)
+        self.assertEqual(group["source_versions"], {"source_version": 12})
+        self.assertEqual(group["read_model_status"], "fresh")
+        self.assertTrue(
+            any(
+                "join read_model.workbench_generations" in sql
+                and "g.generation_id = %s" in sql
                 and "gen-active" in params
                 for sql, params in connection.fetch_one_calls
             )
@@ -4302,6 +4499,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "oa_rows": [{"id": "oa-1", "type": "oa", "detail_fields": {"OA单号": "2151"}}],
                     "bank_rows": [],
                     "invoice_rows": [],
+                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
+                    "read_model_status": "fresh",
                 }
 
         repository = SqlWorkbench()

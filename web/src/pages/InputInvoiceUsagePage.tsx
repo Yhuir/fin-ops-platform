@@ -11,6 +11,7 @@ import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../compo
 import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
@@ -334,13 +335,30 @@ export default function InputInvoiceUsagePage() {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
   }, [setQuery]);
 
-  const handlePaymentStatusRulesSaved = useCallback(() => {
-    loadRows("refresh");
-  }, [loadRows]);
+  const waitForInputInvoiceUsageBarrier = useCallback(async () => {
+    try {
+      await waitForOperationFreshness(operationBarrierTargets("input_invoice_usage", [query.month || "all"]));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [query.month]);
 
-  const handleOaReverseBatchChanged = useCallback(() => {
+  const handlePaymentStatusRulesSaved = useCallback(async () => {
+    const synced = await waitForInputInvoiceUsageBarrier();
+    if (!synced) {
+      return;
+    }
     loadRows("refresh");
-  }, [loadRows]);
+  }, [loadRows, waitForInputInvoiceUsageBarrier]);
+
+  const handleOaReverseBatchChanged = useCallback(async () => {
+    const synced = await waitForInputInvoiceUsageBarrier();
+    if (!synced) {
+      return;
+    }
+    loadRows("refresh");
+  }, [loadRows, waitForInputInvoiceUsageBarrier]);
 
   const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget) => {
     if (target.kind === "invoice") {

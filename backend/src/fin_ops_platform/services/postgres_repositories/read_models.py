@@ -4809,16 +4809,27 @@ class PostgresReadModelRepository:
         generation_clause = ""
         generation_params: list[Any] = []
         if active_generation_id:
-            generation_clause = "and generation_id = %s"
+            generation_clause = "and g.generation_id = %s"
             generation_params.append(active_generation_id)
         exclusion_clause = ""
         if normalized_zone == "open":
             exclusion_clause = f"and {_workbench_open_linked_etc_summary_group_exclusion_sql()}"
         row = self._connection.fetch_one(
             f"""
-            select g.group_id, g.zone, g.payload, g.raw_payload
+            select
+              g.group_id,
+              g.zone,
+              g.payload,
+              g.raw_payload,
+              g.scope_key,
+              g.generation_id,
+              gen.source_versions
             from read_model.workbench_groups g
-            where {scope_where}
+            left join read_model.workbench_generations gen
+              on gen.tenant_id = 'default'
+             and gen.scope_key = g.scope_key
+             and gen.generation_id = g.generation_id
+            where g.{scope_where}
               {generation_clause}
               and g.zone = %s
               and g.group_id = %s
@@ -4830,12 +4841,17 @@ class PostgresReadModelRepository:
         )
         if not isinstance(row, dict):
             return None
+        resolved_scope_key = text(row.get("scope_key")) or normalized_scope_key
         group = _read_model_payload(row)
         if not isinstance(group, dict):
-            return {"group_id": text(row.get("group_id"))}
+            group = {"group_id": text(row.get("group_id"))}
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
+        result["scope_key"] = resolved_scope_key
+        source_versions = row.get("source_versions")
+        result["source_versions"] = dict(source_versions) if isinstance(source_versions, dict) else {}
         result["active_generation_id"] = active_generation_id
         result["read_model_version"] = active_generation_id
+        result["read_model_status"] = self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key)
         return result
 
     def get_workbench_row_detail(self, *, scope_key: str, row_id: str) -> dict[str, Any] | None:
@@ -5228,6 +5244,58 @@ class PostgresReadModelRepository:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         return "scope_key = %s", [normalized_scope_key]
 
+    def _load_active_workbench_snapshot_view(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        if not active_generation_id:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select scope_key, generation_id, payload, raw_payload, cache_status, generated_at, source_versions, row_count
+            from read_model.workbench_snapshots
+            where scope_key = %s
+              and generation_id = %s
+            order by generated_at desc
+            limit 1
+            """,
+            (normalized_scope_key, active_generation_id),
+        )
+        if row is None:
+            return None
+        payload = _read_model_payload(row)
+        if not isinstance(payload, dict):
+            payload = {}
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'workbench'
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        refresh_status = "fresh"
+        if dirty_row is not None:
+            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        payload_source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        return {
+            "scope_key": normalized_scope_key,
+            "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
+            "cache_status": text(row.get("cache_status") or payload.get("cache_status")) or "fresh",
+            "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
+            "source_versions": payload_source_versions or row_source_versions,
+            "row_count": int_value(row.get("row_count"), 0),
+            "refresh_status": refresh_status,
+            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
+            "active_generation_id": active_generation_id,
+            "read_model_version": active_generation_id,
+        }
+
     def _load_all_workbench_view(
         self,
         *,
@@ -5245,6 +5313,9 @@ class PostgresReadModelRepository:
                 source_kind=source_kind,
                 search=search,
             )
+        active_view = self._load_active_workbench_snapshot_view(scope_key="all")
+        if active_view is not None:
+            return active_view
         rows = self._connection.fetch_all(
             """
             select scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
@@ -5331,6 +5402,41 @@ class PostgresReadModelRepository:
         source_kind: str | None,
         search: str | None,
     ) -> dict[str, Any] | None:
+        summary_payload = self.get_workbench_summary(scope_key="all")
+        if isinstance(summary_payload, dict) and text(summary_payload.get("active_generation_id")):
+            summary = summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}
+            rows_page = self._load_workbench_rows_page(
+                scope_key="all",
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+            )
+            source_versions = (
+                summary_payload.get("source_versions") if isinstance(summary_payload.get("source_versions"), dict) else {}
+            )
+            combined = {
+                "month": "all",
+                "summary": _normalize_workbench_summary_counts(summary),
+                "paired": {"groups": []},
+                "open": {"groups": []},
+                "read_model_scope_key": "all",
+                "page_mode": "sql_rows",
+            }
+            return {
+                "scope_key": "all",
+                "payload": combined,
+                "cache_status": "fresh",
+                "generated_at": text(summary_payload.get("generated_at")),
+                "source_versions": source_versions,
+                "row_count": int_value(rows_page.get("total") if isinstance(rows_page, dict) else None, 0),
+                "refresh_status": text(summary_payload.get("read_model_status")) or "fresh",
+                "dirty_scope": None,
+                "active_generation_id": text(summary_payload.get("active_generation_id")),
+                "read_model_version": text(summary_payload.get("read_model_version")),
+                "rows_page": rows_page,
+            }
         rows = self._connection.fetch_all(
             """
             select

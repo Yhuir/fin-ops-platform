@@ -29,6 +29,8 @@ Workbench SQL active generation 必须把 active relation 的 `special_metadata`
 
 `GET /api/workbench/rows/{row_id}` 是 row detail 读接口。它必须优先使用当前 live service/cache，miss 后通过 `WorkbenchQueryFacade` 读取 SQL active generation；opaque OA row id 不能仅依赖从 row id 解析月份。该接口不写 relation，不接入 `WorkbenchRelationCommandService`。
 
+`GET /api/workbench/groups/detail` 是 group detail 读接口。它可以读取 Workbench SQL active generation，但必须携带并校验 active generation `source_versions`、`read_model_status` 和 `read_model_version`；source version stale、同 scope dirty scope pending/processing/failed，或缺少等价 freshness proof 时，不能返回旧 group 并标 `fresh`。该接口只读 group detail，不写 relation，也不能用 active generation 来源本身替代 freshness gate。
+
 `confirm-link`、`cancel-link` 和 `withdraw-link` 的 relation 写入必须通过 `WorkbenchRelationCommandService`。缺少 command service 时 API fail fast，不得回退到 `WorkbenchPairRelationService` 直接写 pair snapshot；UoW 路径应通过 transaction-bound relation repository 保存。
 
 关联台 selection 以 group 为操作上下文：已配对区和未配对区点击任意 OA、银行流水或发票 row，都会带入该 row 所在的完整 group。确认关联、异常处理和统一撤回/拆分入口都基于该 group context；统一撤回/拆分一次只能处理一个 group。已配对区只有撤回关联语义；未配对区的统一按钮由后端 preview 判定为 `withdraw_relation` 或 `split_candidate`。
@@ -48,6 +50,8 @@ OA 附件发票解析缓存必须通过 `app.oa_attachment_invoice_cache_sources
 OA 附件发票 promotion 不是关联台读路径的无条件副作用。`OA附件发票晋级` 设置为 `disabled` 时必须完全跳过；默认 `link_existing_only` 只允许关联已有统一发票池记录，不创建缺失发票；只有 `create_missing` 才允许正式发票缺失时受控写入 `app.invoices`。
 
 Workbench all-scope publish 的性能边界是 active generation 下的结构化投影写入，不是页面读旧 snapshot。生产 profile 显示 `read_model.workbench_group_rows` 适合走 chunked multi-row VALUES，`read_model.workbench_rows` 和 `read_model.workbench_groups` 在相同优化下会变慢，应继续走事务内 `executemany`。`0070_workbench_unused_write_indexes.sql` 删除生产基线中大且零扫描的 `workbench_rows_payload_gin`、`workbench_groups_searchable_text_trgm`、`workbench_group_rows_column_values_gin`；不要在没有新 query workload 证据时恢复这些写入放大型索引。
+
+`GET /api/workbench?month=all` 的当前事实源是已发布的 `workbench:all` active generation。未分页主视图必须优先读取 active all snapshot；分页/过滤视图必须优先读取 active all summary 并从 `read_model.workbench_rows` 做 bounded page query。临时拼接 month snapshots 只允许作为没有 active all generation 时的 legacy fallback，不能在已有 active all generation 时绕过 all-scope 聚合器、source_versions freshness 证明、唯一 visible owner 和 active relation occupancy 不变量。
 
 Workbench all-scope 聚合还承担跨月分片的展示归属权收敛。统一事实源只保证正式 OA、银行流水、发票事实写入唯一；当 month shard 因补行、standalone row、自动候选或 source-linked 关系把同一事实带入多个 open group 时，all-scope 必须在写 active generation 前选出唯一 visible/operable owner。已配对 group 优先于 open；open 内部保留 source-linked/exception/auto-closed/decision/candidate 等证据更强、跨 pane 更多的 group，standalone 只能保留未被更强 group 认领的事实。发票 open/open 可用强发票 identity 去重；银行流水 open/open 只按 row id 去重，避免把真实重复交易按稳定 business-fields identity 折叠。
 

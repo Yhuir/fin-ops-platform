@@ -218,7 +218,7 @@ const rowsPayload = {
   sourceVersion: "output-invoice-collections:v1",
 };
 
-function installOutputInvoiceCollectionsFetch() {
+function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void> } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -351,6 +351,26 @@ function installOutputInvoiceCollectionsFetch() {
       }
       return jsonResponse({ settings: { prefix: "SK", resetPeriod: "monthly", version: 1 } });
     }
+    if (url.pathname === "/api/operation-barrier/status") {
+      await options.operationBarrierDelay;
+      return jsonResponse({
+        status: "fresh",
+        fresh: true,
+        targets: [
+          {
+            read_model_key: "output_invoice_collection",
+            scope_type: "output_invoice_collection",
+            scope_key: "all",
+            status: "fresh",
+            fresh: true,
+            blocking: false,
+            raw_status: "fresh",
+          },
+        ],
+        blocked_targets: [],
+        refreshing_targets: [],
+      });
+    }
     if (
       url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-status"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder"
@@ -382,10 +402,27 @@ function rowsRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectio
     .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
 }
 
+function operationBarrierRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectionsFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/operation-barrier/status";
+  });
+}
+
 function statusRulesRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectionsFetch>) {
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === "/api/output-invoice-collections/status-rules");
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function readWebSource(path: string) {
@@ -880,6 +917,43 @@ describe("Output invoice collections page", () => {
         expect.stringContaining("/api/output-invoice-collections/receipt-settings"),
         expect.objectContaining({ method: "PUT" }),
       );
+    });
+  }, 45000);
+
+  test("waits for output invoice collection barrier before reloading after red relation confirm", async () => {
+    const barrier = deferred();
+    const user = userEvent.setup();
+    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    await within(page).findByText("XSFP-2026-0001");
+    await user.click(within(page).getAllByRole("button", { name: "红蓝票" })[0]);
+    expect(await screen.findByLabelText("红蓝票关系")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("搜索关联发票"), "RED");
+    await user.click(await screen.findByRole("radio", { name: /XSFP-2026-RED/ }));
+    await user.type(screen.getByLabelText("确认依据"), "客户邮件确认红冲");
+    const rowsBeforeMutation = rowsRequests(fetchMock).length;
+
+    await user.click(screen.getByRole("button", { name: "确认关系" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/rows/output-collection-row-001/red-invoice-relations"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
+    expect(JSON.parse(String(barrierInit?.body))).toEqual({
+      targets: [{ read_model_key: "output_invoice_collection", scope_key: "all" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
+
+    barrier.resolve();
+
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
   }, 45000);
 });
