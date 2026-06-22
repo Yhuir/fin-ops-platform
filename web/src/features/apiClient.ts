@@ -157,10 +157,6 @@ function finOpsApiFallbackUrl(resolvedUrl: string): string | null {
   if (typeof window === "undefined") {
     return null;
   }
-  const pagePath = window.location.pathname || "";
-  if (pagePath !== "/fin-ops" && !pagePath.startsWith("/fin-ops/")) {
-    return null;
-  }
   const parsedUrl = new URL(resolvedUrl, window.location.origin);
   if (parsedUrl.origin !== window.location.origin || !parsedUrl.pathname.startsWith("/api/")) {
     return null;

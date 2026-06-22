@@ -74,6 +74,33 @@ describe("apiClient", () => {
     ]);
   });
 
+  test("falls back to canonical fin-ops API prefix when a root API request returns HTML outside the fin-ops page path", async () => {
+    window.history.pushState({}, "", "/oa-pending-payments");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response("<!doctype html><html><body>spa shell</body></html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rows: [], pagination: { total: 0 } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const { apiRequestJson } = await import("../features/apiClient");
+
+    await expect(apiRequestJson("/api/oa-pending-payments/bank-transaction-candidates?relation_status=all&page=1&page_size=100"))
+      .resolves.toEqual({ rows: [], pagination: { total: 0 } });
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+      "/api/oa-pending-payments/bank-transaction-candidates?relation_status=all&page=1&page_size=100",
+      "/fin-ops-api/api/oa-pending-payments/bank-transaction-candidates?relation_status=all&page=1&page_size=100",
+    ]);
+  });
+
   test("surfaces structured API errors with status and error code", async () => {
     vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops-api/");
     vi.resetModules();

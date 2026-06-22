@@ -45,15 +45,22 @@
 - 生产验证：发布 release `main-6652abe4-20260622124730` 后，目标 2026-02 样本能生成并确认 `oa_bank_exact_amount`；详见上方 relation 持久化闭环验证。
 - 未测风险：未跑浏览器端截图验证。
 
-## 2026-06-22 - 已完成 OA 的进行中影子行去重
+## 2026-06-22 - 撤销 completed 指纹排除，进行中只按 flow_id 准入
+
+- 目标：修正“completed 正本排除 in-progress 影子行”的错误口径。业务允许同项目、同供应商、同金额、同事由发起多张不同 OA；这些字段不是付款申请唯一身份。
+- 关键决策：`in_progress` 主行身份只由 `t_payment_simple.flow_id` 准入、OA Mongo `_id` 匹配和当前 workflow status 决定。不得再用 completed projection 的业务字段指纹反向排除进行中 OA；不同 `flow_id` 必须作为不同付款申请保留。
+- 测试覆盖：更新 `tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_in_progress_view_keeps_payment_admitted_record_when_completed_projection_has_same_business_record`，锁定 completed 中存在同业务字段正本时，payment-admitted 的进行中 OA 仍展示。
+- 风险控制：展示层保留不同 flow id；自动匹配层若同一支出流水同时命中多张同额 OA，不能强行确认，应按既有冲突/歧义路径留给人工关联或更强证据判定。
+
+## 2026-06-22 - 已完成 OA 的进行中影子行去重（已撤销）
 
 - 目标：修复生产 `云南心诚环保科技有限公司 / 7000 / 2026-04` 在“进行中 OA”中显示未配对，但真实 completed 行已关联支出流水的重复展示问题。
 - 影响范围：`OaPendingPaymentQueryService` 的 in-progress 视图过滤、`invoice-usage-collection` 重建 `oa_pending_payment` read model 的结果、服务层回归测试和本模块测试矩阵；Workbench relation、自动匹配规则和前端 API contract 不变。
-- 关键决策：真实原因不是金额/对方名/日期规则失败。生产中旧 in-progress 行使用 Mongo 旧 row id（如 `oa-pay-69e5c2a3...`），真实 completed 行使用请求号 row id（如 `oa-pay-2094`），两者业务字段相同但 row id 不同；completed 行已通过 Workbench 自动决策关联 `txn_imported_1521` 并判定 `paid`。查询服务现在用月份、类型、申请人、项目、对方、金额、申请日期、开户行、收款账号和事由组成业务指纹，in-progress payment-admitted 记录如果已存在对应 completed 指纹，就作为影子行排除。
+- 关键决策（历史，已撤销）：当时认为生产中旧 in-progress 行使用 Mongo 旧 row id（如 `oa-pay-69e5c2a3...`）、真实 completed 行使用请求号 row id（如 `oa-pay-2094`），两者业务字段相同但 row id 不同，因此用月份、类型、申请人、项目、对方、金额、申请日期、开户行、收款账号和事由组成业务指纹排除 in-progress payment-admitted 记录。该假设后来被确认不成立，因为业务允许相同业务字段的不同 OA。
 - 文档影响：更新本实施记录和 `tests.md`；产品口径不变，仍是 completed/in-progress 两视图，只是避免同一业务单跨投影重复展示。
-- 测试覆盖：新增 `tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_in_progress_view_hides_payment_admitted_shadow_when_completed_projection_has_same_business_record`。
+- 测试覆盖（历史，已替换）：原 `test_in_progress_view_hides_payment_admitted_shadow_when_completed_projection_has_same_business_record` 已由保留不同 flow id 的回归测试替代。
 - 生产验证：发布 release `main-6652abe4-20260622115629` 后重建 `oa_pending_payment:2026-04`，rows API 返回 `in_progress.total=0`、`summary.viewCounts.in_progress=0`；completed 视图保留 `oa-pay-2094`，付款状态 `paid`，支出流水 `txn_imported_1521`。
-- 未测风险：业务指纹是高置信去重，不替代未来更强的 OA canonical identity；若真实业务允许同日同申请人同项目同对方同金额同账号同事由的两张不同付款申请，需引入更稳定的 OA 跨状态 identity。
+- 未测风险（历史，已关闭）：真实业务已确认允许同日同申请人同项目同对方同金额同账号同事由的两张不同付款申请，因此不能使用业务指纹作为跨 flow id 排除依据。
 
 ## 2026-06-22 - 刷新态分页与自动写回幂等闭环
 

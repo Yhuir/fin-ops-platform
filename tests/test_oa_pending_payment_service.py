@@ -296,8 +296,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
 
-    def test_in_progress_view_hides_payment_admitted_shadow_when_completed_projection_has_same_business_record(self) -> None:
-        duplicate_detail = {
+    def test_in_progress_view_keeps_payment_admitted_record_when_completed_projection_has_same_business_record(self) -> None:
+        same_business_detail = {
             "申请日期": "2026-04-16",
             "开户行": "中国农业银行股份有限公司威信扎西支行",
             "收款账号": "24231201040003910",
@@ -320,7 +320,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
                     workflow_status="completed",
                     counterparty_name="云南心诚环保科技有限公司",
                     reason="申请支付昭通烟厂能源系统维护项目：环保数采仪1套，合同金额：7000元，全额付款7000元。",
-                    detail_fields=duplicate_detail,
+                    detail_fields=same_business_detail,
                 )
             ],
             in_progress_oa_records=[
@@ -333,7 +333,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
                     workflow_status="in_progress",
                     counterparty_name="云南心诚环保科技有限公司",
                     reason="申请支付昭通烟厂能源系统维护项目：环保数采仪1套，合同金额：7000元，全额付款7000元。",
-                    detail_fields=duplicate_detail,
+                    detail_fields=same_business_detail,
                 ),
                 self._oa(
                     "oa-progress-real",
@@ -357,9 +357,9 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
         completed_payload = service.list_rows(page_size=20)
 
-        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-real"])
-        self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
-        self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
+        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-pay-old-mongo-id", "oa-progress-real"])
+        self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 2})
+        self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 2})
 
     def test_page_size_limit_protects_first_screen_slo(self) -> None:
         service = self._service(
