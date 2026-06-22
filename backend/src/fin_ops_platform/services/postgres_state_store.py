@@ -15,6 +15,7 @@ from fin_ops_platform.services.file_object_migration import verified_object_key_
 from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
+    PostgresOaPendingPaymentRelationRepository,
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
@@ -133,6 +134,7 @@ class PostgresStateStore:
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
+        self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
         if self._object_storage_repository is None:
             self._file_root.mkdir(parents=True, exist_ok=True)
@@ -718,6 +720,10 @@ class PostgresStateStore:
     @property
     def read_model_repository(self) -> PostgresReadModelRepository:
         return self._read_model_repository
+
+    @property
+    def oa_pending_payment_relation_repository(self) -> PostgresOaPendingPaymentRelationRepository:
+        return self._oa_pending_payment_relation_repository
 
     @property
     def workbench_sql_read_repository(self) -> PostgresReadModelRepository:

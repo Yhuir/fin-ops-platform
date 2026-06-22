@@ -68,6 +68,19 @@ class FakeAdmissionPaymentStatusRepository:
         return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
 
 
+class FakePendingRelationService:
+    def __init__(self, relations: list[dict[str, object]] | None = None) -> None:
+        self.relations = [dict(relation) for relation in list(relations or [])]
+
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        wanted = {str(row_id) for row_id in list(row_ids or [])}
+        return [
+            relation
+            for relation in self.relations
+            if wanted & {str(row_id) for row_id in list(relation.get("row_ids") or [])}
+        ]
+
+
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
     def test_active_relation_group_returns_one_row_with_aggregated_totals(self) -> None:
         bank_group = self._bank("bank-group", "4450.00")
@@ -296,6 +309,62 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
 
+    def test_in_progress_view_reads_bank_relation_from_pending_payment_source(self) -> None:
+        bank = self._bank("bank-progress-paid", "163000.00", counterparty_name="威斯达昆明信息技术有限责任公司")
+        pending_relation = {
+            "case_id": "oa-pending-progress-paid",
+            "relation_id": "oa-pending-progress-paid",
+            "status": "active",
+            "relation_mode": "oa_pending_payment_in_progress",
+            "relation_source": "oa_pending_payment_bank_relations",
+            "month_scope": "2026-02",
+            "row_ids": ["oa-progress-paid", bank.id],
+            "row_types": ["oa", "bank"],
+            "oa_row_ids": ["oa-progress-paid"],
+            "bank_transaction_ids": [bank.id],
+            "amount_check": {"matched": True, "rule_code": "oa_bank_exact_amount"},
+            "special_metadata": {
+                "origin": "oa_pending_payment_in_progress",
+                "source": "oa_pending_payment_bank_relations",
+            },
+        }
+        payment_repository = FakePaymentStatusRepository(
+            flow_ids={"oa-progress-paid": "flow-progress-paid"},
+            paid_flow_ids={"flow-progress-paid"},
+        )
+        service = self._service(
+            oa_records=[],
+            in_progress_oa_records=[
+                self._oa(
+                    "oa-progress-paid",
+                    "陈秀云",
+                    "163000.00",
+                    workflow_status="in_progress",
+                    project_name="昭通卷烟厂2023-2025年度能源集中监控平台系统维护",
+                    apply_type="支付申请",
+                    counterparty_name="威斯达昆明信息技术有限责任公司",
+                    reason="技术服务费",
+                )
+            ],
+            transactions=[bank],
+            pending_relation_service=FakePendingRelationService([pending_relation]),
+            payment_repository=payment_repository,
+        )
+
+        progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
+        completed_payload = service.list_rows(page_size=20, view_mode="completed")
+
+        self.assertEqual(completed_payload["rows"], [])
+        self.assertEqual(progress_payload["pagination"]["total"], 1)
+        row = progress_payload["rows"][0]
+        self.assertEqual(row["oa"]["id"], "oa-progress-paid")
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["bankTransaction"]["primaryBankTransactionId"], "bank-progress-paid")
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "163000.00")
+        self.assertEqual(row["bankTransaction"]["summaries"][0]["relationSource"], "oa_pending_payment_bank_relations")
+        self.assertEqual(row["oaPaymentWriteback"]["code"], "written")
+        self.assertEqual(set(payment_repository.resolved_records), {"oa-progress-paid"})
+
     def test_in_progress_view_keeps_payment_admitted_record_when_completed_projection_has_same_business_record(self) -> None:
         same_business_detail = {
             "申请日期": "2026-04-16",
@@ -474,6 +543,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         transactions: list[BankTransaction] | None = None,
         invoices: list[Invoice] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
+        pending_relation_service: FakePendingRelationService | None = None,
         payment_repository: FakePaymentStatusRepository | None = None,
     ) -> OaPendingPaymentQueryService:
         projection = StaticOAProjection(oa_records)
@@ -488,6 +558,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
                 invoices=list(invoices or []),
                 oa_projection=projection,
             ),
+            pending_relation_service=pending_relation_service,
             oa_projection=projection,
             in_progress_oa_projection=StaticOAProjection(in_progress_oa_records or oa_records),
             payment_status_repository=payment_repository,
@@ -526,13 +597,19 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _bank(bank_id: str, amount: str, *, direction: TransactionDirection = TransactionDirection.OUTFLOW) -> BankTransaction:
+    def _bank(
+        bank_id: str,
+        amount: str,
+        *,
+        direction: TransactionDirection = TransactionDirection.OUTFLOW,
+        counterparty_name: str = "测试供应商",
+    ) -> BankTransaction:
         signed_amount = -Decimal(amount) if direction == TransactionDirection.OUTFLOW else Decimal(amount)
         return BankTransaction(
             id=bank_id,
             account_no="622200001234",
             txn_direction=direction,
-            counterparty_name_raw="测试供应商",
+            counterparty_name_raw=counterparty_name,
             amount=Decimal(amount),
             signed_amount=signed_amount,
             txn_date="2026-05-21",

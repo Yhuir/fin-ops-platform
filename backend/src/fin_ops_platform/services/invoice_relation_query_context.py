@@ -67,8 +67,6 @@ class DistributedInvoiceRelationContext:
         resolved_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
         if not resolved_row_ids:
             return []
-        if self._relation_facade is None:
-            return []
         return self._distributed_active_relations_for_row_ids(sorted(resolved_row_ids))
 
     def relation_summaries_for_row(self, row_id: str) -> list[dict[str, Any]]:
@@ -110,12 +108,28 @@ class DistributedInvoiceRelationContext:
         self.oa_records_by_id(oa_ids)
 
     def preload_relation_rows(self, row_ids: list[str]) -> None:
-        if self._relation_facade is None:
-            return
         normalized_ids = _dedupe_preserve_order(str(row_id).strip() for row_id in list(row_ids or []))
         if not normalized_ids:
             return
         self._load_distributed_relations(normalized_ids)
+
+    def add_distributed_relations(self, relations: list[dict[str, Any]]) -> None:
+        for relation in list(relations or []):
+            if not isinstance(relation, dict):
+                continue
+            case_id = str(relation.get("case_id") or relation.get("relation_id") or "").strip()
+            if not case_id:
+                continue
+            for row_id, _row_type in self.typed_relation_rows(relation):
+                if not row_id:
+                    continue
+                self._distributed_relations_by_row_id.setdefault(row_id, [])
+                existing_case_ids = {
+                    str(item.get("case_id") or item.get("relation_id") or "").strip()
+                    for item in self._distributed_relations_by_row_id[row_id]
+                }
+                if case_id not in existing_case_ids:
+                    self._distributed_relations_by_row_id[row_id].append(deepcopy(relation))
 
     def _distributed_active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         self._load_distributed_relations(row_ids)

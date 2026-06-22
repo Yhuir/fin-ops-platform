@@ -295,6 +295,7 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import Postgres
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import SnapshotOaPendingPaymentRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
@@ -1011,6 +1012,7 @@ class Application:
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
+            pending_relation_service=self._oa_pending_payment_relation_repository(),
             oa_projection=oa_adapter,
             in_progress_oa_projection=oa_pending_payment_projection,
             payment_status_repository=self._oa_payment_status_repository(),
@@ -9434,6 +9436,7 @@ class Application:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
+            pending_relation_service=self._oa_pending_payment_relation_repository(),
             oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
             in_progress_oa_projection=self._oa_pending_payment_projection(),
             payment_status_repository=self._oa_payment_status_repository(),
@@ -9478,6 +9481,7 @@ class Application:
             oa_projection=self._oa_pending_payment_projection(),
             completed_oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
+            pending_relation_service=self._oa_pending_payment_relation_repository(),
             payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
@@ -9485,6 +9489,29 @@ class Application:
         )
         self._oa_pending_payment_command_service_instance = service
         return service
+
+    def _oa_pending_payment_relation_repository(self) -> object | None:
+        override = getattr(self, "_oa_pending_payment_relation_repository_override", None)
+        if override is not None:
+            return override
+        repository = getattr(self, "_oa_pending_payment_relation_repository_instance", None)
+        if repository is not None:
+            return repository
+        state_store = getattr(self, "_state_store", None)
+        postgres_repository = getattr(state_store, "oa_pending_payment_relation_repository", None)
+        if postgres_repository is not None:
+            self._oa_pending_payment_relation_repository_instance = postgres_repository
+            return postgres_repository
+        loader = getattr(state_store, "load_oa_pending_payment_bank_relations", None)
+        saver = getattr(state_store, "save_oa_pending_payment_bank_relations", None)
+        if callable(loader) and callable(saver):
+            repository = SnapshotOaPendingPaymentRelationRepository(
+                load_snapshot=loader,
+                save_snapshot=saver,
+            )
+            self._oa_pending_payment_relation_repository_instance = repository
+            return repository
+        return None
 
     def _oa_pending_payment_projection(
         self,

@@ -1000,7 +1000,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
   });
 
-  test("confirm link does not expose local optimistic row movement before the fresh refetch", async () => {
+  test("confirm link does not expose row movement while the submit is still in progress", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
@@ -1028,6 +1028,45 @@ describe("Workbench row selection and detail modal", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     });
+  });
+
+  test("confirm link applies operation projection even when the main workbench generation is still refreshing", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      actionDelayMs: 20,
+      workbenchReadModelStatus: "refreshing",
+    });
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const openBankRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    const openInvoiceRow = await screen.findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+
+    await user.click(openBankRow);
+    await user.click(openInvoiceRow);
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+    }, { timeout: 2_000 });
+    expect(screen.queryByText(/关联台刷新未完成/)).not.toBeInTheDocument();
+    expect(
+      within(openZone).queryByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(pairedZone).getByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
   });
 
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {

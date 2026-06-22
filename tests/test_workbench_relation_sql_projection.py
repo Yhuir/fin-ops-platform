@@ -221,6 +221,24 @@ class CandidateDecisionRelationProjectionConnection(WorkbenchRelationProjectionC
         return super().fetch_all(sql, params)
 
 
+class PendingClaimedBankRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transaction_relation_claims" in normalized:
+            self.sql_statements.append(sql)
+            return [{"bank_transaction_id": "txn-unlinked"}]
+        return super().fetch_all(sql, params)
+
+
+class PendingClaimedCandidateDecisionProjectionConnection(CandidateDecisionRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transaction_relation_claims" in normalized:
+            self.sql_statements.append(sql)
+            return [{"bank_transaction_id": "txn-tian-196"}]
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def test_rebuild_writes_linked_and_unlinked_relation_rows(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -254,6 +272,21 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
         self.assertEqual(rows_by_id["txn-unlinked"]["group_ids"], [])
         self.assertFalse(any("from read_model.workbench_rows" in sql for sql in connection.sql_statements))
+
+    def test_rebuild_excludes_unlinked_bank_rows_claimed_by_in_progress_oa(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = PendingClaimedBankRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
+        self.assertIn("txn-tian-196", rows_by_id)
+        self.assertNotIn("txn-unlinked", rows_by_id)
+        self.assertTrue(any("from app.bank_transaction_relation_claims" in sql for sql in connection.sql_statements))
 
     def test_rebuild_deduplicates_formal_and_oa_attachment_invoice_with_same_identity(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -299,6 +332,22 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "candidate")
         self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], ["decision-open-candidate"])
         self.assertEqual(rows_by_id["txn-tian-196"]["linked_oa"][0]["relation_status"], "candidate")
+        self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
+
+    def test_rebuild_excludes_candidate_decisions_using_in_progress_oa_claimed_bank_rows(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = PendingClaimedCandidateDecisionProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        self.assertEqual(result["group_count"], 0)
+        self.assertEqual(repository.saved[0]["groups"], [])
+        rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
+        self.assertNotIn("txn-tian-196", rows_by_id)
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
 
 

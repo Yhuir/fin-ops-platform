@@ -3,6 +3,10 @@
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter, PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
+    PostgresOaPendingPaymentRelationRepository,
+    SnapshotOaPendingPaymentRelationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
@@ -13,6 +17,8 @@ __all__ = [
     "PostgresOAProjectionRepository",
     "PostgresCoreRepository",
     "PostgresOpsTaxEtcRepository",
+    "PostgresOaPendingPaymentRelationRepository",
+    "SnapshotOaPendingPaymentRelationRepository",
     "PostgresReadModelRepository",
     "PostgresWorkbenchRepository",
     "PostgresWorkbenchIdempotencyRepository",

@@ -19,8 +19,10 @@ from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentError,
     VIEW_MODE_IN_PROGRESS,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
+    OaPendingPaymentRelationRepositoryError,
+)
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
-from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 RefreshCallback = Callable[[str], object]
@@ -35,6 +37,7 @@ class OaPendingPaymentCommandService:
         oa_projection: Any,
         relation_command_service: Any | None,
         payment_status_repository: OAPaymentStatusRepository | None,
+        pending_relation_service: Any | None = None,
         completed_oa_projection: Any | None = None,
         lifecycle_policy: InvoiceLifecyclePolicy | None = None,
         matching_rules: WorkbenchMatchingRules | None = None,
@@ -45,6 +48,7 @@ class OaPendingPaymentCommandService:
         self._oa_projection = oa_projection
         self._completed_oa_projection = completed_oa_projection
         self._relation_command_service = relation_command_service
+        self._pending_relation_service = pending_relation_service
         self._payment_status_repository = payment_status_repository
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
         self._matching_rules = matching_rules or WorkbenchMatchingRules(include_special_rules=False)
@@ -70,12 +74,6 @@ class OaPendingPaymentCommandService:
                 "OA payment status writeback is not configured.",
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             )
-        if self._relation_command_service is None:
-            raise OaPendingPaymentError(
-                "workbench_relation_command_unavailable",
-                "Workbench relation command service is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
         flow_id = self._resolve_oa_flow_id(record)
 
         relation_result: dict[str, Any]
@@ -90,7 +88,7 @@ class OaPendingPaymentCommandService:
                     "affected_months": [record.month] if record.month else [],
                 }
             else:
-                relation_result = self._confirm_relation(
+                relation_result = self._confirm_pending_relation(
                     [record],
                     bank_transactions,
                     actor_id=actor,
@@ -136,12 +134,6 @@ class OaPendingPaymentCommandService:
             raise OaPendingPaymentError("oa_row_ids_required", "At least one OA row is required.")
         if not bank_transaction_ids:
             raise OaPendingPaymentError("bank_transaction_ids_required", "At least one bank transaction is required.")
-        if self._relation_command_service is None:
-            raise OaPendingPaymentError(
-                "workbench_relation_command_unavailable",
-                "Workbench relation command service is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
         records = self._oa_records(oa_row_ids)
         if len(records) != len(set(oa_row_ids)):
             found_ids = {record.id for record in records}
@@ -169,7 +161,7 @@ class OaPendingPaymentCommandService:
             )
         amount_check = self._relation_amount_check(records, bank_transactions)
         flow_ids = self._resolve_oa_flow_ids(records) if amount_check.get("matched") is True else []
-        relation_result = self._confirm_relation(
+        relation_result = self._confirm_pending_relation(
             records,
             bank_transactions,
             actor_id=clean_string(actor_id) or "system",
@@ -202,12 +194,6 @@ class OaPendingPaymentCommandService:
         }
 
     def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        if self._relation_command_service is None:
-            raise OaPendingPaymentError(
-                "workbench_relation_command_unavailable",
-                "Workbench relation command service is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
         if self._payment_status_repository is None:
             raise OaPendingPaymentError(
                 "oa_payment_status_repository_unavailable",
@@ -359,18 +345,7 @@ class OaPendingPaymentCommandService:
         return relation
 
     def _active_relation_for_oa_or_none(self, oa_row_id: str) -> dict[str, Any] | None:
-        active_relations_for_row_ids = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
-        if not callable(active_relations_for_row_ids):
-            raise OaPendingPaymentError(
-                "workbench_relation_command_unavailable",
-                "Workbench relation command service cannot read active relations.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
-        relations = [
-            relation
-                for relation in list(active_relations_for_row_ids([oa_row_id]) or [])
-                if isinstance(relation, dict)
-        ]
+        relations = self._active_relations_for_row_ids([oa_row_id])
         if not relations:
             return None
         if len(relations) > 1:
@@ -381,6 +356,19 @@ class OaPendingPaymentCommandService:
                 details={"oa_row_id": oa_row_id, "case_ids": [clean_string(item.get("case_id") or "") for item in relations]},
             )
         return relations[0]
+
+    def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        relations: list[dict[str, Any]] = []
+        for relation_source in (self._relation_command_service, self._pending_relation_service):
+            active_relations_for_row_ids = getattr(relation_source, "active_relations_for_row_ids", None)
+            if not callable(active_relations_for_row_ids):
+                continue
+            relations.extend(
+                relation
+                for relation in list(active_relations_for_row_ids(row_ids) or [])
+                if isinstance(relation, dict)
+            )
+        return _dedupe_relations(relations)
 
     def _bank_transactions_from_relation(self, relation: dict[str, Any]) -> list[BankTransaction]:
         bank_ids = _relation_bank_ids(relation)
@@ -463,7 +451,7 @@ class OaPendingPaymentCommandService:
             "source": "oa_pending_payment_link_bank_transactions",
         }
 
-    def _confirm_relation(
+    def _confirm_pending_relation(
         self,
         records: list[OAApplicationRecord],
         bank_transactions: list[BankTransaction],
@@ -477,11 +465,11 @@ class OaPendingPaymentCommandService:
         history_note: str,
         source_action: str,
     ) -> dict[str, Any]:
-        confirm_relation = getattr(self._relation_command_service, "confirm_relation", None)
-        if not callable(confirm_relation):
+        create_relation = getattr(self._pending_relation_service, "create_active_relation", None)
+        if not callable(create_relation):
             raise OaPendingPaymentError(
-                "workbench_relation_command_unavailable",
-                "Workbench relation command service cannot confirm relations.",
+                "oa_pending_payment_relation_repository_unavailable",
+                "OA pending payment relation repository is not configured.",
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             )
         if not records:
@@ -490,25 +478,23 @@ class OaPendingPaymentCommandService:
         oa_ids = [record.id for record in records]
         try:
             return dict(
-                confirm_relation(
-                    case_id=case_id or _confirm_paid_case_id(oa_ids, bank_ids),
-                    row_ids=[*oa_ids, *bank_ids],
-                    row_types=[*(["oa"] * len(oa_ids)), *(["bank"] * len(bank_ids))],
-                    relation_mode="manual_confirmed",
+                create_relation(
+                    relation_id=case_id or _confirm_paid_case_id(oa_ids, bank_ids),
+                    oa_row_ids=oa_ids,
+                    bank_transaction_ids=bank_ids,
                     actor_id=actor_id,
                     month_scope=_relation_month_scope(records),
                     note=note or None,
                     amount_check=amount_check,
-                    special_metadata={
-                        "origin": "oa_pending_payment_in_progress",
-                        "source_action": source_action,
-                    },
-                    history_note=history_note,
                     idempotency_key=idempotency_key,
-                    history_operation_type=history_operation_type,
+                    source_action=source_action,
+                    raw_payload={
+                        "history_operation_type": history_operation_type,
+                        "history_note": history_note,
+                    },
                 )
             )
-        except WorkbenchRelationCommandError as exc:
+        except OaPendingPaymentRelationRepositoryError as exc:
             raise OaPendingPaymentError(
                 exc.error_code,
                 exc.message,
@@ -632,16 +618,15 @@ class OaPendingPaymentCommandService:
         }
 
     def _relation_status_by_bank_id(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
-        reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
-        if not callable(reader) or not bank_transaction_ids:
+        if not bank_transaction_ids:
             return {}
-        relations = [relation for relation in list(reader(bank_transaction_ids) or []) if isinstance(relation, dict)]
+        relations = self._active_relations_for_row_ids(bank_transaction_ids)
         oa_records = {record.id: record for record in self._oa_records(_relation_oa_ids(relations))}
         result: dict[str, dict[str, Any]] = {}
         for relation in relations:
             bank_ids = _relation_bank_ids(relation)
             oa_ids = _relation_oa_ids([relation])
-            linked_in_progress = any(
+            linked_in_progress = _relation_is_oa_pending_in_progress(relation) or any(
                 clean_string(getattr(oa_records.get(oa_id), "workflow_status", "") or "") == VIEW_MODE_IN_PROGRESS
                 for oa_id in oa_ids
             )
@@ -673,13 +658,8 @@ class OaPendingPaymentCommandService:
     def _writeback_existing_paid_relations(self, records: list[OAApplicationRecord]) -> list[dict[str, Any]]:
         if not records:
             return []
-        relation_reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
-        if not callable(relation_reader):
-            return []
         records_by_id = {record.id: record for record in records}
-        relations = _dedupe_relations(
-            relation for relation in list(relation_reader(list(records_by_id)) or []) if isinstance(relation, dict)
-        )
+        relations = self._active_relations_for_row_ids(list(records_by_id))
         writebacks: list[dict[str, Any]] = []
         for relation in relations:
             relation_records = [
@@ -721,11 +701,8 @@ class OaPendingPaymentCommandService:
         if not in_progress_records:
             return {"relations": [], "writebacks": [], "records": [], "skipped": []}
 
-        relation_reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
-        if not callable(relation_reader):
-            return {"relations": [], "writebacks": [], "records": [], "skipped": []}
         active_oa_relations = _dedupe_relations(
-            relation for relation in list(relation_reader([record.id for record in in_progress_records]) or []) if isinstance(relation, dict)
+            self._active_relations_for_row_ids([record.id for record in in_progress_records])
         )
         active_oa_ids = set(_relation_oa_ids(active_oa_relations))
         eligible_records = [record for record in in_progress_records if record.id not in active_oa_ids]
@@ -738,22 +715,29 @@ class OaPendingPaymentCommandService:
             if _bank_direction(transaction) == "outflow" and _record_or_transaction_matches_month(transaction, month)
         ]
         active_bank_relations = _dedupe_relations(
-            relation for relation in list(relation_reader([transaction.id for transaction in bank_transactions]) or []) if isinstance(relation, dict)
+            self._active_relations_for_row_ids([transaction.id for transaction in bank_transactions])
         )
         active_bank_ids = set(_relation_bank_ids_from_relations(active_bank_relations))
         eligible_banks = [transaction for transaction in bank_transactions if transaction.id not in active_bank_ids]
         if not eligible_banks:
             return {"relations": [], "writebacks": [], "records": [], "skipped": []}
 
-        record_by_id = {record.id: record for record in eligible_records}
         bank_by_id = {transaction.id: transaction for transaction in eligible_banks}
-        candidates = self._matching_rules.generate_candidates(
-            _scope_month_for_matching(month),
-            [_oa_matching_row(record) for record in eligible_records],
-            [_bank_matching_row(transaction) for transaction in eligible_banks],
-            [],
-            source_versions={"oa_pending_payment_auto_reconcile": "v1"},
-        )
+        candidates: list[dict[str, Any]] = []
+        for scope_month, scoped_records in _records_by_matching_scope(eligible_records, month).items():
+            scoped_banks = [transaction for transaction in eligible_banks if _record_or_transaction_matches_month(transaction, scope_month)]
+            if not scoped_banks:
+                continue
+            candidates.extend(
+                self._matching_rules.generate_candidates(
+                    scope_month,
+                    [_oa_matching_row(record) for record in scoped_records],
+                    [_bank_matching_row(transaction) for transaction in scoped_banks],
+                    [],
+                    source_versions={"oa_pending_payment_auto_reconcile": "v1"},
+                )
+            )
+        record_by_id = {record.id: record for record in eligible_records}
 
         claimed_oa_ids: set[str] = set()
         claimed_bank_ids: set[str] = set()
@@ -778,7 +762,7 @@ class OaPendingPaymentCommandService:
             try:
                 amount_check = self._assert_paid_by_banks(record, bank_match)
                 flow_ids = self._resolve_oa_flow_ids([record])
-                relation_result = self._confirm_relation(
+                relation_result = self._confirm_pending_relation(
                     [record],
                     bank_match,
                     actor_id=actor_id,
@@ -874,6 +858,18 @@ def _relation_contains_bank_ids(relation: dict[str, Any], bank_transaction_ids: 
     return all(bank_transaction_id in relation_bank_ids for bank_transaction_id in bank_transaction_ids)
 
 
+def _relation_is_oa_pending_in_progress(relation: dict[str, Any]) -> bool:
+    relation_mode = clean_string(relation.get("relation_mode") or relation.get("relationMode") or "")
+    if relation_mode == "oa_pending_payment_in_progress":
+        return True
+    metadata = relation.get("special_metadata") or relation.get("specialMetadata") or {}
+    if not isinstance(metadata, dict):
+        return False
+    origin = clean_string(metadata.get("origin") or "")
+    source = clean_string(metadata.get("source") or "")
+    return origin == "oa_pending_payment_in_progress" and source == "oa_pending_payment_bank_relations"
+
+
 def _relation_bank_ids_from_relations(relations: list[dict[str, Any]]) -> list[str]:
     bank_ids: list[str] = []
     for relation in relations:
@@ -956,6 +952,19 @@ def _scope_month_for_matching(month: str) -> str:
     if len(normalized) >= 7 and normalized[4] == "-":
         return normalized[:7]
     return "all"
+
+
+def _records_by_matching_scope(records: list[OAApplicationRecord], month: str) -> dict[str, list[OAApplicationRecord]]:
+    requested_scope = _scope_month_for_matching(month)
+    if requested_scope != "all":
+        return {requested_scope: list(records)}
+    grouped: dict[str, list[OAApplicationRecord]] = {}
+    for record in records:
+        scope_month = _scope_month_for_matching(clean_string(record.month or ""))
+        if scope_month == "all":
+            continue
+        grouped.setdefault(scope_month, []).append(record)
+    return grouped
 
 
 def _oa_matching_row(record: OAApplicationRecord) -> dict[str, Any]:

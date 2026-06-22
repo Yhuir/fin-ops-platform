@@ -20,6 +20,7 @@ from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymen
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
+    PostgresOaPendingPaymentRelationRepository,
     PostgresOAProjectionRepository,
     PostgresReadModelRepository,
 )
@@ -207,6 +208,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
+            pending_relation_service=PostgresOaPendingPaymentRelationRepository(self._connection),
             oa_projection=self._oa_projection_repository,
             in_progress_oa_projection=self._oa_pending_payment_projection(),
             payment_status_repository=self._payment_status_repository,

@@ -1816,7 +1816,6 @@ export default function ReconciliationWorkbenchPage() {
         loadingMessage: "正在确认关联...",
         syncingMessage: "关系已写入，正在同步关联台最新数据...",
         onProgress,
-        waitForFreshWorkbenchLoad: true,
         action: async () => {
           const result = await confirmWorkbenchLink({
             month: WORKBENCH_VIEW_MONTH,
@@ -1849,7 +1848,6 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: operationCopy.submittingMessage,
       syncingMessage,
       onProgress,
-      waitForFreshWorkbenchLoad: true,
       action: async () => {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,

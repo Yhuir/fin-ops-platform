@@ -413,14 +413,24 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 {"month": "2026-05"},
                 actor_id="tester",
             )
+            pending_snapshot = app._state_store.load_oa_pending_payment_bank_relations()
 
         self.assertEqual(payload["autoMatchedCount"], 1)
         self.assertEqual(payload["writebackCount"], 1)
         self.assertEqual(payload["autoMatchedRelations"][0]["oaRowIds"], ["oa-pay-flow-auto"])
         self.assertEqual(payload["autoMatchedRelations"][0]["bankTransactionIds"], ["bank-flow-auto"])
         self.assertEqual(payment_repository.marked_flow_ids, ["flow-auto"])
-        self.assertEqual(len(relation_command.confirm_calls), 1)
-        self.assertEqual(relation_command.confirm_calls[0]["amount_check"]["rule_code"], "oa_bank_exact_amount")
+        self.assertEqual(relation_command.confirm_calls, [])
+        pending_relations = list((pending_snapshot.get("relations") or {}).values())
+        self.assertTrue(
+            any(
+                set(relation.get("oa_row_ids") or []) == {"oa-pay-flow-auto"}
+                and set(relation.get("bank_transaction_ids") or []) == {"bank-flow-auto"}
+                and (relation.get("amount_check") or {}).get("rule_code") == "oa_bank_exact_amount"
+                for relation in pending_relations
+                if isinstance(relation, dict)
+            )
+        )
 
     def test_auto_reconcile_persists_relation_and_reload_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -455,7 +465,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 {"month": "2026-05"},
                 actor_id="tester",
             )
-            persisted_snapshot = app._state_store.load_workbench_pair_relations()
+            persisted_snapshot = app._state_store.load_oa_pending_payment_bank_relations()
+            persisted_workbench_snapshot = app._state_store.load_workbench_pair_relations()
 
             reloaded = build_application(data_dir=data_dir)
             reloaded_payment_repository = FakePaymentStatusRepository(
@@ -474,14 +485,17 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 actor_id="tester",
             )
 
-        pair_relations = persisted_snapshot.get("pair_relations")
-        self.assertIsInstance(pair_relations, dict)
-        persisted_relations = list(pair_relations.values()) if isinstance(pair_relations, dict) else []
+        pair_relations = persisted_workbench_snapshot.get("pair_relations")
+        self.assertFalse(pair_relations)
+        pending_relations = persisted_snapshot.get("relations")
+        self.assertIsInstance(pending_relations, dict)
+        persisted_relations = list(pending_relations.values()) if isinstance(pending_relations, dict) else []
         self.assertEqual(first_payload["autoMatchedCount"], 1)
         self.assertEqual(first_payload["writebackCount"], 1)
         self.assertTrue(
             any(
-                set(relation.get("row_ids") or []) == {"oa-pay-flow-persist", "bank-flow-persist"}
+                set(relation.get("oa_row_ids") or []) == {"oa-pay-flow-persist"}
+                and set(relation.get("bank_transaction_ids") or []) == {"bank-flow-persist"}
                 for relation in persisted_relations
                 if isinstance(relation, dict)
             )

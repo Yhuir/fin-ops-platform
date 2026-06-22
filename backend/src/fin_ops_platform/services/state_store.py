@@ -1350,6 +1350,24 @@ class ApplicationStateStore:
             current_payload["workbench_pair_relations"] = merged_snapshot
         self._save_local_pickle(current_payload)
 
+    def load_oa_pending_payment_bank_relations(self) -> dict[str, Any]:
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE and self._mongo_database is None:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self.load() if self._mongo_database is not None else self._load_local_pickle()
+        snapshot = current_payload.get("oa_pending_payment_bank_relations")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_oa_pending_payment_bank_relations(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE and self._mongo_database is None:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self.load() if self._mongo_database is not None else self._load_local_pickle()
+        current_payload["oa_pending_payment_bank_relations"] = normalized_snapshot
+        if self._mongo_database is not None:
+            self.save(current_payload)
+            return
+        self._save_local_pickle(current_payload)
+
     def load_no_oa_bank_batches(self) -> dict[str, Any]:
         if self._mongo_database is not None:
             return self._run_mongo_operation(self._load_no_oa_bank_batches_detailed_payload)

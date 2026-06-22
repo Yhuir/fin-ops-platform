@@ -94,7 +94,8 @@ class OaPendingPaymentQueryService:
     Data ownership mirrors the refactored invoice relation pages:
     - OA rows come from the OA projection;
     - bank transactions and invoices come from normalized import facts;
-    - relationship evidence comes only from WorkbenchRelationReadFacade distribution.
+    - completed OA relationship evidence comes from WorkbenchRelationReadFacade distribution;
+    - in-progress OA-bank payment evidence comes from the OA pending payment relation source.
     """
 
     def __init__(
@@ -102,6 +103,7 @@ class OaPendingPaymentQueryService:
         *,
         import_service: ImportNormalizationService,
         relation_facade: WorkbenchRelationReadFacade | None = None,
+        pending_relation_service: Any | None = None,
         oa_projection: Any | None = None,
         in_progress_oa_projection: Any | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
@@ -110,6 +112,7 @@ class OaPendingPaymentQueryService:
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
+        self._pending_relation_service = pending_relation_service
         self._oa_projection = oa_projection
         self._in_progress_oa_projection = in_progress_oa_projection or oa_projection
         self._payment_status_repository = payment_status_repository
@@ -457,7 +460,10 @@ class OaPendingPaymentQueryService:
         view_mode: str = VIEW_MODE_COMPLETED,
     ) -> list[dict[str, Any]]:
         records = self._oa_records(month=month, view_mode=view_mode)
-        context.preload_relation_rows([record.id for record in records])
+        record_ids = [record.id for record in records]
+        context.preload_relation_rows(record_ids)
+        if view_mode == VIEW_MODE_IN_PROGRESS:
+            context.add_distributed_relations(self._pending_relations_for_row_ids(record_ids))
         oa_by_id = {record.id: record for record in records}
         bank_by_id = context.bank_transactions_by_id()
         invoices_by_id = self._input_invoices_by_id()
@@ -494,6 +500,12 @@ class OaPendingPaymentQueryService:
                 )
             )
         return rows
+
+    def _pending_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        reader = getattr(self._pending_relation_service, "active_relations_for_row_ids", None)
+        if not callable(reader):
+            return []
+        return [relation for relation in list(reader(row_ids) or []) if isinstance(relation, dict)]
 
     def _single_oa_row(
         self,

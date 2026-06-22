@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-22 - 关联预览确认不再等待主 Workbench generation
+
+- 目标：修复关联台内选择 OA 和多条流水后点击确认关联，关系已写入但弹窗报“关联台最新数据同步超过 10 秒，当前状态：refreshing”的问题。
+- 影响范围：`ReconciliationWorkbenchPage` 的确认/撤回预览提交状态机、operation projection 应用路径、关联台前端回归测试；不改变后端 relation 写入、`workbench_relation` barrier、主 Workbench worker 或下游 read model fan-out 合同。
+- 关键决策：`confirm-link` / `withdraw-link` 响应中的 `operation_projection` 是后端写后真实投影，不是前端本地乐观重排。预览提交成功后仍先等待受影响月份 `workbench_relation` operation barrier；barrier fresh 后若有 projection，直接应用投影并关闭预览，主 `workbench` active generation 后台追赶。只有缺少有效 projection 的旧动作才等待当前 Workbench fresh refetch 后释放。
+- 文档影响：同步本模块 README、state-machine 和 tests，撤销“预览提交必须等待主 Workbench fresh refetch 才关闭”的旧页面口径。
+- 测试覆盖：新增 `web/src/test/WorkbenchSelection.test.tsx::confirm link applies operation projection even when the main workbench generation is still refreshing`，并更新“提交进行中不移动行”的断言名称。
+- 验证命令：`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx --testNamePattern "confirm link"`。
+- 未测风险：本地 Vitest 使用 deterministic mock，不证明真实生产 worker drain、`workbench:all` active generation 或下游页面已经收敛；这些仍需 App Status/worker 监控和 staging/生产 smoke 单独验证。
+
 ## 2026-06-22 - Workbench active repair 不再污染 App Health 阻断
 
 - 目标：修复关联台/Workbench 后台修复正在运行时，App Status 仍展示 `Workbench read model generation consistency failed.` 和红色阻断的问题。

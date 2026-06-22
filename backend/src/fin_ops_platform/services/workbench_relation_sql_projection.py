@@ -12,7 +12,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import Postgres
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-workbench-relation-object-identity-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-oa-pending-bank-claim-exclusion-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -55,14 +55,27 @@ class WorkbenchRelationSqlProjectionBuilder:
         normalized_scope = text(scope_key) or ""
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench relation SQL projection scope_key must be a month shard YYYY-MM.")
-        monthly_objects = self._source_objects_for_month(normalized_scope, relation_row_ids=[])
+        pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
+        monthly_objects = self._source_objects_for_month(
+            normalized_scope,
+            relation_row_ids=[],
+            excluded_bank_transaction_ids=pending_claimed_bank_ids,
+        )
         monthly_row_ids = sorted(monthly_objects)
         relations = [
             *self._active_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids),
-            *self._automatic_decision_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids),
+            *self._automatic_decision_relations_for_scope(
+                month=normalized_scope,
+                row_ids=monthly_row_ids,
+                excluded_bank_transaction_ids=pending_claimed_bank_ids,
+            ),
         ]
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
-        objects = self._source_objects_for_month(normalized_scope, relation_row_ids=relation_row_ids)
+        objects = self._source_objects_for_month(
+            normalized_scope,
+            relation_row_ids=relation_row_ids,
+            excluded_bank_transaction_ids=pending_claimed_bank_ids,
+        )
         groups = [_relation_group_payload(relation, objects=objects, month=normalized_scope) for relation in relations]
         relation_groups_by_row_id: dict[str, list[dict[str, Any]]] = {}
         for group in groups:
@@ -107,10 +120,17 @@ class WorkbenchRelationSqlProjectionBuilder:
             mark_empty(scope_key=normalized_scope, source_versions=source_versions, tenant_id=self._tenant_id)
         return {"scope_key": normalized_scope, "row_count": 0, "group_count": 0, "source_versions": source_versions}
 
-    def _source_objects_for_month(self, month: str, *, relation_row_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def _source_objects_for_month(
+        self,
+        month: str,
+        *,
+        relation_row_ids: list[str],
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         ids = _dedupe_preserve_order(text(row_id) for row_id in list(relation_row_ids or []))
+        excluded_bank_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
         objects: dict[str, dict[str, Any]] = {}
-        for row in self._bank_transaction_rows(month, ids):
+        for row in self._bank_transaction_rows(month, ids, excluded_bank_transaction_ids=excluded_bank_ids):
             _put_object(objects, _bank_transaction_object(row, month=month))
         for row in self._oa_rows(month, ids):
             _put_object(objects, _oa_object(row, month=month))
@@ -118,18 +138,35 @@ class WorkbenchRelationSqlProjectionBuilder:
             _put_object(objects, _formal_invoice_object(row, month=month))
         return objects
 
-    def _bank_transaction_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
-        return self._connection.fetch_all(
+    def _bank_transaction_rows(
+        self,
+        month: str,
+        row_ids: list[str],
+        *,
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        explicit_ids = set(row_ids)
+        excluded_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
+        rows = self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, counterparty_name_raw, trade_time, txn_date,
                    amount, txn_direction, summary, remark, bank_serial_no, account_name, account_no, txn_month,
                    raw_payload
             from app.bank_transactions
             where status <> 'deleted'
-              and (txn_month = %s::date or coalesce(legacy_mongo_id, id::text) = any(%s))
+              and (
+                  coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                  or (
+                      txn_month = %s::date
+                      and not (coalesce(legacy_mongo_id, id::text) = any(%s::text[]))
+                  )
+              )
             """,
-            (month_start(month), row_ids),
+            (row_ids, month_start(month), sorted(excluded_ids)),
         )
+        if not excluded_ids:
+            return rows
+        return [row for row in rows if text(row.get("row_id")) in explicit_ids or text(row.get("row_id")) not in excluded_ids]
 
     def _oa_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
         return self._connection.fetch_all(
@@ -169,9 +206,16 @@ class WorkbenchRelationSqlProjectionBuilder:
             (month_start(month), row_ids),
         )
 
-    def _automatic_decision_relations_for_scope(self, *, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
+    def _automatic_decision_relations_for_scope(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         if not row_ids:
             return []
+        excluded_bank_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
         rows = self._connection.fetch_all(
             """
             select decision_key, scope_month, row_ids, row_types, oa_row_ids, bank_row_ids, invoice_row_ids,
@@ -185,6 +229,7 @@ class WorkbenchRelationSqlProjectionBuilder:
                   or (d.decision_status in ('proposed', 'open') and d.display_state = 'open')
               )
               and d.row_ids && %s::text[]
+              and not (coalesce(d.bank_row_ids, array[]::text[]) && %s::text[])
               and not exists (
                   select 1
                   from app.workbench_pair_relations pr
@@ -193,10 +238,12 @@ class WorkbenchRelationSqlProjectionBuilder:
               )
             order by d.generated_at nulls last, d.decision_key
             """,
-            (self._tenant_id, month_start(month), row_ids),
+            (self._tenant_id, month_start(month), row_ids, sorted(excluded_bank_ids)),
         )
         result: list[dict[str, Any]] = []
         for row in rows:
+            if set(text_list(row.get("bank_row_ids"))) & excluded_bank_ids:
+                continue
             row_ids_payload = text_list(row.get("row_ids"))
             row_types_payload = text_list(row.get("row_types"))
             if not row_types_payload:
@@ -229,12 +276,27 @@ class WorkbenchRelationSqlProjectionBuilder:
             )
         return result
 
+    def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select bank_transaction_id
+            from app.bank_transaction_relation_claims
+            where status = 'active'
+              and owner_type = 'oa_pending_payment_relation'
+              and scope_month = %s::date
+            order by bank_transaction_id
+            """,
+            (month_start(month),),
+        )
+        return _dedupe_preserve_order(row.get("bank_transaction_id") for row in rows)
+
     def _source_versions(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
             """
             select
               (select max(updated_at)::text from app.workbench_pair_relations) as pair_relations_updated_at,
               (select max(updated_at)::text from read_model.workbench_reconciliation_decisions) as reconciliation_decisions_updated_at,
+              (select max(updated_at)::text from app.bank_transaction_relation_claims where status = 'active') as oa_pending_payment_bank_claims_updated_at,
               (select max(updated_at)::text from app.bank_transactions) as bank_transactions_updated_at,
               (select max(updated_at)::text from app.invoices) as invoices_updated_at,
               (select max(updated_at)::text from app.oa_applications) as oa_projection_updated_at
@@ -245,6 +307,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
             "workbench_pair_relations_updated_at": text(payload.get("pair_relations_updated_at")),
             "workbench_reconciliation_decisions_updated_at": text(payload.get("reconciliation_decisions_updated_at")),
+            "oa_pending_payment_bank_claims_updated_at": text(payload.get("oa_pending_payment_bank_claims_updated_at")),
             "bank_transactions_updated_at": text(payload.get("bank_transactions_updated_at")),
             "invoices_updated_at": text(payload.get("invoices_updated_at")),
             "oa_projection_updated_at": text(payload.get("oa_projection_updated_at")),

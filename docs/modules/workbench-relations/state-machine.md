@@ -12,6 +12,7 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 
 - 前端 `workbenchRelationUpdated` event。
 - `read_model.workbench_reconciliation_decisions` 中 `relation_status='candidate'`、未确认或仅用于候选展示的匹配。
+- OA 待付款进行中 OA 的 active pending relation 或 `app.bank_transaction_relation_claims`。它们只用于 OA 待付款 in-progress 视图和关联台候选排除，不是 Workbench confirmed relation fact。
 - 页面本地 table rows、drawer state、session state。
 - 非 fresh `workbench_relation` 返回的空 rows。
 
@@ -27,7 +28,7 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 | `no_oa_bank_batch` | 免 OA 批次 | 是 | 免 OA 批次提交和 internal transfer confirm-link 统一使用。 |
 | `turnover_manual_closure` | 外部往来 | 是 | 手工零差额闭环对应的 relation。通常只含 bank rows；当所选银行流水已处于 OA-bank relation 时，可由外部往来确认闭环合并为包含 `oa` + `bank` rows 的同一 active case。不得包含 invoice；包含发票或其他业务 row type 的完整关系必须在关联台处理。 |
 | `batch_accounting` | 批量账务 | 是 | 日常报销 OA 与银行流水批量账务关系。 |
-| `manual_confirmed` + `special_metadata.origin=oa_pending_payment_in_progress` | OA 待付款核对 | 是 | 进行中 OA 在 OA 待付款核对右侧抽屉中人工关联支出流水。它是 Workbench active relation fact，会影响关联台和下游 relation distribution；但不等于 OA MySQL 已写回，`t_payment_simple.pay_status=1` 只能由 OA 待付款“确认已支付并写回”动作触发。 |
+| `manual_confirmed` / `normal_match` + `special_metadata.origin=oa_pending_payment_promotion` | OA 待付款核对 promotion | 是 | 进行中 OA 的独立 pending relation 在 OA sync 发现 OA 已 completed 后 promotion 成普通 Workbench active relation。新建进行中 OA 关系不得使用 `origin=oa_pending_payment_in_progress` 写入 Workbench；历史残留由 migration 0073 迁移到 OA 待付款独立关系并撤回旧 Workbench active relation。 |
 | `etc_business_batch` | ETC | 是 | ETC summary 或业务批次关系。 |
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
 | `etc_batch_invoice_link` | ETC repair/link | 是 | 历史 ETC 批次补关联或 existing batch link 兼容关系；新增写入必须通过 command service，不允许页面 service 直接写 pair snapshot。 |

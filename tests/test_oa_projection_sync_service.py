@@ -49,6 +49,35 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
 
+    def test_oa_sync_promotes_completed_pending_payment_relations_and_marks_affected_scopes_dirty(self) -> None:
+        records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
+        source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
+        projection_repository = FakeProjectionRepository()
+        queue_repository = FakeQueueRepository()
+        promoter = FakePendingPaymentRelationPromoter(
+            {
+                "promoted_count": 1,
+                "skipped_count": 0,
+                "error_count": 0,
+                "errors": [],
+                "affected_months": ["2026-02"],
+            }
+        )
+        service = OAProjectionSyncService(
+            source_adapter=source_adapter,
+            projection_repository=projection_repository,
+            queue_repository=queue_repository,
+            pending_payment_relation_promoter=promoter,
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
+        self.assertEqual(result["promoted_pending_payment_relation_count"], 1)
+        self.assertEqual(result["pending_payment_relation_promotion_error_count"], 0)
+        self.assertIn(("workbench", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertIn(("oa_pending_payment", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
+
 
 class FakeSourceAdapter:
     def __init__(self, *, months: list[str], records_by_month: dict[str, list[OAApplicationRecord]]) -> None:
@@ -107,6 +136,17 @@ class FakeQueueRepository:
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+
+class FakePendingPaymentRelationPromoter:
+    def __init__(self, result: dict[str, object]) -> None:
+        self.result = dict(result)
+        self.completed_records: list[OAApplicationRecord] = []
+
+    def promote_completed_records(self, records: list[OAApplicationRecord], *, actor_id: str) -> dict[str, object]:
+        self.completed_records = list(records)
+        self.actor_id = actor_id
+        return dict(self.result)
 
 
 def _oa(row_id: str, month: str, *, workflow_status: str) -> OAApplicationRecord:

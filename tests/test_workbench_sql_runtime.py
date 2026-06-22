@@ -915,6 +915,45 @@ class InvoiceRowsProjectionConnection(WorkbenchProjectionSettingsConnection):
         return [row]
 
 
+class PendingClaimedBankProjectionConnection(WorkbenchProjectionSettingsConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transaction_relation_claims" in normalized:
+            return [{"bank_transaction_id": "bank-claimed-by-progress-oa"}]
+        if "from app.bank_transactions" in normalized:
+            return [
+                {
+                    "row_id": "bank-claimed-by-progress-oa",
+                    "account_no": "622200001234",
+                    "account_name": "交行 1234",
+                    "txn_direction": "outflow",
+                    "counterparty_name_raw": "进行中OA供应商",
+                    "amount": "7000.00",
+                    "txn_date": "2026-05-21",
+                    "trade_time": "2026-05-21 10:00:00",
+                    "summary": "货款",
+                    "remark": "",
+                    "project_id": None,
+                    "raw_payload": {},
+                },
+                {
+                    "row_id": "bank-unclaimed",
+                    "account_no": "622200001234",
+                    "account_name": "交行 1234",
+                    "txn_direction": "outflow",
+                    "counterparty_name_raw": "普通供应商",
+                    "amount": "5000.00",
+                    "txn_date": "2026-05-22",
+                    "trade_time": "2026-05-22 10:00:00",
+                    "summary": "货款",
+                    "remark": "",
+                    "project_id": None,
+                    "raw_payload": {},
+                },
+            ]
+        return super().fetch_all(sql, params)
+
+
 class EtcSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1299,6 +1338,46 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["tax_amount"], "22.64")
         self.assertEqual(rows[0]["summary_fields"]["税率"], "6%")
         self.assertEqual(rows[0]["summary_fields"]["税额"], "22.64")
+
+    def test_sql_projection_excludes_bank_rows_claimed_by_in_progress_oa_relation(self) -> None:
+        connection = PendingClaimedBankProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        claimed = set(builder._pending_claimed_bank_transaction_ids_for_month("2026-05"))
+        rows = builder._bank_rows("2026-05", excluded_bank_transaction_ids=claimed)
+
+        self.assertEqual([row["id"] for row in rows], ["bank-unclaimed"])
+
+    def test_sql_projection_excludes_candidate_decisions_claimed_by_in_progress_oa_relation(self) -> None:
+        read_model_repository = SimpleNamespace(
+            list_workbench_reconciliation_decisions=lambda **_kwargs: [
+                {
+                    "decision_key": "decision-claimed",
+                    "decision_status": DECISION_STATUS_OPEN,
+                    "display_state": DISPLAY_STATE_OPEN,
+                    "row_ids": ["bank-claimed-by-progress-oa"],
+                    "bank_row_ids": ["bank-claimed-by-progress-oa"],
+                },
+                {
+                    "decision_key": "decision-unclaimed",
+                    "decision_status": DECISION_STATUS_OPEN,
+                    "display_state": DISPLAY_STATE_OPEN,
+                    "row_ids": ["bank-unclaimed"],
+                    "bank_row_ids": ["bank-unclaimed"],
+                },
+            ]
+        )
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=read_model_repository,
+        )
+
+        decisions = builder._active_reconciliation_decisions_for_month(
+            "2026-05",
+            excluded_bank_transaction_ids={"bank-claimed-by-progress-oa"},
+        )
+
+        self.assertEqual([decision["decision_key"] for decision in decisions], ["decision-unclaimed"])
 
     def test_sql_projection_invoice_row_preserves_canonical_oa_attachment_source_metadata(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(connection=WorkbenchProjectionSettingsConnection())
@@ -1778,9 +1857,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         builder = WorkbenchSqlProjectionBuilder(connection=object(), read_model_repository=recorder)
         builder._current_dirty_scope_source_version = lambda _scope_key: 11
         builder._current_bank_auto_tag_rules_version = lambda: 1
-        builder._workbench_rows_for_month = lambda _month: {}
+        builder._pending_claimed_bank_transaction_ids_for_month = lambda _month: []
+        builder._workbench_rows_for_month = lambda _month, **_kwargs: {}
         builder._active_pair_relations_for_month = lambda _month, _row_ids: []
-        builder._active_reconciliation_decisions_for_month = lambda _month: []
+        builder._active_reconciliation_decisions_for_month = lambda _month, **_kwargs: []
         builder._supplement_missing_relation_rows = lambda _rows_by_id, _relations: None
         builder._supplement_missing_decision_rows = lambda _rows_by_id, _decisions: None
         builder._group_payload = lambda *_args, **_kwargs: {"paired": {"groups": []}, "open": {"groups": []}}

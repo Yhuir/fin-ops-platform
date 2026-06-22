@@ -46,7 +46,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-turnover-manual-closure-open-until-three-way-v2"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-oa-pending-bank-claim-exclusion-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -138,9 +138,16 @@ class WorkbenchSqlProjectionBuilder:
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
         self._bank_account_mapping_cache = None
         resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
-        rows_by_id = self._workbench_rows_for_month(normalized_scope)
+        pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
+        rows_by_id = self._workbench_rows_for_month(
+            normalized_scope,
+            excluded_bank_transaction_ids=pending_claimed_bank_ids,
+        )
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
-        decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
+        decisions = self._active_reconciliation_decisions_for_month(
+            normalized_scope,
+            excluded_bank_transaction_ids=pending_claimed_bank_ids,
+        )
         self._supplement_missing_relation_rows(rows_by_id, relations)
         self._supplement_missing_decision_rows(rows_by_id, decisions)
         payload = self._group_payload(
@@ -228,11 +235,16 @@ class WorkbenchSqlProjectionBuilder:
             "ignored_row_count": 0,
         }
 
-    def _workbench_rows_for_month(self, month: str) -> dict[str, dict[str, Any]]:
+    def _workbench_rows_for_month(
+        self,
+        month: str,
+        *,
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         rows: dict[str, dict[str, Any]] = {}
         for row in self._oa_projection_rows(month):
             rows[str(row["id"])] = row
-        for row in self._bank_rows(month):
+        for row in self._bank_rows(month, excluded_bank_transaction_ids=excluded_bank_transaction_ids):
             rows[str(row["id"])] = row
         invoice_rows = self._invoice_rows(month)
         self._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
@@ -346,7 +358,17 @@ class WorkbenchSqlProjectionBuilder:
             "detail_fields": payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {},
         }
 
-    def _bank_rows(self, month: str) -> list[dict[str, Any]]:
+    def _bank_rows(
+        self,
+        month: str,
+        *,
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        excluded_bank_ids = {
+            str(row_id).strip()
+            for row_id in (excluded_bank_transaction_ids or set())
+            if str(row_id).strip()
+        }
         rows = self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
@@ -355,12 +377,15 @@ class WorkbenchSqlProjectionBuilder:
             from app.bank_transactions
             where txn_month = %s::date
               and status <> 'deleted'
+              and not (coalesce(legacy_mongo_id, id::text) = any(%s::text[]))
             order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
             """,
-            (month_start(month),),
+            (month_start(month), sorted(excluded_bank_ids)),
         )
         result: list[dict[str, Any]] = []
         for row in rows:
+            if str(row.get("row_id") or "").strip() in excluded_bank_ids:
+                continue
             if row_payload_dict := self._bank_row_from_sql(row):
                 result.append(row_payload_dict)
         return result
@@ -574,10 +599,20 @@ class WorkbenchSqlProjectionBuilder:
             )
         return result
 
-    def _active_reconciliation_decisions_for_month(self, month: str) -> list[dict[str, Any]]:
+    def _active_reconciliation_decisions_for_month(
+        self,
+        month: str,
+        *,
+        excluded_bank_transaction_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         list_decisions = getattr(self._read_model_repository, "list_workbench_reconciliation_decisions", None)
         if not callable(list_decisions):
             return []
+        excluded_bank_ids = {
+            str(row_id).strip()
+            for row_id in (excluded_bank_transaction_ids or set())
+            if str(row_id).strip()
+        }
         return [
             decision
             for decision in list_decisions(
@@ -586,7 +621,22 @@ class WorkbenchSqlProjectionBuilder:
                 statuses={DECISION_STATUS_PAIRED, DECISION_STATUS_OPEN},
             )
             if self._decision_is_projectable(decision)
+            and not (_decision_bank_row_ids(decision) & excluded_bank_ids)
         ]
+
+    def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select bank_transaction_id
+            from app.bank_transaction_relation_claims
+            where status = 'active'
+              and owner_type = 'oa_pending_payment_relation'
+              and scope_month = %s::date
+            order by bank_transaction_id
+            """,
+            (month_start(month),),
+        )
+        return _dedupe_text(row.get("bank_transaction_id") for row in rows)
 
     def _supplement_missing_relation_rows(
         self,
@@ -1552,6 +1602,28 @@ def _text_list(value: object) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _dedupe_text(values: Any) -> list[str]:
+    result: list[str] = []
+    for value in list(values or []):
+        normalized = _text_or_none(value)
+        if normalized is not None and normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _decision_bank_row_ids(decision: dict[str, Any]) -> set[str]:
+    bank_ids = set(_text_list(decision.get("bank_row_ids")))
+    if bank_ids:
+        return bank_ids
+    row_ids = _text_list(decision.get("row_ids"))
+    row_types = _text_list(decision.get("row_types"))
+    return {
+        row_id
+        for index, row_id in enumerate(row_ids)
+        if index < len(row_types) and row_types[index] in {"bank", "bank_transaction"}
+    }
 
 
 def _list_of_dicts(value: object) -> list[dict[str, Any]]:

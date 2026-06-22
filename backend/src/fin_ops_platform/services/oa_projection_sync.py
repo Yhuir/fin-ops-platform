@@ -21,11 +21,13 @@ class OAProjectionSyncService:
         projection_repository: Any,
         queue_repository: Any,
         retention_cutoff_date_provider: Any | None = None,
+        pending_payment_relation_promoter: Any | None = None,
     ) -> None:
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
         self._queue_repository = queue_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
+        self._pending_payment_relation_promoter = pending_payment_relation_promoter
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
@@ -40,6 +42,7 @@ class OAProjectionSyncService:
         )
         removed_non_completed_count = self._delete_non_completed_projection_records(scope_key=scope_key, records=records)
         pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
+        promotion_result = self._promote_completed_pending_payment_relations(completed_records)
         result = {
             "sync_type": "oa_projection",
             "scope_key": scope_key,
@@ -50,12 +53,20 @@ class OAProjectionSyncService:
             "removed_stale_completed_count": removed_stale_completed_count,
             "removed_non_completed_count": removed_non_completed_count,
             "pruned_count": len(pruned_months),
-            "error_count": 0,
+            "promoted_pending_payment_relation_count": int(promotion_result.get("promoted_count") or 0),
+            "skipped_pending_payment_relation_promotion_count": int(promotion_result.get("skipped_count") or 0),
+            "pending_payment_relation_promotion_error_count": int(promotion_result.get("error_count") or 0),
+            "pending_payment_relation_promotion_errors": list(promotion_result.get("errors") or []),
+            "error_count": int(promotion_result.get("error_count") or 0),
         }
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
-        self._mark_downstream_dirty(scope_key, records, extra_months=pruned_months)
+        self._mark_downstream_dirty(
+            scope_key,
+            records,
+            extra_months=[*pruned_months, *list(promotion_result.get("affected_months") or [])],
+        )
         return result
 
     @staticmethod
@@ -204,6 +215,22 @@ class OAProjectionSyncService:
         if not callable(delete_non_completed) or (scope_key == "all" and not records):
             return 0
         return len(list(delete_non_completed(scope_key=scope_key, records=records) or []))
+
+    def _promote_completed_pending_payment_relations(self, completed_records: list[OAApplicationRecord]) -> dict[str, Any]:
+        promoter = self._pending_payment_relation_promoter
+        if promoter is None:
+            return {
+                "promoted_count": 0,
+                "skipped_count": 0,
+                "error_count": 0,
+                "errors": [],
+                "affected_months": [],
+            }
+        promote = getattr(promoter, "promote_completed_records", None)
+        if not callable(promote):
+            raise RuntimeError("pending payment relation promoter must expose promote_completed_records().")
+        result = promote(completed_records, actor_id="oa_projection_sync")
+        return result if isinstance(result, dict) else {}
 
     def _mark_downstream_dirty(
         self,

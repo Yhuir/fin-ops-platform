@@ -23,10 +23,12 @@
 - `backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_command_service.py`
+- `backend/src/fin_ops_platform/services/oa_pending_payment_relation_promotion_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_details.py`
 - `backend/src/fin_ops_platform/services/oa_payment_admitted_projection.py`
 - `backend/src/fin_ops_platform/services/oa_payment_status_service.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_relation.py`
 - `backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
@@ -43,9 +45,11 @@
 - `t_payment_simple.id` 只是支付状态记录 ID，可作为诊断/内部记录 ID，不是 OA ID；OA 匹配和写回必须使用 `flow_id`。
 - `in_progress` 不得用 completed projection 的金额、对方、项目、事由等业务字段做反向排除；业务允许同项目、同供应商、同金额、同事由发起多张不同 OA。不同 `flow_id` 是不同付款申请，是否展示只由 `t_payment_simple.flow_id` 准入和当前 workflow status 决定。
 - `completed` 是原 OA 待付款视图，只展示统一 OA projection 中当前已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
-- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；页面进入后会调用自动匹配/写回命令，复用关联台 OA-bank 精确金额/精确合计规则，将未配对支出流水自动确认为 Workbench active relation，并在金额、方向和 `flow_id` 校验通过后写回 OA MySQL。
-- `in_progress` 仍保留“关联支出流水”右侧抽屉，作为自动匹配失败后的人工兜底。抽屉默认展示全部支出流水，并可按全部、未配对、已配对、已关联进行中 OA 筛选；只有未配对流水可选择并建立 Workbench active relation。该关联成功后同样触发自动写回：支出流水合计等于 OA 金额且可解析 `flow_id` 时，把 `t_payment_simple.pay_status` 写成已支付，并让表格 chip 从“未写回”刷新为“已写回”。
-- `completed` 和 `in_progress` 只要已经存在有效支出流水 active relation 且支出合计等于 OA 金额，都由自动写回命令写回 `t_payment_simple.pay_status=1`；页面不再提供人工“确认已支付并写回”按钮。
+- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；页面进入后会调用自动匹配/写回命令，复用关联台 OA-bank 精确金额/精确合计规则，将未配对支出流水写入 OA 待付款自己的 `app.oa_pending_payment_bank_relations`，并通过 `app.bank_transaction_relation_claims` 独占该支出流水；金额、方向和 `flow_id` 校验通过后写回 OA MySQL。
+- `in_progress` 仍保留“关联支出流水”右侧抽屉，作为自动匹配失败后的人工兜底。抽屉默认展示全部支出流水，并可按全部、未配对、已配对、已关联进行中 OA 筛选；只有没有 Workbench active relation、也没有 active pending bank claim 的支出流水可选择。该关联成功后同样触发自动写回：支出流水合计等于 OA 金额且可解析 `flow_id` 时，把 `t_payment_simple.pay_status` 写成已支付，并让表格 chip 从“未写回”刷新为“已写回”。
+- `completed` 视图的 OA/流水 relation 证据来自关联台 `app.workbench_pair_relations` / `workbench_relation` distribution；`in_progress` 视图的 OA/流水 relation 证据来自 OA 待付款独立关系表和 bank claim。两者共享“同一条流水只能被一个 active 关系占用”的 bank claim/Workbench active relation 排除规则，但进行中 OA 的配对关系不进入关联台。
+- 当 OA sync 发现已有关联流水的进行中 OA 变成已完成时，`OaPendingPaymentRelationPromotionService` 会把 active pending relation promotion 为普通 Workbench active relation，并把原 pending relation 标记为 `promoted`、释放 bank claim、刷新 Workbench/OA 待付款 read model；迁移前残留的 `special_metadata.origin=oa_pending_payment_in_progress` Workbench active relation 由 migration `0073_oa_pending_payment_bank_relations.sql` 撤回并迁移到独立 pending relation。
+- `completed` 和 `in_progress` 只要已经存在有效支出流水 active relation 或 active pending relation 且支出合计等于 OA 金额，都由自动写回命令写回 `t_payment_simple.pay_status=1`；页面不再提供人工“确认已支付并写回”按钮。
 - `summary.viewCounts.completed/in_progress` 分别按 completed 统一 OA projection 与 in-progress payment-admitted projection 计算；筛选和搜索条件会同步作用于该数量。
 - 普通 `app.oa_applications` 投影只服务已完成/历史未知 OA；本页面的 completed 视图读取该统一 projection，in-progress 视图通过 `PaymentAdmittedOAProjectionAdapter` 以 `t_payment_simple.flow_id` 为准入表，精确读取 OA Mongo 当前记录后再按 `view_mode` 过滤。OA 系统里未进入 `t_payment_simple` 的重复/异常进行中流程不展示。
 - 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。

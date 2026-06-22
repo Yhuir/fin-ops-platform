@@ -84,11 +84,22 @@
 
 - 目标：取消 OA 待付款页面的人工写回入口，让进行中 OA 自动匹配未配对支出流水；completed 和 in-progress 只要已有有效支出流水 active relation 且金额相等，都自动写回 `t_payment_simple.pay_status=1`。
 - 影响范围：`OaPendingPaymentCommandService`、`/api/oa-pending-payments/auto-reconcile-bank-transactions`、`link-bank-transactions` 响应、`OaPendingPaymentsPage` 自动 reconcile effect、`OaPendingPaymentsTable`、前端 API/types、Browser mock、模块/API/E2E 文档和相关测试。
-- 关键决策：自动匹配只复用关联台 OA-bank 精确金额/精确合计规则；不做模糊匹配。候选 relation 不写回；写回必须基于 Workbench active relation 或自动命令刚确认的 relation，并通过 outflow、金额相等和 `flow_id` 校验。支出流水抽屉保留为自动匹配失败后的人工兜底，但提交成功后同样自动写回。
+- 关键决策：自动匹配只复用关联台 OA-bank 精确金额/精确合计规则；不做模糊匹配。候选 relation 不写回；写回必须基于 completed Workbench active relation、in-progress active pending relation 或自动命令刚确认的 pending relation，并通过 outflow、金额相等和 `flow_id` 校验。支出流水抽屉保留为自动匹配失败后的人工兜底，但提交成功后同样自动写回。
 - 文档影响：更新 README、state-machine、tests、e2e-spec、e2e-coverage、implementation-notes 和 `docs/dev/api-contracts.md`。
 - 测试覆盖：后端 command/API 覆盖自动匹配未配对支出流水、已有 relation 写回、link-bank 自动写回和金额不匹配不写回；前端 Vitest 覆盖 auto-reconcile、无人工按钮、operation barrier、link-bank 写回消息；Playwright 覆盖自动写回成功/失败和抽屉关联后自动写回。
 - 验证命令：本轮最终说明列出完整命令。
 - 未测风险：本地 mock/单测不替代真实 OA MySQL、真实 OA Mongo 字段变体、真实 Workbench 大数据和生产 worker drain；需要 staging 用真实进行中 OA 与支出流水样本做 smoke。
+
+## 2026-06-22 - 进行中 OA relation 独立事实源与 promotion 闭环
+
+- 目标：修复进行中 OA 自动/人工关联支出流水后进入关联台的问题，并解决 OA 从进行中变为已完成后的关系归属闭环。
+- 影响范围：`OaPendingPaymentCommandService`、`OaPendingPaymentQueryService`、`OaPendingPaymentRelationPromotionService`、`PostgresOaPendingPaymentRelationRepository`、`SnapshotOaPendingPaymentRelationRepository`、`OAProjectionSyncService`、`WorkbenchRelationSqlProjectionBuilder`、Postgres migration 0073、worker 组装链路、模块文档和测试矩阵。
+- 关键决策：进行中 OA 的 OA-流水关系写入 `app.oa_pending_payment_bank_relations`，支出流水占用写入 `app.bank_transaction_relation_claims`，不写 `app.workbench_pair_relations`。关联台 read model 读取 active pending bank claim 后排除对应流水，避免它作为未配对/候选进入关联台。OA sync 发现 active pending relation 的所有 OA row 已 completed 后，复用 Workbench relation command promotion 成普通 `manual_confirmed`/`normal_match` active relation，并把 pending relation 标记为 `promoted`、释放 claim。
+- 迁移决策：migration `0073_oa_pending_payment_bank_relations.sql` 将历史 `special_metadata.origin=oa_pending_payment_in_progress` 的 Workbench active relation 迁移到 OA 待付款独立 pending relation 和 bank claim，同时撤回旧 Workbench active relation，避免关联台继续显示进行中 OA。
+- 性能决策：候选排除走月度 active claim 集合和索引，Workbench active generation 与 workbench relation projection 每个 scope 各一次查询 active pending bank claim，避免逐行查库；pending relation 查询使用 GIN overlap 索引。
+- 测试覆盖：新增/更新 command/API/query service 测试、Workbench relation SQL projection 测试、promotion service 测试、OA sync promoter fan-out 测试、migration schema/allowlist 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_command_service tests.test_oa_pending_payment_api tests.test_oa_pending_payment_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_sql_projection tests.test_oa_pending_payment_relation_promotion_service tests.test_oa_projection_sync_service tests.test_postgres_migrations -v`。
+- 未测风险：未在真实生产 Postgres 上执行 migration 0073、真实 OA sync promotion、真实 worker drain 和真实页面 smoke；发布后需确认历史 `origin=oa_pending_payment_in_progress` Workbench active relation 已撤回，pending relation promotion 后关联台出现普通 completed relation。
 
 ## 2026-06-22 - OA 待付款表格 OA 区域五列压缩
 
@@ -102,7 +113,7 @@
 ## 当前决策
 
 - OA 待付款列表以 OA application 为主行；银行流水、进项发票和 relation 只是付款证据或详情证据。
-- Workbench active relation 是 OA/支出流水/进项发票关联关系的唯一事实源；多 OA、流水或发票在同一 relation 中必须聚合成一条核对行，并通过 `relationCount`/`summaries` 展开详情。
+- completed 视图以 Workbench active relation 作为 OA/支出流水/进项发票关联关系事实源；in-progress 视图以 OA 待付款独立 pending relation 作为 OA/支出流水关系事实源。多 OA、流水或发票在同一 relation 中必须聚合成一条核对行，并通过 `relationCount`/`summaries` 展开详情。
 - `paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 判定，前端不得按金额字段自行推断。
 - `paymentStatus` 不输出 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计进入 `pending_review`，多 OA 合并付款先按 relation group 合计后再判定。
 - `/oa-pending-payments` 通过 `view_mode=completed|in_progress` 承载同一页面的两类 OA：completed 是原待付款核对，in_progress 只展示 OA 系统仍进行中的支付申请/日常报销。
@@ -111,7 +122,7 @@
 - 页面切换按钮数量来自 rows `summary.viewCounts.completed/in_progress`，统计口径与当前搜索/筛选条件一致，并且使用同一批 `t_payment_simple.flow_id` 准入后的 OA。
 - completed 与 in_progress 视图展示同一套 OA、支付状态、支出流水和进项发票证据四分组表格；没有发票证据时发票列显示 `-`。
 - OA/支付状态/支出流水/发票是表格主体的固定四段：OA 单元格内按“申请人 / 项目 / 申请事由 / 对方户名 / 金额”五栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态和“未写回/已写回”；发票列纵向展示发票号、发票方、日期 chip 和金额，不显示“价税合计”chip。表格优先避免横向滚动，必要时通过紧凑字号、紧凑 chip、换行和行高增长承载信息。
-- 进行中 OA 的候选流水不能写回；页面级自动匹配只接受关联台 OA-bank 精确金额/精确合计规则确认的无冲突匹配。已有 active relation 或自动确认 relation 通过 workflow/outflow/金额/flow_id 校验后，自动写回 OA MySQL `t_payment_simple.pay_status=1`。
+- 进行中 OA 的候选流水不能写回；页面级自动匹配只接受关联台 OA-bank 精确金额/精确合计规则确认的无冲突匹配。已有 completed Workbench active relation、in-progress active pending relation 或自动确认 pending relation 通过 workflow/outflow/金额/flow_id 校验后，自动写回 OA MySQL `t_payment_simple.pay_status=1`。
 - 进行中 OA 自动匹配、`link-bank-transactions` 和规则保存成功后，页面必须先等待 `oa_pending_payment` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只能提示后台同步尚未完成，不能提前读旧投影或把已提交写入显示成操作失败。
 - OA MySQL `t_payment_simple.flow_id` 使用 OA Mongo `form_data._id`。该结论来自 2026-06-17 服务器实机脱敏验证：现有 `t_payment_simple.flow_id` 为 24 位 ObjectId 形态，能匹配 Mongo `_id`，未匹配 Flowable `PROC_INST_ID_`；流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为最终写回 ID。
 - 生产 rows、filter-options 和 detail 必须走 `OaPendingPaymentReadModelService` 的 freshness/source-version gate；非 fresh 返回 refreshing/unavailable 并入队 `oa_pending_payment.read_model.refresh`，不能 live scan。
@@ -268,6 +279,17 @@
 - 数据结论：生产 repository 同源读取 `view_mode=in_progress` 为 fresh、total `0`；`view_mode=completed` 为 fresh、total `210`。当前仍没有可执行真实 confirm-paid 的进行中 OA 行，因此没有改动真实业务支付状态；写回能力通过生产权限和 rollback smoke 验证。
 - 未测风险：真实用户点击 confirm-paid 需要未来出现一条真实进行中 OA + 支出流水候选/关系时再做业务级 smoke；当前生产事实数据没有 in-progress 行可用于不造数验证。
 - 后续事项：当出现真实进行中 OA 样本时，执行一次确认已支付，核对 `t_payment_simple.flow_id=<OA Mongo form_data._id>` 最新记录 `pay_status=1`，并核对页面 `oaPaymentWriteback.label=已写回`。
+
+## 2026-06-22 - 全部月份自动匹配接口 500 修复
+
+- 目标：修复 OA 待付款核对页月份为空（全部月份）时，页面级 `auto-reconcile-bank-transactions` 报“接口处理失败，请联系管理员查看后端日志”的生产故障。
+- 真实原因：生产日志显示后端调用 Workbench 候选匹配服务时传入 `scope_month=all`，而候选匹配服务只接受 `YYYY-MM`；异常为 `ValueError: scope_month must be YYYY-MM for workbench candidate matches.`。页面 rows 已经 fresh 并能展示数据，失败发生在 rows 加载后的自动匹配写命令。
+- 影响范围：`OaPendingPaymentCommandService._auto_confirm_in_progress_bank_matches`、自动匹配候选生成、OA-bank relation confirm、OA MySQL 写回和 read model refresh enqueue。
+- 关键决策：`month=all` 不再把 `all` 传给候选匹配服务；改为按进行中 OA 自身月份分组，并只用同月未配对支出流水生成候选，避免跨月匹配和 matcher contract 违规。
+- 文档影响：更新本实施记录和测试矩阵历史 bug 回归库；业务口径不变。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_command_service.py::OaPendingPaymentCommandServiceTests::test_auto_reconcile_all_months_groups_matches_by_month`，覆盖全部月份下跨月 OA/流水按月分组、分别确认 relation、写回对应 flow id 并入队对应月份 read model refresh。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_command_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_api tests.test_oa_pending_payment_service -v`；`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/oa_pending_payment_command_service.py backend/src/fin_ops_platform/services/oa_pending_payment_service.py`。
+- 未测风险：本地单测使用 fake repository，不替代真实浏览器携带登录态触发生产 HTTP；生产发布后仍需通过线上日志和页面刷新确认不再出现同一异常。
 
 ## 2026-06-17 - Phase 08 生产发布与 worker smoke
 

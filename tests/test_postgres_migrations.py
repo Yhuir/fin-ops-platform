@@ -86,6 +86,7 @@ EXPECTED_MIGRATIONS = [
     "0070_workbench_unused_write_indexes.sql",
     "0071_oa_application_workflow_status.sql",
     "0072_oa_pending_payment_workflow_status.sql",
+    "0073_oa_pending_payment_bank_relations.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -153,6 +154,9 @@ EXPECTED_TABLES = [
     "app.output_invoice_receipt_events",
     "app.input_invoice_usage_oa_reverse_batches",
     "app.oa_applicant_credentials",
+    "app.oa_pending_payment_bank_relations",
+    "app.bank_transaction_relation_claims",
+    "app.oa_pending_payment_bank_relation_events",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
@@ -224,7 +228,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 73)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 74)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -277,6 +281,20 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         )
         self.assertIn("'dead_lettered'", sql)
         self.assertIn("'done'", sql)
+
+    def test_oa_pending_payment_bank_relation_schema_and_migration_are_declared(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("create table if not exists app.oa_pending_payment_bank_relations", sql)
+        self.assertIn("create table if not exists app.bank_transaction_relation_claims", sql)
+        self.assertIn("bank_transaction_relation_claims_active_bank_uidx", sql)
+        self.assertIn("on app.bank_transaction_relation_claims (bank_transaction_id)", sql)
+        self.assertIn("where status = 'active'", sql)
+        self.assertIn("oa_pending_payment_bank_relations_oa_gin", sql)
+        self.assertIn("oa_pending_payment_bank_relations_bank_gin", sql)
+        self.assertIn("special_metadata->>'origin' = 'oa_pending_payment_in_progress'", sql)
+        self.assertIn("migrated_to_pending_relation_id", sql)
+        self.assertIn("oa_pending_payment_in_progress_relation_migrated", sql)
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -806,6 +824,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
         sql = re.sub(r"\binsert\s+into\s+app\.oa_attachment_invoice_cache_sources\b", "insert into allowed_lookup_backfill", sql)
+        for table_name in (
+            "oa_pending_payment_bank_relations",
+            "bank_transaction_relation_claims",
+            "oa_pending_payment_bank_relation_events",
+            "workbench_pair_relation_history",
+        ):
+            sql = re.sub(
+                rf"\binsert\s+into\s+app\.{table_name}\b",
+                f"insert into allowed_0073_{table_name}",
+                sql,
+            )
         sql = re.sub(
             r"\binsert\s+into\s+read_model\.workbench_generations\s*\(.*?on\s+conflict\s*\(generation_id\)\s+do\s+nothing;",
             "insert into allowed_workbench_generation_backfill",

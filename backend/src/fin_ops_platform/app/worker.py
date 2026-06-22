@@ -52,9 +52,14 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import OaPendingPaymentRelationPromotionService
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
+    PostgresOaPendingPaymentRelationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION, PostgresOAProjectionRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader, PostgresStateStore
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
@@ -83,6 +88,7 @@ from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetRea
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
@@ -255,11 +261,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         oa_runtime_settings = _load_oa_runtime_settings(connection)
         source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
+        pending_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
+        relation_command_service = WorkbenchRelationCommandService(
+            relation_repository=PostgresWorkbenchRelationRepository(connection),
+        )
+        pending_relation_promoter = OaPendingPaymentRelationPromotionService(
+            pending_relation_service=pending_relation_repository,
+            relation_command_service=relation_command_service,
+        )
         sync_service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
             queue_repository=queue,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
+            pending_payment_relation_promoter=pending_relation_promoter,
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
