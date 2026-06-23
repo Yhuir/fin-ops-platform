@@ -3339,3 +3339,31 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:transaction-persist-closure-accounting-audit`。
+
+## 2026-06-24 - transaction persist closure accounting audit
+
+目标：审计 transaction / non-transaction relation persist surfaces，判断是否还有必须先实现的 persist 边界。
+
+结论：
+
+- `_persist_workbench_pair_relations(...)`、`_schedule_workbench_pair_relation_persist(...)` 和 background persist 已是 `WorkbenchPairRelationPersistService` 的 compat delegate。
+- `WorkbenchPairRelationPersistService` 已拥有非事务 persist、changed-case snapshot、async coalescing、timing 和 cache clear 行为。
+- `_persist_workbench_pair_relations_in_transaction(...)` 已使用 `PostgresWorkbenchRelationRepository(transaction).save_workbench_pair_relations(...)`，不再使用 broad `PostgresWorkbenchRepository` 作为事务写 owner。
+- `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)` 已拥有 relation SQL upsert/history replacement 和事务内 dirty/outbox enqueue。
+- 该 slice 只关闭 persist surface accounting，不关闭 `workbench_relation` 模块。
+
+仍未闭环：
+
+- rollback restore closure accounting。
+- whole-state persistence snapshot / bootstrap compatibility accounting。
+- app health / route builder pair-service injection accounting。
+- 真实 PostgreSQL/worker/生产只读证据仍按生产证据 defer 处理，不阻塞本地重构推进。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:rollback-closure-accounting-audit`。
