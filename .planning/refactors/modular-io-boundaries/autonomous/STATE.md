@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-amount-check-query-contract`
+Current state: `autonomous-continue-after-batch-accounting-legacy-route-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `reconciliation-workbench:amount-check-query-contract`; next execution should start with batch accounting legacy route contract.
+Completed `batch-accounting:legacy-route-contract`; next execution should start with server.py route owner inventory.
 
 ## Completed Modules
 
@@ -46,6 +46,7 @@ Completed `reconciliation-workbench:amount-check-query-contract`; next execution
 - `read-models:search-and-no-oa-bank-batch-contract` -> `closed-autonomous`
 - `read-models:legacy-read-path-removal-guards` -> `closed-autonomous`
 - `reconciliation-workbench:amount-check-query-contract` -> `closed-autonomous`
+- `batch-accounting:legacy-route-contract` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -57,8 +58,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`reconciliation-workbench:amount-check-query-contract`
+`batch-accounting:legacy-route-contract`
 
 ## Next Prompt
 
-`batch-accounting:legacy-route-contract`
+`server-py:route-owner-inventory`

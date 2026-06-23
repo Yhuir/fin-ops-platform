@@ -701,6 +701,56 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_batch_accounting_route_handlers_do_not_bypass_service_boundaries(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        list_source = _function_source(tree, source, "_handle_api_batch_accounting")
+        submit_source = _function_source(tree, source, "_handle_api_batch_accounting_submit")
+        withdraw_source = _function_source(tree, source, "_handle_api_batch_accounting_withdraw")
+
+        violations: list[str] = []
+        if "_batch_accounting_service(use_sql_read_model=True).build_payload" not in list_source:
+            violations.append("GET /api/batch-accounting no longer delegates reads to BatchAccountingService with SQL read model")
+        for forbidden in (
+            "_repair_batch_accounting_relation_case_ids",
+            "repair_legacy_case_id_collisions",
+            "_execute_derived_data_lifecycle_event",
+            "_schedule_workbench_pair_relation_persist",
+            "_schedule_workbench_read_model_persist",
+            "_workbench_pair_relation_service",
+            "_workbench_relation_command_service",
+            "confirm_relation",
+            "withdraw_relation",
+            "replace_with_confirmed_relation",
+            "withdraw_latest_for_row_ids",
+        ):
+            if forbidden in list_source:
+                violations.append(f"GET /api/batch-accounting bypasses read-only route boundary via {forbidden}")
+
+        mutation_handlers = (
+            ("submit", submit_source, "_batch_accounting_service().submit"),
+            ("withdraw", withdraw_source, "_batch_accounting_service().withdraw"),
+        )
+        for name, handler_source, service_call in mutation_handlers:
+            if "_batch_accounting_mutation_session" not in handler_source:
+                violations.append(f"batch accounting {name} route no longer enforces mutation session")
+            if service_call not in handler_source:
+                violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingService")
+            for forbidden in (
+                "repair_legacy_case_id_collisions",
+                "confirm_relation(",
+                "withdraw_relation(",
+                "replace_with_confirmed_relation",
+                "withdraw_latest_for_row_ids",
+                "create_active_relation",
+                "record_history",
+            ):
+                if forbidden in handler_source:
+                    violations.append(f"batch accounting {name} route bypasses service boundary via {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_turnover_workbench_pair_port_has_no_direct_pair_write_fallback(self) -> None:
         path = SERVICES_ROOT / "turnover_ledger_write_adapters.py"
         source = path.read_text(encoding="utf-8")

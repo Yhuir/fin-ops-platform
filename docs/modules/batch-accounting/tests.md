@@ -54,6 +54,7 @@
 | Relation read model non-fresh | missing/stale 不能被解释成“无关联，可提交”；列表读取必须入队刷新，submit/withdraw 默认由 canonical write safety、owner 状态、权限/session、DB 可写性决定 | covered |
 | Submit command boundary | submit 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
 | Withdraw command boundary | withdraw 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
+| Route boundary contamination | GET route 只能通过 `BatchAccountingService.build_payload(...)` 读，不得 repair/write/schedule；submit/withdraw route 必须经 mutation session 并委托 service，不得直接调用 relation write internals | covered |
 | Mismatch note | 金额不一致必须填写非空说明；切换银行、bucket、OA 选择时清空旧说明 | covered |
 | Submit rollback | pair relation 持久化或调度失败不能留下半写入关系 | covered |
 | Withdraw history | 撤回差额批量账务时保留提交和撤回备注；不把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation | covered |
@@ -76,6 +77,7 @@
 ```bash
 PYTHONPATH=backend/src python3 -m unittest \
   tests.test_batch_accounting_api \
+  tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries \
   tests.test_workbench_relation_read_facade \
   tests.test_workbench_relation_sql_projection \
   tests.test_runtime_worker_registry \

@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-06-23 - Route handler 边界守卫
+
+- 目标：防止 `/api/batch-accounting*` route 重新绕过 `BatchAccountingService`，在 GET 列表路径执行 legacy repair/write/read model schedule，或在 submit/withdraw route 里直接调用 relation write internals。
+- 影响范围：`tests/test_platform_runtime_boundary_guards.py` 的静态边界守卫；不改变 `server.py` runtime、API shape、业务语义、read model、worker 或前端。
+- 关键决策：route 只负责 HTTP/session/DTO/error mapping 和写后 lifecycle/read model scheduling；业务读写边界属于 `BatchAccountingService`，canonical relation 写入属于 `WorkbenchRelationCommandService`。`_repair_batch_accounting_relation_case_ids` 保留为显式 compat-only repair path，禁止回到 GET list path。
+- 文档影响：同步本模块 tests、state-machine、本实施记录，并在 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md` 记录全局/模块状态机 definition unchanged。
+- 测试覆盖：新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；本轮最终验证还会覆盖 batch accounting API/static guards、app check、docs check、diff/secret scan。
+- 未测风险：本轮不连接生产 PostgreSQL，不执行真实 worker drain；因为没有 runtime 行为或 API/read model 发布变更，生产验证不作为本 slice 完成条件。
+- 后续事项：推进 `server-py:route-owner-inventory`，继续 inventory 残留 route owner 和少量边界守卫。
+
 ## 2026-06-21 - 左侧流水时间展示格式修复
 
 - 目标：修复“日常报销批量账务管理”左侧“批量账务流水”列表把 `2026-04-10T17:12:02+08:00` 这类 ISO 时区字符串直接展示给用户的问题，让时间 chip 和可访问名称统一显示为 `YYYY-MM-DD HH:mm:ss`。
