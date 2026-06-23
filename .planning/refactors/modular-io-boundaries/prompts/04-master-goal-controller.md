@@ -192,24 +192,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:persist-state-relation-snapshot-quarantine unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:app-health-route-builder-pair-service-injection-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:persist-state-relation-snapshot-quarantine:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-whole-state-persistence-closure-accounting-audit.md`.
+For workbench-relations:app-health-route-builder-pair-service-injection-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-persist-state-relation-snapshot-quarantine.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-server-precondition-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/state_store.py`, `tests/test_platform_runtime_boundary_guards.py`, `tests/test_app_postgres_mode.py`, `tests/test_state_store_contract.py`, and `tests/test_postgres_state_store.py`.
-- Use CodeGraph/text search for `_persist_state`, `_persist_state_with_workbench_invalidation`, `workbench_pair_relations`, `save_workbench_pair_relations`, `load_workbench_pair_relations`, and state store relation tests.
-- Remove or quarantine relation snapshot facts from broad `Application._persist_state(...)`.
-- Preserve relation-specific persistence through `_persist_workbench_pair_relations(...)`, `_schedule_workbench_pair_relation_persist(...)`, `_persist_workbench_pair_relations_in_transaction(...)`, command repository save paths and state-store domain methods.
-- Preserve app bootstrap loading through `load_workbench_pair_relations`.
-- Preserve local/Mongo relation domain save/load contract.
-- Add or update a static/runtime guard proving broad `_persist_state(...)` no longer serializes relation snapshot facts.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/app_health_alert_service.py`, `backend/src/fin_ops_platform/services/app_status_overview_service.py`, route builder modules and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `AppHealthAlertService`, `AppStatusOverviewService`, `_workbench_pair_relation_service`, `pair_relation_service`, route builders and remaining pair-service injections.
+- Audit app health and route builder pair-service injections.
+- Classify each remaining injection as accepted dependency assembly, compat-only, next implementation boundary, production-evidence-deferred, or blocked-by-human-gate.
+- Decide whether a narrow code slice is still needed before final local closure/defer accounting.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests, app check if relevant, docs verification and diff checks.
+- Run docs verification and diff checks; run code tests only if this audit finds and fixes a testable code inconsistency.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

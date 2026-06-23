@@ -3421,3 +3421,32 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:persist-state-relation-snapshot-quarantine`。
+
+## 2026-06-24 - persist-state relation snapshot quarantine
+
+目标：从 broad app full-state persistence 中隔离 Workbench relation snapshot facts。
+
+变更：
+
+- `Application._persist_state(...)` 不再包含 `workbench_pair_relations`。
+- 新增 static guard，防止 `_persist_state(...)` 再次序列化 relation snapshot、调用 `_workbench_pair_relation_service.snapshot()` 或直接写 `save_workbench_pair_relations(...)`。
+- 保留 relation-specific save/load paths：
+  - `_persist_workbench_pair_relations(...)`
+  - `_schedule_workbench_pair_relation_persist(...)`
+  - `_persist_workbench_pair_relations_in_transaction(...)`
+  - command repository save paths
+  - `PostgresStateStore.save/load_workbench_pair_relations(...)`
+  - `ApplicationStateStore.save/load_workbench_pair_relations(...)`
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_broad_persist_state_does_not_serialize_pair_relations tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_pair_relation_persist_uses_explicit_service_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_transaction_pair_relation_persist_uses_relation_repository_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_app_postgres_mode.AppPostgresModeTests.test_postgres_runtime_bootstrap_loads_pair_relations_without_full_snapshot -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_state_store_contract.StateStoreContractTests.test_state_store_domain_snapshot_contract_round_trips tests.test_postgres_state_store.PostgresStateStoreTests.test_postgres_store_snapshot_methods_round_trip -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:app-health-route-builder-pair-service-injection-audit`。

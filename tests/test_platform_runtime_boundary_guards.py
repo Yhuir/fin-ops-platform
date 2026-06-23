@@ -1568,6 +1568,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_broad_persist_state_does_not_serialize_pair_relations(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_persist_state")
+
+        violations: list[str] = []
+        if '"workbench_pair_relations"' in method_source:
+            violations.append("_persist_state still serializes Workbench pair relation facts")
+        if "_workbench_pair_relation_service.snapshot()" in method_source:
+            violations.append("_persist_state still snapshots Workbench pair relation service")
+        if "save_workbench_pair_relations(" in method_source:
+            violations.append("_persist_state still writes Workbench pair relations directly")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_relation_command_repository_uses_explicit_snapshot_adapter(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
