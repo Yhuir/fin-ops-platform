@@ -8,7 +8,7 @@
 | 1 | `bank-details:auto-tag-category-boundary` | production-evidence-deferred | Local contract/code guard/doc slice completed; real production DB/worker evidence deferred because no local PGSQL_URL or staging DB. |
 | 2 | `read-models:manifest-and-boundary-inventory` | closed-autonomous | Manifest/owner/IO/state/event/permission/test inventory completed as analysis only; no behavior change. |
 | 3 | `read-models:query-gateway-contract-and-status-parity` | closed-autonomous | Added code-level read model manifest and parity guard covering App Status registry, worker events, RabbitMQ dispatch and scope policy contracts; no runtime behavior change. |
-| 4 | `read-models:refresh-gateway-force-refresh-and-operation-barrier` | pending | Shared refresh, force refresh, freshness proof, scope policy and operation barrier registry before page slices. |
+| 4 | `read-models:refresh-gateway-force-refresh-and-operation-barrier` | closed-autonomous | Added manifest force refresh and operation barrier contract guards; no runtime behavior change. |
 | 5 | `read-models:repository-port-and-sql-owner-split-plan` | pending | Owner-map `read_models.py`, define repository ports, and split only behind tests. |
 | 6 | `read-models:workbench-active-generation-contract` | pending | Workbench is special: preserve active generation atomic publish instead of forcing generic rebuild semantics. |
 | 7 | `read-models:bank-detail-and-bank-account-balance-contract` | pending | Bank detail, auto-tag source version, account/month partition and balance read model contract. |

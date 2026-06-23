@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
+from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
     read_model_manifest_by_refresh_event_type,
@@ -14,6 +15,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
     read_model_event_types,
     registration_by_instance_name,
 )
+from fin_ops_platform.tools.read_model_slo_smoke import PAGE_FIRST_SCREEN_SCOPE_KEYS
 
 
 class ReadModelManifestTests(unittest.TestCase):
@@ -73,16 +75,49 @@ class ReadModelManifestTests(unittest.TestCase):
             "forbidden_bare_all",
             "queryable_parent_aggregate",
         }
+        allowed_force_refresh_contracts = {
+            "gateway_force_refresh",
+            "gateway_force_refresh_active_generation_scope",
+            "gateway_force_refresh_with_page_first_screen_scope",
+        }
+        allowed_operation_barrier_contracts = {"app_status_registry_target"}
 
         for entry in READ_MODEL_MANIFEST.values():
             with self.subTest(read_model_key=entry.key):
                 self.assertIn(entry.query_status_contract, allowed_query_contracts)
                 self.assertIn(entry.all_scope_semantics, allowed_all_scope_semantics)
+                self.assertIn(entry.force_refresh_contract, allowed_force_refresh_contracts)
+                self.assertIn(entry.operation_barrier_contract, allowed_operation_barrier_contracts)
                 self.assertTrue(entry.projection_strategy)
                 self.assertTrue(entry.query_owner)
                 self.assertTrue(entry.repository_owner)
                 self.assertTrue(entry.permission_owner)
                 self.assertTrue(entry.test_owner.startswith("tests/"))
+
+    def test_manifest_declares_operation_barrier_targets(self) -> None:
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                target = OperationFreshnessTarget.from_payload({"read_model_key": entry.key})
+
+                self.assertEqual(target.read_model_key, entry.key)
+                self.assertEqual(target.scope_type, entry.scope_type)
+                self.assertEqual(target.scope_key, "all")
+                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
+
+    def test_manifest_declares_force_refresh_smoke_contract(self) -> None:
+        self.assertLessEqual(set(PAGE_FIRST_SCREEN_SCOPE_KEYS), set(READ_MODEL_MANIFEST))
+
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                if entry.key == "workbench":
+                    expected_contract = "gateway_force_refresh_active_generation_scope"
+                elif entry.key in PAGE_FIRST_SCREEN_SCOPE_KEYS:
+                    expected_contract = "gateway_force_refresh_with_page_first_screen_scope"
+                else:
+                    expected_contract = "gateway_force_refresh"
+
+                self.assertEqual(entry.force_refresh_contract, expected_contract)
+                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
 
 
 if __name__ == "__main__":

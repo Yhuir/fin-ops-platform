@@ -5,13 +5,13 @@ Continue the autonomous modular IO refactor from the current state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:query-gateway-contract-and-status-parity`
+- Last completed boundary: `read-models:refresh-gateway-force-refresh-and-operation-barrier`
 - Last status: `closed-autonomous`
-- A code-level read model manifest now covers the 14 App Status read model keys and is guarded against App Status registry, worker registry, RabbitMQ dispatch, and scope policy drift.
+- The read model manifest covers the 14 App Status read models and is guarded against App Status registry, worker registry, RabbitMQ dispatch, scope policy, force refresh smoke contract, and operation barrier target drift.
 
 ## Next Boundary
 
-`read-models:refresh-gateway-force-refresh-and-operation-barrier`
+`read-models:repository-port-and-sql-owner-split-plan`
 
 ## Required First Steps On Resume
 
@@ -25,10 +25,11 @@ Continue the autonomous modular IO refactor from the current state.
    - `docs/architecture/persistence-and-read-models.md`
    - `docs/operations/runtime-worker-governance.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`
-4. Use CodeGraph for `ReadModelRefreshGateway`, `ReadModelScopePolicyRegistry`, `OperationFreshnessBarrierService`, direct refresh producers, transaction dirty/outbox producers, and force-refresh/runbook/API entry points.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md`.
-6. If implementation starts in that boundary, keep it to refresh/barrier contract tests and small registry/manifest wiring first; do not implement Go/Fiber, Go Worker, production writes, or broad SQL splitting.
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md`
+4. Use CodeGraph for `PostgresReadModelRepository`, per-key read model repository methods, query facades/services that consume read model rows, and direct legacy read paths.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`.
+6. If implementation starts in that boundary, keep it to repository owner inventory, port contracts, architecture guards, or one tiny low-risk extraction behind tests. Do not split the full `read_models.py` file in one pass, do not implement Go/Fiber or Go Worker, and do not perform production writes.
 
 ## Stop Condition
 
-Complete one narrow verified refresh/force-refresh/operation-barrier slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one narrow verified repository-owner/port-contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

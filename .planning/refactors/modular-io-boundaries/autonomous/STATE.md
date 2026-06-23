@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-model-query-status-parity`
+Current state: `autonomous-continue-after-read-model-refresh-barrier-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,13 +29,14 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:query-gateway-contract-and-status-parity`; next execution should start with refresh gateway / force refresh / operation barrier before page-specific slices.
+Completed `read-models:refresh-gateway-force-refresh-and-operation-barrier`; next execution should start with repository port and SQL owner split planning before page-specific slices.
 
 ## Completed Modules
 
 - `bank-details:auto-tag-category-boundary` -> `production-evidence-deferred`
 - `read-models:manifest-and-boundary-inventory` -> `closed-autonomous`
 - `read-models:query-gateway-contract-and-status-parity` -> `closed-autonomous`
+- `read-models:refresh-gateway-force-refresh-and-operation-barrier` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -47,8 +48,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:query-gateway-contract-and-status-parity`
+`read-models:refresh-gateway-force-refresh-and-operation-barrier`
 
 ## Next Prompt
 
-`read-models:refresh-gateway-force-refresh-and-operation-barrier`
+`read-models:repository-port-and-sql-owner-split-plan`

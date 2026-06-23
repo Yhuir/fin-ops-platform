@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Force refresh 与 operation barrier manifest 合同守卫
+
+- 目标：执行 `read-models:refresh-gateway-force-refresh-and-operation-barrier`，把受控强制刷新入口和写后 operation barrier 目标纳入 read model manifest，防止后续新增 read model 只改 worker/App Status 而漏掉刷新闭环。
+- 影响范围：`backend/src/fin_ops_platform/services/read_model_manifest.py`、`tests/test_read_model_manifest.py`、read-models 模块文档；不改变 API、SQL、worker、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：`read_model_slo_smoke` / deploy-control runbook 是受控 force refresh 入口，apply 时仍必须通过 `ReadModelRefreshGateway`；operation barrier 只读 App Status runtime snapshot，不替代页面 fresh gate。manifest 中显式区分标准 gateway force refresh、Workbench active generation scope 和 pending invoice page-first-screen scope。
+- 文档影响：同步 README、测试矩阵和 planning analysis；长期 read model 事实源不变。
+- 测试覆盖：扩展 `tests/test_read_model_manifest.py`，覆盖 force refresh contract、operation barrier target 推导、page-first-screen scope 和 refresh event 命名合同；现有 refresh gateway、operation barrier 和 SLO smoke 测试保持通过。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier tests.test_read_model_slo_smoke -v`。
+- 未测风险：未连接真实 PostgreSQL、Redis、RabbitMQ，未执行生产 `read_model_slo_smoke --apply`，本轮不需要生产写或生产 worker drain 证据。
+- 后续事项：推进 `read-models:repository-port-and-sql-owner-split-plan`，先 owner-map `read_models.py` 并定义 repository port/SQL owner，再小步拆分。
+
 ## 2026-06-23 - Read model manifest 与边界库存分析
 
 - 目标：执行 `read-models:manifest-and-boundary-inventory`，在实现前先把所有 App Status read model key 的 owner、IO、scope、event、worker、repository、权限和测试合同登记清楚。
