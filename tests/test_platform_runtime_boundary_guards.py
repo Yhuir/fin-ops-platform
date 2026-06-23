@@ -1452,6 +1452,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_confirm_link_context_uses_relation_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_expand_confirm_link_row_ids_for_existing_context")
+        port_source = (SERVICES_ROOT / "workbench_confirm_link_context_relation_read_port.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchConfirmLinkContextRelationReadPort" not in port_source:
+            violations.append("Workbench confirm-link context relation read port is missing")
+        if "def active_relations_for_row_ids" not in port_source:
+            violations.append("WorkbenchConfirmLinkContextRelationReadPort does not expose active_relations_for_row_ids")
+        if "_workbench_pair_relation_service.active_relations_for_row_ids" in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context still reads broad pair service directly")
+        if "_workbench_confirm_link_context_relation_read_port()" not in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context does not use confirm-link context relation read port")
+        if "_normalize_row_ids(row_ids)" not in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer normalizes selected row ids")
+        if "_cached_existing_context_groups_for_row_ids" not in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves cached existing context expansion")
+        if "_confirm_link_context_row_ids_to_preserve" not in method_source:
+            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves context row-id filter")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

@@ -3173,3 +3173,35 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-confirm-link-context-relation-read-port-extraction`。
+
+## 2026-06-24 - server confirm-link context relation read port extraction
+
+目标：把 confirm-link context expansion 的 active relation 读取迁移到显式 read port，保留 preview/submit 的上下文补齐语义。
+
+变更：
+
+- 新增 `WorkbenchConfirmLinkContextRelationReadPort`。
+- `Application._workbench_confirm_link_context_relation_read_port(...)` 使用 `WorkbenchRelationCommandService(require_fresh_relations=False)` 构造 port。
+- `_expand_confirm_link_row_ids_for_existing_context(...)` 通过 port 读取 active relations。
+- row id normalization、relation context expansion、self-row 去重、cached existing context group expansion 和 confirm-link 行为不变。
+- 新增静态 guard，防止该方法回退到 broad pair service direct read。
+
+未闭环：
+
+- auto-pair conflict precondition read 仍需单独迁移。
+- transaction-persist、rollback、case-id allocation、whole-state persistence snapshot surfaces 保持单独后续 slice。
+- `workbench_relation` 模块仍未完整闭环，Go/Fiber/Go Worker 仍阻塞。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_confirm_link_context_relation_read_port.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_confirm_link_context_uses_relation_read_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_active_relation_rows_for_selected_oa_context -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_existing_oa_attachment_context_rows -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-auto-pair-conflict-relation-read-port-extraction`。

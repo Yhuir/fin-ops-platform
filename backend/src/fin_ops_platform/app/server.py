@@ -417,6 +417,9 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
     workbench_groups_redis_ttl_seconds_from_env,
     workbench_groups_redis_version_key,
 )
+from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
+    WorkbenchConfirmLinkContextRelationReadPort,
+)
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
@@ -3220,6 +3223,11 @@ class Application:
 
     def _workbench_oa_attachment_repair_relation_read_port(self) -> WorkbenchOaAttachmentRepairRelationReadPort:
         return WorkbenchOaAttachmentRepairRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
+        )
+
+    def _workbench_confirm_link_context_relation_read_port(self) -> WorkbenchConfirmLinkContextRelationReadPort:
+        return WorkbenchConfirmLinkContextRelationReadPort(
             self._workbench_relation_command_service(require_fresh_relations=False)
         )
 
@@ -20255,7 +20263,8 @@ class Application:
             seen.add(normalized_row_id)
             expanded_row_ids.append(normalized_row_id)
 
-        for relation in self._workbench_pair_relation_service.active_relations_for_row_ids(expanded_row_ids):
+        relation_read_port = self._workbench_confirm_link_context_relation_read_port()
+        for relation in relation_read_port.active_relations_for_row_ids(expanded_row_ids):
             for relation_row_id in list(relation.get("row_ids") or []):
                 add(relation_row_id)
 
