@@ -88,8 +88,10 @@ Failure behavior:
 - Go candidate admission failure is a soft gate. Record go-candidate-deferred and continue with Python boundary hardening or the next independent module.
 - Stop only for hard gates in 10-AUTONOMOUS-STOP-GATES.md.
 
-Initial recommended module:
-bank-details:auto-tag-category-boundary.
+Initial/resume module:
+- If autonomous/STATE.md says work has already started, continue from autonomous/NEXT-PROMPT.md and the first pending boundary in MODULE-QUEUE.md.
+- Current next boundary after the bank-details slice is `read-models:manifest-and-boundary-inventory`.
+- Do not restart `bank-details:auto-tag-category-boundary` unless STATE.md or MODULE-QUEUE.md explicitly marks it pending again.
 
 Final response when you stop or finish a wave:
 - List modules completed.
