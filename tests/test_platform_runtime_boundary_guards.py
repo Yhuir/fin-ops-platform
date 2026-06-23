@@ -652,6 +652,34 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_relation_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        executor_path = SERVICES_ROOT / "workbench_relation_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
+        violations: list[str] = []
+
+        removed_helper = "_derived_lifecycle_workbench_relation_read_model_executor"
+        if _function_source(server_tree, server_source, removed_helper):
+            violations.append(f"server.py still owns removed workbench relation lifecycle executor {removed_helper}")
+        if "WorkbenchRelationDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not build the explicit workbench relation lifecycle executor")
+        if '"workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit workbench relation executor")
+        if "class WorkbenchRelationDerivedLifecycleExecutor" not in executor_source:
+            violations.append("workbench relation lifecycle executor service is missing")
+        for snippet in (
+            "def execute(",
+            'reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_relation")',
+            '"deleted_counts": {"workbench_relation_read_models": 0}',
+            '"enqueued_jobs": ["workbench_relation.read_model.refresh"] if enqueued else []',
+        ):
+            if snippet not in executor_source:
+                violations.append(f"workbench relation lifecycle executor is missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",

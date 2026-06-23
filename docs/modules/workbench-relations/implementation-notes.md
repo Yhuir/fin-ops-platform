@@ -45,6 +45,33 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
+## 2026-06-24 - derived lifecycle executor 抽离
+
+目标：移除 `server.py` 中的 `workbench_relation` derived lifecycle refresh enqueue helper，把该边界收敛到显式 service/port。
+
+变更：
+
+- 新增 `WorkbenchRelationDerivedLifecycleExecutor`。
+- 删除 `Application._derived_lifecycle_workbench_relation_read_model_executor(...)`。
+- derived lifecycle registry 改为使用 `self._workbench_relation_derived_lifecycle_executor().execute`。
+- 保留 explicit scope 优先、空 scope fallback `["all"]`、gateway-backed enqueue、reason/metadata forwarding、`deleted_counts` / `invalidated_scopes` / `enqueued_jobs` payload shape。
+- 新增单测和静态 guard，防止旧 app-level helper 回流。
+
+决策：
+
+- 本轮不迁移 canonical relation write lifecycle。
+- `Application._workbench_relation_derived_lifecycle_executor(...)` 只作为 dependency assembly 保留。
+- `workbench_relation` 模块仍是 `implementation-gap-open`，下一步需要 local implementation closure audit 来选择 relation write lifecycle、repository SQL owner split、read facade freshness/force-refresh proof、service factory collaborator 或 production-evidence defer 中的下一条边界。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_derived_lifecycle_executor tests.test_bank_detail_derived_lifecycle_executor -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_relation_derived_lifecycle_uses_explicit_executor_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

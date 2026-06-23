@@ -432,6 +432,9 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandService,
 )
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
+from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor import (
+    WorkbenchRelationDerivedLifecycleExecutor,
+)
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -19356,7 +19359,7 @@ class Application:
             plan,
             executors={
                 "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
-                "workbench_relation_read_model": self._derived_lifecycle_workbench_relation_read_model_executor,
+                "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
                 "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
                 "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
                 "invoice_lifecycle_read_model": self._derived_lifecycle_invoice_lifecycle_executor,
@@ -19421,21 +19424,6 @@ class Application:
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
-        }
-
-    def _derived_lifecycle_workbench_relation_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        target_scope_keys = scope_keys or ["all"]
-        enqueued = self._enqueue_generic_read_model_refreshes(
-            "workbench_relation",
-            target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_relation"),
-            metadata=self._read_model_refresh_metadata(domain_plan),
-        )
-        return {
-            "deleted_counts": {"workbench_relation_read_models": 0},
-            "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["workbench_relation.read_model.refresh"] if enqueued else [],
         }
 
     def _derived_lifecycle_invoice_lifecycle_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
@@ -19597,6 +19585,15 @@ class Application:
         return BankDetailDerivedLifecycleExecutor(
             available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
             enqueue_refresh=self._bank_detail_read_model_refresh_producer().enqueue,
+        )
+
+    def _workbench_relation_derived_lifecycle_executor(self) -> WorkbenchRelationDerivedLifecycleExecutor:
+        return WorkbenchRelationDerivedLifecycleExecutor(
+            enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
+                "workbench_relation",
+                scope_keys,
+                **kwargs,
+            ),
         )
 
     def _derived_lifecycle_no_oa_bank_batch_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

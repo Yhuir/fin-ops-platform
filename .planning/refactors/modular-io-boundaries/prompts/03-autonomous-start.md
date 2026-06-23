@@ -69,10 +69,7 @@ Required first preflight:
 
 Dirty worktree handling:
 - If the worktree is clean, proceed normally.
-- If the only dirty files are the interrupted autonomous read-model slice below, treat them as in-progress work that must be inspected, completed, verified, documented, committed, and pushed before selecting another module:
-  - backend/src/fin_ops_platform/services/read_model_scope_policy.py
-  - backend/src/fin_ops_platform/services/read_model_manifest.py
-  - tests/test_read_model_manifest.py
+- If the only dirty files are the interrupted autonomous slice, treat them as in-progress work that must be inspected, completed, verified, documented, committed, and pushed before selecting another module.
 - If other dirty files exist, inspect ownership carefully.
 - If dirty files look like user work or unrelated work, stop before staging, formatting, reverting, stashing, committing, or overwriting them.
 - If dirty files are clearly from the current interrupted autonomous slice, continue that slice; do not discard them.
@@ -121,10 +118,10 @@ Read every refactor planning file before implementation:
 Current resume priority:
 - First run planning-state reconciliation preflight across `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `modular-io-boundaries/README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
 - If any of those files disagree on source hierarchy, current state, completed boundary, next boundary, status labels, or completion metric source, finish a `planning:state-reconciliation-*` slice first.
-- Current completed boundary in STATE.md is expected to be `read-models:workbench-relation-repository-port-extraction`.
-- Current next queued boundary is expected to be `read-models:workbench-relation-derived-lifecycle-executor-port-extraction`.
+- Current completed boundary in STATE.md is expected to be `read-models:workbench-relation-derived-lifecycle-executor-port-extraction`.
+- Current next queued boundary is expected to be `read-models:workbench-relation-local-implementation-closure-audit`.
 - `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure; production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `workbench_relation` is selected as the next read model implementation pilot; repository port extraction is complete, but relation write lifecycle migration and derived lifecycle executor extraction remain open.
+- `workbench_relation` is selected as the next read model implementation pilot; repository port extraction and derived lifecycle executor extraction are complete, but relation write lifecycle migration and local implementation closure audit remain open.
 - After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md, unless a planning-state inconsistency requires another reconciliation slice.
 - Do not select GoHotPath while any earlier read model or modular IO implementation boundary remains `pending`, `implementation-pending`, or `implementation-gap-open`.
 
