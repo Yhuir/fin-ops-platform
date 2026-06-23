@@ -2864,3 +2864,23 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:workbench-write-facade-post-port-local-implementation-closure-audit`。
+
+## 2026-06-24 - WorkbenchWriteFacade post-port local implementation closure audit
+
+目标：在 read/snapshot port 和 cash special metadata mutation port 都完成后，复查 `WorkbenchWriteFacade` 是否还有本地 relation 依赖缺口。
+
+结论：
+
+- `WorkbenchWriteFacade` 已不再保存 broad `_pair_relation_service`。
+- `workbench_write_facade.py` 中直接持有 pair service 的代码只剩两个显式 adapter：`WorkbenchWriteRelationReadSnapshotPort` 和 `WorkbenchWriteRelationSpecialMetadataMutationPort`。
+- `Application._workbench_write_facade(...)` 已显式注入两个 port。
+- 仅剩构造函数仍接收 `pair_relation_service` 用于默认 port 构造；这会给未来调用者留下不显式声明 IO port 的入口。
+- 代码搜索发现 `WorkbenchWriteFacade(...)` 只有生产 Application factory 和 `tests/test_workbench_auth_context_idempotency.py::_new_facade(...)` 两个构造点。
+- 下一条边界是 `workbench-relations:workbench-write-facade-required-port-constructor`：移除 facade 构造函数的 broad `pair_relation_service` 参数，要求显式注入 read/snapshot port 和 special metadata mutation port。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
