@@ -6,7 +6,7 @@
 | Order | Boundary | Status | Notes |
 | ---: | --- | --- | --- |
 | 1 | `bank-details:auto-tag-category-boundary` | production-evidence-deferred | Local contract/code guard/doc slice completed; real production DB/worker evidence deferred because no local PGSQL_URL or staging DB. |
-| 2 | `read-models:manifest-and-boundary-inventory` | pending | Build the full read model manifest/owner/IO/state/event/permission/test inventory first; no behavior change. |
+| 2 | `read-models:manifest-and-boundary-inventory` | closed-autonomous | Manifest/owner/IO/state/event/permission/test inventory completed as analysis only; no behavior change. |
 | 3 | `read-models:query-gateway-contract-and-status-parity` | pending | Ensure every page read path has freshness/status/enqueue semantics or an explicit equivalent contract. |
 | 4 | `read-models:refresh-gateway-force-refresh-and-operation-barrier` | pending | Shared refresh, force refresh, freshness proof, scope policy and operation barrier registry before page slices. |
 | 5 | `read-models:repository-port-and-sql-owner-split-plan` | pending | Owner-map `read_models.py`, define repository ports, and split only behind tests. |

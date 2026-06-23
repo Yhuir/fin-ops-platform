@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Read model manifest 与边界库存分析
+
+- 目标：执行 `read-models:manifest-and-boundary-inventory`，在实现前先把所有 App Status read model key 的 owner、IO、scope、event、worker、repository、权限和测试合同登记清楚。
+- 影响范围：`.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`、自动队列状态；不改变后端、前端、worker 或生产 runtime 行为。
+- 关键决策：先建立 manifest/parity guard，再逐 key 做 query gateway parity、force refresh/operation barrier 和 repository port split；不直接全量拆 `postgres_repositories/read_models.py`，不启动 Go/Fiber 或 Go Worker。
+- 文档影响：新增 planning analysis，并在本实施记录中登记本轮分析结论；长期 read model 事实源不变。
+- 测试覆盖：本轮是文档/规划分析，无业务行为变化；后续实现必须覆盖 read model/cache/background job、API contract、cross-page freshness 和 legacy contamination guard。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ，未执行生产 SSH/DB 操作；本轮不需要生产证据。
+- 后续事项：推进 `read-models:query-gateway-contract-and-status-parity`，优先新增 manifest/parity guard，把 direct fresh、自管 freshness 和 legacy compat-only 路径分类。
+
 ## 2026-06-22 - Active repair App Health 与 refresh enqueue 语义收敛
 
 - 目标：修复 App Status 同时展示 Workbench read model “刷新中”和 `Workbench read model generation consistency failed.` 阻断的问题，并让 API `refresh_enqueued` 只表示本次调用真实新增 refresh request。

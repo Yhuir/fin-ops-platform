@@ -5,14 +5,14 @@ Continue the autonomous modular IO refactor from the paused state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `bank-details:auto-tag-category-boundary`
-- Last status: `production-evidence-deferred`
-- The queue has been reprioritized so read model foundation runs before additional page-specific slices.
+- Last completed boundary: `read-models:manifest-and-boundary-inventory`
+- Last status: `closed-autonomous`
+- Read model foundation inventory is complete; continue with query/status parity before page-specific slices.
 - Do not continue to another module unless the user asks to resume.
 
 ## Next Boundary
 
-`read-models:manifest-and-boundary-inventory`
+`read-models:query-gateway-contract-and-status-parity`
 
 ## Required First Steps On Resume
 
@@ -26,10 +26,11 @@ Continue the autonomous modular IO refactor from the paused state.
    - `docs/architecture/persistence-and-read-models.md`
    - `docs/operations/runtime-worker-governance.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md`
-4. Use CodeGraph for `ReadModelQueryGateway`, `ReadModelRefreshGateway`, `ReadModelScopePolicyRegistry`, `APP_STATUS_READ_MODEL_REGISTRY`, `runtime_worker_registry`, `operation_freshness_barrier`, and `postgres_repositories/read_models.py`.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`.
-6. Do not implement Go/Fiber, Go Worker, production writes, or broad SQL splitting in this boundary.
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
+4. Use CodeGraph for `ReadModelQueryGateway`, self-managed freshness services, direct `read_model_status=fresh` paths, direct refresh producers, and legacy/live-scan fallbacks.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`.
+6. If implementation starts in that boundary, keep it to manifest/parity guards and query/status contract tests first; do not implement Go/Fiber, Go Worker, production writes, or broad SQL splitting.
 
 ## Stop Condition
 
-Complete the read model manifest/owner/IO/state/event/permission/test inventory, update docs/state, commit and push to `origin/dev`, then continue only if the user has explicitly resumed autonomous execution.
+Complete one narrow verified query/status parity slice, update docs/state, commit and push to `origin/dev`, then continue only if the user has explicitly resumed autonomous execution.

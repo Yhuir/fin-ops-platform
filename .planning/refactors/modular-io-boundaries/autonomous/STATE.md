@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `paused-before-read-model-foundation`
+Current state: `paused-after-read-model-manifest-inventory`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,11 +29,12 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Paused after `bank-details:auto-tag-category-boundary`; next execution should start with read model foundation analysis before additional page-specific slices.
+Paused after `read-models:manifest-and-boundary-inventory`; next execution should start with query gateway/status parity before page-specific slices.
 
 ## Completed Modules
 
 - `bank-details:auto-tag-category-boundary` -> `production-evidence-deferred`
+- `read-models:manifest-and-boundary-inventory` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -45,8 +46,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`bank-details:auto-tag-category-boundary`
+`read-models:manifest-and-boundary-inventory`
 
 ## Next Prompt
 
-`read-models:manifest-and-boundary-inventory`
+`read-models:query-gateway-contract-and-status-parity`
