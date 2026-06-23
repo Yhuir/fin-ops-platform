@@ -3475,3 +3475,30 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:turnover-local-pair-snapshot-port-extraction`。
+
+## 2026-06-24 - turnover local pair snapshot port extraction
+
+目标：移除 turnover primary builders / local connection 对 broad Workbench pair service 的直接依赖。
+
+变更：
+
+- 新增 `TurnoverLedgerLocalPairSnapshotPort`。
+- `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder` 和 `TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder` 改为接收 `pair_snapshot_port`。
+- `TurnoverLedgerLocalClosureConnection` 改为依赖 `pair_snapshot_port`，不再接收或保存 broad `pair_relation_service`。
+- pair snapshot / save / restore 以及私有字段恢复逻辑集中在显式 port 内。
+- `Application` 的 turnover closure/withdraw builder wiring 使用 `TurnoverLedgerLocalPairSnapshotPort(self._workbench_pair_relation_service, save_pair_snapshot=...)`。
+- 新增 static guard 防止 turnover builders/local connection 重新接收 broad pair service。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_local_pair_snapshot_uses_explicit_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_workbench_integration.TurnoverWorkbenchIntegrationTests.test_manual_closure_merges_existing_oa_bank_relations_and_withdraw_restores_them tests.test_turnover_workbench_integration.TurnoverWorkbenchIntegrationTests.test_turnover_withdraw_bank_only_closure_cancels_workbench_relation -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:settings-data-reset-pair-service-boundary-audit`。

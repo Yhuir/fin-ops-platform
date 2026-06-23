@@ -1879,6 +1879,61 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_turnover_local_pair_snapshot_uses_explicit_port(self) -> None:
+        adapters_path = SERVICES_ROOT / "turnover_ledger_write_adapters.py"
+        adapters_source = adapters_path.read_text(encoding="utf-8")
+        adapters_tree = _parse(adapters_path)
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+
+        port_source = _class_source(adapters_tree, adapters_source, "TurnoverLedgerLocalPairSnapshotPort")
+        connection_source = _class_source(adapters_tree, adapters_source, "TurnoverLedgerLocalClosureConnection")
+        builder_sources = [
+            _class_source(adapters_tree, adapters_source, "TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"),
+            _class_source(adapters_tree, adapters_source, "TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"),
+        ]
+        server_builder_sources = [
+            _function_source(server_tree, server_source, "_turnover_ledger_closure_write_facade"),
+            _function_source(server_tree, server_source, "_turnover_ledger_withdraw_write_facade"),
+        ]
+        violations: list[str] = []
+
+        for snippet in (
+            "class TurnoverLedgerLocalPairSnapshotPort",
+            "def snapshot(",
+            "def save_current(",
+            "def restore(",
+            "from_snapshot(snapshot)",
+            "_pair_relations",
+            "_pair_relation_history",
+        ):
+            if snippet not in port_source:
+                violations.append(f"turnover local pair snapshot port missing {snippet}")
+        for forbidden in (
+            "pair_relation_service:",
+            "self._pair_relation_service",
+            "from_snapshot(snapshot)",
+            "_pair_relations",
+            "_pair_relation_history",
+        ):
+            if forbidden in connection_source:
+                violations.append(f"TurnoverLedgerLocalClosureConnection still owns broad pair behavior {forbidden}")
+        if "pair_snapshot_port: TurnoverLedgerLocalPairSnapshotPort" not in connection_source:
+            violations.append("TurnoverLedgerLocalClosureConnection does not require explicit pair snapshot port")
+        for source in builder_sources:
+            if "pair_relation_service:" in source or "self._pair_relation_service" in source:
+                violations.append("turnover primary builder still accepts or stores broad pair relation service")
+            if "pair_snapshot_port:" not in source:
+                violations.append("turnover primary builder does not accept explicit pair snapshot port")
+            if "pair_snapshot_port=self._pair_snapshot_port" not in source:
+                violations.append("turnover primary builder does not pass pair snapshot port to local connection")
+        for source in server_builder_sources:
+            if "pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(" not in source:
+                violations.append("Application turnover builder wiring does not wrap pair service in explicit port")
+
+        self.assertEqual(violations, [])
+
     def test_bank_details_relation_tags_only_read_relation_distribution_facade(self) -> None:
         path = SERVICES_ROOT / "bank_details_relation_tag_projection_service.py"
         source = path.read_text(encoding="utf-8")

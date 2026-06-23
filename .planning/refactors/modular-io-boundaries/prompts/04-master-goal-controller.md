@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:server-oa-invoice-offset-relation-read-port-extraction.
+- Last completed boundary: workbench-relations:turnover-local-pair-snapshot-port-extraction.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
@@ -95,8 +95,14 @@ Current state expected on start:
 - Workbench payload/live-row active relation reads now go through `WorkbenchPayloadRelationReadPort`.
 - Workbench/no-OA source-version relation snapshot reads now go through `WorkbenchRelationSourceVersionProvider`.
 - OA invoice offset sync active relation reads now go through `WorkbenchOaInvoiceOffsetRelationReadPort`.
-- Remaining write-adjacent reads include OA attachment context repair, confirm-link context expansion and auto-pair conflict checks.
-- The next pending boundary is workbench-relations:server-oa-attachment-repair-relation-read-port-extraction.
+- OA attachment context repair active relation reads now go through `WorkbenchOaAttachmentRepairRelationReadPort`.
+- Confirm-link context expansion active relation reads now go through `WorkbenchConfirmLinkContextRelationReadPort`.
+- Auto-pair conflict active relation reads now go through `WorkbenchAutoPairConflictRelationReadPort`.
+- Retained-OA supplemental relation reads now go through `WorkbenchRetainedOaSupplementalRelationReadPort`.
+- Relation case-id collision avoidance now goes through `WorkbenchRelationCaseIdAllocator`.
+- Broad app `_persist_state(...)` no longer serializes Workbench relation snapshot facts.
+- Turnover primary builders and `TurnoverLedgerLocalClosureConnection` now depend on explicit `TurnoverLedgerLocalPairSnapshotPort` instead of broad pair service injection.
+- The next pending boundary is workbench-relations:settings-data-reset-pair-service-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -192,25 +198,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:turnover-local-pair-snapshot-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:settings-data-reset-pair-service-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:turnover-local-pair-snapshot-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-app-health-route-builder-pair-service-injection-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-workbench-pair-port-required-command-constructor.md`.
+For workbench-relations:settings-data-reset-pair-service-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-local-pair-snapshot-port-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`, `tests/test_platform_runtime_boundary_guards.py`, and turnover ledger API/service tests that cover local rollback.
-- Use CodeGraph/text search for `TurnoverLedgerLocalClosureConnection`, `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder`, `TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder`, `pair_relation_service`, `_pair_relation_service`, `snapshot`, `from_snapshot`, and turnover rollback tests.
-- Add or reuse an explicit turnover local pair snapshot/restore port.
-- Remove broad `pair_relation_service` from turnover primary builder constructors and `TurnoverLedgerLocalClosureConnection`.
-- Preserve local transaction rollback semantics for confirm/withdraw.
-- Preserve command-service writes, relation facade reads and route response shape.
-- Add or update static guard coverage proving turnover primary builders/local connection no longer accept broad pair service.
-- Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
+- Read `docs/modules/settings/README.md`, `state-machine.md`, and `tests.md`.
+- Inspect `backend/src/fin_ops_platform/services/settings_data_reset_service.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_settings_data_reset_service.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `SettingsDataResetService`, `workbench_pair_relation_service`, `save_workbench_pair_relations`, `clear`, `reset`, `pair_relation_service`, and settings data reset tests.
+- Audit whether `SettingsDataResetService(workbench_pair_relation_service=...)` is a legitimate reset boundary, an old broad service leak, or a candidate for explicit reset/snapshot port extraction.
+- Classify every settings reset pair relation interaction as removed, quarantined, compat-only, or requiring a follow-up implementation slice.
+- Determine whether the next action should be an implementation slice or final local closure/defer accounting.
+- Preserve data reset semantics, relation persistence semantics, API response shape, read model freshness contracts, dirty scopes and operation barriers.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted turnover/guard tests, docs verification and diff checks.
+- Run targeted settings/workbench relation tests if changed, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

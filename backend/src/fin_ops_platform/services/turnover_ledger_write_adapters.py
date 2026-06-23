@@ -461,7 +461,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
-        pair_relation_service: Any | None = None,
+        pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -476,7 +476,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
-        self._pair_relation_service = pair_relation_service
+        self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
@@ -521,10 +521,9 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                     relation_snapshot_provider=local_adapters.relation_snapshot,
                     replace_relation_snapshot=self._replace_snapshot,
                     save_relation_snapshot=local_adapters.save_snapshot,
-                    pair_relation_service=self._pair_relation_service,
-                    save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+                    pair_snapshot_port=self._pair_snapshot_port,
                 )
-                if self._pair_relation_service is not None
+                if self._pair_snapshot_port is not None
                 else local_adapters.connection()
             )
             relation_repository = local_adapters.relation_repository()
@@ -572,7 +571,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
-        pair_relation_service: Any | None = None,
+        pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -587,7 +586,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
-        self._pair_relation_service = pair_relation_service
+        self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
@@ -633,10 +632,9 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                     relation_snapshot_provider=local_adapters.relation_snapshot,
                     replace_relation_snapshot=self._replace_snapshot,
                     save_relation_snapshot=local_adapters.save_snapshot,
-                    pair_relation_service=self._pair_relation_service,
-                    save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+                    pair_snapshot_port=self._pair_snapshot_port,
                 )
-                if self._pair_relation_service is not None
+                if self._pair_snapshot_port is not None
                 else local_adapters.connection()
             )
             relation_repository = local_adapters.relation_repository()
@@ -2550,6 +2548,29 @@ class TurnoverLedgerLocalRelationConnection:
             self._save_snapshot(current_snapshot)
 
 
+class TurnoverLedgerLocalPairSnapshotPort:
+    def __init__(
+        self,
+        *,
+        pair_relation_service: Any,
+        save_pair_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._pair_relation_service = pair_relation_service
+        self._save_pair_snapshot = save_pair_snapshot
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self._pair_relation_service.snapshot() or {})
+
+    def save_current(self) -> None:
+        self._save_pair_snapshot(self.snapshot())
+
+    def restore(self, snapshot: dict[str, object]) -> None:
+        restored = type(self._pair_relation_service).from_snapshot(snapshot)
+        self._pair_relation_service._pair_relations = deepcopy(restored._pair_relations)
+        self._pair_relation_service._pair_relation_history = deepcopy(restored._pair_relation_history)
+        self._save_pair_snapshot(dict(snapshot))
+
+
 class TurnoverLedgerLocalClosureConnection:
     def __init__(
         self,
@@ -2557,35 +2578,27 @@ class TurnoverLedgerLocalClosureConnection:
         relation_snapshot_provider: Callable[[], dict[str, object]],
         replace_relation_snapshot: Callable[[dict[str, object]], None],
         save_relation_snapshot: Callable[[dict[str, object]], None],
-        pair_relation_service: Any,
-        save_pair_snapshot: Callable[[dict[str, object]], None],
+        pair_snapshot_port: TurnoverLedgerLocalPairSnapshotPort,
     ) -> None:
         self._relation_snapshot_provider = relation_snapshot_provider
         self._replace_relation_snapshot = replace_relation_snapshot
         self._save_relation_snapshot = save_relation_snapshot
-        self._pair_relation_service = pair_relation_service
-        self._save_pair_snapshot = save_pair_snapshot
+        self._pair_snapshot_port = pair_snapshot_port
 
     @contextmanager
     def transaction(self) -> Any:
         previous_relation_snapshot = dict(self._relation_snapshot_provider() or {})
-        previous_pair_snapshot = dict(self._pair_relation_service.snapshot() or {})
+        previous_pair_snapshot = self._pair_snapshot_port.snapshot()
         try:
             yield SimpleNamespace()
         except Exception:
             self._replace_relation_snapshot(dict(previous_relation_snapshot))
             self._save_relation_snapshot(dict(previous_relation_snapshot))
-            self._replace_pair_snapshot(previous_pair_snapshot)
-            self._save_pair_snapshot(dict(previous_pair_snapshot))
+            self._pair_snapshot_port.restore(previous_pair_snapshot)
             raise
         else:
             self._save_relation_snapshot(dict(self._relation_snapshot_provider() or {}))
-            self._save_pair_snapshot(dict(self._pair_relation_service.snapshot() or {}))
-
-    def _replace_pair_snapshot(self, snapshot: dict[str, object]) -> None:
-        restored = type(self._pair_relation_service).from_snapshot(snapshot)
-        self._pair_relation_service._pair_relations = deepcopy(restored._pair_relations)
-        self._pair_relation_service._pair_relation_history = deepcopy(restored._pair_relation_history)
+            self._pair_snapshot_port.save_current()
 
 
 class TurnoverLedgerLocalRelationRepository:

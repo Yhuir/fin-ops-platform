@@ -354,6 +354,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalBankRowTagsAdapterSet,
     TurnoverLedgerLocalConfirmRelationAdapterSet,
     TurnoverLedgerLocalDirtyOutboxWriter,
+    TurnoverLedgerLocalPairSnapshotPort,
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraAdapterSet,
@@ -3466,7 +3467,10 @@ class Application:
             ),
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
-            pair_relation_service=self._workbench_pair_relation_service,
+            pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(
+                pair_relation_service=self._workbench_pair_relation_service,
+                save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+            ),
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         ).build()
@@ -3516,7 +3520,10 @@ class Application:
             ),
             postgres_idempotency_store_factory=self._turnover_ledger_withdraw_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_withdraw_local_idempotency_store,
-            pair_relation_service=self._workbench_pair_relation_service,
+            pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(
+                pair_relation_service=self._workbench_pair_relation_service,
+                save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+            ),
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         ).build()
