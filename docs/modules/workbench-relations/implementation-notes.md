@@ -3395,3 +3395,29 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:whole-state-persistence-closure-accounting-audit`。
+
+## 2026-06-24 - whole-state persistence closure accounting audit
+
+目标：审计 relation whole-state persistence / bootstrap compatibility paths。
+
+结论：
+
+- app 启动通过 `_runtime_repository_snapshot(..., "workbench_pair_relations", "load_workbench_pair_relations")` 加载 relation domain snapshot；Postgres mode 测试已保护不走 full snapshot load。
+- `PostgresStateStore.load_workbench_pair_relations(...)` / `save_workbench_pair_relations(...)` 已是 relation repository domain loader/delegate，并保留 fallback snapshot。
+- Mongo/local `ApplicationStateStore.load/save_workbench_pair_relations(...)` 是本地兼容路径，已有 round trip、changed-case incremental 和不重写无关 detailed collection 的测试。
+- 但 `Application._persist_state(...)` 仍把 `workbench_pair_relations` 放入 broad full-state payload；该函数被许多无关 import/settings/cache 路径调用，可能让旧全量持久化路径触碰 relation 写/refresh 边界。
+
+下一条最小实现边界：
+
+- `workbench-relations:persist-state-relation-snapshot-quarantine`
+
+该实现应移除或隔离 `_persist_state(...)` 中的 relation snapshot facts，同时保留 relation-specific save/load paths。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:persist-state-relation-snapshot-quarantine`。
