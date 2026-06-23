@@ -3262,3 +3262,35 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-retained-oa-supplemental-relation-read-port-extraction`。
+
+## 2026-06-24 - server retained-OA supplemental relation read port extraction
+
+目标：把 retained-OA all-scope supplemental row id 计算中的 active relation 读取迁移到显式 read port，保留 cutoff/manual retained row 语义。
+
+变更：
+
+- 新增 `WorkbenchRetainedOaSupplementalRelationReadPort`。
+- `Application._workbench_retained_oa_supplemental_relation_read_port(...)` 使用 `WorkbenchRelationCommandService(require_fresh_relations=False)` 构造 port。
+- `_supplemental_retained_oa_row_ids(...)` 通过 port 读取 active relations。
+- manual retained OA row ids、OA/bank relation filtering、`month_hint="all"` bank row resolution、bank cutoff date checks 和 sorted return 行为不变。
+- 新增静态 guard，防止该方法回退到 broad pair service direct read。
+
+未闭环：
+
+- `_next_workbench_relation_case_id(...)` 仍通过 relation snapshot 做 case id 去重，下一步审计 case-id allocation/read owner。
+- transaction-persist、rollback、whole-state persistence snapshot surfaces 仍需 closure accounting。
+- `workbench_relation` 模块仍未完整闭环，Go/Fiber/Go Worker 仍阻塞。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_retained_oa_supplemental_relation_read_port.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_retained_oa_supplemental_uses_relation_read_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_all_reincludes_old_oa_related_to_recent_bank_after_cutoff -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_all_scopes_mongo_oa_reads_to_retention_months -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-case-id-allocation-relation-read-owner-audit`。

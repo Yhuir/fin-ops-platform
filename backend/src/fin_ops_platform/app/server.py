@@ -466,6 +466,9 @@ from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor imp
 )
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
+from fin_ops_platform.services.workbench_retained_oa_supplemental_relation_read_port import (
+    WorkbenchRetainedOaSupplementalRelationReadPort,
+)
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -3236,6 +3239,11 @@ class Application:
 
     def _workbench_auto_pair_conflict_relation_read_port(self) -> WorkbenchAutoPairConflictRelationReadPort:
         return WorkbenchAutoPairConflictRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
+        )
+
+    def _workbench_retained_oa_supplemental_relation_read_port(self) -> WorkbenchRetainedOaSupplementalRelationReadPort:
+        return WorkbenchRetainedOaSupplementalRelationReadPort(
             self._workbench_relation_command_service(require_fresh_relations=False)
         )
 
@@ -17811,7 +17819,8 @@ class Application:
 
     def _supplemental_retained_oa_row_ids(self, cutoff_date: datetime) -> list[str]:
         retained_row_ids: set[str] = set(self._manual_retained_oa_row_ids())
-        for relation in self._workbench_pair_relation_service.list_active_relations():
+        relation_read_port = self._workbench_retained_oa_supplemental_relation_read_port()
+        for relation in relation_read_port.list_active_relations():
             row_ids = [
                 str(row_id).strip()
                 for row_id in list(relation.get("row_ids") or [])

@@ -1500,6 +1500,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_retained_oa_supplemental_uses_relation_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_supplemental_retained_oa_row_ids")
+        port_source = (SERVICES_ROOT / "workbench_retained_oa_supplemental_relation_read_port.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchRetainedOaSupplementalRelationReadPort" not in port_source:
+            violations.append("Workbench retained-OA supplemental relation read port is missing")
+        if "def list_active_relations" not in port_source:
+            violations.append("WorkbenchRetainedOaSupplementalRelationReadPort does not expose list_active_relations")
+        if "_workbench_pair_relation_service.list_active_relations" in method_source:
+            violations.append("_supplemental_retained_oa_row_ids still reads broad pair service directly")
+        if "_workbench_retained_oa_supplemental_relation_read_port()" not in method_source:
+            violations.append("_supplemental_retained_oa_row_ids does not use retained-OA supplemental relation read port")
+        for required in (
+            "_manual_retained_oa_row_ids()",
+            "_resolve_live_rows_direct(bank_row_ids, month_hint=\"all\")",
+            "_row_is_on_or_after(row, cutoff_date, row_type=\"bank\")",
+            "return sorted(retained_row_ids)",
+        ):
+            if required not in method_source:
+                violations.append(f"_supplemental_retained_oa_row_ids no longer preserves {required}")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
