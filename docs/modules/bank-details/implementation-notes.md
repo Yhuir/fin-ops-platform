@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail pilot verification / server helper quarantine queued
+
+- 目标：核对银行明细 read model 试点是否已经满足模块化 IO 闭环，并把下一步收敛到剩余 `server.py` helper/callback 隔离。
+- 影响范围：银行明细模块实施状态、read model pilot accounting、自动推进 Queue；不改变银行明细业务规则、API response shape、权限、审计或前端交互。
+- 关键决策：当前不能把银行明细标记为 `closed`。已删除的只是 `Application._get_bank_detail_*_from_sql_read_model` 两个旧 SQL helper；`server.py` 仍持有 scope summary、auto-tag freshness、refresh wrapper、Redis cache/wakeup、suggestion provider 和 after-mutation callback 等依赖，需要逐项分类为 removed/migrated/compat-only/gateway-backed wrapper/dependency-factory-only。
+- 文档影响：新增 modular IO pilot verification analysis，并更新 autonomous state/queue/journal/next prompt；银行明细状态机定义不变。
+- 测试覆盖：本轮没有新增测试；下一边界必须补 helper 防污染 guard 或迁移测试。
+- 验证命令：复跑 bank detail targeted API/service/read model/operation barrier 回归，详见 planning analysis。
+- 未测风险：真实 PostgreSQL/worker/readiness 没有本地或 staging 证据；production evidence 继续 deferred。
+
 ## 2026-06-24 - Bank detail legacy SQL helper removal
 
 - 目标：删除 `server.py` 上已无生产调用者的银行明细 SQL read compat helper，防止后续读路径绕过 `BankDetailsApiRoutes -> BankDetailsApplicationService`。

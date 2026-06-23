@@ -77,10 +77,11 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be read-models:bank-detail-legacy-contamination-removal.
-- Last status is expected to be implementation-closed.
+- Last completed boundary is expected to be read-models:bank-detail-pilot-verification-and-template-revision.
+- Last status is expected to be analysis-closed.
 - First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be read-models:bank-detail-pilot-verification-and-template-revision.
+- Next executable boundary is expected to be read-models:bank-detail-server-helper-quarantine.
+- The bank_detail pilot is not module-closed. Remaining server.py scope/cache/refresh/callback helper paths must be classified, migrated, removed or quarantined before broader rollout or Go admission.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
@@ -104,9 +105,9 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:bank-detail-pilot-verification-and-template-revision unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-server-helper-quarantine unless a planning-state inconsistency is found first.
 
-For read-models:bank-detail-pilot-verification-and-template-revision:
+For read-models:bank-detail-server-helper-quarantine:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
@@ -118,17 +119,23 @@ For read-models:bank-detail-pilot-verification-and-template-revision:
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-repository-port-extraction.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-freshness-operation-barrier.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-legacy-contamination-removal.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-pilot-verification-and-template-revision.md
   - docs/modules/read-models/README.md
   - docs/modules/read-models/state-machine.md
   - docs/modules/read-models/tests.md
+  - docs/modules/bank-details/README.md
+  - docs/modules/bank-details/state-machine.md
+  - docs/modules/bank-details/tests.md
   - docs/modules/runtime-workers/README.md
   - docs/modules/runtime-workers/state-machine.md
 - Use CodeGraph first for structural lookup of bank_detail remaining helpers, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
 - Keep the implementation boundary narrow:
-  - Verify the bank_detail pilot implementation evidence and revise templates/runbook only if evidence shows a reusable gap.
+  - Classify every remaining server.py bank_detail scope/cache/refresh/callback helper by owner, caller list, allowed behavior, forbidden writes, deletion condition and test evidence.
+  - Remove or migrate only the smallest helper whose call graph and tests prove it is safe.
+  - Register retained paths as compat-only, gateway-backed wrapper, dependency-factory-only or blocked-by-human-production-gate.
   - Preserve API response shape for accounts, transactions and export.
-  - Do not add broad new implementation unless verification exposes a concrete small missing boundary and the queue is split first.
+  - Do not add broad new implementation unless classification exposes a concrete small missing boundary and the queue is split first.
   - Keep regression coverage for repository port/query boundary, force refresh gateway/scope-policy usage and exact month operation barrier targets.
   - Do not split all of postgres_repositories/read_models.py.
   - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.

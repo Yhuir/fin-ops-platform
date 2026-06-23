@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-legacy-contamination-removal`
+Current state: `autonomous-continue-after-bank-detail-pilot-verification`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-legacy-contamination-removal`; next execution must start with `read-models:bank-detail-pilot-verification-and-template-revision`.
+Completed `read-models:bank-detail-pilot-verification-and-template-revision` as a verification/accounting slice; next execution must start with `read-models:bank-detail-server-helper-quarantine`.
 
 ## Closed Or Deferred Slices
 
@@ -56,14 +56,15 @@ Completed `read-models:bank-detail-legacy-contamination-removal`; next execution
 - `read-models:bank-detail-repository-port-extraction` -> `implementation-closed`
 - `read-models:bank-detail-refresh-freshness-operation-barrier` -> `implementation-closed`
 - `read-models:bank-detail-legacy-contamination-removal` -> `implementation-closed`
+- `read-models:bank-detail-pilot-verification-and-template-revision` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
-- `bank_detail` repository port/query boundary, freshness/barrier response contract and first legacy SQL helper removal are implemented, but pilot verification/template revision and production evidence/defer status are still open.
+- `bank_detail` repository port/query boundary, freshness/barrier response contract and first legacy SQL helper removal are implemented; pilot verification found the module is not closed because remaining `server.py` bank detail helper/callback dependencies still need owner/caller/deletion-condition classification, migration or compat-only quarantine.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual `bank_detail` pilot work must continue before Go admission: pilot verification/template revision, environment evidence/defer status and any remaining explicitly classified compat-only legacy paths.
+- Actual `bank_detail` pilot work must continue before Go admission: helper/callback quarantine, environment evidence/defer status and any remaining explicitly classified compat-only legacy paths.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -76,8 +77,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-legacy-contamination-removal`
+`read-models:bank-detail-pilot-verification-and-template-revision`
 
 ## Next Prompt
 
-`read-models:bank-detail-pilot-verification-and-template-revision`
+`read-models:bank-detail-server-helper-quarantine`

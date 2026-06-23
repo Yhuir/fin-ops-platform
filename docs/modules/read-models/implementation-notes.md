@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail pilot verification / queue correction
+
+- 目标：执行 `read-models:bank-detail-pilot-verification-and-template-revision`，核对银行明细 read model 试点是否满足模块闭环条件，并修正自动推进 Queue 的下一步。
+- 影响范围：modular IO planning state、`bank_detail` read model pilot accounting、后续 `server.py` helper quarantine boundary；不改业务代码、API shape、read model schema、worker 或前端。
+- 关键决策：`bank_detail` 试点不能标记为模块闭环；已完成的 repository port、freshness/operation barrier 和旧 SQL helper 删除只是窄实现 slice。`server.py` 仍保留 scope/cache/refresh/callback helper，需要下一步登记 owner/caller/deletion condition，并迁移、删除或隔离为 compat-only/gateway-backed wrapper。
+- 文档影响：新增 pilot verification analysis，更新 autonomous state/queue/journal/next prompt 和主控 prompt；全局/模块状态机定义不变。
+- 测试覆盖：本轮为 docs/planning/accounting slice，复跑 bank detail targeted API/service/read model/operation barrier 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-pilot-verification-and-template-revision.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；未证明真实 `bank_detail` worker drain 的 enqueue-to-fresh SLO；剩余 helper 迁移/隔离进入 `read-models:bank-detail-server-helper-quarantine`。
+
 ## 2026-06-24 - Bank detail legacy SQL helper removal
 
 - 目标：执行 `read-models:bank-detail-legacy-contamination-removal` 的第一步，删除 `server.py` 上已无生产调用者的 bank detail SQL read compat helper。
