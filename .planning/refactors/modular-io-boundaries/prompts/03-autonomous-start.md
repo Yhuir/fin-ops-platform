@@ -10,6 +10,9 @@ You are Codex working in /Users/yu/Desktop/fin-ops-platform.
 Goal:
 Autonomously continue the modular IO boundary refactor until the refactor plan reaches closure. Use GSD discipline end to end: review and full analysis first, then implementation, then review, verification, state update, commit/push to dev, next prompt generation, and immediate continuation to the next safe boundary. I may be away. Do not wait for me unless a hard stop gate is hit.
 
+Non-negotiable state-machine rule:
+State-machine updates are part of the implementation contract, not optional bookkeeping. Every autonomous slice must update or explicitly audit all relevant state-machine artifacts before it can be considered complete. A slice that changes code/tests/docs but does not update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, and the applicable global/module state-machine definition or "definition unchanged" analysis is incomplete and must not be committed.
+
 Definition of "closure":
 - Every boundary in .planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md is either closed with verified code/docs/tests, production-evidence-deferred with explicit evidence gap, go-candidate-deferred with admission evidence, or needs-human-production-gate for a true hard gate.
 - .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md, autonomous/STATE.md, autonomous/MODULE-QUEUE.md, autonomous/JOURNAL.md, and autonomous/NEXT-PROMPT.md reflect the same current state, completed boundary, next boundary, transition reason, evidence, and stop/defer gate.
@@ -237,6 +240,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
 
 9. Verification
    - Run the smallest sufficient verification for the changed slice.
+   - Verification is not complete until the state-machine artifacts have been updated or explicitly audited as unchanged.
    - Prefer documented commands and existing tests.
    - Typical commands include:
      - PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
