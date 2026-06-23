@@ -758,13 +758,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
 
-        class BlockingPairService:
-            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
-                raise AssertionError("turnover manual closure must not read active relations from pair service.")
-
-            def replace_with_confirmed_relation(self, **_kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
-                raise AssertionError("turnover manual closure must delegate write to WorkbenchRelationCommandService.")
-
         class RecordingRelationCommandService:
             def __init__(self) -> None:
                 self.confirm_calls: list[dict[str, object]] = []
@@ -785,7 +778,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: command,
         )
 
@@ -819,13 +811,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:
         module = self._write_adapters_module()
-
-        class BlockingPairService:
-            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
-                raise AssertionError("turnover manual closure must not read active relations from pair service.")
-
-            def replace_with_confirmed_relation(self, **_kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
-                raise AssertionError("turnover manual closure must delegate merge to WorkbenchRelationCommandService.")
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
@@ -869,7 +854,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: command,
         )
 
@@ -908,10 +892,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def test_turnover_manual_closure_rejects_rows_already_in_turnover_closure(self) -> None:
         module = self._write_adapters_module()
 
-        class BlockingPairService:
-            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
-                raise AssertionError("turnover manual closure must not read active relations from pair service.")
-
         class ExistingClosureRelationCommandService:
             def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
                 return [
@@ -928,7 +908,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 raise AssertionError("existing turnover closure must block confirm before writing.")
 
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: ExistingClosureRelationCommandService(),
         )
 
@@ -953,14 +932,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure(self) -> None:
         module = self._write_adapters_module()
 
-        class BlockingPairService:
-            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
-                raise AssertionError("turnover manual closure must not fallback to pair relation reads.")
-
-            def replace_with_confirmed_relation(self, **_kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
-                raise AssertionError("turnover manual closure must not fallback to pair relation writes.")
-
-        port = module.TurnoverLedgerWorkbenchPairPort(pair_relation_service=BlockingPairService())
+        port = module.TurnoverLedgerWorkbenchPairPort()
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.create_turnover_manual_closure(
@@ -980,16 +952,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
-
-        class BlockingPairService:
-            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
-                raise AssertionError("turnover withdraw must not read active relation from pair service.")
-
-            def list_active_relations(self) -> list[dict[str, object]]:
-                raise AssertionError("turnover withdraw must not list pair service relations.")
-
-            def cancel_relation(self, _case_id: str) -> dict[str, object]:
-                raise AssertionError("turnover withdraw must delegate cancel to WorkbenchRelationCommandService.")
 
         class FreshRelationFacade:
             def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
@@ -1028,7 +990,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: command,
             relation_facade=FreshRelationFacade(),
         )
@@ -1055,16 +1016,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations(self) -> None:
         module = self._write_adapters_module()
-
-        class BlockingPairService:
-            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
-                raise AssertionError("turnover withdraw must not read active relation from pair service.")
-
-            def list_active_relations(self) -> list[dict[str, object]]:
-                raise AssertionError("turnover withdraw must not list pair service relations.")
-
-            def cancel_relation(self, _case_id: str) -> dict[str, object]:
-                raise AssertionError("turnover withdraw must use WorkbenchRelationCommandService withdraw semantics.")
 
         class FreshRelationFacade:
             def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
@@ -1107,7 +1058,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: command,
             relation_facade=FreshRelationFacade(),
         )
@@ -1137,16 +1087,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure_withdraw(self) -> None:
         module = self._write_adapters_module()
 
-        class BlockingPairService:
-            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
-                raise AssertionError("turnover withdraw must not fallback to pair relation reads.")
-
-            def list_active_relations(self) -> list[dict[str, object]]:
-                raise AssertionError("turnover withdraw must not fallback to pair relation reads.")
-
-            def cancel_relation(self, _case_id: str) -> dict[str, object]:
-                raise AssertionError("turnover withdraw must not fallback to pair relation writes.")
-
         class FreshRelationFacade:
             def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
                 return {
@@ -1170,7 +1110,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 }
 
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_facade=FreshRelationFacade(),
         )
 
@@ -1190,16 +1129,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_workbench_pair_port_delegates_cash_closure_withdraw_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
-
-        class BlockingPairService:
-            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
-                raise AssertionError("cash closure withdraw must not read active relation from pair service.")
-
-            def list_active_relations(self) -> list[dict[str, object]]:
-                raise AssertionError("cash closure withdraw must not list pair service relations.")
-
-            def cancel_relation(self, _case_id: str) -> dict[str, object]:
-                raise AssertionError("cash closure withdraw must delegate to WorkbenchRelationCommandService.")
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
@@ -1221,7 +1150,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=BlockingPairService(),
             relation_command_service_factory=lambda transaction: command,
         )
 
@@ -1247,17 +1175,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw(self) -> None:
         module = self._write_adapters_module()
 
-        class BlockingPairService:
-            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
-                raise AssertionError("cash closure withdraw must not fallback to pair relation reads.")
-
-            def list_active_relations(self) -> list[dict[str, object]]:
-                raise AssertionError("cash closure withdraw must not fallback to pair relation reads.")
-
-            def cancel_relation(self, _case_id: str) -> dict[str, object]:
-                raise AssertionError("cash closure withdraw must not fallback to pair relation writes.")
-
-        port = module.TurnoverLedgerWorkbenchPairPort(pair_relation_service=BlockingPairService())
+        port = module.TurnoverLedgerWorkbenchPairPort()
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.withdraw_cash_closure_case(

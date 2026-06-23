@@ -500,11 +500,10 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             idempotency_store = self._postgres_idempotency_store_factory(connection)
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
-                    pair_relation_service=self._pair_relation_service,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
-                if self._pair_relation_service is not None or self._relation_command_service_factory is not None
+                if self._relation_command_service_factory is not None
                 else None
             )
         else:
@@ -535,11 +534,10 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             idempotency_store = self._local_idempotency_store_provider()
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
-                    pair_relation_service=self._pair_relation_service,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
-                if self._pair_relation_service is not None or self._relation_command_service_factory is not None
+                if self._relation_command_service_factory is not None
                 else None
             )
         stale_precondition_port = TurnoverLedgerRelationStalePreconditionPort(
@@ -613,11 +611,10 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             idempotency_store = self._postgres_idempotency_store_factory(connection)
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
-                    pair_relation_service=self._pair_relation_service,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
-                if self._pair_relation_service is not None or self._relation_command_service_factory is not None
+                if self._relation_command_service_factory is not None
                 else None
             )
         else:
@@ -649,11 +646,10 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             idempotency_store = self._local_idempotency_store_provider()
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
-                    pair_relation_service=self._pair_relation_service,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
-                if self._pair_relation_service is not None or self._relation_command_service_factory is not None
+                if self._relation_command_service_factory is not None
                 else None
             )
         stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
@@ -1014,7 +1010,6 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
         relation_rebuild: Callable[[], None],
         routes: Any,
         after_mutation: Callable[[list[str]], None],
-        pair_relation_service: Any,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -1022,7 +1017,6 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
         self._routes = routes
         self._after_mutation = after_mutation
         self._pair_port = TurnoverLedgerWorkbenchPairPort(
-            pair_relation_service=pair_relation_service,
             relation_command_service_factory=relation_command_service_factory,
             relation_facade=relation_facade,
         )
@@ -1545,7 +1539,6 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         *,
         routes: Any,
         after_mutation: Callable[[list[str]], None],
-        pair_relation_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -1553,11 +1546,10 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         self._after_mutation = after_mutation
         self._pair_port = (
             TurnoverLedgerWorkbenchPairPort(
-                pair_relation_service=pair_relation_service,
                 relation_command_service_factory=relation_command_service_factory,
                 relation_facade=relation_facade,
             )
-            if pair_relation_service is not None or relation_command_service_factory is not None
+            if relation_command_service_factory is not None
             else None
         )
 
@@ -1755,11 +1747,9 @@ class TurnoverLedgerWorkbenchPairPort:
     def __init__(
         self,
         *,
-        pair_relation_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
-        self._pair_relation_service = pair_relation_service
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
@@ -1907,18 +1897,7 @@ class TurnoverLedgerWorkbenchPairPort:
                     message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
                 )
             return
-        if self._relation_facade is not None and bank_row_ids:
-            return
-        if self._pair_relation_service is None:
-            return
-        active_relation = self._active_relation_by_case_id(case_id)
-        if active_relation is None:
-            return
-        if not self._is_turnover_manual_closure_withdrawable_from_turnover(active_relation):
-            raise TurnoverLedgerWritePreconditionError(
-                error_code="turnover_closure_withdraw_requires_workbench",
-                message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
-            )
+        return
 
     def withdraw_turnover_manual_closure(
         self,
@@ -2182,20 +2161,6 @@ class TurnoverLedgerWorkbenchPairPort:
     def _turnover_case_id(relation_id: str) -> str:
         normalized_relation_id = str(relation_id or "").strip()
         return f"turnover:{normalized_relation_id}" if normalized_relation_id else ""
-
-    def _active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
-        if self._pair_relation_service is None:
-            return None
-        get_by_case_id = getattr(self._pair_relation_service, "get_active_relation_by_case_id", None)
-        if callable(get_by_case_id):
-            active_relation = get_by_case_id(case_id)
-            return dict(active_relation) if isinstance(active_relation, dict) else None
-        list_active = getattr(self._pair_relation_service, "list_active_relations", None)
-        if callable(list_active):
-            for relation in list(list_active() or []):
-                if isinstance(relation, dict) and str(relation.get("case_id") or "") == case_id:
-                    return dict(relation)
-        return None
 
     def _active_relation_by_case_id_from_facade(
         self,

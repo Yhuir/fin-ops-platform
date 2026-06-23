@@ -2931,3 +2931,27 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:turnover-workbench-pair-port-required-command-constructor`。
+
+## 2026-06-24 - turnover Workbench pair port required-command constructor
+
+目标：移除 `TurnoverLedgerWorkbenchPairPort` 的 broad `pair_relation_service` 构造依赖，使该 port 只能通过 command service 和 relation facade 边界工作。
+
+变更：
+
+- `TurnoverLedgerWorkbenchPairPort.__init__` 不再接收 `pair_relation_service`。
+- `TurnoverLedgerWorkbenchPairPort` 不再保存 `_pair_relation_service`。
+- 删除 port 内基于 pair service 的 active relation fallback read。
+- turnover primary builder 和 legacy fallback facade 不再把 broad pair service 传入 `TurnoverLedgerWorkbenchPairPort`。
+- `TurnoverLedgerLocalClosureConnection` 仍保留 pair service snapshot/rollback 行为，作为单独 rollback/snapshot 边界后续分类。
+- 更新 turnover UoW tests，并加强 static guard，防止 port 重新接收或保存 broad pair service。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_uow_contract.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_manual_closure_merges_existing_oa_bank_relations tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_manual_closure_rejects_rows_already_in_turnover_closure tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure_withdraw tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_cash_closure_withdraw_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_workbench_pair_port_has_no_direct_pair_write_fallback -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+下一条边界：`workbench-relations:workbench-matching-pair-service-boundary-audit`。

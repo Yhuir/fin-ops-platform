@@ -3432,7 +3432,6 @@ class Application:
             ),
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         )
@@ -3487,7 +3486,6 @@ class Application:
         return TurnoverLedgerWithdrawLegacyFallbackFacade(
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         )

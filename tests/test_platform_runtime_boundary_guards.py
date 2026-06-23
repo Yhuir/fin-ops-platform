@@ -1128,12 +1128,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         violations: list[str] = []
         for forbidden in (
+            "pair_relation_service",
+            "_pair_relation_service",
             "replace_with_confirmed_relation",
             "cancel_relation(case_id)",
             "_persist_pair_relations",
+            "def _active_relation_by_case_id(",
         ):
             if forbidden in port_source:
-                violations.append(f"TurnoverLedgerWorkbenchPairPort keeps direct pair write fallback {forbidden}")
+                violations.append(f"TurnoverLedgerWorkbenchPairPort keeps broad pair service surface {forbidden}")
         if "workbench_relation_command_unavailable" not in port_source:
             violations.append("TurnoverLedgerWorkbenchPairPort does not fail fast when relation command service is unavailable")
 
