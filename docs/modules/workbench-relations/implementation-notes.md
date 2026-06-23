@@ -203,6 +203,28 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
+## 2026-06-24 - rollback restore helper audit
+
+目标：审计 `_restore_workbench_pair_relation_snapshot(...)` 是否可删除、应抽离、应 quarantine，或需要保留在 app。
+
+结论：
+
+- 该 helper 不可删除；它保护 confirm/cancel/withdraw 在 relation command 已改变内存状态后，后续 persist、reconciliation decision consume 或 read-model scheduling 失败时恢复旧 pair relation snapshot。
+- 下一条实现边界应为 `workbench-relations:pair-relation-rollback-restore-service-extraction`。
+- 建议新增 `WorkbenchPairRelationRollbackRestoreService`，接管 pair relation snapshot rehydrate、exception application service reconfigure 和 state store best-effort rollback save。
+- 不应把 rollback restore 合并进 `WorkbenchPairRelationPersistService`，因为前者是失败恢复语义，后者是正常前向持久化/调度语义。
+
+剩余风险：
+
+- `_restore_workbench_exception_pair_snapshots(...)`、`_restore_workbench_exception_write_snapshots(...)` 和 `_restore_batch_accounting_pair_relation_snapshot(...)` 是相邻 rollback helper，但下一刀不强行合并，避免扩大范围。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
