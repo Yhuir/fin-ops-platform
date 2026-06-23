@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail repository port/query boundary
+
+- 目标：执行 `read-models:bank-detail-repository-port-extraction`，为银行明细 read model 查询侧建立窄 repository port，并把 `server.py` 旧 SQL helper 收敛到 `BankDetailsApplicationService`。
+- 影响范围：`backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`、`PostgresStateStore.bank_detail_sql_read_repository`、`server.py` bank detail compat helper、bank detail SQL/runtime 测试和 planning state。
+- 关键决策：`PostgresStateStore.bank_detail_sql_read_repository` 不再直接返回共享 `PostgresReadModelRepository`；旧 `server.py` helper 保留为 `compat-only`，但只能委托 application service，不能直接读 repository。Accounts endpoint 对 `list_bank_account_balances` 的读取能力暂时保留为页面 response shape 兼容，不代表 `bank_account_balance` 模块已并入 `bank_detail`。
+- 文档影响：同步本实施记录和 modular IO analysis/state；read model 状态机语义不变。
+- 测试覆盖：新增 `BankDetailSqlRepositoryTests.test_bank_detail_read_model_port_excludes_unrelated_read_model_methods`、`BankAutoTagRulesApiTests.test_bank_detail_legacy_sql_helpers_delegate_to_application_service_boundary`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ；未证明 write -> dirty/outbox -> worker -> operation barrier fresh 的完整闭环。
+- 后续事项：推进 `read-models:bank-detail-refresh-freshness-operation-barrier`，再处理 `bank_detail` legacy helper removal/quarantine。
+
 ## 2026-06-23 - Legacy read path refresh enqueue 污染守卫
 
 - 目标：执行 `read-models:legacy-read-path-removal-guards`，先把 direct `enqueue_read_model_refresh(...)` 调用点做静态分类，阻止后续旧 producer 绕过 `ReadModelRefreshGateway` / scope policy registry。

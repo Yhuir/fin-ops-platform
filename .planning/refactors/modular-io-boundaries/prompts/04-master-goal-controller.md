@@ -77,10 +77,10 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be read-models:pilot-gap-audit-and-contract-selection.
-- Last status is expected to be analysis-closed.
+- Last completed boundary is expected to be read-models:bank-detail-repository-port-extraction.
+- Last status is expected to be implementation-closed.
 - First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be read-models:bank-detail-repository-port-extraction.
+- Next executable boundary is expected to be read-models:bank-detail-refresh-freshness-operation-barrier.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
@@ -91,6 +91,7 @@ Non-negotiable completion semantics:
 - regression-guard-closed means regression guard slice closed only.
 - route-guard-closed means route guard slice closed only.
 - inventory-guard-closed means inventory guard slice closed only.
+- implementation-closed means one narrow implementation slice closed only.
 - planning-closed means planning/state/prompt slice closed only.
 - None of the labels above means a module is fully modularized.
 - Full module closure requires the module completion definition in 00-REQUIREMENTS.md and 03-REFACTOR-STATE-MACHINE.md: IO contract, public/internal boundary, canonical facts, read model freshness, force refresh, operation barrier, legacy removal/quarantine, permissions, audit, tests, docs and environment evidence/defer status.
@@ -103,9 +104,9 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:bank-detail-repository-port-extraction unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-refresh-freshness-operation-barrier unless a planning-state inconsistency is found first.
 
-For read-models:bank-detail-repository-port-extraction:
+For read-models:bank-detail-refresh-freshness-operation-barrier:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
@@ -114,6 +115,7 @@ For read-models:bank-detail-repository-port-extraction:
   - .planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-repository-port-extraction.md
   - docs/modules/read-models/README.md
   - docs/modules/read-models/state-machine.md
   - docs/modules/read-models/tests.md
@@ -122,10 +124,9 @@ For read-models:bank-detail-repository-port-extraction:
 - Use CodeGraph first for structural lookup of bank_detail symbols, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
 - Keep the implementation boundary narrow:
-  - Create or identify a narrow bank_detail repository port/wrapper around existing PostgresReadModelRepository.bank_detail methods.
-  - Move server.py bank detail SQL read helper dependencies to that port through an application/query service boundary.
+  - Implement bank_detail freshness, force-refresh and operation-barrier behavior only.
   - Preserve API response shape for accounts, transactions and export.
-  - Add tests proving the API/query boundary uses the bank_detail port and does not reach unrelated read model repository methods.
+  - Add tests proving exact affected month scopes, stale/refreshing/fresh behavior, force refresh gateway/scope-policy usage, operation barrier targets and regression coverage for the repository port/query boundary.
   - Do not split all of postgres_repositories/read_models.py.
   - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.
   - Do not implement Go/Fiber/Go Worker.

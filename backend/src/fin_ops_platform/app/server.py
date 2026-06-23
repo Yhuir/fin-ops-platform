@@ -13018,121 +13018,10 @@ class Application:
         )
 
     def _get_bank_detail_accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
-        repository = getattr(self, "_bank_detail_sql_read_repository", None)
-        if repository is None:
-            self._enqueue_bank_detail_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
-            return self._bank_detail_accounts_refreshing_payload(
-                scope_keys=["all"],
-                date_from=date_from,
-                date_to=date_to,
-            )
-        account_balance_loader = getattr(repository, "list_bank_account_balances", None)
-        if callable(account_balance_loader):
-            try:
-                payload = account_balance_loader(date_from=date_from, date_to=date_to)
-            except Exception as error:
-                if self._is_missing_bank_account_balance_read_model_error(error):
-                    self._enqueue_bank_account_balance_read_model_refresh(reason="api_migration_missing")
-                    return self._bank_detail_accounts_refreshing_payload(
-                        scope_keys=["all"],
-                        date_from=date_from,
-                        date_to=date_to,
-                        scope_summary={
-                            "read_model_status": "refreshing",
-                            "balance_read_model_status": "missing",
-                            "read_model_scope_keys": ["all"],
-                            "read_model_error": "bank_account_balance_read_model_not_migrated",
-                        },
-                    )
-                raise
-            if not isinstance(payload, dict):
-                self._enqueue_bank_account_balance_read_model_refresh(reason="api_miss")
-                return self._bank_detail_accounts_refreshing_payload(
-                    scope_keys=["all"],
-                    date_from=date_from,
-                    date_to=date_to,
-                )
-            payload_status = str(
-                payload.get("balance_read_model_status")
-                or payload.get("read_model_status")
-                or "fresh"
-            )
-            if payload_status != "fresh" and not (payload.get("accounts") or []):
-                self._enqueue_bank_account_balance_read_model_refresh(reason=f"api_{payload_status or 'stale'}")
-                return self._bank_detail_accounts_refreshing_payload(
-                    scope_keys=["all"],
-                    date_from=date_from,
-                    date_to=date_to,
-                    scope_summary=payload,
-                )
-            result = dict(payload)
-            result["read_model_status"] = payload_status
-            result["balance_read_model_status"] = payload_status
-            result["cache_status"] = "uncached"
-            return result
-        scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
-        scope_summary = self._bank_detail_scope_summary(scope_keys)
-        read_model_status = str(scope_summary.get("read_model_status") or "missing")
-        if read_model_status == "missing":
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason="api_missing",
-                scope_summary=scope_summary,
-            )
-            return self._bank_detail_accounts_refreshing_payload(
-                scope_keys=scope_keys,
-                date_from=date_from,
-                date_to=date_to,
-                scope_summary=scope_summary,
-            )
-        if read_model_status != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason=f"api_{read_model_status}",
-                scope_summary=scope_summary,
-            )
-        cache_key = self._bank_detail_redis_cache_key(
-            "accounts",
-            {
-                "date_from": date_from,
-                "date_to": date_to,
-            },
-            scope_summary=scope_summary,
+        return self._bank_details_application_service()._accounts_from_sql_read_model(  # noqa: SLF001
+            date_from=date_from,
+            date_to=date_to,
         )
-        cached = self._get_bank_detail_cached_payload(cache_key) if read_model_status == "fresh" else None
-        if cached is not None:
-            cached["cache_status"] = "hit"
-            return cached
-        loader = getattr(repository, "list_bank_detail_accounts", None)
-        if not callable(loader):
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_sql_repository_unavailable")
-            return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
-        payload = loader(date_from=date_from, date_to=date_to)
-        if not isinstance(payload, dict):
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
-            return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
-        payload_status = str(payload.get("read_model_status") or read_model_status or "fresh")
-        if read_model_status != "fresh":
-            payload = {**payload, **scope_summary, "read_model_status": read_model_status}
-            payload_status = read_model_status
-        if payload_status != "fresh" and not (payload.get("accounts") or []):
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason=f"api_{payload_status or 'stale'}",
-                scope_summary=payload,
-            )
-            return self._bank_detail_accounts_refreshing_payload(
-                scope_keys=scope_keys,
-                date_from=date_from,
-                date_to=date_to,
-                scope_summary=payload,
-            )
-        result = dict(payload)
-        result["read_model_status"] = payload_status
-        result["cache_status"] = "miss" if payload_status == "fresh" else "stale"
-        if payload_status == "fresh":
-            self._set_bank_detail_cached_payload(cache_key, result)
-        return result
 
     def _get_bank_detail_transactions_from_sql_read_model(
         self,
@@ -13148,75 +13037,7 @@ class Application:
         page: int,
         page_size: int,
     ) -> dict[str, object] | None:
-        repository = getattr(self, "_bank_detail_sql_read_repository", None)
-        normalized_page = max(int(page or 1), 1)
-        normalized_page_size = min(max(int(page_size or 100), 1), 100)
-        if repository is None:
-            self._enqueue_bank_detail_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
-            return self._bank_detail_transactions_refreshing_payload(
-                scope_keys=["all"],
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-            )
-        scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
-        scope_summary = self._bank_detail_scope_summary(scope_keys)
-        read_model_status = str(scope_summary.get("read_model_status") or "missing")
-        if read_model_status == "missing":
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason="api_missing",
-                scope_summary=scope_summary,
-            )
-            return self._bank_detail_transactions_refreshing_payload(
-                scope_keys=scope_keys,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-                scope_summary=scope_summary,
-            )
-        if read_model_status != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason=f"api_{read_model_status}",
-                scope_summary=scope_summary,
-            )
-        cache_key = self._bank_detail_redis_cache_key(
-            "transactions",
-            {
-                "account_key": account_key,
-                "date_from": date_from,
-                "date_to": date_to,
-                "keyword": keyword,
-                "category_code": category_code,
-                "category_primary_label": category_primary_label,
-                "category_sub_label": category_sub_label,
-                "category_third_label": category_third_label,
-                "page": normalized_page,
-                "page_size": normalized_page_size,
-            },
-            scope_summary=scope_summary,
-        )
-        cached = self._get_bank_detail_cached_payload(cache_key) if read_model_status == "fresh" else None
-        if cached is not None:
-            cached["cache_status"] = "hit"
-            return self._with_bank_detail_tag_dictionary(cached)
-        loader = getattr(repository, "list_bank_detail_transactions", None)
-        if not callable(loader):
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_sql_repository_unavailable")
-            return self._bank_detail_transactions_refreshing_payload(
-                scope_keys=scope_keys,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-            )
-        payload = loader(
+        return self._bank_details_application_service()._transactions_from_sql_read_model(  # noqa: SLF001
             account_key=account_key,
             date_from=date_from,
             date_to=date_to,
@@ -13225,44 +13046,9 @@ class Application:
             category_primary_label=category_primary_label,
             category_sub_label=category_sub_label,
             category_third_label=category_third_label,
-            page=normalized_page,
-            page_size=normalized_page_size,
+            page=page,
+            page_size=page_size,
         )
-        if not isinstance(payload, dict):
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
-            return self._bank_detail_transactions_refreshing_payload(
-                scope_keys=scope_keys,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-            )
-        payload_status = str(payload.get("read_model_status") or read_model_status or "fresh")
-        if read_model_status != "fresh":
-            payload = {**payload, **scope_summary, "read_model_status": read_model_status}
-            payload_status = read_model_status
-        if payload_status != "fresh" and not (payload.get("rows") or []):
-            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-                scope_keys,
-                reason=f"api_{payload_status or 'stale'}",
-                scope_summary=payload,
-            )
-            return self._bank_detail_transactions_refreshing_payload(
-                scope_keys=scope_keys,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-                scope_summary=payload,
-            )
-        result = self._with_bank_detail_tag_dictionary(dict(payload))
-        result["read_model_status"] = payload_status
-        result["cache_status"] = "miss" if payload_status == "fresh" else "stale"
-        if payload_status == "fresh":
-            self._set_bank_detail_cached_payload(cache_key, result)
-        return result
 
     def _bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
         repository = getattr(self, "_bank_detail_sql_read_repository", None)

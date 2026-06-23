@@ -1,19 +1,19 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor from the selected `bank_detail` read model pilot.
+Continue the autonomous modular IO refactor after the `bank_detail` repository port/query boundary slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:pilot-gap-audit-and-contract-selection`
-- Last status: `analysis-closed`
+- Last completed boundary: `read-models:bank-detail-repository-port-extraction`
+- Last status: `implementation-closed`
 - Queue semantics are corrected: prior guard/analysis slices are slice-complete only and do not mean module implementation closure.
 - First read model implementation pilot: `bank_detail`.
 - Go hot-path candidates are blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
 
 ## Next Boundary
 
-`read-models:bank-detail-repository-port-extraction`
+`read-models:bank-detail-refresh-freshness-operation-barrier`
 
 ## Required First Steps On Resume
 
@@ -47,12 +47,13 @@ Continue the autonomous modular IO refactor from the selected `bank_detail` read
    - `docs/modules/runtime-workers/state-machine.md`
 5. Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`.
 6. Use CodeGraph first to locate current `bank_detail` query/refresh/repository owners, callers, callees, routes and tests.
-7. Implement the narrow `bank_detail` repository port/query boundary without changing response shape.
+7. Implement the `bank_detail` freshness, force-refresh and operation-barrier boundary without changing response shape.
 8. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Selection Rules
 
 - The pilot is already selected: `bank_detail`.
+- The repository port/query boundary is implemented, but module closure remains open.
 - Do not choose a Go boundary.
 - Do not implement Go/Fiber/Go Worker in this boundary.
 - Do not claim a module is closed because a manifest guard or static guard exists.
@@ -61,16 +62,16 @@ Continue the autonomous modular IO refactor from the selected `bank_detail` read
 
 ## Expected Output
 
-- Implementation file changes for `bank_detail` repository port/query boundary only.
-- Tests proving the API/query boundary uses the `bank_detail` port and preserves response shape.
-- Legacy contamination guard or regression evidence proving the new path does not reach unrelated read model repository methods.
+- Implementation file changes for `bank_detail` freshness/force-refresh/operation-barrier boundary only.
+- Tests proving write/query paths produce exact affected month scopes, stale/refreshing/fresh behavior remains correct, force refresh goes through gateway/scope policy, and operation barrier targets match the affected scopes.
+- Regression evidence proving the repository port/query boundary from the previous slice remains intact.
 - Updated state/journal/next prompt.
 - Docs verification and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one narrow verified `bank_detail` implementation slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one narrow verified `bank_detail` freshness/barrier implementation slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
 
 ## Reporting Rule
 

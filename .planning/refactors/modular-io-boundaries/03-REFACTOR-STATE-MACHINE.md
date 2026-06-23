@@ -127,7 +127,7 @@ AnalysisOnly
 - 只有需要生产写入、secret 或特权操作时才进入 hard stop。
 - 自动推进开始和每个 slice 提交前必须执行 planning-state reconciliation check：若 `.planning/ROADMAP.md`、`.planning/refactors/README.md`、本目录 `README.md`、`00-REQUIREMENTS.md`、`04-IMPLEMENTATION-ROADMAP.md`、`autonomous/STATE.md`、`MODULE-QUEUE.md`、`JOURNAL.md`、`NEXT-PROMPT.md` 的状态口径互相矛盾，先完成 `planning:state-reconciliation-and-roadmap-alignment` 文档状态同步 slice，再继续代码或模块实现。
 - 完成度报告必须标注来源，至少区分 root page-analysis roadmap、modular IO phase roadmap 和 modular IO autonomous queue；禁止用一个未标注来源的百分比代表“整个重构计划”。
-- `autonomous/MODULE-QUEUE.md` 的 `Status` 是 slice 状态，不是模块完成状态。`analysis-closed`、`contract-guard-closed`、`static-guard-closed`、`regression-guard-closed`、`route-guard-closed`、`inventory-guard-closed` 和 `planning-closed` 只表示该窄 slice 已关闭，不能作为 `Closed` 模块状态或全局闭环证据。
+- `autonomous/MODULE-QUEUE.md` 的 `Status` 是 slice 状态，不是模块完成状态。`analysis-closed`、`contract-guard-closed`、`static-guard-closed`、`regression-guard-closed`、`route-guard-closed`、`inventory-guard-closed`、`implementation-closed` 和 `planning-closed` 只表示该窄 slice 已关闭，不能作为 `Closed` 模块状态或全局闭环证据。
 - 模块实现闭环必须单独看 `Module Closure` 和 `04-IMPLEMENTATION-ROADMAP.md` 的完成标准。只要存在 `implementation-pending` 或 `implementation-gap-open`，自动流程必须优先推进实现/验证/legacy 隔离相关边界，而不能跳到 Go hot-path admission。
 - Go hot-path candidate 只有在相关模块 IO contract、legacy retirement/quarantine、freshness proof、测试、性能证据、shadow run 和 rollback gate 均满足后，才能从 `blocked-by-prerequisite` 进入 `pending`。
 - 每个自动推进 slice 在进入 commit 前必须经过状态机更新闸门：先判断是否改变全局 workflow state/transition/guard 或模块状态定义；若改变，必须同步本文件或对应 `docs/modules/<module>/state-machine.md`；若未改变，必须在 analysis 文件中记录 reviewed files、definition unchanged 原因和只更新 progress/accounting 的证据。

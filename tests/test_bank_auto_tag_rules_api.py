@@ -1065,6 +1065,71 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(repository.account_reads, 1)
         self.assertEqual(queue.enqueued, [])
 
+    def test_bank_detail_legacy_sql_helpers_delegate_to_application_service_boundary(self) -> None:
+        class DelegatingService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def _accounts_from_sql_read_model(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("accounts", dict(kwargs)))
+                return {"accounts": [{"account_key": "delegated"}], "read_model_status": "fresh"}
+
+            def _transactions_from_sql_read_model(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("transactions", dict(kwargs)))
+                return {"rows": [{"id": "delegated-txn"}], "read_model_status": "fresh"}
+
+        class PoisonRepository:
+            def bank_detail_scope_keys_for_range(self, **_kwargs: object) -> list[str]:
+                raise AssertionError("server helper must not access bank detail repository directly")
+
+            def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("server helper must not access bank detail repository directly")
+
+            def list_bank_detail_accounts(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("server helper must not access bank detail repository directly")
+
+        app = build_application()
+        service = DelegatingService()
+        app._bank_details_application_service = lambda: service
+        app._bank_detail_sql_read_repository = PoisonRepository()
+
+        accounts = app._get_bank_detail_accounts_from_sql_read_model(date_from="2026-05-01", date_to="2026-05-31")
+        transactions = app._get_bank_detail_transactions_from_sql_read_model(
+            account_key=None,
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            keyword="服务费",
+            category_code=None,
+            category_primary_label=None,
+            category_sub_label=None,
+            page=1,
+            page_size=100,
+        )
+
+        self.assertEqual(accounts["accounts"][0]["account_key"], "delegated")
+        self.assertEqual(transactions["rows"][0]["id"], "delegated-txn")
+        self.assertEqual(
+            service.calls,
+            [
+                ("accounts", {"date_from": "2026-05-01", "date_to": "2026-05-31"}),
+                (
+                    "transactions",
+                    {
+                        "account_key": None,
+                        "date_from": "2026-05-01",
+                        "date_to": "2026-05-31",
+                        "keyword": "服务费",
+                        "category_code": None,
+                        "category_primary_label": None,
+                        "category_sub_label": None,
+                        "category_third_label": None,
+                        "page": 1,
+                        "page_size": 100,
+                    },
+                ),
+            ],
+        )
+
     def test_bank_detail_api_reenqueues_stale_scopes_once(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()

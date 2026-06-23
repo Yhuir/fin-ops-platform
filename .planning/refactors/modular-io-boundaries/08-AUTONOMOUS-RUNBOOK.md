@@ -104,6 +104,7 @@ Do not treat these statuses as module implementation closure:
 - `regression-guard-closed`
 - `route-guard-closed`
 - `inventory-guard-closed`
+- `implementation-closed`
 - `planning-closed`
 
 Skipped modules must be marked in `autonomous/STATE.md` with a reason.
@@ -222,7 +223,7 @@ Push to the configured Dev branch only.
 
 After a successful commit/push:
 
-- Mark the boundary with the most specific slice status, for example `analysis-closed`, `contract-guard-closed`, `static-guard-closed`, `regression-guard-closed`, `inventory-guard-closed`, `planning-closed`, `production-evidence-deferred`, `go-candidate-deferred`, or `needs-human-production-gate`.
+- Mark the boundary with the most specific slice status, for example `analysis-closed`, `contract-guard-closed`, `static-guard-closed`, `regression-guard-closed`, `inventory-guard-closed`, `implementation-closed`, `planning-closed`, `production-evidence-deferred`, `go-candidate-deferred`, or `needs-human-production-gate`.
 - Update the separate `Module Closure` value in `MODULE-QUEUE.md`; do not claim `closed` unless the module completion definition in `00-REQUIREMENTS.md` and `03-REFACTOR-STATE-MACHINE.md` is met.
 - Append a journal entry.
 - Generate next prompt into `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`.

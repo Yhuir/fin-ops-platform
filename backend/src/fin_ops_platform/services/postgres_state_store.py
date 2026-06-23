@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.postgres_repositories import (
@@ -132,6 +133,7 @@ class PostgresStateStore:
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
+        self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
@@ -752,8 +754,8 @@ class PostgresStateStore:
         return self._sql_read_model_repository
 
     @property
-    def bank_detail_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
+    def bank_detail_sql_read_repository(self) -> BankDetailReadModelRepositoryPort:
+        return self._bank_detail_sql_read_repository
 
     @property
     def input_invoice_usage_sql_read_repository(self) -> PostgresReadModelRepository:

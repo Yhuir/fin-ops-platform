@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
+from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 from fin_ops_platform.services.bank_transaction_effective_category_provider import BankTransactionEffectiveCategoryProvider
@@ -73,6 +74,34 @@ class FakeConnection:
                 return False
 
         return Transaction()
+
+
+class _UnderlyingBankDetailReadModelRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+        self.calls.append(("bank_detail_scope_keys_for_range", {"date_from": date_from, "date_to": date_to}))
+        return ["2026-05"]
+
+    def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+        self.calls.append(("bank_detail_scope_summary", {"scope_keys": list(scope_keys)}))
+        return {"read_model_status": "fresh", "read_model_scope_keys": list(scope_keys)}
+
+    def list_bank_detail_transactions(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_bank_detail_transactions", dict(kwargs)))
+        return {"rows": [{"id": "txn-1"}], "read_model_status": "fresh"}
+
+    def list_bank_detail_accounts(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_bank_detail_accounts", dict(kwargs)))
+        return {"accounts": [{"account_key": "icbc:6386"}], "read_model_status": "fresh"}
+
+    def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_bank_account_balances", dict(kwargs)))
+        return {"accounts": [{"account_key": "icbc:6386"}], "balance_read_model_status": "fresh"}
+
+    def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("bank_detail port must not expose pending invoice repository methods")
 
 
 class CaptureBankDetailReadModelRepository:
@@ -581,6 +610,37 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
 
 
 class BankDetailSqlRepositoryTests(unittest.TestCase):
+    def test_bank_detail_read_model_port_excludes_unrelated_read_model_methods(self) -> None:
+        underlying = _UnderlyingBankDetailReadModelRepository()
+        port = BankDetailReadModelRepositoryPort(underlying)
+
+        self.assertEqual(port.bank_detail_scope_keys_for_range(date_from="2026-05-01", date_to=None), ["2026-05"])
+        self.assertEqual(port.bank_detail_scope_summary(scope_keys=["2026-05"])["read_model_status"], "fresh")
+        self.assertEqual(
+            port.list_bank_detail_transactions(
+                account_key=None,
+                date_from="2026-05-01",
+                date_to=None,
+                keyword=None,
+                page=1,
+                page_size=100,
+            )["rows"][0]["id"],
+            "txn-1",
+        )
+        self.assertEqual(port.list_bank_detail_accounts(date_from=None, date_to=None)["accounts"][0]["account_key"], "icbc:6386")
+        self.assertEqual(port.list_bank_account_balances(date_from=None, date_to=None)["balance_read_model_status"], "fresh")
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "bank_detail_scope_keys_for_range",
+                "bank_detail_scope_summary",
+                "list_bank_detail_transactions",
+                "list_bank_detail_accounts",
+                "list_bank_account_balances",
+            ],
+        )
+
     def test_save_bank_detail_rows_keeps_insert_placeholders_aligned_with_record(self) -> None:
         connection = FakeConnection()
         repository = PostgresReadModelRepository(connection)

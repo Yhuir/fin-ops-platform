@@ -30,7 +30,7 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 16 | `planning:state-reconciliation-and-roadmap-alignment` | planning-closed | not-applicable | Reconciled root page-analysis roadmap, modular IO phase roadmap, autonomous queue, state-machine rules and autonomous prompt completion metrics; no runtime behavior change. |
 | 17 | `planning:completion-semantics-and-queue-reclassification` | planning-closed | not-applicable | Reclassified prior `closed-autonomous` entries as analysis/guard/regression/inventory slices rather than module closure; parked Go candidates behind implementation prerequisites. |
 | 18 | `read-models:pilot-gap-audit-and-contract-selection` | analysis-closed | implementation-gap-open | Selected `bank_detail` as the first read model implementation pilot and documented candidate comparison, entry points, IO gaps, freshness/force-refresh/operation-barrier gaps, legacy risks and seven-category test plan. No runtime behavior change. |
-| 19 | `read-models:bank-detail-repository-port-extraction` | pending | implementation-pending | Implement a narrow `bank_detail` repository port/wrapper and route query/application boundary with tests; do not split all `read_models.py` at once. No Go work. |
+| 19 | `read-models:bank-detail-repository-port-extraction` | implementation-closed | implementation-gap-open | Added `BankDetailReadModelRepositoryPort`, wired `PostgresStateStore.bank_detail_sql_read_repository` to the narrow port, and made `server.py` legacy SQL helpers delegate to `BankDetailsApplicationService`; tests prove unrelated read model methods are not exposed and old helpers do not bypass the application boundary. Module still needs freshness/barrier and legacy removal. |
 | 20 | `read-models:bank-detail-refresh-freshness-operation-barrier` | pending | implementation-pending | Implement `bank_detail` write-to-read freshness, force refresh and operation-barrier path with exact month scopes and tests. |
 | 21 | `read-models:bank-detail-legacy-contamination-removal` | pending | implementation-pending | Remove or quarantine selected `bank_detail` legacy read/refresh/write path and prove new paths cannot call it. |
 | 22 | `read-models:bank-detail-pilot-verification-and-template-revision` | pending | implementation-pending | Verify the `bank_detail` pilot module, update templates/runbook based on evidence, and decide the second batch only after the pilot is actually verified or production-evidence-deferred. |
@@ -51,6 +51,7 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 - `regression-guard-closed`
 - `route-guard-closed`
 - `inventory-guard-closed`
+- `implementation-closed`
 - `planning-closed`
 - `production-evidence-deferred`
 - `deferred-module-failure`
