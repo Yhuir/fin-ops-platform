@@ -113,6 +113,24 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 
 - 该阶段不迁移 command service lifecycle，不删除 app-level command repository snapshot/apply helpers，也不声明生产 PostgreSQL/worker/App Status/high-row/browser evidence。
 
+## 2026-06-24 - command repository snapshot adapter audit
+
+目标：审计 `server.py` 中 `_workbench_relation_command_repository(...)`、`_save_workbench_relation_command_snapshot(...)`、`_apply_workbench_relation_command_snapshot(...)` 和 `_relation_history_touches_cases(...)` 是否可抽离。
+
+结论：
+
+- CodeGraph 显示该 helper 组调用链集中，只服务 `_workbench_relation_command_service(...)`。
+- 下一条实现边界应为 `workbench-relations:command-repository-snapshot-adapter-extraction`。
+- 建议新增 `WorkbenchRelationCommandRepositoryAdapter`，把 callback repository、optional transaction repository save、changed-case snapshot merge/apply、runtime mirror 更新和 post-apply callback 收敛到显式 service/port。
+- `CallbackWorkbenchRelationRepository` 可继续保留给测试和 runtime worker handler，不在下一刀强制全局替换。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
