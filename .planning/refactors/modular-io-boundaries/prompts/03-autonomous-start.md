@@ -114,6 +114,14 @@ Current resume priority:
 GSD autonomous loop:
 Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary that can be safely advanced.
 
+State-machine updates are a first-class step in this loop. Do not treat them as a final note or as part of prompt generation only:
+- Before implementation, read the global and module state-machine files and record the intended transition in the boundary analysis.
+- During implementation, track whether any workflow state, module state, transition guard, freshness status, worker lifecycle, permission state, operation barrier state, force-refresh state, or legacy-retirement state changed.
+- After verification and before commit, update the actual transition in `autonomous/STATE.md`, `autonomous/MODULE-QUEUE.md`, `autonomous/JOURNAL.md`, and `autonomous/NEXT-PROMPT.md`.
+- If definitions changed, update `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md` or the affected `docs/modules/<module>/state-machine.md` in the same slice.
+- If definitions did not change, the analysis file must explicitly say which state-machine files were reviewed and why the definition is unchanged.
+- A slice is incomplete if state-machine accounting is missing, even when code, tests, docs, and `NEXT-PROMPT.md` were updated.
+
 1. Review and full analysis
    - Read current STATE.md, JOURNAL.md, MODULE-QUEUE.md, and NEXT-PROMPT.md.
    - Select exactly one narrow boundary.
@@ -238,7 +246,19 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - Shadow Go output cannot ack outbox, mark dirty scope done, publish generation, write readiness, or update cache.
    - If admission fails, record go-candidate-deferred and continue with Python boundary hardening or the next module.
 
-9. Verification
+9. State-machine sync before verification
+   - Re-open the analysis file for the selected boundary and update the state-machine impact section with the actual implementation outcome.
+   - Confirm the intended transition recorded before code edits still matches the actual diff.
+   - If the diff changed any global workflow definition, update `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md` before running final verification.
+   - If the diff changed any module business/UI/read model/worker/operation barrier/force-refresh/permission/legacy-retirement state, update every affected `docs/modules/<module>/state-machine.md` before running final verification.
+   - If no state-machine definition changed, record `global state-machine definition unchanged` and/or `module state-machine definition unchanged` in the analysis file with the reviewed files and evidence.
+   - Prepare the progress/accounting updates that will be finalized after verification:
+     - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
+
+10. Verification
    - Run the smallest sufficient verification for the changed slice.
    - Verification is not complete until the state-machine artifacts have been updated or explicitly audited as unchanged.
    - Prefer documented commands and existing tests.
@@ -255,7 +275,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - Do not require staging DB.
    - Use fake/stub repository, queue, read model gateway, API contract, frontend mock, static checks, and production read-only SSH checks when useful.
 
-10. Production and SSH policy
+11. Production and SSH policy
    - No local PGSQL_URL is available.
    - No staging database is available.
    - Do not ask me for PostgreSQL URLs, staging DBs, SSH passwords, database passwords, tokens, cookies, or private secrets.
@@ -266,7 +286,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - If production write or secret access is required, record needs-human-production-gate and continue to another independent module when safe.
    - Missing production DB/worker evidence is a soft gate. Record production-evidence-deferred; never claim real production closure for that evidence.
 
-11. Diff review and security scan
+12. Diff review and security scan
    - Inspect git diff before staging.
    - Confirm every changed file belongs to the selected slice or required docs/state.
    - Confirm no user/unrelated changes are staged.
@@ -281,7 +301,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
      - Every affected docs/modules/<module>/state-machine.md is updated when module states/transitions changed, or the analysis explicitly says "module state-machine definition unchanged" with evidence.
    - Do not commit if state-machine accounting is missing, contradictory, or only represented by NEXT-PROMPT.md.
 
-12. State-machine update gate
+13. State-machine update gate
    - This gate is mandatory before every commit. Do not skip it for documentation-only, test-only, manifest-only, or "no behavior change" slices.
    - Decide explicitly whether the slice changes any state-machine definition:
      - global refactor workflow states, transitions, guards, stop gates, defer gates, completion criteria, or autonomous continuation rules.
@@ -301,7 +321,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - The commit is invalid if it updates only `NEXT-PROMPT.md` without matching `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and analysis evidence.
    - The commit is invalid if the analysis says "state-machine definition unchanged" but the code/docs changed state names, status values, transition guards, read model freshness states, worker lifecycle states, permission states, or legacy-retirement states.
 
-13. State update
+14. State update
    - Updating state is mandatory after every closed, deferred, blocked, or failed boundary. Do not treat NEXT-PROMPT.md alone as the state machine.
    - Update .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md when the run introduces, renames, or clarifies any workflow state, transition, guard, stop/defer condition, or completion criterion.
    - If the selected boundary changes business state, UI state, read model state, worker state, operation barrier state, force-refresh state, permission state, or legacy-retirement state, update docs/modules/<module>/state-machine.md in the same slice.
@@ -325,7 +345,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - If a Go candidate fails admission, mark go-candidate-deferred.
    - If a hard gate is hit, mark blocked-hard-stop with concrete evidence and stop.
 
-14. Commit and push
+15. Commit and push
    - Stage only files for the completed slice.
    - Commit with a scoped message such as:
      - refactor(read-models): tighten query freshness manifest guards
@@ -336,7 +356,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - After push, confirm branch status is clean and up to date with origin/dev.
    - Then continue to the next pending boundary without waiting for me unless a hard stop gate exists.
 
-15. Next prompt execution
+16. Next prompt execution
    - Generate or update autonomous/NEXT-PROMPT.md after every closed/deferred slice.
    - Treat NEXT-PROMPT.md as resume state, but do not stop merely because it was updated.
    - Immediately execute the next prompt unless the current run hit a hard stop gate or no safe module remains.
