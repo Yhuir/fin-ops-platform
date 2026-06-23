@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:no-oa-domain-repair-read-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:post-no-oa-local-implementation-closure-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -86,8 +86,9 @@ Current state expected on start:
 - No-OA normal relation writes are command-service gated and active reads mostly use `relation_facade`.
 - No-OA application snapshot/version/persist/rollback pair service usage now goes through `NoOaPairRelationSnapshotPort`.
 - No-OA domain repair/read active relation reads go through `NoOaRelationRepairReadPort`.
-- ETC and WorkbenchWriteFacade relation dependencies still need focused classification.
-- The next pending boundary is workbench-relations:post-no-oa-local-implementation-closure-audit.
+- WorkbenchWriteFacade remains the largest direct broad pair service holder.
+- ETC still needs later focused classification, but it is not the highest-risk next boundary.
+- The next pending boundary is workbench-relations:workbench-write-facade-pair-service-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -183,18 +184,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:post-no-oa-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:workbench-write-facade-pair-service-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:post-no-oa-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-no-oa-domain-repair-read-port-extraction.md`.
+For workbench-relations:workbench-write-facade-pair-service-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-no-oa-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/etc_business_batch_application_service.py`, `backend/src/fin_ops_platform/services/etc_service.py`, WorkbenchWriteFacade relation construction and relevant tests.
-- Use CodeGraph/text search for remaining `_workbench_pair_relation_service`, `pair_relation_service=`, `WorkbenchPairRelationService`, `replace_pair_relation_service`, `WorkbenchWriteFacade`, `EtcBusinessBatchApplicationService`, `EtcService`, and relation command/read facade boundaries.
-- Re-audit local `workbench_relation` implementation gaps after no-OA extraction.
-- Decide whether the next narrow boundary should be ETC relation dependency audit/extraction, WorkbenchWriteFacade relation callback classification, production-evidence defer, or another smaller planning slice.
-- Keep Go hot-path candidates blocked until relation dependencies and read model implementation prerequisites are closed or explicitly deferred.
+- Read `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_pair_relation_service`, `active_relations_for_row_ids`, `get_active_relation_by_row_id`, `snapshot`, `update_special_metadata_for_row_ids`, `clear_special_metadata_for_row_ids`, `preview_withdraw_for_row_ids`, `relation_command_service`, `relation_command_service_factory`, `restore_pair_relation_snapshot`, and `persist_pair_relations`.
+- Audit every `WorkbenchWriteFacade._pair_relation_service` call site.
+- Classify each call as command write, read/preflight, snapshot/rollback, special metadata mutation, or compat-only.
+- Identify which call sites are already command-service gated and which still bypass the target boundary.
+- Decide the next narrow implementation boundary; do not migrate the whole facade in one slice.
+- Preserve Workbench confirm/cancel/withdraw/idempotency/UoW behavior.
 - Do not change relation write semantics, API payloads, dirty scope semantics or read model refresh semantics in this audit slice.
-- Do not declare `workbench_relation` module closed unless IO contract, legacy isolation, freshness proof, tests, docs and production evidence/defer requirements are all satisfied.
+- Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

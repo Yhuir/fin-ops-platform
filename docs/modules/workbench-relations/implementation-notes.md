@@ -134,6 +134,27 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 
 下一条边界：`workbench-relations:post-no-oa-local-implementation-closure-audit`。
 
+## 2026-06-24 - post-no-OA local implementation closure audit
+
+目标：在 no-OA application snapshot port 和 domain repair/read port 完成后，重新审计 `workbench_relation` 的本地剩余 gap，避免误跳到 GoHotPath 或误标模块闭环。
+
+结论：
+
+- `workbench_relation` 仍是 `implementation-gap-open`。
+- ETC business batch application 的可见构造路径没有直接注入 `WorkbenchPairRelationService`，已有 guard 覆盖 ETC summary delete command boundary 和 historical ETC migration 直接写 fallback。
+- 当前最高风险剩余边界不是 ETC，而是 `WorkbenchWriteFacade`。
+- `Application._workbench_write_facade(...)` 仍传入 `pair_relation_service=self._workbench_pair_relation_service`。
+- `WorkbenchWriteFacade` 仍保存 `_pair_relation_service`，并直接承担 preview/confirm/cancel/withdraw/special metadata 等多个 relation read/snapshot/mutation 入口。
+- 现有 guard 已经证明 confirm/cancel 关键路径不能回退到 direct pair write fallback，但 facade 的 read、snapshot/rollback、special metadata mutation 和 compat-only surface 还没有拆分边界。
+- 下一条边界是 `workbench-relations:workbench-write-facade-pair-service-boundary-audit`，先分类每个 call site，再决定最小实现刀口。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
