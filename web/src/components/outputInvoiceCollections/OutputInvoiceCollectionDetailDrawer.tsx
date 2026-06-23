@@ -7,6 +7,7 @@ export type OutputInvoiceCollectionDetailTarget = {
   kind: "invoice" | "bank" | "relationList";
   id: string;
   rowId?: string;
+  relationKind?: "oa" | "bank" | "invoice" | "red_invoice" | "receipt";
 };
 
 export type OutputInvoiceCollectionDetailField = {

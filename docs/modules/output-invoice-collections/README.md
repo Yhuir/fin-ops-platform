@@ -49,11 +49,12 @@
 - 列表读接口优先读取 SQL read model `output_invoice_collection`；miss/stale/schema/source version mismatch 时返回 `202` 与 `read_model_status=refreshing`，不得在请求线程同步 live rebuild。
 - 生产 PostgreSQL runtime 下，SQL read repository 缺失也属于 read model unavailable：API 必须 enqueue `output_invoice_collection` 对应 month/all scope 并返回 `read_model_status=refreshing`，不能回退 `OutputInvoiceCollectionQueryService.list_rows(...)` 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
 - fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
+- 页面展示统一关系事实源中的 OA、收入流水和销项发票项：rows 中 `oa`、`bankTransactions`、`invoiceRelations` 都携带 `relationCount`、`hasMultiple`、`detailMode` 和 `summaries`；同一 relation 下多项对象在对应栏显示 `+N`，点击 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。多项模式下该栏不再额外展示已包含在 `+N` 中的 primary 对象。
 - 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
 - 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
 - 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 必须 enqueue `output_invoice_collection` scope，并在 PostgreSQL 模式下通过 transaction-bound queue writer 与事实写入同事务提交。
 - 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
-- `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本。
+- `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本；统一关系展示字段缺失属于 SQL payload schema stale，必须 enqueue refresh。
 - `output_invoice_collection:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
 - App Status domain `output_invoice_collections` 依赖 `output_invoice_collection`、`invoice_lifecycle` readiness，以及 `invoice-usage-collection`、`invoice-lifecycle` worker。
 

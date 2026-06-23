@@ -13,6 +13,7 @@ import type {
   FetchPendingInvoiceCandidatesRequest,
   FetchPendingInvoiceRowsRequest,
   PendingInvoiceBankTransaction,
+  PendingInvoiceBankTransactionSummary,
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
   PendingInvoiceDetailSection,
@@ -28,6 +29,7 @@ import type {
   PendingInvoiceOaPrintLayout,
   PendingInvoiceOaSummary,
   PendingInvoiceRelationDetail,
+  PendingInvoiceRelationDetailKind,
   PendingInvoiceRuleGroup,
   PendingInvoiceRulesPayload,
   PendingInvoiceRow,
@@ -92,36 +94,53 @@ type ApiOaSummary = Partial<{
   relationSource: string | null;
 }>;
 
+type ApiBankTransactionPayload = Partial<{
+  id: string | null;
+  account_no: string | null;
+  counterparty_name: string | null;
+  counterparty_account_no: string | null;
+  counterparty_bank_name: string | null;
+  trade_time: string | null;
+  booked_date: string | null;
+  debit_amount: string | null;
+  credit_amount: string | null;
+  amount: string | null;
+  balance: string | null;
+  currency: string | null;
+  bank_name: string | null;
+  bank_short_name: string | null;
+  account_name: string | null;
+  account_last4: string | null;
+  summary: string | null;
+  remark: string | null;
+  statement_serial_no: string | null;
+  enterprise_serial_no: string | null;
+  voucher_type: string | null;
+  voucher_no: string | null;
+  effective_tag_code: string | null;
+  effective_tag_label: string | null;
+  effective_tag_primary_label: string | null;
+  effective_tag_sub_label: string | null;
+  effective_tag_label_path: unknown[] | null;
+  relation_case_id: string | null;
+  relationCaseId: string | null;
+  relation_status: string | null;
+  relationStatus: string | null;
+  relation_source: string | null;
+  relationSource: string | null;
+}>;
+
 type ApiPendingInvoiceRow = {
   id?: string | null;
-  bank_transaction?: Partial<{
-    id: string | null;
-    account_no: string | null;
-    counterparty_name: string | null;
-    counterparty_account_no: string | null;
-    counterparty_bank_name: string | null;
-    trade_time: string | null;
-    booked_date: string | null;
-    debit_amount: string | null;
-    credit_amount: string | null;
-    amount: string | null;
-    balance: string | null;
-    currency: string | null;
-    bank_name: string | null;
-    bank_short_name: string | null;
-    account_name: string | null;
-    account_last4: string | null;
-    summary: string | null;
-    remark: string | null;
-    statement_serial_no: string | null;
-    enterprise_serial_no: string | null;
-    voucher_type: string | null;
-    voucher_no: string | null;
-    effective_tag_code: string | null;
-    effective_tag_label: string | null;
-    effective_tag_primary_label: string | null;
-    effective_tag_sub_label: string | null;
-    effective_tag_label_path: unknown[] | null;
+  bank_transaction?: ApiBankTransactionPayload | null;
+  bank_transactions?: Partial<{
+    primary: ApiBankTransactionPayload | null;
+    relation_count: number | null;
+    linked_relation_count: number | null;
+    has_multiple: boolean | null;
+    detail_mode: string | null;
+    summaries: ApiBankTransactionPayload[] | null;
+    payment_summary: Partial<{ paid_total: string | null }> | null;
   }> | null;
   invoice_acquisition_status?: Partial<{
     code: string | null;
@@ -441,7 +460,7 @@ export function mapBankTransactionTagDictionary(value: ApiTagDictionary | null |
   };
 }
 
-function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fallbackId: string): PendingInvoiceBankTransaction {
+function mapBankTransaction(value: ApiBankTransactionPayload | null | undefined, fallbackId: string): PendingInvoiceBankTransaction {
   const amount = stringValue(value?.amount, stringValue(value?.debit_amount, stringValue(value?.credit_amount)));
   return {
     id: stringValue(value?.id, fallbackId),
@@ -471,6 +490,16 @@ function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fal
     effectiveTagPrimaryLabel: value?.effective_tag_primary_label ?? null,
     effectiveTagSubLabel: value?.effective_tag_sub_label ?? null,
     effectiveTagLabelPath: stringList(value?.effective_tag_label_path),
+  };
+}
+
+function mapBankTransactionSummary(value: ApiBankTransactionPayload | null | undefined, fallbackId: string): PendingInvoiceBankTransactionSummary {
+  const mapped = mapBankTransaction(value, fallbackId);
+  return {
+    ...mapped,
+    relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
+    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
 
@@ -535,6 +564,14 @@ function statusLabel(code: string) {
 
 export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceRow {
   const id = stringValue(row.id, stringValue(row.bank_transaction?.id));
+  const bankTransaction = mapBankTransaction(row.bank_transaction, id);
+  const bankSummaries = (row.bank_transactions?.summaries ?? [])
+    .map((bankRow) => mapBankTransactionSummary(bankRow, id))
+    .filter((item) => item.id || item.counterpartyName);
+  const bankPrimary = row.bank_transactions?.primary
+    ? mapBankTransactionSummary(row.bank_transactions.primary, id)
+    : (bankSummaries.length === 1 ? bankSummaries[0] : null);
+  const bankTransactionSummaries = bankSummaries.length > 0 ? bankSummaries : [mapBankTransactionSummary(row.bank_transaction, id)];
   const legacyInvoices = (row.invoices ?? []).map(mapInvoice).filter(hasInvoiceIdentity);
   const inputSummaries = (row.input_invoices?.summaries ?? []).map(mapInvoice).filter(hasInvoiceIdentity);
   const primaryInvoice = mapInvoice(row.input_invoices?.primary ?? legacyInvoices[0] ?? null);
@@ -552,7 +589,18 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   const oaDetailAvailable = row.oa?.detail_available !== false && Boolean(oaPrimary?.detailAvailable) && isRealOaDetailId(oaPrimary?.id ?? "");
   return {
     id,
-    bankTransaction: mapBankTransaction(row.bank_transaction, id),
+    bankTransaction,
+    bankTransactions: {
+      primary: bankPrimary,
+      relationCount: numberValue(row.bank_transactions?.relation_count, bankTransactionSummaries.length),
+      linkedRelationCount: numberValue(row.bank_transactions?.linked_relation_count, bankTransactionSummaries.length),
+      hasMultiple: row.bank_transactions?.has_multiple === true || bankTransactionSummaries.length > 1,
+      detailMode: stringValue(row.bank_transactions?.detail_mode, bankTransactionSummaries.length > 1 ? "list" : "single") as PendingInvoiceRow["bankTransactions"]["detailMode"],
+      summaries: bankTransactionSummaries,
+      paymentSummary: row.bank_transactions?.payment_summary ? {
+        paidTotal: stringValue(row.bank_transactions.payment_summary.paid_total),
+      } : null,
+    },
     invoiceAcquisitionStatus: Object.freeze({
       code: statusCode as PendingInvoiceRow["invoiceAcquisitionStatus"]["code"],
       label: stringValue(row.invoice_acquisition_status?.label, statusLabel(statusCode)),
@@ -817,9 +865,17 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
   };
 }
 
-export async function fetchPendingInvoiceRelationDetail(transactionId: string, direction: PendingInvoiceDirection = "expense", signal?: AbortSignal): Promise<PendingInvoiceRelationDetail> {
+export async function fetchPendingInvoiceRelationDetail(
+  transactionId: string,
+  direction: PendingInvoiceDirection = "expense",
+  kind: PendingInvoiceRelationDetailKind = "all",
+  signal?: AbortSignal,
+): Promise<PendingInvoiceRelationDetail> {
   const params = new URLSearchParams();
   params.set("direction", direction);
+  if (kind !== "all") {
+    params.set("kind", kind);
+  }
   const payload = await requestJson<ApiRelationDetail>(
     `/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/relation-detail?${params.toString()}`,
     { method: "GET", signal },

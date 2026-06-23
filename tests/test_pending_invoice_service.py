@@ -360,6 +360,67 @@ class LiveWorkbenchRelationFacade:
 
 
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
+    def test_list_rows_collapses_multi_bank_relation_into_one_grouped_row(self) -> None:
+        vendor = self._counterparty("cp_vendor", "Vendor A")
+        txn_1 = self._bank_transaction("txn_group_1", TransactionDirection.OUTFLOW, "Vendor A", "120.00")
+        txn_2 = self._bank_transaction("txn_group_2", TransactionDirection.OUTFLOW, "Vendor A", "80.00")
+        txn_3 = self._bank_transaction("txn_group_3", TransactionDirection.OUTFLOW, "Vendor A", "50.00")
+        inv_1 = self._invoice("inv_group_1", InvoiceType.INPUT, "IN-GROUP-001", vendor, seller_name="Vendor A", total_with_tax="100.00")
+        inv_2 = self._invoice("inv_group_2", InvoiceType.INPUT, "IN-GROUP-002", vendor, seller_name="Vendor A", total_with_tax="150.00")
+        relation_facade = FakeWorkbenchRelationFacade([
+            {
+                "row_id": transaction.id,
+                "row_type": "bank_transaction",
+                "group_ids": ["case_multi_pending"],
+                "linked_oa": [
+                    {
+                        "id": "oa-group-1",
+                        "applicant": "张三",
+                        "application_type": "支付申请",
+                        "project_name": "项目一",
+                        "relation_case_id": "case_multi_pending",
+                    },
+                    {
+                        "id": "oa-group-2",
+                        "applicant": "李四",
+                        "application_type": "日常报销",
+                        "project_name": "项目二",
+                        "relation_case_id": "case_multi_pending",
+                    },
+                ],
+                "linked_bank_transactions": [
+                    {"id": txn_1.id, "amount": "120.00", "trade_time": txn_1.trade_time, "counterparty_name": "Vendor A", "relation_case_id": "case_multi_pending"},
+                    {"id": txn_2.id, "amount": "80.00", "trade_time": txn_2.trade_time, "counterparty_name": "Vendor A", "relation_case_id": "case_multi_pending"},
+                    {"id": txn_3.id, "amount": "50.00", "trade_time": txn_3.trade_time, "counterparty_name": "Vendor A", "relation_case_id": "case_multi_pending"},
+                ],
+                "linked_input_invoices": [
+                    {"id": inv_1.id, "invoice_no": "IN-GROUP-001", "seller_name": "Vendor A", "total_with_tax": "100.00", "relation_case_id": "case_multi_pending"},
+                    {"id": inv_2.id, "invoice_no": "IN-GROUP-002", "seller_name": "Vendor A", "total_with_tax": "150.00", "relation_case_id": "case_multi_pending"},
+                ],
+                "linked_output_invoices": [],
+            }
+            for transaction in (txn_1, txn_2, txn_3)
+        ])
+        service = self._query_service(
+            transactions=[txn_1, txn_2, txn_3],
+            invoices=[inv_1, inv_2],
+            relation_facade=relation_facade,
+        )
+
+        payload = service.list_rows(direction="expense", filter="all")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["id"], txn_1.id)
+        self.assertEqual(row["relation_case_ids"], ["case_multi_pending"])
+        self.assertEqual(row["bank_transactions"]["relation_count"], 3)
+        self.assertEqual(row["bank_transactions"]["linked_relation_count"], 3)
+        self.assertEqual([item["id"] for item in row["bank_transactions"]["summaries"]], [txn_1.id, txn_2.id, txn_3.id])
+        self.assertEqual(row["bank_transactions"]["payment_summary"]["paid_total"], "250.00")
+        self.assertEqual(row["input_invoices"]["relation_count"], 2)
+        self.assertEqual(row["oa"]["relation_count"], 2)
+        self.assertEqual(row["invoice_acquisition_status"]["code"], "paid_invoiced")
+
     def test_expense_rows_use_input_invoices_and_keep_multiple_invoices_in_one_bank_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn = self._bank_transaction("txn_expense", TransactionDirection.OUTFLOW, "Vendor A", "100.00")
@@ -534,6 +595,21 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([oa["id"] for oa in detail["related_oa"]], ["oa-tmw-196"])
         self.assertEqual(detail["relation_case_ids"], ["case_tmw_196"])
         self.assertIn([txn.id], relation_facade.calls)
+
+        invoice_detail = service.relation_detail(transaction_id=txn.id, direction="expense", kind="invoice")
+        self.assertEqual([invoice["id"] for invoice in invoice_detail["related_invoices"]], ["oa-att-inv-001", "oa-att-inv-002"])
+        self.assertEqual(invoice_detail["payment_rows"], [])
+        self.assertEqual(invoice_detail["related_oa"], [])
+
+        bank_detail = service.relation_detail(transaction_id=txn.id, direction="expense", kind="bank")
+        self.assertEqual([row["id"] for row in bank_detail["payment_rows"]], [txn.id])
+        self.assertEqual(bank_detail["related_invoices"], [])
+        self.assertEqual(bank_detail["related_oa"], [])
+
+        oa_detail = service.relation_detail(transaction_id=txn.id, direction="expense", kind="oa")
+        self.assertEqual([oa["id"] for oa in oa_detail["related_oa"]], ["oa-tmw-196"])
+        self.assertEqual(oa_detail["related_invoices"], [])
+        self.assertEqual(oa_detail["payment_rows"], [])
 
     def test_oa_detail_uses_workbench_relation_distribution_case_id(self) -> None:
         relation_facade = FakeWorkbenchRelationFacade([

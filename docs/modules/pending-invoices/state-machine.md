@@ -26,6 +26,7 @@
 - filter-options、export-preview 和 export 必须先读 fresh read model；非 fresh 时返回 accepted/refreshing。
 - 历史 manual invoice service/command 只作为旧数据恢复和迁移兼容能力保留；待找发票页面和 HTTP API 不再提供新建 manual invoice 写入口。
 - 选择已有发票批量 preview 不写事实；confirm 必须返回 affected transaction/invoice arrays。已存在兼容的 bank+invoice 或 OA+invoice relation 时应把既有 rows 与本次选择的银行流水/发票合并到同一 active case，不创建复用同一 row 的第二条 active case。后续从关联台 withdraw 该 active case 时，应通过 workbench relation history 恢复 confirm 前的上一 active 状态，而不是取消所有历史关系。
+- 待找发票列表中的 OA、银行流水和发票关系成员必须来自 `workbench_relation` distribution。任一分区成员数大于 1 时，该分区进入 `detail_mode=list`，用 `+N` 表达全部 N 个成员；`N` 不是 extra count，且分区内不得再展示 primary 成员。
 - 收入批量状态覆盖必须先全量校验：transaction ids 非空且不重复、全部为收入流水、状态码属于 `income_no_invoice_required` / `cash_income`、当前行未关联销项发票；任一失败不得写 command/audit/finalizer。
 - invoice lifecycle 必须先于待找发票、税金、成本、OA/进项/销项下游页面刷新。
 
@@ -36,6 +37,7 @@
 - 禁止保存规则时接受未知标签、归档标签或重复映射。
 - 禁止收入规则污染支出规则，或支出规则污染收入规则。
 - 禁止候选 relation case id 被当作真实 OA id 请求详情。
+- 禁止把已经包含在 `+N` 明细里的 OA、银行流水或发票继续作为同栏 primary 单独呈现；同一多流水 relation 的成员也不得再作为 standalone 待找发票行重复出现。
 - 禁止 attach existing 或历史 manual command 恢复时重复创建发票或 relation。
 - 禁止待找发票页面或 HTTP route 暴露 manual invoice preview/confirm 新写入口。
 - 禁止 pending invoice 规则变更刷新 `turnover_ledger`、`no_oa_bank_batch` 或 `bank_account_balance`。
@@ -54,6 +56,7 @@
 | expense transaction selection | 用户在支出列表勾选流水 | 仅允许有 `attach_existing_invoice` action 的支出流水进入批量选择；筛选、排序、分页、搜索或确认后清理选择；选择发票入口只在表格上方选中工具栏出现。 |
 | income transaction selection | 用户在收入列表勾选流水 | 仅允许有 `mark_income_status` action 的收入流水进入批量选择；选中后工具栏显示“标记无需开票”“标记现金收入”“清除选择”。 |
 | income status batch action | 收入选中工具栏提交 | 提交时禁用批量状态按钮；成功后以响应 rows 或 refetch 为准，并清理选择。 |
+| relation member list | 用户点击 `+N` | 仅展示点击分区对应的 OA、银行流水或发票成员；请求可带 `kind=oa|bank|invoice`，默认全量详情只作为兼容路径。 |
 | permission disabled/hidden | session permissions | 只读用户隐藏或禁用保存规则、attach、income override 等 mutation。 |
 
 前端事件：
@@ -109,6 +112,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 待找发票 rows 补齐 `bank_transactions` 分区，多 OA/多流水/多发票按 `workbench_relation` 聚合为一行并用 `+N` 展开对应类型明细 | PendingInvoiceQueryService、SearchPendingSqlProjectionBuilder、PendingInvoicesTable、PendingInvoiceRelationDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
 | 2026-06-17 | 选择已有进项发票候选表改为后端事实驱动的“流水关联”chip，并允许已有 OA+发票关系并入同一 attach active case；关联台撤回恢复上一状态 | PendingInvoiceQueryService candidates、PendingInvoiceApplicationService attach existing、PendingInvoiceInvoicePickerDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
 | 2026-06-15 | `requires_invoice` 父筛选改为最终状态桶，解除对 `filter_group` 的可见性依赖 | Pending invoice status helper、service fallback、SQL read repository、SQL projection、API/product/module docs | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py` |
 | 2026-06-15 | 移除待找发票行内三点菜单和 manual invoice HTTP/UI 新写入口；收入侧增加多选批量标记 | PendingInvoiceApplicationService batch income override、pending invoice routes/API、PendingInvoicesPage/Table、SQL projection、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |

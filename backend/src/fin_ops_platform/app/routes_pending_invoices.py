@@ -92,6 +92,7 @@ class PendingInvoiceApiRoutes:
         return self._query_service.relation_detail(
             transaction_id=transaction_id,
             direction=request_query.get("direction", ["expense"])[0],
+            kind=request_query.get("kind", ["all"])[0],
         )
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:

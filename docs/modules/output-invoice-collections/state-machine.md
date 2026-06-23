@@ -12,6 +12,7 @@
   - 正式收据：`preview -> issued -> voided -> reissued`。创建必须有 idempotency key；history 读取真实 receipt lifecycle facts。
 - 状态事实源：
   - 销项发票和银行/关系事实来自 import/workbench/read model 上游。
+  - OA、收入流水和关联销项发票项展示来自 `workbench_relation` 统一分发关系；`relationStatus="candidate"` 只能作为候选证据展示，不能计入已收款或 confirmed relation 判断。
   - 收款状态规则来自 `InvoiceLifecyclePolicy` 和 `OutputInvoiceCollectionStatusRuleService`。
   - 手动状态、提醒、红蓝票关系、收据 facts 来自 output invoice collection lifecycle repository。
   - 页面列表事实来自 SQL read model `output_invoice_collection`，fresh 时叠加 lifecycle facts。
@@ -39,11 +40,13 @@
   - 收款状态、提醒、红蓝票和 receipt mutation 需要 mutation 权限。
   - receipt settings 入口 admin-only。
   - 权限不足时 API 返回 403，前端隐藏或禁用对应入口。
+- relation list：当 OA、收入流水或关联销项发票项为多项时，对应栏只显示 `+N` 入口；点击后打开详情 drawer，按 `kind=oa|bank|invoice` 展示全部 summaries。已包含在 `+N` 中的对象不在同一栏重复展示 primary 明细。
 
 ## Read Model / Worker 状态
 
 - fresh：`read_model.app_status_readiness` 或等价 repository 状态证明 `output_invoice_collection` scope fresh；rows route 返回 `200` 并可叠加 lifecycle overlay。
 - missing/stale/source version mismatch：rows route 返回 `202`、`read_model_status=refreshing`，enqueue `output_invoice_collection` refresh；不得同步 live rebuild。
+- schema stale：SQL payload 缺少 `oa` 或 `invoiceRelations` 等统一关系字段时，视为 schema stale 并 enqueue refresh；旧 read model 不得作为 fresh rows 返回。
 - refreshing：dirty/outbox 或 readiness 显示 scope 正在刷新；页面保持 busy/auto retry。
 - failed/unavailable：App Status domain 进入 blocked 或 unavailable；页面不能伪装数据 ready。
 - refresh 触发来源：
@@ -59,6 +62,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 统一关系 OA/流水/发票项 `+N` 展示 | 不新增收款业务状态；新增 relation list UI 状态和 SQL payload schema stale 条件 | `python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run` |
 | 2026-06-18 | 补充红蓝票 Browser fan-out | 不改变状态机；新增真实 Chromium 覆盖红蓝票关系确认后 rows refresh 和人工依据展示 | `cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts` |
 | 2026-06-17 | 补充 Browser e2e 主流程 | 不改变状态机；新增真实 Chromium 覆盖手动状态/提醒保存、rows refresh、正式收据创建和 history 展示 | `cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts` |
 | 2026-06-11 | 首轮测试闭环文档化 | 明确业务/UI/read model/worker 状态和禁止流转 | `tests/test_output_invoice_collection_*`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`bash scripts/verify.sh docs` |

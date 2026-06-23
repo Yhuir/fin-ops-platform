@@ -3,6 +3,17 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-23 - 右侧抽屉候选流水按已选 OA 月份收敛
+
+- 目标：修复 OA 待付款核对进行中视图中，勾选 OA 后打开“关联支出流水”右侧抽屉长期停留在“加载中”的问题。
+- 影响范围：`OaPendingPaymentCommandService.bank_transaction_candidates`、`fetchOaPendingPaymentBankCandidates`、`OaBankLinkDrawer`、API/command/page 回归测试和本模块维护文档；`link-bank-transactions` 提交、pending relation、bank claim 和自动写回语义不变。
+- 真实原因：抽屉虽然从一个已选 OA 打开，但前端没有把已选 OA row id 传给候选接口；后端因此每次都按 `month=all` 读取全部历史支出流水，并为这些历史流水计算 Workbench active relation 与 OA pending bank claim 状态。生产历史流水多时，金额搜索如 `2152` 仍要先完成全量候选与关系状态扫描，页面就表现为右侧抽屉一直“加载中”。这不是流水不存在，也不是前端筛选按钮问题。
+- 关键决策：抽屉有已选 OA 上下文时，前端必须传 repeated `oa_row_ids`；后端基于这些 OA 的 `month` 得出候选月份，只读取对应月份的支出流水并去重，再执行 relation status 和关键字筛选。没有 OA 上下文的旧调用继续保留 `all` 语义；有 OA id 但无法解析月份时返回空候选，不回退到全量历史扫描。
+- 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、`e2e-spec.md` 和 `e2e-coverage.md`；产品口径仍是“人工抽屉作为自动匹配失败后的兜底”，只是候选读取边界从全量历史收敛到已选 OA 所在月份。
+- 测试覆盖：新增 `tests/test_oa_pending_payment_command_service.py::OaPendingPaymentCommandServiceTests::test_bank_transaction_candidates_uses_selected_oa_month_scope` 和 `::test_bank_transaction_candidates_with_selected_oa_does_not_fallback_all_when_month_missing`；更新 `tests/test_oa_pending_payment_api.py::OaPendingPaymentApiTests::test_bank_transaction_candidates_route_delegates_to_command_service` 锁定 repeated `oa_row_ids` 透传；更新 `web/src/test/OaPendingPaymentsPage.test.tsx::switches to in-progress OA view and links bank payment with automatic writeback` 锁定抽屉候选请求携带已选 OA row id。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地自动化没有连接真实生产 OA/Mongo/PostgreSQL/银行流水库和真实浏览器会话；发布后仍需用截图中的 `2152.80` 进行中 OA 样本确认候选接口返回对应月份流水，并观察生产请求耗时。
+
 ## 2026-06-23 - 多 OA 多流水 relation 聚合成员补全
 
 - 目标：修复 OA 待付款核对中同一 Workbench active relation 已包含多条 OA 与多条支出流水时，OA 侧可能只显示主 OA 金额、缺少 `+N`，并把支出合计大于主 OA 金额误判为 `pending_review` 的场景。

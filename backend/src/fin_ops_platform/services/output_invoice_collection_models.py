@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v2"
+OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v3"
 
 MANUAL_COLLECTION_STATUS_OPTIONS: tuple[dict[str, Any], ...] = (
     {

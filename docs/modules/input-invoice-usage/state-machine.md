@@ -83,6 +83,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - refreshing：dirty scope 处于 `pending`/`processing`，或 API 判定 schema/source version stale 后，会返回空 rows 或详情不可用的 refreshing payload。
 - stale/failed/unavailable：dirty scope 失败或依赖不可用时不得把旧 rows 伪装为 fresh；调用方应触发 refresh 或展示可恢复状态。
 - all scope：默认不传 `month` 的页面查询使用 `scope_key=all`。当没有单独 `all` scope 行时，repository 会从各月份 scope 聚合共同一致的顶层 `source_versions`；月份间 `workbench_relation_source_versions` 等嵌套版本可不同，不应导致基础版本被清空。若任一月份 cache status 非 fresh，all scope 仍判定不可 fresh。
+- orphan month scope cleanup：`input_invoice_usage:all` refresh 是 fan-out 控制 scope；worker 发现当前有效月份 shard 后必须删除不在当前 shard set 内的旧 `read_model.input_invoice_usage_rows` / `read_model.input_invoice_usage_scopes` 月份 shard，避免已不存在月份的旧 source versions 继续污染 all-scope freshness proof。
 - refresh 触发来源：API miss、schema stale、source version stale、业务写入后的 read model invalidation、worker all scope 展开月 shard。
 - 失败恢复：通过 durable queue 重新刷新对应 month 或 all scope；all scope refresh 会展开到月 shard 后完成 queue 状态。
 
@@ -104,3 +105,4 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | 2026-06-17 | 主列表通过 OA 附件 row id 查询 relation distribution | 正式发票由 OA 附件提升/合并后，列表 rows 使用正式发票 id 与 `source_workbench_row_id` 共同查询统一 relation facade，显示已有 OA/candidate 证据但不改变支付状态 | `tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` |
 | 2026-06-18 | 补 Spec-first Browser relation fan-out smoke | 不改变状态机；新增真实 Chromium 覆盖 candidate OA/流水证据只展示不驱动支付状态、Workbench confirm 后 linked 证据驱动 `已支付`，并在 OA reverse drawer 中证明 candidate/linked 均不可勾选 | `web/e2e/input-invoice-relation-fanout.spec.ts` |
 | 2026-06-18 | 新增 OA reverse `暂存` bucket | `oa_draft_created` 作为用户可见暂存状态，关闭确认弹窗不清理 batch；暂存列表只展示两项处理动作，不展示 OA 草稿链接 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` |
+| 2026-06-23 | all-scope refresh 清理 orphan month shards | 修复旧月份 read model scope/rows 不再属于当前发票事实集但继续参与 all-scope source version 聚合，导致 `oa_projection_sync_version_missing` 并长期显示“正在刷新”的问题 | `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_api_all_scope_recovers_after_orphan_scope_prune`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_repository_prunes_orphan_scope_shards`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_refresh_handler_expands_all_scopes_and_completes_with_source_version` |

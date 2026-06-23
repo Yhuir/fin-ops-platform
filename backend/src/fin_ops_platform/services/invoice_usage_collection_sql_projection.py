@@ -58,8 +58,14 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
     def list_input_invoice_usage_scope_shards(self, scope_key: str) -> list[str]:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.INPUT)
 
+    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
+
     def list_output_invoice_collection_scope_shards(self, scope_key: str) -> list[str]:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.OUTPUT)
+
+    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_output_invoice_collection_scope_shards(current_scope_keys)
 
     def list_oa_pending_payment_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope_key = str(scope_key or "").strip()
@@ -75,6 +81,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             if MONTH_SCOPE_RE.match(str(month or ""))
         )
         return sorted(months, reverse=True)
+
+    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
@@ -200,6 +209,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return OutputInvoiceCollectionQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
+            oa_projection=self._oa_projection_repository,
             lifecycle_repository=build_output_invoice_collection_lifecycle_repository(self._connection),
             require_fresh_relations=True,
         )

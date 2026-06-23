@@ -14,6 +14,7 @@ import type {
   PendingInvoiceColumnFilter,
   PendingInvoiceFilterField,
   PendingInvoiceObjectDetailTarget,
+  PendingInvoiceRelationDetailKind,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
@@ -29,7 +30,7 @@ type PendingInvoicesTableProps = {
   rows: PendingInvoiceRow[];
   config: PendingInvoicesTableConfig;
   onSortChange: (field: PendingInvoiceSortField, direction?: PendingInvoiceSortDirection) => void;
-  onOpenRelation: (row: PendingInvoiceRow) => void;
+  onOpenRelation: (row: PendingInvoiceRow, kind?: PendingInvoiceRelationDetailKind) => void;
   onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
   direction: PendingInvoiceDirection;
   statusFilterControl: ReactNode;
@@ -484,8 +485,12 @@ function PendingInvoiceTableRow({
 }: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
-  const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
-  const oaExtraCount = Math.max(0, row.oa.relationCount - 1);
+  const bankRelationCount = Math.max(0, row.bankTransactions.relationCount);
+  const bankHasMultiple = row.bankTransactions.hasMultiple && bankRelationCount > 1;
+  const invoiceRelationCount = Math.max(0, row.inputInvoices.relationCount);
+  const invoiceHasMultiple = row.inputInvoices.hasMultiple && invoiceRelationCount > 1;
+  const oaRelationCount = Math.max(0, row.oa.relationCount);
+  const oaHasMultiple = row.oa.hasMultiple && oaRelationCount > 1;
   const oaDetailAvailable = canOpenOaDetail(row);
   const moneyDirection = rowMoneyDirection(row, direction);
   const invoiceNumberLabel = primaryInvoice ? invoiceNumber(primaryInvoice) : "";
@@ -493,6 +498,7 @@ function PendingInvoiceTableRow({
   const transactionSelectable = isTransactionSelectable?.(row) === true;
   const transactionSelected = selectedTransactionIds?.has(transactionId) === true;
   const invoiceTotal = row.inputInvoices.paymentSummary?.invoiceTotal || primaryInvoice?.totalWithTax || "";
+  const bankTotal = row.bankTransactions.paymentSummary?.paidTotal || row.bankTransaction.amount;
 
   return (
     <tr className="pending-invoices-table-row" id={row.id}>
@@ -510,41 +516,53 @@ function PendingInvoiceTableRow({
             ) : null}
           </span>
           <span className="pending-invoices-counterparty-content">
-            <span className="pending-invoices-counterparty-row">
-              <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
-                {row.bankTransaction.counterpartyName}
+            {bankHasMultiple ? (
+              <span className="pending-invoices-counterparty-row">
+                <DetailButton label="查看全部流水关系" onClick={() => onOpenRelation(row, "bank")}>
+                  +{bankRelationCount}
+                </DetailButton>
               </span>
-              <button
-                aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
-                className="pending-invoices-icon-button"
-                onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
-                title="流水详情"
-                type="button"
-              >
-                <Info aria-hidden="true" size={14} strokeWidth={2.3} />
-              </button>
-            </span>
-            <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
-            <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
-              {tagPathLabel(row.bankTransaction)}
-            </span>
+            ) : (
+              <>
+                <span className="pending-invoices-counterparty-row">
+                  <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
+                    {row.bankTransaction.counterpartyName}
+                  </span>
+                  <button
+                    aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
+                    className="pending-invoices-icon-button"
+                    onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
+                    title="流水详情"
+                    type="button"
+                  >
+                    <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+                  </button>
+                </span>
+                <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
+                <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
+                  {tagPathLabel(row.bankTransaction)}
+                </span>
+              </>
+            )}
           </span>
         </span>
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-amount" data-column-role="amount" role="gridcell">
         <AmountCell
-          account={bankAccountLabel(row.bankTransaction)}
-          amount={formatMoney(row.bankTransaction.amount)}
+          account={bankHasMultiple ? `${bankRelationCount} 笔流水` : bankAccountLabel(row.bankTransaction)}
+          amount={formatMoney(bankTotal)}
           className="pending-invoices-amount-cell"
           direction={<FinanceDirectionTag direction={moneyDirection}>{moneyDirection === "income" ? "收" : "支"}</FinanceDirectionTag>}
         />
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--summary pending-invoices-col-summary" data-column-role="description" role="gridcell">
-        <TextCell
-          primary={row.bankTransaction.summary || <EmptyValue />}
-          secondary={row.bankTransaction.remark || row.bankTransaction.voucherNo || <EmptyValue />}
-          title={row.bankTransaction.summary}
-        />
+        {bankHasMultiple ? <EmptyValue /> : (
+          <TextCell
+            primary={row.bankTransaction.summary || <EmptyValue />}
+            secondary={row.bankTransaction.remark || row.bankTransaction.voucherNo || <EmptyValue />}
+            title={row.bankTransaction.summary}
+          />
+        )}
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--status pending-invoices-table-cell--left-border pending-invoices-col-status" data-column-role="status" role="gridcell">
         <span className="pending-invoices-status-cell">
@@ -554,7 +572,11 @@ function PendingInvoiceTableRow({
         </span>
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" data-column-role="identity" role="gridcell">
-        {primaryInvoice ? (
+        {invoiceHasMultiple ? (
+          <DetailButton label="查看全部发票关系" onClick={() => onOpenRelation(row, "invoice")}>
+            +{invoiceRelationCount}
+          </DetailButton>
+        ) : primaryInvoice ? (
           <TextCell
             primary={invoiceNumberLabel}
             secondary={(
@@ -567,11 +589,6 @@ function PendingInvoiceTableRow({
                 >
                   <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                 </DetailButton>
-                {invoiceExtraCount > 0 ? (
-                  <DetailButton label={`${row.bankTransaction.counterpartyName} 查看全部发票关系`} onClick={() => onOpenRelation(row)}>
-                    +{invoiceExtraCount}
-                  </DetailButton>
-                ) : null}
               </span>
             )}
             title={invoiceNumberLabel}
@@ -579,7 +596,7 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </td>
       <td className="pending-invoices-table-cell pending-invoices-col-seller" data-column-role="identity" role="gridcell">
-        {primaryInvoice ? (
+        {!invoiceHasMultiple && primaryInvoice ? (
           <TextCell
             primary={primaryInvoice.sellerName || <EmptyValue />}
             secondary={primaryInvoice.sellerTaxNo || <EmptyValue />}
@@ -588,11 +605,10 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" data-column-role="amount" role="gridcell">
-        {primaryInvoice ? (
+        {primaryInvoice || invoiceHasMultiple ? (
           <span className="pending-invoices-money-stack">
             <span className="pending-invoices-money-primary">
               {formatMoney(invoiceTotal)}
-              {invoiceExtraCount > 0 ? <span className="pending-invoices-money-extra"> +{invoiceExtraCount}</span> : null}
             </span>
             {row.inputInvoices.paymentSummary ? (
               <>
@@ -604,7 +620,11 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </td>
       <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" data-column-role="identity" role="gridcell">
-        {primaryOa ? (
+        {oaHasMultiple ? (
+          <DetailButton label="查看全部 OA 关系" onClick={() => onOpenRelation(row, "oa")}>
+            +{oaRelationCount}
+          </DetailButton>
+        ) : primaryOa ? (
           <TextCell
             primary={primaryOa.applicant || <EmptyValue />}
             secondary={(
@@ -618,7 +638,7 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </td>
       <td className="pending-invoices-table-cell pending-invoices-col-oa-project" data-column-role="description" role="gridcell">
-        {primaryOa ? (
+        {!oaHasMultiple && primaryOa ? (
           <TextCell
             primary={primaryOa.projectName || <EmptyValue />}
             secondary={(
@@ -630,11 +650,6 @@ function PendingInvoiceTableRow({
                 >
                   <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                 </DetailButton>
-                {oaExtraCount > 0 ? (
-                  <DetailButton label={`${row.bankTransaction.counterpartyName} 查看全部 OA 关系`} onClick={() => onOpenRelation(row)}>
-                    +{oaExtraCount}
-                  </DetailButton>
-                ) : null}
               </span>
             )}
             title={primaryOa.projectName}

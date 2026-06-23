@@ -25,7 +25,7 @@ function api() {
     fetchPendingInvoiceFilterOptions: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
     fetchPendingInvoiceRules: () => Promise<PendingInvoiceRulesPayload>;
     savePendingInvoiceRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
-    fetchPendingInvoiceRelationDetail: (transactionId: string, direction?: string) => Promise<unknown>;
+    fetchPendingInvoiceRelationDetail: (transactionId: string, direction?: string, kind?: string) => Promise<unknown>;
     fetchPendingInvoiceObjectDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<unknown>;
     fetchPendingInvoiceCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<unknown>;
     fetchPendingInvoiceCandidatesBatch: (request: FetchPendingInvoiceBatchCandidatesRequest) => Promise<unknown>;
@@ -77,6 +77,40 @@ describe("pending invoices and tag settings API mapping", () => {
             enterprise_serial_no: "ent-001",
             voucher_type: "电子凭证",
             voucher_no: "v-001",
+          },
+          bank_transactions: {
+            primary: null,
+            relation_count: 2,
+            linked_relation_count: 2,
+            has_multiple: true,
+            detail_mode: "list",
+            summaries: [
+              {
+                id: "txn_001",
+                counterparty_name: "云南供应商有限公司",
+                trade_time: "2026-05-02T10:00:00+08:00",
+                amount: "1200.00",
+                debit_amount: "1200.00",
+                bank_short_name: "工行",
+                account_last4: "6386",
+                summary: "电子转账",
+                relation_case_id: "case_001",
+                relation_status: "linked",
+              },
+              {
+                id: "txn_002",
+                counterparty_name: "云南供应商二号",
+                trade_time: "2026-05-02T11:00:00+08:00",
+                amount: "800.00",
+                debit_amount: "800.00",
+                bank_short_name: "建行",
+                account_last4: "8106",
+                summary: "电子转账",
+                relation_case_id: "case_001",
+                relation_status: "linked",
+              },
+            ],
+            payment_summary: { paid_total: "2000.00" },
           },
           invoice_acquisition_status: {
             code: "invoice_not_fully_paid",
@@ -211,6 +245,13 @@ describe("pending invoices and tag settings API mapping", () => {
         summary: "电子转账",
         voucherNo: "v-001",
       },
+      bankTransactions: {
+        relationCount: 2,
+        linkedRelationCount: 2,
+        hasMultiple: true,
+        detailMode: "list",
+        paymentSummary: { paidTotal: "2000.00" },
+      },
       invoiceAcquisitionStatus: {
         code: "invoice_not_fully_paid",
         label: "未支付完已开票",
@@ -230,6 +271,11 @@ describe("pending invoices and tag settings API mapping", () => {
         detailAvailable: true,
         primary: { id: "oa-001", applicant: "张三", projectName: "维护项目", formNo: "2048", detailAvailable: true, relationCaseId: "candidate:api-oa-bank", relationStatus: "candidate" },
       },
+    });
+    expect(payload.rows[0].bankTransactions.summaries[1]).toMatchObject({
+      id: "txn_002",
+      counterpartyName: "云南供应商二号",
+      relationStatus: "linked",
     });
     expect(payload.rows[0].inputInvoices.summaries[1]).toMatchObject({ id: "inv_002", relationStatus: "candidate" });
     expect(payload.pagination).toEqual({ page: 2, pageSize: 25, total: 51 });

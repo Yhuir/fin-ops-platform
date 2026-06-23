@@ -38,6 +38,7 @@ import type {
   PendingInvoiceFilterField,
   PendingInvoiceIncomeStatusCode,
   PendingInvoiceObjectDetailTarget,
+  PendingInvoiceRelationDetailKind,
   PendingInvoiceRow,
   PendingInvoiceRowsResponse,
   PendingInvoiceSortDirection,
@@ -50,7 +51,7 @@ const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
-type RelationTarget = { transactionId: string } | null;
+type RelationTarget = { transactionId: string; kind: PendingInvoiceRelationDetailKind } | null;
 type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
 type StatusFilterSelection =
   | "paid_pending_invoice"
@@ -422,8 +423,8 @@ export default function PendingInvoicesPage() {
     setSortDirection("asc");
   }, [clearSelectedTransactions, sortField]);
 
-  const handleOpenRelation = useCallback((row: PendingInvoiceRow) => {
-    setRelationTarget({ transactionId: row.bankTransaction.id || row.id });
+  const handleOpenRelation = useCallback((row: PendingInvoiceRow, kind: PendingInvoiceRelationDetailKind = "all") => {
+    setRelationTarget({ transactionId: row.bankTransaction.id || row.id, kind });
     setActiveDrawer("relation");
   }, []);
 
@@ -509,7 +510,10 @@ export default function PendingInvoicesPage() {
     closeDrawer();
   }
 
-  const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction), [direction]);
+  const loadRelation = useCallback(
+    (transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction, relationTarget?.kind ?? "all"),
+    [direction, relationTarget?.kind],
+  );
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
   const saveRules = useCallback(async (payload: Parameters<typeof savePendingInvoiceRules>[0]) => {
@@ -903,6 +907,7 @@ export default function PendingInvoicesPage() {
       <PendingInvoiceRelationDrawer
         open={activeDrawer === "relation"}
         transactionId={relationTarget?.transactionId ?? null}
+        detailKind={relationTarget?.kind ?? "all"}
         loadDetail={loadRelation}
         onClose={closeDrawer}
       />

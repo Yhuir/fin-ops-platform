@@ -53,6 +53,10 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandService,
+)
 from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION, WorkbenchSqlProjectionBuilder
 
@@ -178,6 +182,10 @@ class WorkbenchMatchingWorkerFactory:
         state_store = self._state_store()
         read_model_repository = getattr(state_store, "read_model_repository", None)
         pair_relation_service = WorkbenchPairRelationService.from_snapshot(state_store.load_workbench_pair_relations())
+        relation_command_service = self._relation_command_service(
+            state_store=state_store,
+            pair_relation_service=pair_relation_service,
+        )
         app_settings_service = _app_settings_service(state_store)
         row_provider = _WorkbenchSqlMatchingRowProvider(connection=self._connection)
         return build_workbench_matching_dirty_scope_worker(
@@ -191,6 +199,7 @@ class WorkbenchMatchingWorkerFactory:
                 special_rule_service=WorkbenchSpecialPairRuleService(),
                 exception_case_service=WorkbenchExceptionCaseService.from_snapshot(state_store.load_workbench_exception_cases()),
                 decision_store=WorkbenchReconciliationDecisionStore(repository=read_model_repository),
+                relation_command_service=relation_command_service,
                 settings_provider=lambda: _workbench_matching_settings(app_settings_service),
                 source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
             ),
@@ -208,6 +217,26 @@ class WorkbenchMatchingWorkerFactory:
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
         return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
+
+    @staticmethod
+    def _relation_command_service(
+        *,
+        state_store: Any,
+        pair_relation_service: WorkbenchPairRelationService,
+    ) -> WorkbenchRelationCommandService:
+        def save_snapshot(snapshot: dict[str, Any], *, changed_case_ids: list[str]) -> None:
+            state_store.save_workbench_pair_relations(snapshot, changed_case_ids=set(changed_case_ids or []))
+            updated = WorkbenchPairRelationService.from_snapshot(snapshot)
+            pair_relation_service._pair_relations.update(updated._pair_relations)
+            pair_relation_service._pair_relation_history = list(updated._pair_relation_history)
+
+        return WorkbenchRelationCommandService(
+            relation_repository=CallbackWorkbenchRelationRepository(
+                load_snapshot=lambda: pair_relation_service.snapshot(),
+                save_snapshot=save_snapshot,
+            ),
+            require_fresh_relations=False,
+        )
 
 
 def build_import_job_handler_bundle(

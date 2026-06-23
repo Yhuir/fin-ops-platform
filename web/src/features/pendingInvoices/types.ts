@@ -148,6 +148,26 @@ export type PendingInvoiceBankTransaction = {
   effectiveTagLabelPath: string[];
 };
 
+export type PendingInvoiceBankTransactionSummary = PendingInvoiceBankTransaction & {
+  relationCaseId: string;
+  relationStatus: string;
+  relationSource: string;
+};
+
+export type PendingInvoiceBankTransactionPaymentSummary = {
+  paidTotal: string;
+};
+
+export type PendingInvoiceBankTransactionZone = {
+  primary: PendingInvoiceBankTransactionSummary | null;
+  relationCount: number;
+  linkedRelationCount: number;
+  hasMultiple: boolean;
+  detailMode: "single" | "list" | (string & {});
+  summaries: PendingInvoiceBankTransactionSummary[];
+  paymentSummary: PendingInvoiceBankTransactionPaymentSummary | null;
+};
+
 export type PendingInvoiceMatchedRule = {
   source: string;
   group: PendingInvoiceRuleGroupCode | (string & {});
@@ -195,6 +215,7 @@ export type PendingInvoiceInvoiceZone = {
   relationCount: number;
   linkedRelationCount: number;
   hasMultiple: boolean;
+  detailMode?: "single" | "list" | (string & {});
   summaries: PendingInvoiceSummary[];
   paymentSummary: PendingInvoicePaymentSummary | null;
 };
@@ -216,6 +237,7 @@ export type PendingInvoiceOaZone = {
   primary: PendingInvoiceOaSummary | null;
   relationCount: number;
   hasMultiple: boolean;
+  detailMode?: "single" | "list" | (string & {});
   detailAvailable: boolean;
   summaries: PendingInvoiceOaSummary[];
 };
@@ -228,9 +250,12 @@ export type PendingInvoiceSourceSummary = {
   excludedDirectionRows: number;
 };
 
+export type PendingInvoiceRelationDetailKind = "all" | "bank" | "invoice" | "oa";
+
 export type PendingInvoiceRow = {
   id: string;
   bankTransaction: PendingInvoiceBankTransaction;
+  bankTransactions: PendingInvoiceBankTransactionZone;
   invoiceAcquisitionStatus: Readonly<PendingInvoiceAcquisitionStatus>;
   inputInvoices: PendingInvoiceInvoiceZone;
   oa: PendingInvoiceOaZone;

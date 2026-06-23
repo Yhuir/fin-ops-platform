@@ -643,7 +643,9 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 列表响应必须包含 rows、summary、filters、read model 状态和可解释的状态字段。
 - filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项；表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
-- 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。
+- rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`。同一 linked 或 candidate relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自统一 `workbench_relation` distribution 并聚合为一条待找发票行；多项时前端用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
+- `bank_transactions.payment_summary.paid_total` 表示 relation 下 linked 流水合计；`input_invoices.payment_summary` 继续表达发票合计、已付合计、待付金额和差额。候选 relation 可以作为证据展示，但业务状态和 linked-only 金额判断仍只能使用 linked 成员。
+- 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。`GET /api/pending-invoices/rows/{transaction_id}/relation-detail` 可接收 `kind=all|bank|invoice|oa`，默认 `all` 保持全量兼容；`bank`、`invoice`、`oa` 只返回对应类型列表，供 `+N` 分栏展开。
 - `requires_invoice` 在列表、filter-options 和导出中是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 的 SQL/规则分组条件。支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只用于解释规则命中和表头规则列筛选。
 - 支出状态下拉中的 `已支付待开票` / `已支付已开票` 是 `requires_invoice` 状态桶下的状态快捷筛选，前端通过 `filter=requires_invoice` 加 `filters=[{"field":"status_code","operator":"in","values":[...]}]` 提交，不把状态码伪装成规则组。
 - `POST /api/pending-invoices/invoice-candidates/batch` 接收 `transaction_ids` 和候选发票筛选/排序/分页字段，返回 `selection_summary.transaction_count`、`selection_summary.bank_total`、候选发票 rows 和 pagination。该接口按选中流水合计金额计算 `amount_difference_abs`，只支持支出流水选择进项发票。候选 rows 继续保留 `remaining_amount` 兼容旧调用方，但用于“流水关联”展示的事实字段是 `bank_relation_status` 和 `linked_bank_transaction_count`；`bank_relation_status` 可为 `unlinked`、`linked`、`already_selected`、`conflict`，不得由前端用剩余金额推断。
@@ -716,6 +718,19 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
 - 成功响应返回 `success`、`action`、`month`、`autoMatchedCount`、`writebackCount`、`autoMatchedRelations`、`oaPaymentWritebacks` 和 `readModelRefresh`；refresh 至少覆盖 Workbench 与 `oa_pending_payment`，目标刷新窗口为 2 秒级。
 - 失败时返回可展示业务错误；金额、方向或 `flow_id` 校验失败不得半写 `t_payment_simple`。
+
+`GET /api/oa-pending-payments/bank-transaction-candidates`
+
+该接口为进行中 OA 的“关联支出流水”抽屉提供候选支出流水。
+
+查询参数：
+
+- `relation_status=all|unmatched|matched|linked_in_progress`，默认 `all`。
+- `keyword`，可选，按候选 payload 做关键字筛选。
+- `page` / `page_size`，默认 `1` / `100`，`page_size` 上限为 `200`。
+- repeated `oa_row_ids`，可选。抽屉从已选 OA 打开时必须传入；后端按这些 OA 的 `month` 限定候选支出流水月份并去重。没有 OA 上下文的旧调用才保留全部支出流水语义；有 OA id 但无法解析月份时返回空候选，不得退回全量历史扫描。
+
+响应 `filters` 必须回显 `relationStatus`、`keyword`、`oaRowIds` 和 `monthScopes`，便于诊断候选池是否按 OA 月份收敛。
 
 `POST /api/oa-pending-payments/link-bank-transactions`
 
@@ -870,10 +885,17 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 读接口：
 
-- `GET /api/output-invoice-collections/rows`：优先读取 SQL read model；miss/stale/schema/source version 不匹配时返回 `202` 与 `read_model_status=refreshing`，不在请求线程 live rebuild。响应包含 `summary`、`bank.receivedTotal`、`bank.hasMultiple`、手动状态/提醒、人工红蓝票关系和正式收据摘要。
+- `GET /api/output-invoice-collections/rows`：优先读取 SQL read model；miss/stale/schema/source version 不匹配时返回 `202` 与 `read_model_status=refreshing`，不在请求线程 live rebuild。响应包含 `summary`、统一关系 `oa`、`bankTransactions`、`invoiceRelations`、手动状态/提醒、人工红蓝票关系和正式收据摘要。
 - `GET /api/output-invoice-collections/filter-options`：基于同一行集生成筛选项。
 - `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
 - `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
+- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须来自 `workbench_relation` 统一分发事实源；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+N` 展开全部明细，且同一栏不得再单独展示已包含在 `+N` 中的 primary 对象。
+
+rows 中统一关系字段要求：
+
+- `oa`、`bankTransactions`、`invoiceRelations` 都携带 `primary` 或兼容 primary 字段、`relationCount`、`hasMultiple`、`detailMode`、`summaries`；多项时 `detailMode=list`。
+- `bankTransactions.receivedTotal` 只统计 linked 收入流水；`relationStatus="candidate"` 的流水可作为候选证据展示，但不得计入已收款和 confirmed relation 判断。
+- SQL read model payload 缺少 `oa`、`bankTransactions`、`invoiceRelations`、`redInvoiceRelation` 或 `receipt` 任一结构字段时属于 schema stale，API 必须 enqueue `output_invoice_collection` refresh 并返回 `202 refreshing`。
 
 写接口：
 

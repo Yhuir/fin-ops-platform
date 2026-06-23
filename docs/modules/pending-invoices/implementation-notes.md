@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - 多 OA / 多流水 / 多发票 `+N` 聚合展示
+
+- 目标：让待找发票列表严格按统一 `workbench_relation` distribution 显示 OA、银行流水和发票配对关系；当同一 relation 下某类成员大于 1 时，该栏只显示代表全部成员的 `+N`，点击后只展开对应类型明细。
+- 影响范围：`PendingInvoiceQueryService`、`SearchPendingSqlProjectionBuilder`、`PendingInvoiceApiRoutes.relation_detail`、pending invoice API mapper/types、`PendingInvoicesTable`、`PendingInvoiceRelationDrawer`、本模块文档和 API/product 合同。
+- 关键决策：不新建页面私有事实源；rows 新增向后兼容的 `bank_transactions` 分区，`input_invoices` / `oa` 沿用 relation count 和 summaries。多笔流水属于同一 relation 时只输出一条聚合行，成员不再重复作为 standalone 行；`kind=bank|invoice|oa` 只过滤关系详情的展示列表，不改变金额汇总和 relation case 事实。
+- 文档影响：更新 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md`、`README.md`、`state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增 query service fallback 和 SQL projection 多流水 relation 聚合测试；扩展 relation detail kind 过滤测试；扩展前端 API mapper 和页面测试，覆盖 `bankTransactions`、多项只显示 `+N`、不展示 primary 重复项，以及 `+N` 分栏抽屉只显示发票/流水/OA 对应列表。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service tests.test_search_pending_sql_runtime tests.test_pending_invoice_api -v`；`cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx`。
+- 未测风险：本地未跑真实 Browser E2E、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain，也未用真实跨月 relation 样本验证“一个 relation 横跨多个 month shard”时的展示 owner 选择；当前实现按单次 rows 构建去重，跨月 aggregate scope 如存在同一 relation 的多个 owner month 仍需 staging 数据验证。
+- 后续事项：如生产确认存在跨月多流水 relation，应补充 owner month 规则和 SQL projection/repository 回归；导出是否完全镜像 grouped row 的明细拼接仍需在下一轮导出专项验证。
+
 ## 2026-06-20 - rules save mutation 暂时失败草稿重试恢复
 
 - 目标：补齐待找发票规则保存的 mutation 级 `NETWORK-RECOVERY` Browser 负面链路，防止保存暂时失败时误触发 freshness barrier/rows refresh、丢失草稿，或留下被抽屉 top-layer 拦截的不可点击全局错误弹窗。

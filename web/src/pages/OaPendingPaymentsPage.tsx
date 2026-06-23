@@ -167,6 +167,7 @@ export default function OaPendingPaymentsPage() {
   const autoReconcileFailedKeysRef = useRef<Set<string>>(new Set()).current;
   const autoReconcilePromisesRef = useRef<Map<string, Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse>>>(new Map()).current;
   const loadRowsRef = useRef<(mode: "reset" | "refresh", signal?: AbortSignal) => void>(() => undefined);
+  const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
@@ -537,7 +538,7 @@ export default function OaPendingPaymentsPage() {
       />
       <OaBankLinkDrawer
         open={canMutateData && bankLinkDrawerOpen}
-        selectedOaRowIds={[...selectedOaRowIds]}
+        selectedOaRowIds={selectedOaRowIdList}
         onLinked={handleBankLinkSuccess}
         onError={setError}
         onClose={() => setBankLinkDrawerOpen(false)}
@@ -643,6 +644,7 @@ function OaBankLinkDrawer({
     fetchOaPendingPaymentBankCandidates({
       relationStatus,
       keyword,
+      oaRowIds: selectedOaRowIds,
       page: 1,
       pageSize: 100,
       signal,
@@ -664,7 +666,7 @@ function OaBankLinkDrawer({
           setLoading(false);
         }
       });
-  }, [keyword, onError, open, relationStatus]);
+  }, [keyword, onError, open, relationStatus, selectedOaRowIds]);
 
   useEffect(() => {
     if (!open) {

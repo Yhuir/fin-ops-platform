@@ -234,6 +234,7 @@ class PendingInvoiceQueryService:
             "income": self._pending_invoice_tag_groups(direction="income"),
         }
         rows: list[dict[str, Any]] = []
+        emitted_relation_groups: set[str] = set()
         for transaction in transactions:
             transaction_direction = self.direction_for_transaction(transaction)
             row = self._row_payload(
@@ -242,8 +243,13 @@ class PendingInvoiceQueryService:
                 category=categories.get(transaction.id, {}),
                 tag_groups=tag_groups_by_direction[transaction_direction],
             )
+            relation_group_key = self._multi_bank_relation_group_key(row)
+            if relation_group_key and relation_group_key in emitted_relation_groups:
+                continue
             if self._row_matches_filter(row, direction=transaction_direction, filter_name=normalized_filter):
                 rows.append(row)
+                if relation_group_key:
+                    emitted_relation_groups.add(relation_group_key)
         if keyword:
             normalized_keyword = str(keyword).strip().lower()
             rows = [row for row in rows if normalized_keyword in str(row).lower()]
@@ -495,38 +501,46 @@ class PendingInvoiceQueryService:
             "account_last4": transaction.imported_bank_last4 or self._account_last4(transaction.account_no),
         }
         self._apply_bank_identity(bank_identity)
+        bank_transaction = {
+            "id": transaction.id,
+            "account_no": transaction.account_no,
+            "counterparty_name": transaction.counterparty_name_raw,
+            "counterparty_account_no": transaction.counterparty_account_no or "",
+            "counterparty_bank_name": transaction.counterparty_bank_name or "",
+            "trade_time": transaction.trade_time or transaction.txn_date,
+            "booked_date": transaction.booked_date or transaction.txn_date or "",
+            "trade_date": trade_date,
+            "amount": _decimal_to_str(transaction.amount),
+            "debit_amount": _decimal_to_str(debit_amount),
+            "credit_amount": _decimal_to_str(credit_amount),
+            "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
+            "currency": transaction.currency or "CNY",
+            "bank_name": bank_identity["bank_name"],
+            "bank_short_name": bank_identity["bank_short_name"],
+            "account_name": transaction.account_name or "",
+            "account_last4": bank_identity["account_last4"],
+            "summary": transaction.summary or "",
+            "remark": transaction.remark or "",
+            "statement_serial_no": transaction.bank_serial_no or "",
+            "enterprise_serial_no": transaction.enterprise_serial_no or "",
+            "voucher_type": transaction.voucher_kind or "",
+            "voucher_no": transaction.voucher_no or "",
+            "effective_tag_code": category_code,
+            "effective_tag_label": effective_category.get("category_label"),
+            "effective_tag_primary_label": effective_category.get("category_primary_label"),
+            "effective_tag_sub_label": effective_category.get("category_sub_label"),
+            "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
+        }
+        bank_transactions = self._bank_transactions_payload_from_distribution(
+            relation_row,
+            fallback=bank_transaction,
+            direction=direction,
+            paid_total=payment_summary.get("paid_total", "0.00") if isinstance(payment_summary, dict) else "0.00",
+        )
         return {
             "id": transaction.id,
-            "bank_transaction": {
-                "id": transaction.id,
-                "account_no": transaction.account_no,
-                "counterparty_name": transaction.counterparty_name_raw,
-                "counterparty_account_no": transaction.counterparty_account_no or "",
-                "counterparty_bank_name": transaction.counterparty_bank_name or "",
-                "trade_time": transaction.trade_time or transaction.txn_date,
-                "booked_date": transaction.booked_date or transaction.txn_date or "",
-                "trade_date": trade_date,
-                "amount": _decimal_to_str(transaction.amount),
-                "debit_amount": _decimal_to_str(debit_amount),
-                "credit_amount": _decimal_to_str(credit_amount),
-                "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
-                "currency": transaction.currency or "CNY",
-                "bank_name": bank_identity["bank_name"],
-                "bank_short_name": bank_identity["bank_short_name"],
-                "account_name": transaction.account_name or "",
-                "account_last4": bank_identity["account_last4"],
-                "summary": transaction.summary or "",
-                "remark": transaction.remark or "",
-                "statement_serial_no": transaction.bank_serial_no or "",
-                "enterprise_serial_no": transaction.enterprise_serial_no or "",
-                "voucher_type": transaction.voucher_kind or "",
-                "voucher_no": transaction.voucher_no or "",
-                "effective_tag_code": category_code,
-                "effective_tag_label": effective_category.get("category_label"),
-                "effective_tag_primary_label": effective_category.get("category_primary_label"),
-                "effective_tag_sub_label": effective_category.get("category_sub_label"),
-                "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
-            },
+            "bank_transaction": bank_transaction,
+            "bank_transactions": bank_transactions,
             "invoice_acquisition_status": status_payload,
             "input_invoices": input_invoices,
             "oa": oa_payload,
@@ -536,6 +550,18 @@ class PendingInvoiceQueryService:
             "available_actions": available_actions,
             "relation_case_ids": self._invoice_relation_case_ids(invoices, relation_row),
         }
+
+    @staticmethod
+    def _multi_bank_relation_group_key(row: dict[str, Any]) -> str | None:
+        bank_transactions = row.get("bank_transactions") if isinstance(row.get("bank_transactions"), dict) else {}
+        summaries = list(bank_transactions.get("summaries") or []) if isinstance(bank_transactions, dict) else []
+        if len(summaries) <= 1:
+            return None
+        for case_id in list(row.get("relation_case_ids") or []):
+            normalized = str(case_id or "").strip()
+            if normalized:
+                return normalized
+        return None
 
     def _payment_summary_for_relations(self, invoice_relations: list[tuple[dict[str, Any], Invoice]]) -> dict[str, Any]:
         invoice_ids = [invoice.id for _, invoice in invoice_relations]
@@ -743,6 +769,66 @@ class PendingInvoiceQueryService:
                 }
             )
         return rows
+
+    def _bank_transactions_payload_from_distribution(
+        self,
+        row: dict[str, Any] | None,
+        *,
+        fallback: dict[str, Any],
+        direction: str,
+        paid_total: str,
+    ) -> dict[str, Any]:
+        summaries: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        linked_count = 0
+        if isinstance(row, dict):
+            for item in list(row.get("linked_bank_transactions") or []):
+                if not isinstance(item, dict):
+                    continue
+                transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
+                if not transaction_id or transaction_id in seen:
+                    continue
+                seen.add(transaction_id)
+                if _distribution_item_is_linked(item):
+                    linked_count += 1
+                try:
+                    transaction = self._import_service.get_transaction(transaction_id)
+                except KeyError:
+                    transaction = None
+                amount = transaction.amount if transaction is not None else _decimal_from_text(item.get("amount"))
+                debit_amount = amount if direction == "expense" else Decimal("0.00")
+                credit_amount = amount if direction == "income" else Decimal("0.00")
+                summaries.append(
+                    {
+                        "id": transaction_id,
+                        "trade_time": (transaction.trade_time or transaction.txn_date) if transaction is not None else str(item.get("trade_time") or ""),
+                        "booked_date": (transaction.booked_date or transaction.txn_date or "") if transaction is not None else str(item.get("booked_date") or ""),
+                        "counterparty_name": transaction.counterparty_name_raw if transaction is not None else str(item.get("counterparty_name") or ""),
+                        "amount": _decimal_to_str(amount),
+                        "debit_amount": _decimal_to_str(debit_amount),
+                        "credit_amount": _decimal_to_str(credit_amount),
+                        "bank_name": transaction.imported_bank_name if transaction is not None else str(item.get("bank_name") or ""),
+                        "bank_short_name": transaction.imported_bank_name if transaction is not None else str(item.get("bank_short_name") or item.get("bank_name") or ""),
+                        "account_last4": self._account_last4(transaction.imported_bank_last4 or transaction.account_no) if transaction is not None else self._account_last4(item.get("account_last4") or item.get("account_no")),
+                        "summary": transaction.summary if transaction is not None else str(item.get("summary") or ""),
+                        "remark": transaction.remark if transaction is not None else str(item.get("remark") or ""),
+                        "relation_case_id": str(item.get("relation_case_id") or ""),
+                        "relation_status": _distribution_item_relation_status(item),
+                        "relation_source": str(item.get("relation_source") or item.get("relationSource") or ""),
+                    }
+                )
+        if not summaries:
+            summaries = [dict(fallback)]
+            linked_count = 1
+        return {
+            "primary": summaries[0] if len(summaries) == 1 else None,
+            "relation_count": len(summaries),
+            "linked_relation_count": linked_count,
+            "has_multiple": len(summaries) > 1,
+            "detail_mode": "list" if len(summaries) > 1 else "single",
+            "summaries": summaries,
+            "payment_summary": {"paid_total": paid_total},
+        }
 
     @staticmethod
     def _payment_summary_from_distribution(row: dict[str, Any], invoices: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1299,7 +1385,7 @@ class PendingInvoiceQueryService:
             {"field": "project_name", "label": "项目", "operators": ["contains", "in"]},
         ]
 
-    def relation_detail(self, *, transaction_id: str, direction: str = "expense") -> dict[str, Any]:
+    def relation_detail(self, *, transaction_id: str, direction: str = "expense", kind: str = "all") -> dict[str, Any]:
         normalized_direction = self._normalize_direction(direction)
         if normalized_direction == "all":
             normalized_direction = self.direction_for_transaction(self._get_transaction(transaction_id))
@@ -1333,7 +1419,7 @@ class PendingInvoiceQueryService:
         }
         relation_row = self._relation_distribution_row(transaction_id, reason="pending_invoice_relation_detail")
         if relation_row is None:
-            return payload
+            return self._filter_relation_detail_payload(payload, kind=kind)
         invoices = self._invoice_payloads_from_distribution(relation_row, direction=normalized_direction)
         oa_summaries = self._oa_summaries_from_distribution(relation_row)
         payment_summary = self._payment_summary_from_distribution(relation_row, invoices)
@@ -1352,7 +1438,23 @@ class PendingInvoiceQueryService:
                 "relation_case_ids": self._invoice_relation_case_ids(invoices, relation_row),
             }
         )
-        return payload
+        return self._filter_relation_detail_payload(payload, kind=kind)
+
+    @staticmethod
+    def _filter_relation_detail_payload(payload: dict[str, Any], *, kind: str) -> dict[str, Any]:
+        normalized_kind = str(kind or "all").strip().lower() or "all"
+        if normalized_kind == "all":
+            return payload
+        result = dict(payload)
+        if normalized_kind != "invoice":
+            result["related_invoices"] = []
+            result["invoice_summaries"] = []
+        if normalized_kind != "bank":
+            result["payment_rows"] = []
+        if normalized_kind != "oa":
+            result["related_oa"] = []
+            result["oa_summaries"] = []
+        return result
 
     @staticmethod
     def _invoice_relation_case_ids(invoices: list[dict[str, Any]], relation_row: dict[str, Any] | None) -> list[str]:
