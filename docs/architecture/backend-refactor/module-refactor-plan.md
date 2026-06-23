@@ -251,7 +251,8 @@ PF-P189 后的模块计划调整：
 
 当前相关代码：
 
-- `app/server.py` 中 `_handle_api_batch_accounting*`、`_batch_accounting_service`、`_repair_batch_accounting_relation_case_ids`
+- `app/server.py` 中 `_handle_api_batch_accounting*`、`_batch_accounting_service`
+- `app/routes_batch_accounting.py` 中 `BatchAccountingApiRoutes`
 - `services/batch_accounting_service.py`
 - `services/postgres_repositories/read_models.py` 中 `load_batch_accounting_workbench_payload`
 - `services/workbench_candidate_grouping.py` 中 batch accounting relation 识别

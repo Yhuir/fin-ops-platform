@@ -945,6 +945,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_withdraw_source = _function_source(routes_tree, routes_source, "withdraw")
 
         violations: list[str] = []
+        if "def _repair_batch_accounting_relation_case_ids" in source:
+            violations.append("server.py still defines unused batch accounting app-level repair helper")
         if "_batch_accounting_routes().list_payload" not in list_source:
             violations.append("GET /api/batch-accounting no longer delegates reads to BatchAccountingApiRoutes")
         if "_service_factory(use_sql_read_model=True).build_payload" not in route_list_source:

@@ -13077,49 +13077,6 @@ class Application:
         status_code, payload = self._batch_accounting_routes().list_payload(query)
         return self._json_response(status_code, payload)
 
-    def _repair_batch_accounting_relation_case_ids(self) -> dict[str, object]:
-        repair_result = self._batch_accounting_service().repair_legacy_case_id_collisions()
-        if not repair_result.get("changed"):
-            return repair_result
-        affected_row_ids = [
-            str(row_id)
-            for row_id in list(repair_result.get("affected_row_ids") or [])
-            if str(row_id).strip()
-        ]
-        affected_months = {
-            str(month)
-            for month in list(repair_result.get("affected_months") or [])
-            if str(month).strip()
-        }
-        changed_scope_keys = sorted(
-            {
-                *affected_months,
-                *self._scope_keys_for_row_ids(month="all", row_ids=affected_row_ids, month_scope="all"),
-            }
-        )
-        changed_case_ids = [
-            str(case_id)
-            for case_id in list(repair_result.get("changed_case_ids") or [])
-            if str(case_id).strip()
-        ]
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="repair_batch_accounting_relation_case_ids",
-        )
-        self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": "submit_batch_accounting"},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            action_name="repair_batch_accounting_relation_case_ids",
-        )
-        return {
-            **repair_result,
-            "affected_months": changed_scope_keys,
-        }
-
     def _handle_api_batch_accounting_submit(
         self,
         body: str | bytes | None,

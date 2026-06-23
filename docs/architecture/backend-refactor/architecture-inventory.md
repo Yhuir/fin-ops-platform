@@ -538,7 +538,7 @@ POST /api/batch-accounting/submit
 
 - Batch 读取 Workbench payload，但写入边界应属于 Batch relation usecase。
 - submit/withdraw 的 expected_version、note/reason、amount check 必须保持在 usecase，不应落在 handler。
-- `repair_legacy_case_id_collisions` 不能留在高频读路径，后续需确认实际触发条件。
+- `repair_legacy_case_id_collisions` 保留为 service-level repair capability；高频读路径和 app/server wrapper 不得触发 repair，旧 app-level wrapper 已删除。
 
 结论：
 

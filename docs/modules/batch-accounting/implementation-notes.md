@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-06-24 - App-level repair helper 删除
+
+- 目标：删除没有运行时调用者的 `Application._repair_batch_accounting_relation_case_ids(...)`，避免 `server.py` 保留一个可写 pair relation persist、derived lifecycle event 和 Workbench read model persist 的旧兼容入口。
+- 影响范围：`server.py`、`tests/test_batch_accounting_api.py` 的 GET 只读回归、`tests/test_platform_runtime_boundary_guards.py` 的 batch-accounting route/repair guard、相关 refactor 架构文档。
+- 关键决策：删除 app-level wrapper，不删除 `BatchAccountingService.repair_legacy_case_id_collisions(...)`；service-level repair 仍由 command service 边界和现有历史修复测试保护。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-repair-compat-removal.md`；更新长期 backend-refactor 文档，移除 `server.py` repair helper 仍存在的旧事实。
+- 测试覆盖：静态 guard 防止 `def _repair_batch_accounting_relation_case_ids` 回归；GET 回归改为证明 app-level repair helper 不存在且列表仍正常；service repair tests 继续覆盖 command-service delegation 和 fail-fast。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_repair_has_no_direct_pair_write_fallback -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_does_not_run_legacy_relation_repair tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_delegates_relation_write_to_command_service tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_requires_relation_command_service_without_direct_pair_fallback tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_restores_lost_batch_relation_from_history -v`。
+- 未测风险：未执行真实生产历史 collision dry-run；service-level repair 能力仍保留，生产写入型 repair 仍需人工审批和 runbook。
+- 后续事项：推进 `batch-accounting:module-closure-audit-and-production-evidence-defer`，审计 batch-accounting 是否只剩生产证据/长期外部环境风险。
+
 ## 2026-06-24 - Submit/withdraw route side-effect port 抽取
 
 - 目标：把 `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 的 DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 从 `server.py` inline handler 抽到 `BatchAccountingApiRoutes`，让 `server.py` 只保留 mutation session、JSON body 和 response mapping。

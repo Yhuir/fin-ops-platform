@@ -79,6 +79,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-24 | 删除无调用者的 app-level repair helper：`Application._repair_batch_accounting_relation_case_ids(...)` 不再存在；service-level `repair_legacy_case_id_collisions(...)` 保留 | 移除 unused legacy write wrapper；业务/UI/read model/worker 状态定义不变 | 静态 route/repair guard、GET 只读回归、service repair command-boundary tests |
 | 2026-06-24 | Submit/withdraw route owner 抽取：mutation session/JSON 仍在 `server.py`，DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 进入 `BatchAccountingApiRoutes` 显式 callback 边界 | route ownership 变化；业务/UI/read model/worker 状态定义不变 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries`、批量账务 submit/withdraw API 回归 |
 | 2026-06-23 | Route handler 边界守卫：GET 只能委托 `BatchAccountingService.build_payload(...)`，不得执行 repair/write/read model schedule；submit/withdraw route 必须经 mutation session 并委托 service，不得 direct relation write | `server.py` 批量账务 route ownership；不改变业务/UI/read model/worker 状态定义 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries` |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |

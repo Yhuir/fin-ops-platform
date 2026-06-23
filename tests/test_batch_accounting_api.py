@@ -640,13 +640,7 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_unsubmitted_list_does_not_run_legacy_relation_repair(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        repair_patcher = patch.object(
-            app,
-            "_repair_batch_accounting_relation_case_ids",
-            side_effect=AssertionError("GET /api/batch-accounting must be read-only"),
-        )
-        repair_patcher.start()
-        self.addCleanup(repair_patcher.stop)
+        self.assertFalse(hasattr(app, "_repair_batch_accounting_relation_case_ids"))
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)

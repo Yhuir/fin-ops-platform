@@ -242,7 +242,7 @@ PF-P046 风险判断：
 - `server.py` 中 `_handle_api_batch_accounting*` 到 `BatchAccountingService`。
 - `load_batch_accounting_workbench_payload` 与 Workbench SQL read model 的读取边界。
 - submit/withdraw 是否同事务写 relation、audit、dirty scope 和 `batch_accounting_relation_changed`。
-- `repair_legacy_case_id_collisions` 是否应从读请求热路径迁出。
+- `repair_legacy_case_id_collisions` 保留为 service-level repair capability；app/server 级 `_repair_batch_accounting_relation_case_ids` wrapper 已删除，读请求热路径不得触发 repair。
 - Workbench 如何识别 `special_metadata.source == "batch_accounting"` 并投影到候选分组。
 
 ### Bankdetail
