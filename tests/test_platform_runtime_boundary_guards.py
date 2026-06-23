@@ -364,6 +364,89 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("def execute_file_import_confirm_job", service_source)
         self.assertIn("def execute_etc_invoice_import_confirm_job", service_source)
 
+    def test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        routes_source = (APP_ROOT / "routes_bank_details.py").read_text(encoding="utf-8")
+        service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
+        app_settings_source = (SERVICES_ROOT / "app_settings_service.py").read_text(encoding="utf-8")
+
+        handler_delegates = {
+            "_handle_api_bank_details_auto_tag_rules_update": "update_auto_tag_rules",
+            "_handle_api_bank_details_auto_tag_rules_file_replacement": "replace_auto_tag_rules_from_file_source",
+            "_handle_api_bank_details_auto_tag_rules_reapply": "reapply_auto_tag_rules",
+            "_handle_api_bank_detail_category_confirmation": "confirm_category",
+            "_handle_api_bank_detail_category_confirmation_delete": "revoke_category_confirmation",
+            "_handle_api_bank_detail_category_assignment": "assign_category",
+            "_handle_api_bank_detail_category_assignment_delete": "clear_category_assignment",
+        }
+        violations: list[str] = []
+
+        for forbidden in (
+            "def _finalize_bank_auto_tag_rules_update",
+            "def _bank_detail_refresh_scope_keys_from_auto_tag_rules_payload",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns legacy bank auto-tag write helper {forbidden}")
+
+        for handler_name, route_method in handler_delegates.items():
+            handler_source = _function_source(server_tree, server_source, handler_name)
+            if f"_bank_details_routes().{route_method}" not in handler_source:
+                violations.append(f"{handler_name} does not delegate to BankDetailsApiRoutes.{route_method}")
+            for forbidden in (
+                "update_bank_auto_tag_rules(",
+                "replace_bank_auto_tag_rules_from_file_source(",
+                "confirm_auto_category(",
+                "assign_manual_category(",
+                "clear_manual_category(",
+                "_execute_derived_data_lifecycle_event(",
+                "_enqueue_bank_detail_read_model_refreshes(",
+                "_enqueue_turnover_ledger_read_model_refreshes(",
+            ):
+                if forbidden in handler_source:
+                    violations.append(f"{handler_name} keeps application/write-side logic {forbidden}")
+
+        for forbidden in (
+            "update_bank_auto_tag_rules(",
+            "replace_bank_auto_tag_rules_from_file_source(",
+            "_execute_derived_data_lifecycle_event(",
+            "_enqueue_bank_detail_read_model_refreshes(",
+            "_enqueue_turnover_ledger_read_model_refreshes(",
+        ):
+            if forbidden in routes_source:
+                violations.append(f"routes_bank_details.py bypasses application service via {forbidden}")
+
+        required_service_snippets = {
+            "self._app_settings_service.update_bank_auto_tag_rules(",
+            "self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(",
+            "def finalize_auto_tag_rules_update",
+            "self._execute_derived_data_lifecycle_event(",
+            "self._enqueue_read_model_refreshes(priority_scope_keys",
+            "self._bank_transaction_category_service.confirm_auto_category(",
+            "self._bank_transaction_category_service.assign_manual_category(",
+            "self._persist_category_mutation(",
+        }
+        for snippet in sorted(required_service_snippets):
+            if snippet not in service_source:
+                violations.append(f"BankDetailsApplicationService is missing boundary behavior {snippet}")
+
+        if "bank_transaction_tags_write_forbidden" not in server_source:
+            violations.append("workbench settings route no longer blocks legacy bank_transaction_tags writes")
+        if "def update_bank_auto_tag_rules" not in app_settings_source:
+            violations.append("AppSettingsService no longer owns bank auto-tag settings persistence")
+
+        for path, source in {
+            "routes_bank_details.py": routes_source,
+            "bank_details_application_service.py": service_source,
+            "app_settings_service.py": app_settings_source,
+        }.items():
+            direct_job_writes = _sql_write_table_references(source)
+            if direct_job_writes:
+                violations.append(f"{path} writes job queue tables directly: {direct_job_writes}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",

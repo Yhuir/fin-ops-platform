@@ -5,7 +5,7 @@
 
 | Order | Boundary | Status | Notes |
 | ---: | --- | --- | --- |
-| 1 | `bank-details:auto-tag-category-boundary` | pending | Recommended pilot; validates command/read model/operation barrier/front-end path without full workbench complexity. |
+| 1 | `bank-details:auto-tag-category-boundary` | production-evidence-deferred | Local contract/code guard/doc slice completed; real production DB/worker evidence deferred because no local PGSQL_URL or staging DB. |
 | 2 | `reconciliation-workbench:amount-check-query-contract` | pending | Narrow workbench contract; avoid full workbench rewrite. |
 | 3 | `pending-invoices:read-side-contract` | pending | Read model/detail/drawer contract first; avoid rule write expansion. |
 | 4 | `oa-pending-payments:read-side-and-relation-contract` | pending | Builds on pending invoice/OA projection read-side evidence. |

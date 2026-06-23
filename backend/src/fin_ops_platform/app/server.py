@@ -13265,21 +13265,6 @@ class Application:
                 months.add(month)
         return sorted(months) or ["all"]
 
-    def _bank_detail_refresh_scope_keys_from_auto_tag_rules_payload(self, payload: dict[str, object]) -> list[str]:
-        refresh_scope = payload.get("refresh_scope") if isinstance(payload.get("refresh_scope"), dict) else {}
-        date_from = str(refresh_scope.get("date_from") or "").strip() if isinstance(refresh_scope, dict) else ""
-        date_to = str(refresh_scope.get("date_to") or "").strip() if isinstance(refresh_scope, dict) else ""
-        if not date_from and not date_to:
-            return []
-        return [
-            scope_key
-            for scope_key in self._bank_detail_scope_keys_for_range(
-                date_from=date_from or None,
-                date_to=date_to or None,
-            )
-            if scope_key and scope_key != "all"
-        ]
-
     def _bank_detail_scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
         repository = getattr(self, "_bank_detail_sql_read_repository", None)
         summary_loader = getattr(repository, "bank_detail_scope_summary", None)
@@ -14671,40 +14656,6 @@ class Application:
                 "new_version": event.get("new_version"),
                 "affected_groups": list(event.get("affected_groups") or []),
             },
-        )
-
-    def _finalize_bank_auto_tag_rules_update(self, event: dict[str, object]) -> None:
-        projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
-        if projection is not None:
-            try:
-                setattr(projection, "_index_cache_key", "")
-                setattr(projection, "_index_cache", {})
-            except Exception:
-                pass
-        self._clear_turnover_ledger_read_model_best_effort()
-        self._enqueue_turnover_ledger_read_model_refreshes(
-            ["all"],
-            reason="bank_auto_tag_rules_changed",
-        )
-        priority_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(event.get("bank_detail_priority_scope_keys") or [])
-            if str(scope_key).strip() and str(scope_key).strip() != "all"
-        ]
-        if priority_scope_keys:
-            self._enqueue_bank_detail_read_model_refreshes(
-                priority_scope_keys,
-                reason="bank_auto_tag_rules_changed_priority",
-            )
-        self._execute_derived_data_lifecycle_event(
-            "bank_auto_tag_rules_changed",
-            scope_keys=["all"],
-            include_all=True,
-            metadata={
-                "reason": "bank_auto_tag_rules_changed",
-                "new_version": event.get("new_version"),
-            },
-            schedule_cost_warmup=False,
         )
 
     def _handle_api_tax_certified_import_preview(

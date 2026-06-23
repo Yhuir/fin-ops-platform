@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `ready-for-autonomous-start`
+Current state: `paused-after-bank-details-slice`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -24,21 +24,20 @@ Go hot-path state: `candidate-gated-not-started`
 - Go/Fiber/Go Worker work is candidate-gated by `11-GO-HOT-PATH-CARVE-OUT.md`.
 - Target read model strategy is partitioned scoped + scoped incremental.
 - Target worker runtime is Go Worker + PostgreSQL dual queue; RabbitMQ is wakeup/transport only.
-- Latest branch check found `origin/dev...origin/main = 350 ahead / 91 behind`; user intends to push current `main` first, then align `dev` with `main`.
-- The autonomous run may merge `origin/main` into `dev` after `main` is clean and pushed.
-- The autonomous run must not reset `dev` to `main`, rebase `dev`, or force-push.
+- Latest branch check found `dev`, `origin/dev`, and `origin/main` aligned at `6e8ed50d` before the first autonomous slice.
+- The autonomous run aligned `dev` with `origin/main` via the documented merge workflow; no reset, rebase, or force-push was used in this run.
 
 ## Current Module
 
-None selected.
+Paused after `bank-details:auto-tag-category-boundary`.
 
 ## Completed Modules
 
-None.
+- `bank-details:auto-tag-category-boundary` -> `production-evidence-deferred`
 
 ## Deferred Modules
 
-None.
+- `bank-details:auto-tag-category-boundary`: real production PostgreSQL/worker dirty/outbox/readiness evidence unavailable without staging/local `PGSQL_URL`; no production write performed.
 
 ## Go Candidate Status
 
@@ -46,8 +45,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-None.
+`bank-details:auto-tag-category-boundary`
 
 ## Next Prompt
 
-See `autonomous/NEXT-PROMPT.md` after the autonomous run starts.
+`reconciliation-workbench:amount-check-query-contract`

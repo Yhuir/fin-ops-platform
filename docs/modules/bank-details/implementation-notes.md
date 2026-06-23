@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-23 - 自动标签与分类写边界 guard
+
+- 目标：收紧银行明细自动标签规则、候选确认、人工补分类和清除分类的 IO 边界，防止旧 `server.py` 写后刷新 helper 或旧 settings 路径重新污染新链路。
+- 影响范围：`server.py` 中无调用者的旧银行自动标签写后刷新 helper、平台 runtime boundary guard、模块测试矩阵和 `.planning/refactors/modular-io-boundaries/analysis/bank-details-auto-tag-category-boundary.md`；不改变 API shape、前端行为、业务规则、read model key 或 worker 实现。
+- 关键决策：`server.py` 只保留 session/auth、JSON body、HTTP response 映射和 `BankDetailsApiRoutes` 委托；自动标签事实写入由 `AppSettingsService` 拥有，写后 lifecycle/dirty/outbox 编排由 `BankDetailsApplicationService` 拥有；`/api/workbench/settings` 继续拒绝 `bank_transaction_tags`。
+- 文档影响：更新本实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 `PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary`，覆盖旧 helper 不得恢复、HTTP handler 必须委托 route、route 不得绕过 application service、service 不得直接 SQL 写 job queue 表。
+- 验证命令：见本次提交记录；真实生产 PostgreSQL/worker drain 未验证，按 `production-evidence-deferred` 处理。
+- 未测风险：没有本地 `PGSQL_URL` 或 staging 数据库，不能证明生产 dirty/outbox/readiness 实际收敛；本轮只证明本地 contract、API/service 边界和回归测试。
+
 ## 2026-06-21 - 时间选择器简化为年/月与全部
 
 - 目标：简化银行明细右上角时间筛选，移除“本月 / 上月 / 近7天 / 近30天 / 今年”和任意起止日期范围输入，改为一个支持按年或按月选择的时间选择器，以及一个“全部”按钮。
