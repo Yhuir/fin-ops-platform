@@ -1,12 +1,12 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `bank_detail` category side-effect port extraction slice.
+Continue the autonomous modular IO refactor after the queue semantics and master goal prompt revision slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:bank-detail-category-side-effect-port-extraction`
-- Last status: `implementation-closed`
+- Last completed boundary: `planning:queue-semantics-and-master-goal-prompt-revision`
+- Last status: `planning-closed`
 - Queue semantics are corrected: slice status is not module closure.
 - First read model implementation pilot: `bank_detail`.
 - Implemented for `bank_detail` so far:
@@ -22,6 +22,7 @@ Continue the autonomous modular IO refactor after the `bank_detail` category sid
   - production worker/readiness evidence remains deferred because there is no local `PGSQL_URL` or staging DB
   - `Application._latest_bank_detail_auto_category_suggestion(...)` is classified as a compat-only read callback, not extracted
   - shared gateway/scope support wrappers remain classified, not globally extracted
+- `server-py:legacy-handler-extraction-implementation` is the next executable shared-boundary implementation slice. It is not evidence that `bank_detail` is fully module-closed.
 - Go hot-path candidates remain blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
 
 ## Next Boundary
@@ -89,7 +90,7 @@ Forbidden:
 
 ## Stop Condition
 
-Complete one verified server.py legacy handler extraction/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one verified server.py legacy handler extraction/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
 
 ## Reporting Rule
 

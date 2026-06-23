@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-category-side-effect-port-extraction`
+Current state: `autonomous-ready-after-queue-semantics-and-master-goal-prompt-revision`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-category-side-effect-port-extraction`; next execution must start with `server-py:legacy-handler-extraction-implementation` unless a planning-state inconsistency is found first.
+Completed `planning:queue-semantics-and-master-goal-prompt-revision` after `read-models:bank-detail-category-side-effect-port-extraction`; next execution must start with `server-py:legacy-handler-extraction-implementation` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -59,6 +59,7 @@ Completed `read-models:bank-detail-category-side-effect-port-extraction`; next e
 - `read-models:bank-detail-pilot-verification-and-template-revision` -> `analysis-closed`
 - `read-models:bank-detail-server-helper-quarantine` -> `implementation-closed`
 - `read-models:bank-detail-category-side-effect-port-extraction` -> `implementation-closed`
+- `planning:queue-semantics-and-master-goal-prompt-revision` -> `planning-closed`
 
 ## Open Implementation Closure Work
 
@@ -79,7 +80,7 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-category-side-effect-port-extraction`
+`planning:queue-semantics-and-master-goal-prompt-revision`
 
 ## Next Prompt
 

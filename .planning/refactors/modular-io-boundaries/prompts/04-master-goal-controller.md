@@ -3,21 +3,29 @@
 Copy the full prompt below into Codex to start or resume the autonomous run.
 
 ```text
-Fully close the modular IO boundary refactor for /Users/yu/Desktop/fin-ops-platform.
+You are Codex working in /Users/yu/Desktop/fin-ops-platform.
 
-Act as the main controller. Use GSD discipline and a closed-loop workflow:
+Objective:
+Autonomously continue the production-grade modular IO boundary refactor until the refactor reaches true closure or a hard stop gate is hit.
 
-1. Review and analyze current state.
-2. Select exactly one bounded boundary.
-3. Execute that boundary.
-4. Review the diff and verification.
-5. Update state machine, queue, journal and next prompt.
-6. Commit and push the verified slice to origin/dev.
-7. Generate the next bounded prompt from the updated state and execute it immediately.
+Use GSD discipline. This is a closed-loop controller, not a one-shot task.
 
-Continue until the modular IO refactor reaches closure or a hard stop gate is hit. I may be away. Do not wait for me unless continuing would violate a hard stop gate.
+Core workflow for every slice:
+1. Review and analyze current planning/code state.
+2. Reconcile STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md and state-machine semantics.
+3. If planning files disagree, execute a planning:state-reconciliation-* slice first.
+4. Otherwise select exactly one bounded boundary from the queue.
+5. Analyze target docs/code and write or update an analysis file.
+6. Implement only that boundary, or quarantine it if implementation is too broad.
+7. Review diff and verification.
+8. Update state machine/accounting files.
+9. Commit and push the verified slice to origin/dev.
+10. Generate the next bounded prompt from updated state.
+11. Continue immediately to the next slice unless a hard stop gate is hit.
 
-Repository:
+I may be away. Do not wait for me unless continuing would violate a hard stop gate.
+
+Repository and branch rules:
 - Work only in /Users/yu/Desktop/fin-ops-platform.
 - Use the main repository directory directly. Do not create a new worktree.
 - Use branch dev.
@@ -32,10 +40,7 @@ Repository:
 - Never run destructive local operations such as git reset --hard or git checkout -- unless the user explicitly asks for that exact operation.
 
 Preflight:
-1. Run:
-   - pwd
-   - git status --short --branch
-   - git remote -v
+1. Run pwd, git status --short --branch, and git remote -v.
 2. Confirm the repository is /Users/yu/Desktop/fin-ops-platform.
 3. Confirm current branch is dev before implementation commits.
 4. Fetch origin with prune.
@@ -67,25 +72,21 @@ Required reading before any edits:
 - every Markdown file under .planning/refactors/modular-io-boundaries/autonomous/
 - every Markdown file under .planning/refactors/modular-io-boundaries/prompts/
 
-Planning source rule:
-This refactor has multiple planning sources. Read and report them separately; never collapse them into one unqualified percentage.
+Planning source hierarchy:
 - .planning/ROADMAP.md is the root page-analysis roadmap.
-- .planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md is the modular IO phase roadmap.
-- .planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md is the executable autonomous boundary queue.
-- .planning/refactors/modular-io-boundaries/autonomous/STATE.md, JOURNAL.md and NEXT-PROMPT.md are execution accounting.
-- MODULE-QUEUE.md Status is slice status, not module closure.
-- MODULE-QUEUE.md Module Closure is the implementation closure signal.
+- .planning/refactors/README.md is the refactor index.
+- .planning/refactors/modular-io-boundaries/README.md is this refactor package entry.
+- 00-REQUIREMENTS.md defines production-grade modular IO requirements.
+- 03-REFACTOR-STATE-MACHINE.md defines legal state transitions and completion semantics.
+- 04-IMPLEMENTATION-ROADMAP.md defines phase roadmap progress.
+- autonomous/MODULE-QUEUE.md is the executable boundary queue.
+- autonomous/STATE.md, autonomous/JOURNAL.md and autonomous/NEXT-PROMPT.md are execution accounting.
 
-Current corrected state:
-- Last completed boundary is expected to be read-models:bank-detail-category-side-effect-port-extraction.
-- Last status is expected to be implementation-closed.
-- First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be server-py:legacy-handler-extraction-implementation.
-- The bank_detail pilot is not full production-closed. Category mutation side-effect callback wiring is implemented through an explicit port, while production evidence/defer status and classified support wrappers remain visible.
-- Go hot-path candidates are expected to be blocked-by-prerequisite.
-- Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
+Never collapse these sources into one unqualified percentage.
 
-Non-negotiable completion semantics:
+Completion semantics:
+- MODULE-QUEUE.md Status is slice status.
+- MODULE-QUEUE.md Module Closure is module implementation closure status.
 - analysis-closed means analysis/inventory slice closed only.
 - contract-guard-closed means manifest/contract guard slice closed only.
 - static-guard-closed means static guard slice closed only.
@@ -94,11 +95,37 @@ Non-negotiable completion semantics:
 - inventory-guard-closed means inventory guard slice closed only.
 - implementation-closed means one narrow implementation slice closed only.
 - planning-closed means planning/state/prompt slice closed only.
+- production-evidence-deferred means a real environment evidence gap is recorded, not silently passed.
 - None of the labels above means a module is fully modularized.
-- Full module closure requires the module completion definition in 00-REQUIREMENTS.md and 03-REFACTOR-STATE-MACHINE.md: IO contract, public/internal boundary, canonical facts, read model freshness, force refresh, operation barrier, legacy removal/quarantine, permissions, audit, tests, docs and environment evidence/defer status.
+
+Full module closure requires:
+- IO contract.
+- Public/internal boundary.
+- Canonical fact owner.
+- Shared fact source.
+- Read model contract.
+- Freshness proof.
+- Force refresh contract.
+- Operation barrier contract.
+- Legacy removal or compat-only quarantine.
+- Permission contract.
+- Audit contract.
+- Test contract.
+- Docs updates.
+- Environment evidence or explicit defer status.
+
+Current corrected state expected on start:
+- Last completed boundary: planning:queue-semantics-and-master-goal-prompt-revision.
+- Last status: planning-closed.
+- First read model implementation pilot: bank_detail.
+- bank_detail is not module-closed.
+- bank_detail Module Closure remains implementation-gap-open.
+- The next executable implementation boundary is server-py:legacy-handler-extraction-implementation.
+- Go hot-path candidates remain blocked-by-prerequisite.
+- Do not select GoHotPath next unless the queue was legitimately updated after prerequisite evidence closed.
 
 Boundary selection priority:
-1. If .planning/ROADMAP.md, refactors README, modular README, 00-REQUIREMENTS.md, 03-REFACTOR-STATE-MACHINE.md, 04-IMPLEMENTATION-ROADMAP.md, STATE.md, MODULE-QUEUE.md, JOURNAL.md or NEXT-PROMPT.md disagree on source hierarchy, current state, next boundary, status labels, module closure meaning or completion metric source, select a planning:state-reconciliation-* boundary first.
+1. If ROADMAP, refactor README, modular README, 00-REQUIREMENTS, 03-REFACTOR-STATE-MACHINE, 04-IMPLEMENTATION-ROADMAP, STATE, MODULE-QUEUE, JOURNAL or NEXT-PROMPT disagree on source hierarchy, current state, next boundary, status labels, module closure meaning or completion metric source, select a planning:state-reconciliation-* boundary first.
 2. Otherwise pick the first boundary in MODULE-QUEUE.md whose Status is pending.
 3. Skip blocked-by-prerequisite items.
 4. Do not select Go hot-path candidates while any earlier pending, implementation-pending or implementation-gap-open modular IO boundary exists.
@@ -111,175 +138,136 @@ For server-py:legacy-handler-extraction-implementation:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md
+  - .planning/refactors/modular-io-boundaries/analysis/queue-semantics-and-master-goal-prompt-revision.md
   - .planning/refactors/modular-io-boundaries/analysis/server-py-route-owner-inventory.md
   - docs/app-architecture/runtime-and-ownership.md
   - docs/modules/README.md
   - target module docs for the selected legacy handler before editing
 - Use CodeGraph first for structural lookup of the selected legacy handler, route owner, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
-- Keep the implementation boundary narrow:
-  - Select one existing `server.py` legacy handler area with a clear route/service owner and a small testable surface.
-  - Move the handler logic to an existing `routes_*.py` or service boundary, or quarantine it with owner/caller/deletion-condition/forbidden-write guard if extraction is too broad.
-  - Preserve API response shape, permissions, audit, read model freshness and frontend behavior.
-  - Keep `server.py` limited to HTTP parsing, session/auth resolution, dependency wiring and response mapping.
-  - Do not do broad line-count splitting.
-  - Do not migrate unrelated modules in the same slice.
-  - Do not implement Go/Fiber/Go Worker.
-- Produce or update an analysis file for the implementation slice under .planning/refactors/modular-io-boundaries/analysis/.
+- Select one existing server.py legacy handler area with a clear route/service owner and a small testable surface.
+- Move the handler logic to an existing routes_*.py or service boundary, or quarantine it with owner/caller/deletion-condition/forbidden-write guard if extraction is too broad.
+- Preserve API response shape, permissions, audit, read model freshness and frontend behavior.
+- Keep server.py limited to HTTP parsing, session/auth resolution, dependency wiring and response mapping.
+- Do not do broad line-count splitting.
+- Do not migrate unrelated modules in the same slice.
+- Do not implement Go/Fiber/Go Worker.
+- Produce or update an analysis file under .planning/refactors/modular-io-boundaries/analysis/.
 - Update MODULE-QUEUE.md so the next pending item remains a concrete implementation boundary, not Go admission.
 - Update STATE.md, JOURNAL.md and NEXT-PROMPT.md.
 - Run targeted tests, docs verification and diff checks.
 - Commit and push to origin/dev if verification passes.
 - Continue immediately to the next pending implementation boundary.
 
-Per-boundary loop:
+Per-boundary analysis requirements:
+- Read current STATE.md, JOURNAL.md, MODULE-QUEUE.md and NEXT-PROMPT.md.
+- Read target module docs under docs/modules/<module>/, including README.md, state-machine.md, tests.md, e2e-spec.md, e2e-coverage.md and implementation-notes.md when present.
+- Read relevant architecture/dev/operations/product docs.
+- Read 03-REFACTOR-STATE-MACHINE.md before selecting implementation changes.
+- Read every affected docs/modules/<module>/state-machine.md before selecting implementation changes.
+- Use CodeGraph first for structural questions.
+- Use rg for literal text and file discovery.
+- Produce or update an analysis file under .planning/refactors/modular-io-boundaries/analysis/.
+- Fill impact analysis from 05-IMPACT-AND-TEST-GATES.md before editing code.
+- Analysis must name previous state, selected boundary, transition guard, expected evidence, success transition, defer/block transition and files to update.
 
-1. Analyze
-   - Read current STATE.md, JOURNAL.md, MODULE-QUEUE.md and NEXT-PROMPT.md.
-   - Read target module docs under docs/modules/<module>/, including README.md, state-machine.md, tests.md, e2e-spec.md, e2e-coverage.md and implementation-notes.md when present.
-   - Read relevant architecture/dev/operations/product docs.
-   - Read 03-REFACTOR-STATE-MACHINE.md before selecting implementation changes.
-   - Read every affected docs/modules/<module>/state-machine.md before selecting implementation changes.
-   - Use CodeGraph first for structural questions.
-   - Use rg for literal text and file discovery.
-   - Produce or update an analysis file under .planning/refactors/modular-io-boundaries/analysis/.
-   - Fill impact analysis from 05-IMPACT-AND-TEST-GATES.md before editing code.
-   - Analysis must name previous state, selected boundary, transition guard, expected evidence, success transition, defer/block transition and files to update.
+Contract requirements:
+- Fill or update the relevant module IO contract using 02-MODULE-IO-CONTRACT-TEMPLATE.md when the boundary changes module contract.
+- Every module boundary must define inputs, outputs, states, events, read model contract, force refresh contract, operation barrier contract, canonical facts, shared fact owner, permissions, audit records, public surface, internal-only surface, allowed dependencies, forbidden dependencies, legacy retirement/quarantine contract, test contract and docs impact.
+- For read model boundaries, define read_model_key, scope_type, scope_key, partition key, affected scope calculation, freshness proof, parent/aggregate semantics, all-scope semantics, builder owner, full rebuild fallback, source/schema version and operation barrier target.
 
-2. Contract
-   - Fill or update the relevant module IO contract using 02-MODULE-IO-CONTRACT-TEMPLATE.md.
-   - Every module boundary must define:
-     - inputs
-     - outputs
-     - states
-     - events
-     - read model contract
-     - force refresh contract
-     - operation barrier contract
-     - canonical facts
-     - shared fact owner
-     - permissions
-     - audit records
-     - public surface
-     - internal-only surface
-     - allowed dependencies
-     - forbidden dependencies
-     - legacy retirement/quarantine contract
-     - test contract
-     - docs impact
-   - For read model boundaries, define read_model_key, scope_type, scope_key, partition key, affected scope calculation, freshness proof, parent/aggregate semantics, all-scope semantics, builder owner, full rebuild fallback, source/schema version and operation barrier target.
+Tests and verification:
+- Evaluate all seven test categories for every implementation slice:
+  1. Business core unit tests.
+  2. Service-layer tests.
+  3. API contract tests.
+  4. Read model/cache/background job tests.
+  5. Frontend component and interaction tests.
+  6. End-to-end business-flow integration tests.
+  7. Existing feature regression tests.
+- Add or update tests for every applicable category.
+- If a category is not applicable, document why in the analysis and final summary.
+- For read model changes, include stale/refreshing/fresh/failed behavior, dirty scope, outbox, readiness, operation barrier, force refresh, scope normalization, dedupe/idempotency, cache gating and cross-page freshness regressions where applicable.
+- For legacy retirement, include call graph/import/API/frontend route guards proving new code does not call old internals and old paths cannot write new facts or refresh state.
 
-3. Tests first where practical
-   - Evaluate all seven test categories:
-     1. Business core unit tests.
-     2. Service-layer tests.
-     3. API contract tests.
-     4. Read model/cache/background job tests.
-     5. Frontend component and interaction tests.
-     6. End-to-end business-flow integration tests.
-     7. Existing feature regression tests.
-   - Add or update tests for every applicable category.
-   - If a category is not applicable, document why in the analysis and final summary.
-   - For read model changes, include stale/refreshing/fresh/failed behavior, dirty scope, outbox, readiness, operation barrier, force refresh, scope normalization, dedupe/idempotency, cache gating and cross-page freshness regressions where applicable.
-   - For legacy retirement, include call graph/import/API/frontend route guards proving new code does not call old internals and old paths cannot write new facts or refresh state.
+Implementation rules:
+- Implement only the selected boundary.
+- Prefer existing local patterns and helpers.
+- Keep server.py thin: route mapping, dependency wiring and HTTP mapping only.
+- Keep business rules in services.
+- Keep SQL/table knowledge in repositories.
+- Inject explicit service dependencies; do not pass the whole Application into services.
+- Services must not read HTTP cookies/headers, import app.auth or construct HTTP responses.
+- Workers must not depend on Application, app.server, app.auth, HTTP responses, cookies, headers, request/session or route modules.
+- Do not change business semantics, amount rules, status transitions, permissions, audit meaning, API shape or UI behavior unless explicitly required and tested.
+- Do not do broad file splitting for line-count optics.
 
-4. Implement narrowly
-   - Implement only the selected boundary.
-   - Prefer existing local patterns and helpers.
-   - Keep server.py thin: route mapping, dependency wiring and HTTP mapping only.
-   - Keep business rules in services.
-   - Keep SQL/table knowledge in repositories.
-   - Inject explicit service dependencies; do not pass the whole Application into services.
-   - Services must not read HTTP cookies/headers, import app.auth or construct HTTP responses.
-   - Workers must not depend on Application, app.server, app.auth, HTTP responses, cookies, headers, request/session or route modules.
-   - Do not change business semantics, amount rules, status transitions, permissions, audit meaning, API shape or UI behavior unless explicitly required and tested.
-   - Do not do broad file splitting for line-count optics.
+Legacy removal/quarantine rules:
+- For every old route/service/repository/read model/frontend API/worker path touched or replaced, classify it as removed, quarantined, compat-only or blocked-by-human-gate.
+- Default to removal when tests and call graph prove it is unused.
+- compat-only paths must have owner, caller list, deletion condition, forbidden write list and regression tests.
+- Old paths must not write canonical facts, dirty scopes, outbox events, read model readiness, cache, App Status or new authoritative outputs.
+- New paths must not call old internals or legacy fallbacks unless the contract explicitly registers a temporary compat-only adapter.
 
-5. Remove or quarantine legacy paths
-   - For every old route/service/repository/read model/frontend API/worker path touched or replaced, classify it as removed, quarantined, compat-only or blocked-by-human-gate.
-   - Default to removal when tests and call graph prove it is unused.
-   - compat-only paths must have owner, caller list, deletion condition, forbidden write list and regression tests.
-   - Old paths must not write canonical facts, dirty scopes, outbox events, read model readiness, cache, App Status or new authoritative outputs.
-   - New paths must not call old internals or legacy fallbacks unless the contract explicitly registers a temporary compat-only adapter.
+Shared facts and read model rules:
+- Canonical facts have one owner.
+- Derived/read model/cache data cannot become the source of truth.
+- All non-transactional read model refresh requests go through ReadModelRefreshGateway and the scope policy registry.
+- Transactional writers must maintain equivalent scope/outbox contract inside the business transaction.
+- Business services must not directly SQL write job.outbox_events or job.read_model_dirty_scopes.
+- Redis may cache only payloads that passed the fresh gate.
+- RabbitMQ is wakeup/transport only; it is never the read model, worker, job or freshness source of truth.
+- No page may display stale payload as fresh.
+- Writes affecting cross-page consistency must return or expose affected scopes/months/version/job, then the frontend/API must use operation barrier or registered read boundary before claiming sync is complete.
 
-6. Enforce shared facts and read model boundaries
-   - Canonical facts have one owner.
-   - Derived/read model/cache data cannot become the source of truth.
-   - All non-transactional read model refresh requests go through ReadModelRefreshGateway and the scope policy registry.
-   - Transactional writers must maintain equivalent scope/outbox contract inside the business transaction.
-   - Business services must not directly SQL write job.outbox_events or job.read_model_dirty_scopes.
-   - Redis may cache only payloads that passed the fresh gate.
-   - RabbitMQ is wakeup/transport only; it is never the read model, worker, job or freshness source of truth.
-   - No page may display stale payload as fresh.
-   - Writes affecting cross-page consistency must return or expose affected scopes/months/version/job, then the frontend/API must use operation barrier or registered read boundary before claiming sync is complete.
+Go/Fiber/Go Worker rules:
+- Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
+- Do not run Go admission while earlier implementation-pending or implementation-gap-open modular IO boundaries remain, unless the queue was explicitly reclassified with evidence.
+- Fiber is optional internal API for selected compute/read services; it is not a replacement for read models, workers, durable queue, freshness proof, permissions, audit or canonical write services.
+- Long-running work must not run inside a Fiber request handler.
+- Go Worker target remains Go Worker + PostgreSQL dual queue; PostgreSQL durable queue remains authoritative.
+- RabbitMQ can be future wakeup/transport only.
 
-7. Go/Fiber/Go Worker rules
-   - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
-   - Do not even run Go admission while earlier implementation-pending or implementation-gap-open modular IO boundaries remain, unless the queue was explicitly reclassified with evidence.
-   - Fiber is optional internal API for selected compute/read services; it is not a replacement for read models, workers, durable queue, freshness proof, permissions, audit or canonical write services.
-   - Long-running work must not run inside a Fiber request handler.
-   - Python and Go workers must not both ack, publish or write readiness for the same authoritative event/scope.
-   - Shadow Go output cannot ack outbox, mark dirty scope done, publish generation, write readiness or update cache.
-   - If admission fails, record go-candidate-deferred and continue with Python boundary hardening or the next module.
+Production and SSH rules:
+- SSH aliases may be used for read-only production evidence if already configured.
+- Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
+- Do not perform production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, file mutation or OA mutation.
+- If production write or secret access is required, record needs-human-production-gate and continue to another independent module when safe.
+- Missing production DB/worker evidence is a soft gate. Record production-evidence-deferred; never claim real production closure for that evidence.
+- The plan must not depend on local PGSQL_URL or a staging database.
 
-8. State-machine update gate
-   - This gate is mandatory before every commit.
-   - Decide explicitly whether the slice changes any global workflow state, transition, guard, stop/defer condition, completion criterion or queue status semantics.
-   - Decide explicitly whether the slice changes any module business/UI/read model/worker/operation-barrier/force-refresh/permission/legacy-retirement state.
-   - If global workflow definition changed, update 03-REFACTOR-STATE-MACHINE.md in the same slice.
-   - If module state definition changed, update every affected docs/modules/<module>/state-machine.md in the same slice.
-   - If definitions did not change, record this explicitly in the analysis file with reviewed files and reason.
-   - Update progress/accounting state separately:
-     - autonomous/STATE.md
-     - autonomous/MODULE-QUEUE.md
-     - autonomous/JOURNAL.md
-     - autonomous/NEXT-PROMPT.md
-   - The commit is invalid if it updates only NEXT-PROMPT.md without matching STATE.md, MODULE-QUEUE.md, JOURNAL.md and analysis evidence.
+State-machine update gate:
+- This gate is mandatory before every commit.
+- Decide explicitly whether the slice changes any global workflow state, transition, guard, stop/defer condition, completion criterion or queue status semantics.
+- Decide explicitly whether the slice changes any module business/UI/read model/worker/operation-barrier/force-refresh/permission/legacy-retirement state.
+- If global workflow definition changed, update 03-REFACTOR-STATE-MACHINE.md in the same slice.
+- If module state definition changed, update every affected docs/modules/<module>/state-machine.md in the same slice.
+- If definitions did not change, record this explicitly in the analysis file with reviewed files and reason.
+- Always update progress/accounting state separately:
+  - autonomous/STATE.md
+  - autonomous/MODULE-QUEUE.md
+  - autonomous/JOURNAL.md
+  - autonomous/NEXT-PROMPT.md
+- A commit is invalid if it updates only NEXT-PROMPT.md without matching STATE.md, MODULE-QUEUE.md, JOURNAL.md and analysis evidence.
 
-9. Verify
-   - Run the smallest sufficient verification for the changed slice.
-   - Prefer documented commands and existing tests.
-   - Typical commands include:
-     - bash scripts/verify.sh docs
-     - git diff --check
-     - PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
-     - PYTHONPATH=backend/src python3 -m unittest <targeted-tests> -v
-     - cd web && npm test -- <targeted-tests>
-     - cd web && npm run build
-   - If a command is unavailable or too broad for the slice, document exactly why and run the closest targeted substitute.
-   - Do not require local PGSQL_URL.
-   - Do not require staging DB.
-   - Use fake/stub repository, queue, read model gateway, API contract, frontend mock, static checks and production read-only SSH checks when useful.
+Review, commit and push:
+- Inspect git diff before staging.
+- Confirm every changed file belongs to the selected slice or required docs/state.
+- Confirm no unrelated user changes are staged.
+- Scan changed files for secrets.
+- Confirm old-path removal/quarantine is documented and tested.
+- Confirm shared facts and read model refresh cannot be bypassed.
+- Confirm docs impact is handled.
+- Confirm state-machine accounting is handled.
+- Stage only files for the completed slice.
+- Commit with a scoped message.
+- Push only to origin/dev.
+- After push, confirm branch status is clean and up to date with origin/dev.
 
-10. Production and SSH policy
-   - No local PGSQL_URL is available.
-   - No staging database is available.
-   - Do not ask me for PostgreSQL URLs, staging DBs, SSH passwords, database passwords, tokens, cookies or private secrets.
-   - ssh finops-prod-root is available as root with key login for privileged read-only checks.
-   - Use production SSH only for non-secret read-only checks such as service status, file existence, health endpoints, logs without secrets and runtime status that does not expose credentials.
-   - Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
-   - Do not perform production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, file mutation or OA mutation.
-   - If production write or secret access is required, record needs-human-production-gate and continue to another independent module when safe.
-   - Missing production DB/worker evidence is a soft gate. Record production-evidence-deferred; never claim real production closure for that evidence.
-
-11. Review, commit and push
-   - Inspect git diff before staging.
-   - Confirm every changed file belongs to the selected slice or required docs/state.
-   - Confirm no unrelated user changes are staged.
-   - Scan changed files for secrets.
-   - Confirm old-path removal/quarantine is documented and tested.
-   - Confirm shared facts and read model refresh cannot be bypassed.
-   - Confirm docs impact is handled.
-   - Confirm state-machine accounting is handled.
-   - Stage only files for the completed slice.
-   - Commit with a scoped message.
-   - Push only to origin dev.
-   - After push, confirm branch status is clean and up to date with origin/dev.
-
-12. Continue
-   - Generate or update autonomous/NEXT-PROMPT.md after every closed/deferred/blocked slice.
-   - Treat NEXT-PROMPT.md as resume state, but do not stop merely because it was updated.
-   - Immediately execute the next prompt unless the current run hit a hard stop gate or no safe module remains.
+Continue:
+- Generate or update autonomous/NEXT-PROMPT.md after every closed/deferred/blocked slice.
+- Treat NEXT-PROMPT.md as resume state, but do not stop merely because it was updated.
+- Immediately execute the next prompt unless the current run hit a hard stop gate or no safe module remains.
 
 Hard stop gates:
 Stop immediately only when continuing would be unsafe:
