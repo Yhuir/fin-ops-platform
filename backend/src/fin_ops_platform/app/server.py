@@ -453,6 +453,7 @@ from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor imp
     WorkbenchRelationDerivedLifecycleExecutor,
 )
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -3202,6 +3203,9 @@ class Application:
         return WorkbenchPayloadRelationReadPort(
             self._workbench_relation_command_service(require_fresh_relations=False)
         )
+
+    def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider:
+        return WorkbenchRelationSourceVersionProvider(self._workbench_pair_relation_service.snapshot)
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
         storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
@@ -15835,14 +15839,13 @@ class Application:
 
     def _no_oa_bank_batch_source_versions(self) -> dict[str, object]:
         no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        relation_source_versions = self._workbench_relation_source_version_provider()
         payload = {
             **self._workbench_matching_source_versions(),
             "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
             "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "pair_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._workbench_pair_relation_service.snapshot()
-            ),
+            "pair_relation_snapshot_version": relation_source_versions.pair_relation_snapshot_version(),
             "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._bank_transaction_category_service.snapshot()
             ),
@@ -15938,15 +15941,14 @@ class Application:
         return result
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:
+        relation_source_versions = self._workbench_relation_source_version_provider()
         payload: dict[str, object] = {
             "exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
             "exception_projection_version": EXCEPTION_PROJECTION_VERSION,
             "case_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._workbench_exception_case_service.snapshot()
             ),
-            "pair_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._workbench_pair_relation_service.snapshot()
-            ),
+            "pair_relation_snapshot_version": relation_source_versions.pair_relation_snapshot_version(),
             "candidate_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._workbench_candidate_match_service.snapshot()
             ),

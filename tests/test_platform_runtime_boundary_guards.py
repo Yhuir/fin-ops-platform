@@ -1206,6 +1206,34 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_source_versions_use_relation_source_version_provider(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        provider_source = (SERVICES_ROOT / "workbench_relation_source_version_provider.py").read_text(encoding="utf-8")
+        checked_sources = {
+            method_name: _function_source(tree, source, method_name)
+            for method_name in (
+                "_no_oa_bank_batch_source_versions",
+                "_workbench_read_model_source_versions",
+            )
+        }
+
+        violations: list[str] = []
+        if "class WorkbenchRelationSourceVersionProvider" not in provider_source:
+            violations.append("Workbench relation source version provider is missing")
+        if "from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider" not in source:
+            violations.append("Application does not import WorkbenchRelationSourceVersionProvider")
+        if "def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider" not in source:
+            violations.append("Application does not expose Workbench relation source version provider")
+        for method_name, method_source in checked_sources.items():
+            if "_workbench_pair_relation_service.snapshot" in method_source:
+                violations.append(f"{method_name} still reads pair relation snapshot directly")
+            if "pair_relation_snapshot_version()" not in method_source:
+                violations.append(f"{method_name} does not use relation source version provider")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")

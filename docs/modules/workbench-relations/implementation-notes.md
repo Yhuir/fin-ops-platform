@@ -3067,3 +3067,33 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-source-version-relation-snapshot-provider-extraction`。
+
+## 2026-06-24 - server source-version relation snapshot provider extraction
+
+目标：把 Workbench/no-OA read model freshness source_versions 中的 relation snapshot hash 读取收敛到显式 provider，避免 source-version helper 直接读取 `_workbench_pair_relation_service.snapshot()`。
+
+变更：
+
+- 新增 `WorkbenchRelationSourceVersionProvider`。
+- `Application._workbench_relation_source_version_provider(...)` 负责组装 provider。
+- `_no_oa_bank_batch_source_versions(...)` 和 `_workbench_read_model_source_versions(...)` 使用 provider 获取 `pair_relation_snapshot_version`。
+- provider 继续使用 `WorkbenchReadModelService.snapshot_version(...)`，hash 语义不变。
+- 新增 provider 单元测试和 source-version helper 静态 guard。
+
+未闭环：
+
+- repair/precondition direct active relation reads 仍需单独审计和迁移。
+- transaction-persist、rollback、case-id allocation、whole-state persistence snapshot surfaces 保持单独后续 slice。
+- `workbench_relation` 模块仍未完整闭环，Go/Fiber/Go Worker 仍阻塞。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_source_version_provider.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_workbench_relation_source_version_provider.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_source_version_provider tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_source_versions_use_relation_source_version_provider -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-repair-precondition-relation-read-port-audit`。
