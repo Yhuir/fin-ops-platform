@@ -90,6 +90,29 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - transaction persist repository owner split
+
+目标：关闭一个最小 SQL owner split 边界，把 transaction-bound relation persist 从 broad Workbench repository 转到 relation-specific repository。
+
+变更：
+
+- `Application._persist_workbench_pair_relations_in_transaction(...)` 改为调用 `PostgresWorkbenchRelationRepository(transaction).save_workbench_pair_relations(...)`。
+- 保留 transaction required、search cache clear、snapshot selection 和 `changed_case_ids` 归一化行为。
+- 新增静态 guard，防止该 helper 回退到 `PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(...)`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py -q
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_transaction_pair_relation_persist_uses_relation_repository_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+剩余风险：
+
+- 该阶段不迁移 command service lifecycle，不删除 app-level command repository snapshot/apply helpers，也不声明生产 PostgreSQL/worker/App Status/high-row/browser evidence。
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

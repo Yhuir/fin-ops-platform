@@ -1185,6 +1185,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_persist_workbench_pair_relations_in_transaction")
+
+        violations: list[str] = []
+        if "PostgresWorkbenchRelationRepository(transaction).save_workbench_pair_relations(" not in method_source:
+            violations.append("transaction pair relation persist does not use PostgresWorkbenchRelationRepository")
+        if "PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(" in method_source:
+            violations.append("transaction pair relation persist still uses broad PostgresWorkbenchRepository")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
         source = path.read_text(encoding="utf-8")

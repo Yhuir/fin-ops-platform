@@ -69,15 +69,16 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:workbench-relation-local-implementation-closure-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:transaction-persist-repository-owner-split.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation is selected as the next read model implementation pilot.
 - WorkbenchRelationReadModelRepositoryPort is now wired into app/worker/projection builder relation read-model paths.
 - WorkbenchRelationDerivedLifecycleExecutor now owns derived lifecycle refresh enqueue payload behavior.
-- The next pending boundary is workbench-relations:transaction-persist-repository-owner-split.
+- Transaction pair relation persist now uses `PostgresWorkbenchRelationRepository`.
+- The next pending boundary is workbench-relations:command-repository-snapshot-adapter-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -173,21 +174,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:transaction-persist-repository-owner-split unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:command-repository-snapshot-adapter-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:transaction-persist-repository-owner-split:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-workbench-relation-local-implementation-closure-audit.md`.
+For workbench-relations:command-repository-snapshot-adapter-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-transaction-persist-repository-owner-split.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph for `_persist_workbench_pair_relations_in_transaction`, `PostgresWorkbenchRelationRepository.save_workbench_pair_relations`, `PostgresWorkbenchRepository.save_workbench_pair_relations`, and callers/impact.
-- Replace transaction pair relation persist helper's broad `PostgresWorkbenchRepository.save_workbench_pair_relations(...)` usage with `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)`.
-- Preserve snapshot selection, `changed_case_ids` normalization, transaction requirement and cache clearing behavior.
-- Add or update a focused static guard proving transaction pair relation persist uses the relation-specific repository owner.
-- Do not migrate relation command service lifecycle in this slice.
-- Do not remove app-level command repository snapshot/apply helpers in this slice.
+- Use CodeGraph for `_workbench_relation_command_repository`, `_save_workbench_relation_command_snapshot`, `_apply_workbench_relation_command_snapshot`, `_relation_history_touches_cases`, and callers/impact.
+- Audit the app-level callback repository and snapshot merge/apply helpers.
+- Decide whether the next implementation boundary should extract these helpers into an explicit adapter/port, split only snapshot apply logic, or defer to another narrower persist/schedule helper boundary.
+- Do not implement adapter extraction during this audit slice.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests, docs verification and diff checks.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the queued implementation boundary if verification passes.
 

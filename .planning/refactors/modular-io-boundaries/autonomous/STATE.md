@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relation-local-implementation-closure-audit`
+Current state: `autonomous-continue-after-workbench-relation-transaction-persist-repository-owner-split`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:workbench-relation-local-implementation-closure-audit`. `workbench_relation` remains implementation-gap-open. The audit selected `workbench-relations:transaction-persist-repository-owner-split` as the next narrow implementation boundary before any Go admission.
+Completed `workbench-relations:transaction-persist-repository-owner-split`. `workbench_relation` remains implementation-gap-open. The transaction persist helper now uses the relation-specific PostgreSQL repository owner. Next execution must audit app-level command repository snapshot/apply helpers before extracting another boundary.
 
 ## Closed Or Deferred Slices
 
@@ -76,6 +76,7 @@ Completed `read-models:workbench-relation-local-implementation-closure-audit`. `
 - `read-models:workbench-relation-repository-port-extraction` -> `implementation-closed`
 - `read-models:workbench-relation-derived-lifecycle-executor-port-extraction` -> `implementation-closed`
 - `read-models:workbench-relation-local-implementation-closure-audit` -> `analysis-closed`
+- `workbench-relations:transaction-persist-repository-owner-split` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -83,7 +84,7 @@ Completed `read-models:workbench-relation-local-implementation-closure-audit`. `
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction for the read facade/projection builder and derived lifecycle executor extraction are implemented; local closure audit selected transaction persist repository owner split as the next narrow slice. The broader relation write lifecycle and app-level snapshot/persist helper cleanup remain open.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction and transaction persist repository owner split are implemented. The broader relation write lifecycle and app-level command repository snapshot/apply helper cleanup remain open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -98,8 +99,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:workbench-relation-local-implementation-closure-audit`
+`workbench-relations:transaction-persist-repository-owner-split`
 
 ## Next Prompt
 
-`workbench-relations:transaction-persist-repository-owner-split`
+`workbench-relations:command-repository-snapshot-adapter-audit`

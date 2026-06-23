@@ -16295,7 +16295,7 @@ class Application:
             if changed_case_ids is not None
             else self._workbench_pair_relation_service.snapshot()
         )
-        PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(
+        PostgresWorkbenchRelationRepository(transaction).save_workbench_pair_relations(
             snapshot,
             changed_case_ids={str(case_id) for case_id in list(changed_case_ids or []) if str(case_id).strip()}
             if changed_case_ids is not None
