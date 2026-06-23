@@ -84,6 +84,7 @@ Refresh 触发来源：
 - Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
 - `workbench-matching` worker 每轮 claim 前会把 completed 但 matching source versions 落后的 scope run 原子转回 dirty。这个自愈路径是规则版本发布后的主恢复机制；`startup_stale_scan` 只是 opt-in 补扫，不是常驻一致性边界。
 - Workbench `all` active generation 必须从所有 month shard source versions 聚合 `workbench_matching_rules_version`；缺失或多版本混杂时 all scope 不发布该版本证明，后续 freshness/审计必须按 source mismatch 处理。
+- Workbench `all` 聚合执行 open group owner 去重时，只能移除被更强 open group 明确拥有的 row；如果自动决策 group 被剥离 OA 后仍剩余未被任何 group 认领的银行流水或发票，剩余事实行必须保留。只有 paired shard 或 canonical active relation claim 抢占 row 时，partial automatic decision group 才能被整体清空，避免已配对流水回流到 open 区。
 - `startup_stale_scan` 默认关闭；启用时只标记 stale matching dirty scopes；它不直接 invalidating workbench read model。
 - PostgreSQL formal read path 必须恢复 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run，供 `WorkbenchCandidateMatchService.is_scope_fresh(...)` 判断 freshness；否则 opt-in 启动补扫会因为缺少 scope run 证明而把已完成月份重新标 dirty。
 

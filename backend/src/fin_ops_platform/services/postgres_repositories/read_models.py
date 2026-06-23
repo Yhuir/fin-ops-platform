@@ -9379,12 +9379,10 @@ def _suppress_all_scope_open_rows_claimed_by_other_open_groups(open_groups: list
         return
 
     for group in open_groups:
-        before_row_count = _workbench_group_fact_row_counts(group)["rows"]
         _remove_workbench_rows_from_group_claimed_by_other_open_group(
             group,
             owner_by_claim_key=owner_by_claim_key,
         )
-        _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
         _finalize_all_scope_group(group, zone="open")
 
 

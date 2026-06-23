@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - all scope 保留被 open owner 剥离后的未认领银行流水
+
+- 目标：修复月分片中存在 `case:decision:*` 自动决策 open group，但 all scope 聚合后其中未被任何其他 group 认领的银行流水消失的问题。
+- 真实原因：all-scope 聚合先按 open group owner 规则去重；当另一个更强 open group 拿走同一 OA row 后，自动决策 group 变成 partial。旧逻辑在“open group 之间去重”后也调用 `_drop_partial_all_scope_automatic_decision_group`，把剩余未被认领的银行流水一起清空。`txn_imported_1419` 属于该形状：`oa-pay-2068` 被 3 月 open group 拿走，4 月自动决策 group 里的银行流水没有其他 owner，却随 partial group 被清空。
+- 影响范围：`PostgresReadModelRepository` all-scope aggregate 的 open-group 去重；paired shard/正式 relation 抢占时清空自动决策残片的保护保持不变。
+- 关键决策：open group 之间的 owner 去重只移除被更强 open group 明确拥有的 row，不再清空自动决策 group 中剩余未被认领的事实行；当 paired group 或 canonical active relation claim 抢占 row 时，仍清空 partial automatic decision group，避免已配对流水回流到 open 区。
+- 文档影响：同步本实施记录和 `tests.md`；产品口径不变，仍以 active all generation 为 all 视图事实源。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_all_scope_keeps_unclaimed_bank_when_open_group_takes_automatic_decision_oa`，并保留 `test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地测试使用 synthetic active month shard；生产需要通过正式 Workbench refresh 重建 affected month/all active generation 后再确认 all 视图数量。
+
 ## 2026-06-23 - OA 附件 source-linked 三栏闭合分区修复
 
 - 目标：修复截图中 OA、银行流水和多张 OA 附件发票三栏金额已经闭合，且页面显示“自动匹配”，但整组仍停留在未配对区的问题。

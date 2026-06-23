@@ -33,6 +33,7 @@
 - `paymentStatus` 不再输出 `overpaid` 或 `merged_paid`；多 OA 合并付款通过 relation group 合计后判定为 `paid`，支出流水合计大于 OA 合计时进入 `pending_review`。
 - 页面进入后调用自动匹配/写回命令。该命令复用关联台 OA-bank 精确金额/精确合计规则，只自动确认无冲突的 in-progress OA 与没有 Workbench active relation、也没有 pending bank claim 的支出流水；同时扫描 completed 中已有 Workbench active 支出流水 relation 的 OA、in-progress 中已有 active pending relation 的 OA。写回前必须校验银行流水为 outflow、支出流水合计等于 OA 金额、可解析 OA Mongo 文档 ID；校验通过后写回 `t_payment_simple.pay_status=1`。
 - “关联支出流水”抽屉作为自动匹配失败后的人工兜底，创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占对应支出流水，不写 `app.workbench_pair_relations`。关联成功后沿用同一写回校验，金额/方向/`flow_id` 通过时自动写回 `t_payment_simple.pay_status=1`，不再需要用户二次点击确认写回。
+- `oa_pending_payment` 月份 read model refresh 成功读取当前 `t_payment_simple.flow_id` 准入集合后，必须取消同月 active pending relation 中完全不再准入的 OA 关系并释放对应 bank claim，让流水回到关联台候选/未配对口径；支付状态 repository 不可用或准入源读取失败时不得释放，避免把外部依赖故障误判为准入消失。
 - OA sync 发现 active pending relation 的所有 OA row 都变成 completed 时，promotion service 复用 Workbench relation command 创建普通 `manual_confirmed`/`normal_match` active relation，再把 pending relation 标记为 `promoted` 并释放 bank claim。promotion metadata 使用 `origin=oa_pending_payment_promotion`；不得继续写 `origin=oa_pending_payment_in_progress` 的 Workbench active relation。
 - 支出流水付款合计使用所有有效 outflow relation 的 decimal total；收入流水、缺失银行事实或无效 relation 进入 `pending_review`。
 - completed 视图 OA、支出流水和发票的 `relationCount`/`summaries` 必须完全来自 Workbench relation payload；in-progress 视图 OA、支出流水 relation summary 必须来自 OA 待付款独立 pending relation payload。任何视图都不得由金额、日期或名称相似度推断已关联。

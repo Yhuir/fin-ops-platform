@@ -14,6 +14,16 @@
 - 验证命令：本轮最终说明列出完整命令。
 - 未测风险：本地自动化没有连接真实生产 OA/Mongo/PostgreSQL/银行流水库和真实浏览器会话；发布后仍需用截图中的 `2152.80` 进行中 OA 样本确认候选接口返回对应月份流水，并观察生产请求耗时。
 
+## 2026-06-23 - 准入源消失后释放进行中 OA pending relation
+
+- 目标：修复进行中 OA 曾经通过 `t_payment_simple.flow_id` 准入并关联支出流水，但后续不再出现在当前准入集合时，流水被 active pending claim 占用，既不在 OA 待付款 read model 展示，也不回到关联台的问题。
+- 影响范围：`InvoiceUsageCollectionSqlProjectionBuilder.rebuild_oa_pending_payment_read_model_scope`、`PostgresOaPendingPaymentRelationRepository` / snapshot repository、OA pending read model refresh 和 Workbench pending claim 排除链路；不改变 completed OA promotion 语义。
+- 关键决策：只有在支付状态 repository 存在且 read model refresh 成功读取当前准入集合后，才取消同月 active pending relation 中 `oa_row_ids` 完全不在准入集合内的关系，并释放对应 `app.bank_transaction_relation_claims`。准入源不可用时跳过释放，避免把外部依赖故障误判为 OA 不再准入。
+- 文档影响：同步本实施记录和 `tests.md`；产品口径仍是 in-progress 只以 `t_payment_simple.flow_id` 当前准入为主行事实源。
+- 测试覆盖：新增 `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_projection_builder_releases_pending_relation_when_oa_admission_disappears`，覆盖已不准入 OA 的 active pending relation 被取消、bank claim 被释放，仍准入 OA 正常进入 read model；新增 `::test_projection_builder_does_not_release_pending_relation_when_oa_admission_projection_is_refreshing`，锁定 OA admission projection 非 ready 时不释放 claim。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地测试使用 synthetic repository，不连接真实生产 MySQL；发布后需要在生产/预发确认对应 flow_id 当前不在 `t_payment_simple` 准入集合，并通过正式 worker refresh 释放 claim。
+
 ## 2026-06-23 - 多 OA 多流水 relation 聚合成员补全
 
 - 目标：修复 OA 待付款核对中同一 Workbench active relation 已包含多条 OA 与多条支出流水时，OA 侧可能只显示主 OA 金额、缺少 `+N`，并把支出合计大于主 OA 金额误判为 `pending_review` 的场景。

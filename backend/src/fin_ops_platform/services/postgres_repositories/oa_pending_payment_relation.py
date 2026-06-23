@@ -355,6 +355,134 @@ class PostgresOaPendingPaymentRelationRepository:
 
         return run_in_transaction(self._connection, write)
 
+    def cancel_active_relations_missing_oa_admission(
+        self,
+        *,
+        month_scope: str,
+        admitted_oa_row_ids: list[str],
+        actor_id: str,
+        cancellation_reason: str = "oa_pending_payment_admission_missing",
+    ) -> dict[str, Any]:
+        resolved_month = month_start(month_scope)
+        if not resolved_month:
+            return {
+                "status": "cancelled",
+                "changed_relation_ids": [],
+                "affected_months": [],
+                "relations": [],
+            }
+        normalized_month_scope = resolved_month[:7]
+        normalized_admitted_oa_ids = _dedupe_text(admitted_oa_row_ids)
+        actor = text(actor_id) or "system"
+        reason = text(cancellation_reason) or "oa_pending_payment_admission_missing"
+
+        def write(connection: Any) -> dict[str, Any]:
+            rows = connection.fetch_all(
+                """
+                select
+                    relation_id,
+                    status,
+                    version,
+                    scope_month,
+                    oa_row_ids,
+                    bank_transaction_ids,
+                    source_action,
+                    note,
+                    amount_check,
+                    writeback_status,
+                    migrated_from_workbench_case_id,
+                    promoted_workbench_case_id,
+                    created_by,
+                    created_at,
+                    updated_at,
+                    raw_payload
+                from app.oa_pending_payment_bank_relations
+                where status = 'active'
+                  and scope_month = %s::date
+                  and not (oa_row_ids && %s)
+                order by relation_id
+                """,
+                (resolved_month, normalized_admitted_oa_ids),
+            )
+            changed_relation_ids: list[str] = []
+            cancelled_relations: list[dict[str, Any]] = []
+            for before_row in rows:
+                before = self._row_payload(before_row)
+                relation_id = text(before.get("relation_id"))
+                if relation_id is None:
+                    continue
+                row = connection.fetch_one(
+                    """
+                    update app.oa_pending_payment_bank_relations
+                    set status = 'cancelled',
+                        version = version + 1,
+                        updated_at = now(),
+                        raw_payload = jsonb_set(
+                            jsonb_set(
+                                jsonb_set(
+                                    coalesce(raw_payload, '{}'::jsonb),
+                                    '{normalized_payload,status}',
+                                    to_jsonb('cancelled'::text),
+                                    true
+                                ),
+                                '{normalized_payload,cancellation_reason}',
+                                to_jsonb(%s::text),
+                                true
+                            ),
+                            '{normalized_payload,cancelled_by}',
+                            to_jsonb(%s::text),
+                            true
+                        )
+                    where relation_id = %s
+                      and status = 'active'
+                    returning
+                        relation_id,
+                        status,
+                        version,
+                        scope_month,
+                        oa_row_ids,
+                        bank_transaction_ids,
+                        source_action,
+                        note,
+                        amount_check,
+                        writeback_status,
+                        migrated_from_workbench_case_id,
+                        promoted_workbench_case_id,
+                        created_by,
+                        created_at,
+                        updated_at,
+                        raw_payload
+                    """,
+                    (reason, actor, relation_id),
+                )
+                after = self._row_payload(row)
+                if not after:
+                    continue
+                self._release_claims(
+                    connection,
+                    relation_id=relation_id,
+                    actor_id=actor,
+                    release_reason=reason,
+                )
+                self._record_event(
+                    connection,
+                    relation_id=relation_id,
+                    event_type="cancel_admission_missing",
+                    actor_id=actor,
+                    before_payload=before,
+                    after_payload=after,
+                )
+                changed_relation_ids.append(relation_id)
+                cancelled_relations.append(_public_relation(after))
+            return {
+                "status": "cancelled",
+                "changed_relation_ids": changed_relation_ids,
+                "affected_months": [normalized_month_scope] if changed_relation_ids else [],
+                "relations": cancelled_relations,
+            }
+
+        return run_in_transaction(self._connection, write)
+
     def _load_relation_by_id(self, connection: Any, relation_id: str) -> dict[str, Any] | None:
         row = connection.fetch_one(
             """
@@ -898,6 +1026,61 @@ class SnapshotOaPendingPaymentRelationRepository:
             "changed_relation_ids": [resolved_relation_id],
             "affected_months": [text(promoted.get("month_scope"))] if text(promoted.get("month_scope")) else [],
             "idempotent_replay": False,
+        }
+
+    def cancel_active_relations_missing_oa_admission(
+        self,
+        *,
+        month_scope: str,
+        admitted_oa_row_ids: list[str],
+        actor_id: str,
+        cancellation_reason: str = "oa_pending_payment_admission_missing",
+    ) -> dict[str, Any]:
+        normalized_month = (month_start(month_scope) or "")[:7] or text(month_scope) or "all"
+        admitted = set(_dedupe_text(admitted_oa_row_ids))
+        actor = text(actor_id) or "system"
+        reason = text(cancellation_reason) or "oa_pending_payment_admission_missing"
+        snapshot = self._normalized_snapshot()
+        relations = snapshot.setdefault("relations", {})
+        claims = snapshot.setdefault("claims", {})
+        changed_relation_ids: list[str] = []
+        cancelled_relations: list[dict[str, Any]] = []
+        for relation_id, relation in list(relations.items()):
+            if not isinstance(relation, dict):
+                continue
+            if text(relation.get("status")) != "active":
+                continue
+            if (text(relation.get("month_scope")) or "all") != normalized_month:
+                continue
+            if admitted and set(text_list(relation.get("oa_row_ids"))) & admitted:
+                continue
+            cancelled = {
+                **deepcopy(relation),
+                "status": "cancelled",
+                "version": int_value(relation.get("version"), 1) + 1,
+                "cancellation_reason": reason,
+                "cancelled_by": actor,
+            }
+            relations[str(relation_id)] = cancelled
+            for claim in claims.values():
+                if (
+                    isinstance(claim, dict)
+                    and text(claim.get("owner_type")) == "oa_pending_payment_relation"
+                    and text(claim.get("owner_id")) == str(relation_id)
+                    and text(claim.get("status")) == "active"
+                ):
+                    claim["status"] = "released"
+                    claim["release_reason"] = reason
+                    claim["released_by"] = actor
+            changed_relation_ids.append(str(relation_id))
+            cancelled_relations.append(_public_relation(cancelled))
+        if changed_relation_ids:
+            self._save_snapshot(deepcopy(snapshot))
+        return {
+            "status": "cancelled",
+            "changed_relation_ids": changed_relation_ids,
+            "affected_months": [normalized_month] if changed_relation_ids else [],
+            "relations": cancelled_relations,
         }
 
     def _normalized_snapshot(self) -> dict[str, Any]:

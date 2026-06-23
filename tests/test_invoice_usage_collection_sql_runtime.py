@@ -8,7 +8,7 @@ import unittest
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
 from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
     InvoiceUsageCollectionReadModelRefreshService,
 )
@@ -483,6 +483,11 @@ class StaticOAProjectionRepository:
         return sorted({record.month for record in self.records}, reverse=True)
 
 
+class RefreshingOAProjectionRepository(StaticOAProjectionRepository):
+    def get_read_status(self) -> OAReadStatus:
+        return OAReadStatus(code="refreshing", message="OA projection refreshing")
+
+
 class StaticOAPaymentStatusRepository:
     def __init__(self, *, flow_ids: dict[str, str], admitted_flow_ids: set[str]) -> None:
         self.flow_ids = dict(flow_ids)
@@ -591,6 +596,100 @@ class WriteRecordingConnection:
 
     def execute(self, sql: str, params: object = ()) -> None:
         self.executed.append((" ".join(sql.lower().split()), params))
+
+
+class OaPendingRelationCleanupConnection(EmptyTransactionConnection):
+    def __init__(self) -> None:
+        self.relations: dict[str, dict[str, object]] = {
+            "rel-missing-admission": {
+                "relation_id": "rel-missing-admission",
+                "status": "active",
+                "version": 1,
+                "scope_month": "2026-05-01",
+                "oa_row_ids": ["oa-pay-missing-admission"],
+                "bank_transaction_ids": ["bank-missing-admission"],
+                "source_action": "auto_reconcile_bank_transactions",
+                "note": None,
+                "amount_check": {},
+                "writeback_status": {},
+                "migrated_from_workbench_case_id": None,
+                "promoted_workbench_case_id": None,
+                "created_by": "system",
+                "created_at": "2026-06-22T00:00:00+08:00",
+                "updated_at": "2026-06-22T00:00:00+08:00",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "relation_id": "rel-missing-admission",
+                        "status": "active",
+                        "month_scope": "2026-05",
+                        "oa_row_ids": ["oa-pay-missing-admission"],
+                        "bank_transaction_ids": ["bank-missing-admission"],
+                    }
+                },
+            }
+        }
+        self.claims: dict[str, dict[str, object]] = {
+            "bank-missing-admission": {
+                "bank_transaction_id": "bank-missing-admission",
+                "owner_type": "oa_pending_payment_relation",
+                "owner_id": "rel-missing-admission",
+                "status": "active",
+            }
+        }
+        self.executed: list[tuple[str, object]] = []
+
+    def fetch_all(self, sql: str, params: object = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.oa_pending_payment_bank_relations" not in normalized:
+            return []
+        rows = [dict(relation) for relation in self.relations.values() if relation.get("status") == "active"]
+        if "scope_month = %s::date" in normalized:
+            admitted = {str(row_id) for row_id in list(params[1] if isinstance(params, tuple) and len(params) > 1 else [])}
+            return [
+                row
+                for row in rows
+                if str(row.get("scope_month", ""))[:7] == "2026-05"
+                and not ({str(row_id) for row_id in list(row.get("oa_row_ids") or [])} & admitted)
+            ]
+        if "oa_row_ids && %s or bank_transaction_ids && %s" in normalized:
+            wanted = {str(row_id) for row_id in list(params[0] if isinstance(params, tuple) and params else [])}
+            return [
+                row
+                for row in rows
+                if ({str(row_id) for row_id in list(row.get("oa_row_ids") or [])} & wanted)
+                or ({str(row_id) for row_id in list(row.get("bank_transaction_ids") or [])} & wanted)
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: object = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "update app.oa_pending_payment_bank_relations" not in normalized:
+            return None
+        reason, actor, relation_id = params
+        relation = dict(self.relations[str(relation_id)])
+        relation["status"] = "cancelled"
+        relation["version"] = int(relation["version"]) + 1
+        relation["raw_payload"] = {
+            "normalized_payload": {
+                **dict(relation.get("raw_payload", {}).get("normalized_payload", {})),
+                "status": "cancelled",
+                "cancellation_reason": str(reason),
+                "cancelled_by": str(actor),
+            }
+        }
+        self.relations[str(relation_id)] = relation
+        return dict(relation)
+
+    def execute(self, sql: str, params: object = ()) -> None:
+        normalized = " ".join(sql.lower().split())
+        self.executed.append((normalized, params))
+        if "update app.bank_transaction_relation_claims" in normalized:
+            actor, reason, relation_id = params
+            for claim in self.claims.values():
+                if claim.get("owner_id") == relation_id and claim.get("status") == "active":
+                    claim["status"] = "released"
+                    claim["released_by"] = actor
+                    claim["release_reason"] = reason
 
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
@@ -1692,6 +1791,66 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         rows = read_repository.saved_oa["rows"]
         self.assertEqual(result["row_count"], 1)
         self.assertEqual([row["oa"]["id"] for row in rows], ["oa-pay-mongo-admitted"])
+
+    def test_projection_builder_releases_pending_relation_when_oa_admission_disappears(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        connection = OaPendingRelationCleanupConnection()
+        payment_repository = StaticOAPaymentStatusRepository(
+            flow_ids={
+                "oa-pay-mongo-admitted": "mongo-admitted",
+                "oa-pay-missing-admission": "mongo-missing-admission",
+            },
+            admitted_flow_ids={"mongo-admitted"},
+        )
+        oa_source_adapter = StaticOAProjectionRepository([
+            self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
+            self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
+        ])
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=connection,
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+            payment_status_repository=payment_repository,
+            oa_source_adapter=oa_source_adapter,
+        )
+        builder._core_repository = ProjectionCoreRepository()
+        builder._read_repository = read_repository
+
+        result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
+
+        self.assertIsNotNone(read_repository.saved_oa)
+        self.assertEqual([row["oa"]["id"] for row in read_repository.saved_oa["rows"]], ["oa-pay-mongo-admitted"])
+        self.assertEqual(result["pending_relation_cleanup"]["changed_relation_ids"], ["rel-missing-admission"])
+        self.assertEqual(connection.relations["rel-missing-admission"]["status"], "cancelled")
+        self.assertEqual(connection.claims["bank-missing-admission"]["status"], "released")
+        self.assertEqual(
+            connection.claims["bank-missing-admission"]["release_reason"],
+            "oa_pending_payment_admission_missing",
+        )
+
+    def test_projection_builder_does_not_release_pending_relation_when_oa_admission_projection_is_refreshing(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        connection = OaPendingRelationCleanupConnection()
+        payment_repository = StaticOAPaymentStatusRepository(
+            flow_ids={"oa-pay-missing-admission": "mongo-missing-admission"},
+            admitted_flow_ids=set(),
+        )
+        oa_source_adapter = RefreshingOAProjectionRepository([
+            self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
+        ])
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=connection,
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+            payment_status_repository=payment_repository,
+            oa_source_adapter=oa_source_adapter,
+        )
+        builder._core_repository = ProjectionCoreRepository()
+        builder._read_repository = read_repository
+
+        result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
+
+        self.assertEqual(result["pending_relation_cleanup"]["skipped"], "oa_admission_projection_not_ready")
+        self.assertEqual(connection.relations["rel-missing-admission"]["status"], "active")
+        self.assertEqual(connection.claims["bank-missing-admission"]["status"], "active")
 
     def test_projection_builder_reads_completed_from_unified_projection_and_in_progress_from_admission(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
