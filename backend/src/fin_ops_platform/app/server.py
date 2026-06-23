@@ -80,6 +80,7 @@ from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_detail_available_month_scope_provider import BankDetailAvailableMonthScopeProvider
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
+from fin_ops_platform.services.bank_detail_derived_lifecycle_executor import BankDetailDerivedLifecycleExecutor
 from fin_ops_platform.services.bank_detail_read_model_refresh_producer import BankDetailReadModelRefreshProducer
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
@@ -19366,7 +19367,7 @@ class Application:
                 "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
                 "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
-                "bank_detail_read_model": self._derived_lifecycle_bank_detail_executor,
+                "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
                 "no_oa_bank_batch_read_model": self._derived_lifecycle_no_oa_bank_batch_executor,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
@@ -19591,25 +19592,11 @@ class Application:
             "invalidated_scopes": invalidated_scope_keys,
         }
 
-    def _derived_lifecycle_bank_detail_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        months = self._months_from_lifecycle_scope_keys(scope_keys)
-        if months:
-            target_scope_keys = months
-        elif "all" in scope_keys:
-            target_scope_keys = self._bank_detail_available_month_scope_provider().scope_keys()
-        else:
-            target_scope_keys = ["all"]
-        enqueued = self._bank_detail_read_model_refresh_producer().enqueue(
-            target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_detail"),
-            metadata=self._read_model_refresh_metadata(domain_plan),
+    def _bank_detail_derived_lifecycle_executor(self) -> BankDetailDerivedLifecycleExecutor:
+        return BankDetailDerivedLifecycleExecutor(
+            available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
+            enqueue_refresh=self._bank_detail_read_model_refresh_producer().enqueue,
         )
-        return {
-            "deleted_counts": {"bank_detail_read_models": 0},
-            "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["bank_detail.read_model.refresh"] if enqueued else [],
-        }
 
     def _derived_lifecycle_no_oa_bank_batch_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)

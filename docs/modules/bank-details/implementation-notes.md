@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail derived lifecycle executor port extraction
+
+- 目标：执行 `read-models:bank-detail-derived-lifecycle-executor-port-extraction`，把银行明细 derived lifecycle executor 从 `Application` 抽到显式 services-layer executor。
+- 影响范围：`BankDetailDerivedLifecycleExecutor`、derived lifecycle executor registry、银行明细 lifecycle/guard 测试和 modular IO planning state；不改变 API response shape、权限、审计、operation barrier、read model freshness、worker 或前端。
+- 关键决策：`Application._derived_lifecycle_bank_detail_executor(...)` 删除；新 executor 保留显式月份优先、`all` 通过 available-month provider fan-out、默认 `["all"]`、通过 `BankDetailReadModelRefreshProducer` enqueue，以及原有 `deleted_counts` / `invalidated_scopes` / `enqueued_jobs` payload shape。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：新增 derived lifecycle executor 单测，扩展静态 guard 防止旧 app-level executor 回归，并复跑 derived data lifecycle service 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status 和生产历史数据未在本地验证；剩余 broad service factory collaborator injection 需要下一步闭环审计。
+
 ## 2026-06-24 - Bank detail available-month scope provider extraction
 
 - 目标：执行 `read-models:bank-detail-available-month-scope-provider-extraction`，把银行明细可用月份 scope 计算从 `Application` 抽到显式 provider。

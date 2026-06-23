@@ -558,6 +558,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_set_bank_detail_cached_payload",
             "_delete_bank_detail_redis_cache",
             "_bank_detail_available_month_scope_keys",
+            "_derived_lifecycle_bank_detail_executor",
         }
         for helper_name in sorted(removed_application_helpers):
             if _function_source(server_tree, server_source, helper_name):
@@ -599,6 +600,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py still owns removed bank detail suggestion provider callback")
         if _function_source(server_tree, server_source, "_bank_detail_available_month_scope_keys"):
             violations.append("server.py still owns removed bank detail available-month scope helper")
+        if _function_source(server_tree, server_source, "_derived_lifecycle_bank_detail_executor"):
+            violations.append("server.py still owns removed bank detail derived lifecycle executor")
         for removed_helper_name in sorted(removed_application_helpers):
             if removed_helper_name in factory_source:
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
@@ -615,6 +618,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("BankDetailsApplicationService factory does not build the explicit bank detail suggestion provider")
         if "BankDetailAvailableMonthScopeProvider(" not in server_source:
             violations.append("server.py does not build the explicit bank detail available-month scope provider")
+        if "BankDetailDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not build the explicit bank detail derived lifecycle executor")
+        if '"bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit bank detail executor")
         removed_side_effect_callback = "_after_bank_category_confirmation_mutation"
         if _function_source(server_tree, server_source, removed_side_effect_callback):
             violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")
