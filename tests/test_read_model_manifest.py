@@ -296,6 +296,61 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertFalse(set(lifecycle.repository_port_contract).intersection(output_collection.repository_port_contract))
         self.assertFalse(set(input_usage.repository_port_contract).intersection(output_collection.repository_port_contract))
 
+    def test_cost_tax_and_turnover_manifest_preserve_summary_contracts(self) -> None:
+        cost_statistics = READ_MODEL_MANIFEST["cost_statistics"]
+        tax_offset = READ_MODEL_MANIFEST["tax_offset"]
+        turnover_ledger = READ_MODEL_MANIFEST["turnover_ledger"]
+        required_cost_ports = {
+            "load_cost_statistics_read_models",
+            "get_cost_statistics_view",
+            "save_cost_statistics_read_models",
+        }
+        required_tax_ports = {
+            "load_tax_offset_read_models",
+            "get_tax_offset_view",
+            "save_tax_offset_read_models",
+        }
+        required_turnover_ports = {
+            "list_turnover_ledger_view",
+            "save_turnover_ledger_rows",
+            "clear_turnover_ledger_rows",
+        }
+
+        for entry in (cost_statistics, tax_offset, turnover_ledger):
+            with self.subTest(read_model_key=entry.key):
+                self.assertEqual(entry.query_status_contract, "read_model_query_gateway")
+                self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
+                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
+                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
+
+        self.assertEqual(cost_statistics.scope_type, "cost_statistics")
+        self.assertEqual(tax_offset.scope_type, "tax_offset")
+        self.assertEqual(turnover_ledger.scope_type, "turnover_ledger")
+        self.assertEqual(cost_statistics.projection_strategy, "partitioned_scoped_parent_rollup")
+        self.assertEqual(tax_offset.projection_strategy, "partitioned_scoped_incremental")
+        self.assertEqual(turnover_ledger.projection_strategy, "partitioned_scoped_incremental")
+        self.assertEqual(cost_statistics.all_scope_semantics, "queryable_parent_aggregate")
+        self.assertEqual(tax_offset.all_scope_semantics, "fan_out_command")
+        self.assertEqual(turnover_ledger.all_scope_semantics, "fan_out_command")
+        self.assertEqual(cost_statistics.primary_worker_instance, "cost-statistics")
+        self.assertEqual(tax_offset.primary_worker_instance, "tax-offset")
+        self.assertEqual(turnover_ledger.primary_worker_instance, "turnover-ledger")
+        self.assertEqual(cost_statistics.auxiliary_refresh_worker_instances, ("cost-tax",))
+        self.assertEqual(tax_offset.auxiliary_refresh_worker_instances, ("cost-tax",))
+        self.assertEqual(turnover_ledger.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(cost_statistics.query_owner, "CostStatisticsQueryService")
+        self.assertEqual(tax_offset.query_owner, "TaxOffsetQueryService")
+        self.assertEqual(turnover_ledger.query_owner, "TurnoverLedgerQueryService")
+        self.assertEqual(cost_statistics.permission_owner, "cost_statistics_api_session")
+        self.assertEqual(tax_offset.permission_owner, "tax_offset_api_session")
+        self.assertEqual(turnover_ledger.permission_owner, "turnover_ledger_api_session")
+        self.assertEqual(required_cost_ports, set(cost_statistics.repository_port_contract))
+        self.assertEqual(required_tax_ports, set(tax_offset.repository_port_contract))
+        self.assertEqual(required_turnover_ports, set(turnover_ledger.repository_port_contract))
+        self.assertFalse(set(cost_statistics.repository_port_contract).intersection(tax_offset.repository_port_contract))
+        self.assertFalse(set(cost_statistics.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
+        self.assertFalse(set(tax_offset.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()

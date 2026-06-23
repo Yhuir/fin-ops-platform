@@ -14,7 +14,7 @@
 | 7 | `read-models:bank-detail-and-bank-account-balance-contract` | closed-autonomous | Added manifest guard keeping bank detail and bank account balance scope/repository/test contracts separate. |
 | 8 | `read-models:pending-invoice-and-oa-pending-payment-contract` | closed-autonomous | Added manifest guard preserving pending invoice page-first-screen scope and OA pending payment fan-out contracts. |
 | 9 | `read-models:invoice-lifecycle-and-usage-contract` | closed-autonomous | Added manifest guard preserving invoice lifecycle, input usage and output collection scoped incremental fan-out contracts and disjoint repository ports. |
-| 10 | `read-models:cost-tax-ledger-summary-contract` | pending | Cost statistics, tax offset and turnover ledger partitioned scoped rollup contracts. |
+| 10 | `read-models:cost-tax-ledger-summary-contract` | closed-autonomous | Added manifest guard preserving cost parent aggregate semantics, tax/turnover fan-out contracts and disjoint repository ports. |
 | 11 | `read-models:search-and-no-oa-bank-batch-contract` | pending | Search and no-OA bank batch read-side freshness/status contracts. |
 | 12 | `read-models:legacy-read-path-removal-guards` | pending | Remove or quarantine live scan, direct queue write and legacy refresh paths that can pollute new links. |
 | 13 | `reconciliation-workbench:amount-check-query-contract` | pending | Narrow workbench compute/query contract after read model foundation; avoid full workbench rewrite. |

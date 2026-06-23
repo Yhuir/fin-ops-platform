@@ -97,4 +97,5 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 补 read model manifest 合同守卫 | 不改变税金抵扣业务/UI/read model/worker 状态；锁定 `tax_offset` 为 `partitioned_scoped_incremental`、`all` 为 fan-out command，并保持 `tax-offset` primary worker 与 `cost-tax` 兼容 worker 的 owner 区分 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
 | 2026-06-11 | 补齐测试闭环状态机 | 认证状态、计划保存、read model freshness、认证导入 job、UI 和 worker 状态边界 | `tests.test_tax_offset_service`、`tests.test_tax_certified_import_service`、`tests.test_tax_offset_read_model_service`、`tests.test_tax_offset_api`、`tests.test_import_job_queue`、`tests.test_tax_offset_sql_runtime`、`tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_postgres_state_store`、`tests.test_postgres_migrations`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx` |

@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Cost/tax/turnover summary read model 合同守卫
+
+- 目标：执行 `read-models:cost-tax-ledger-summary-contract`，把 `cost_statistics`、`tax_offset`、`turnover_ledger` 的 query gateway、parent/fan-out semantics、worker、permission 和 repository port 边界固化为 manifest guard。
+- 影响范围：`tests/test_read_model_manifest.py`、read-models/cost-statistics/tax-offset/turnover-ledger 模块文档和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：`cost_statistics` 保持 `queryable_parent_aggregate` 与 `partitioned_scoped_parent_rollup`；`tax_offset` 和 `turnover_ledger` 保持 fan-out/incremental 语义。旧 `cost-tax` 只能是 cost/tax 的兼容 auxiliary worker，不能替代 primary owner。
+- 文档影响：同步 read-models 测试矩阵、cost/tax/turnover 状态机变更记录和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_cost_statistics_sql_runtime tests.test_tax_offset_sql_runtime tests.test_turnover_ledger_query_service tests.test_turnover_ledger_read_model_refresh -v`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ，未执行生产 worker drain；本轮不需要生产写或真实 read model 重建证据。
+- 后续事项：推进 `read-models:search-and-no-oa-bank-batch-contract`。
+
 ## 2026-06-23 - Invoice lifecycle 与发票使用/收款 read model 合同守卫
 
 - 目标：执行 `read-models:invoice-lifecycle-and-usage-contract`，把 `invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection` 的 scoped incremental、fan-out `all`、owner、permission 和 repository port 边界固化为 manifest guard。

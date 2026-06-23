@@ -5,13 +5,13 @@ Continue the autonomous modular IO refactor from the current state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:invoice-lifecycle-and-usage-contract`
+- Last completed boundary: `read-models:cost-tax-ledger-summary-contract`
 - Last status: `closed-autonomous`
-- Invoice lifecycle, input invoice usage and output invoice collection are guarded as scoped incremental fan-out read models with explicit worker/query/permission owners and disjoint repository ports.
+- Cost statistics is guarded as a queryable parent aggregate read model; tax offset and turnover ledger are guarded as fan-out/incremental read models with explicit worker/query/permission owners and disjoint repository ports.
 
 ## Next Boundary
 
-`read-models:cost-tax-ledger-summary-contract`
+`read-models:search-and-no-oa-bank-batch-contract`
 
 ## Required First Steps On Resume
 
@@ -22,21 +22,16 @@ Continue the autonomous modular IO refactor from the current state.
    - `docs/modules/read-models/state-machine.md`
    - `docs/modules/read-models/tests.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - `docs/product-specs/cost-tax.md`
-   - `docs/modules/cost-statistics/README.md`
-   - `docs/modules/cost-statistics/state-machine.md`
-   - `docs/modules/cost-statistics/tests.md`
-   - `docs/modules/tax-offset/README.md`
-   - `docs/modules/tax-offset/state-machine.md`
-   - `docs/modules/tax-offset/tests.md`
-   - `docs/modules/turnover-ledger/README.md`
-   - `docs/modules/turnover-ledger/state-machine.md`
-   - `docs/modules/turnover-ledger/tests.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`
-4. Use CodeGraph for `CostStatisticsQueryService`, `TaxOffsetQueryService`, `TurnoverLedgerQueryService`, cost/tax/turnover repository methods, query gateway ownership, scope policy entries, parent/fan-out semantics, and production fail-closed behavior.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`.
-6. If implementation starts in that boundary, keep it to cost statistics / tax offset / turnover ledger manifest contract tests, owner refinement, or one tiny guard. Do not rewrite rollup SQL, tax certification business policy, turnover relation writes, worker rebuild, Go/Fiber, Go Worker, or production state.
+   - `docs/product-specs/bank-turnover-and-no-oa.md`
+   - `docs/modules/no-oa-bank-batches/README.md`
+   - `docs/modules/no-oa-bank-batches/state-machine.md`
+   - `docs/modules/no-oa-bank-batches/tests.md`
+   - `docs/modules/no-oa-bank-batches/implementation-notes.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`
+4. Use CodeGraph for `Search read API`, `SearchPendingReadModelRefreshService`, `NoOaBankBatchApplicationService`, `NoOaBankBatchReadModelRefreshService`, search/no-OA repository methods, query gateway ownership, scope policy entries, freshness/status handling, and production fail-closed behavior.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`.
+6. If implementation starts in that boundary, keep it to search / no-OA bank batch manifest contract tests, owner refinement, or one tiny guard. Do not rewrite search indexing, no-OA business batch writes, worker rebuild, Go/Fiber, Go Worker, or production state.
 
 ## Stop Condition
 
-Complete one narrow verified cost/tax/turnover ledger summary contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one narrow verified search / no-OA bank batch read-side contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
