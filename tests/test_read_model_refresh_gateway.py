@@ -135,7 +135,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 "expense:all",
                 "income:cash_income",
                 "expense:bank_statement_as_invoice:2026-02",
+                "expense:no_invoice_required:2026-02",
                 "income:all:2026-02",
+                "income:requires_invoice:2026-02",
                 "income:all:2026-02",
             ],
             reason="unit_test",
@@ -147,7 +149,9 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 "expense:all",
                 "income:cash_income",
                 "expense:bank_statement_as_invoice:2026-02",
+                "expense:no_invoice_required:2026-02",
                 "income:all:2026-02",
+                "income:requires_invoice:2026-02",
             ],
         )
         self.assertEqual(
@@ -160,7 +164,13 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                     "scope_key": "expense:bank_statement_as_invoice:2026-02",
                     "reason": "unit_test",
                 },
+                {
+                    "scope_type": "pending_invoice",
+                    "scope_key": "expense:no_invoice_required:2026-02",
+                    "reason": "unit_test",
+                },
                 {"scope_type": "pending_invoice", "scope_key": "income:all:2026-02", "reason": "unit_test"},
+                {"scope_type": "pending_invoice", "scope_key": "income:requires_invoice:2026-02", "reason": "unit_test"},
             ],
         )
 
@@ -186,6 +196,24 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
 
         with self.assertRaises(ReadModelScopeError):
             gateway.enqueue_many("pending_invoice", ["all"], reason="unit_test")
+        self.assertEqual(queue.refreshes, [])
+
+    def test_pending_invoice_policy_rejects_unsupported_filter_groups(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        for invalid_scope_key in [
+            "expense:cash_income",
+            "expense:unknown_filter:2026-02",
+            "income:bank_statement_as_invoice",
+            "income:unknown_filter:2026-02",
+        ]:
+            with self.subTest(invalid_scope_key=invalid_scope_key):
+                with self.assertRaises(ReadModelScopeError):
+                    gateway.enqueue_many("pending_invoice", [invalid_scope_key], reason="unit_test")
         self.assertEqual(queue.refreshes, [])
 
     def test_metadata_is_passed_to_queue_repository(self) -> None:

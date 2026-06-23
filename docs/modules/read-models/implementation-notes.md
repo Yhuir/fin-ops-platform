@@ -657,6 +657,14 @@
 - 发现的 P1 缺口：pending invoice mutation 响应没有统一的 `freshness_targets` 合同；规则保存已有 `read_model_status=refreshing`，attach-existing/income-status 返回 affected months，但 operation barrier target 合同需要单独审/补。
 - 非目标：本轮不改业务状态、API shape、UI、worker runtime 或生产数据；Go/Fiber/Go Worker 继续 blocked。
 
+## 2026-06-24 - pending invoice scope policy filter allowlist
+
+- 目标：让 `pending_invoice` refresh scope 在 `ReadModelRefreshGateway` 层拒绝非法 filter group，避免无效 scope 进入 durable queue 后才由 worker/projection 报错。
+- 改动：`read_model_scope_policy.py` 新增 pending invoice expense/income allowlist；expense 只接受 `all`、`requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`，income 只接受 `all`、`requires_invoice`、`no_invoice_required`、`cash_income`。
+- 测试覆盖：扩展 `tests/test_read_model_refresh_gateway.py`，证明合法 aggregate/month scope 仍 enqueue/dedupe，非法 `expense:cash_income`、`income:bank_statement_as_invoice` 和 unknown filter 不 enqueue。
+- 非目标：不改业务筛选语义、API shape、SQL projection、worker expansion 或 UI。Projection 级 filter 校验仍作为 defense-in-depth。
+- 后续事项：继续审/补 pending invoice mutation freshness target contract。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:pending-invoice-refresh-freshness-operation-barrier-audit.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:pending-invoice-scope-policy-filter-allowlist.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -107,8 +107,8 @@ Current state expected on start:
 - Real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
 - `pending_invoice` is selected as the next non-Go read model implementation pilot because it consumes both `bank_detail` and `workbench_relation` source versions and has special `expense|income:<filter>[:YYYY-MM]` scope semantics.
 - `PendingInvoiceReadModelRepositoryPort` now narrows rows, filter-options, source-version and projection save/mark repository access.
-- Pending invoice freshness/barrier audit found that scope policy lacks direction-specific filter allowlist validation; mutation freshness target contract remains a later pending boundary.
-- The next pending boundary is read-models:pending-invoice-scope-policy-filter-allowlist.
+- Pending invoice scope policy now rejects unsupported expense/income filter groups at gateway validation.
+- The next pending boundary is read-models:pending-invoice-mutation-freshness-target-contract.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -204,15 +204,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:pending-invoice-scope-policy-filter-allowlist unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:pending-invoice-mutation-freshness-target-contract unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:pending-invoice-scope-policy-filter-allowlist:
+For read-models:pending-invoice-mutation-freshness-target-contract:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-scope-policy-filter-allowlist.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-refresh-freshness-operation-barrier-audit.md`.
 - Read `docs/modules/read-models/README.md`, `docs/modules/pending-invoices/README.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `pending_invoice_service.py`, `search_pending_sql_projection.py`, and `tests/test_read_model_refresh_gateway.py`.
-- Tighten `pending_invoice` scope policy so invalid filter groups fail at gateway validation and never reach runtime worker/projection.
-- Preserve valid base and month shard scopes for supported expense/income filters.
-- Add targeted gateway tests for invalid filter group rejection and valid scope preservation.
+- Read `backend/src/fin_ops_platform/app/routes_pending_invoices.py`, `pending_invoice_service.py`, `pending_invoice_rules_application_service.py`, and operation barrier related frontend/backend tests.
+- Audit pending invoice mutation responses and frontend callers for rules update, attach-existing confirm and income-status updates.
+- Decide whether to add `freshness_targets` now or split a narrower implementation boundary.
+- If behavior/API shape changes, add targeted backend/frontend tests.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.

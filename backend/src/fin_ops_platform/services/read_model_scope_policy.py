@@ -10,6 +10,8 @@ class ReadModelScopeError(ValueError):
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+PENDING_INVOICE_EXPENSE_FILTERS = frozenset({"all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required"})
+PENDING_INVOICE_INCOME_FILTERS = frozenset({"all", "requires_invoice", "no_invoice_required", "cash_income"})
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,11 @@ def _validate_pending_invoice_scope_key(scope_key: str) -> None:
         raise ReadModelScopeError("pending_invoice read model scope direction must be expense or income.")
     if not filter_group:
         raise ReadModelScopeError(f"Invalid pending_invoice read model scope_key: {scope_key}")
+    valid_filters = PENDING_INVOICE_EXPENSE_FILTERS if direction == "expense" else PENDING_INVOICE_INCOME_FILTERS
+    if filter_group not in valid_filters:
+        raise ReadModelScopeError(
+            f"pending_invoice read model scope filter is not supported for {direction}: {filter_group}"
+        )
     if len(parts) == 3 and not MONTH_RE.match(parts[2]):
         raise ReadModelScopeError(f"Invalid pending_invoice read model month scope_key: {scope_key}")
 

@@ -310,6 +310,14 @@
 - 待修缺口：scope policy 目前没有限制 filter group allowlist，非法 `expense:<unknown>` 或 `income:<unknown>` 不应通过 gateway；下一步需加测试和 policy 校验。
 - 后续候选：统一 pending invoice mutation 响应的 `freshness_targets` 或明确现有页面 refetch/barrier 合同，避免写后页面同步语义分散。
 
+## 2026-06-24 - pending invoice scope policy filter allowlist
+
+- 目标：关闭待找发票特殊 scope 的 filter 污染入口，确保非法 direction/filter 组合在 refresh gateway 阶段失败。
+- 改动：`pending_invoice` scope policy 现在按方向校验 filter；支出不允许 `cash_income`，收入不允许 `bank_statement_as_invoice`，未知 filter group 全部拒绝。
+- 测试覆盖：`tests/test_read_model_refresh_gateway.py` 新增非法 filter group 不入队回归，并扩展合法支出/收入 month scope 覆盖。
+- 影响：不改变页面筛选、业务状态、API response shape 或 projection 行为；只提前拒绝无效 refresh scope。
+- 后续事项：继续处理 pending invoice mutation freshness target contract。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。
