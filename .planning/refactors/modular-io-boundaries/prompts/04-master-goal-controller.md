@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:post-batch-restore-local-implementation-closure-audit.
+- Last completed boundary: workbench-relations:turnover-workbench-pair-port-boundary-audit.
 - Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
@@ -83,8 +83,8 @@ Current state expected on start:
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
 - Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- Post-batch local closure audit still found turnover, pending invoice, no-OA, ETC and WorkbenchWriteFacade relation dependencies requiring focused classification; Go hot-path candidates remain blocked.
-- The next pending boundary is workbench-relations:turnover-workbench-pair-port-boundary-audit.
+- Turnover pair writes are command-service gated; pair service is currently read-only compat fallback and unused persist callback wiring should be removed next.
+- The next pending boundary is workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -180,23 +180,25 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:turnover-workbench-pair-port-boundary-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:turnover-workbench-pair-port-boundary-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-batch-restore-local-implementation-closure-audit.md`.
+For workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-workbench-pair-port-boundary-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
 - Read `docs/modules/turnover-ledger/README.md`, `state-machine.md`, and `tests.md`.
-- Read `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant turnover/workbench relation tests.
-- Use CodeGraph/text search for `TurnoverLedgerWorkbenchPairPort`, turnover primary/fallback builders, `pair_relation_service`, `persist_pair_relations`, and relation command service factory callers/impact.
-- Audit `TurnoverLedgerWorkbenchPairPort` and turnover primary/fallback wiring.
-- Decide whether the pair service dependency can be removed, should become command-service-only, or must remain `compat-only`.
-- Classify primary write facade builders and legacy fallback facades separately.
-- Do not migrate turnover behavior in this audit slice unless a trivial no-code deletion is proven safe and queue is updated.
-- Do not change turnover closure/withdraw business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
+- Read `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_turnover_ledger_uow_contract.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `TurnoverLedgerWorkbenchPairPort`, `persist_pair_relations`, `_persist_pair_relations`, and caller wiring.
+- Remove the unused `persist_pair_relations` constructor parameter from `TurnoverLedgerWorkbenchPairPort`.
+- Remove the unused `_persist_pair_relations` field.
+- Remove `persist_pair_relations=...` arguments from primary builders and legacy fallback facades where they instantiate the port.
+- Keep `pair_relation_service` read-only compat fallback unchanged.
+- Update static guard to prove `_persist_pair_relations` cannot return inside `TurnoverLedgerWorkbenchPairPort`.
+- Do not remove `pair_relation_service` in this slice.
+- Do not change turnover closure/withdraw/cash-closure business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
-- Produce an analysis/accounting file.
+- Produce an implementation analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted docs verification and diff checks.
+- Run targeted turnover/guard tests, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

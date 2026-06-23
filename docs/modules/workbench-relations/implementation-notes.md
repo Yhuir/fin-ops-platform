@@ -376,6 +376,25 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - turnover workbench pair port boundary audit
+
+目标：审计 `TurnoverLedgerWorkbenchPairPort` 和 turnover primary/fallback wiring，判断 pair service dependency 是否可移除、是否 command-only，或是否必须保留为 compat-only。
+
+结论：
+
+- `TurnoverLedgerWorkbenchPairPort` 的 confirm、manual closure withdraw 和 cash closure withdraw 写入口都要求 `relation_command_service_factory`；缺 command service 时 fail fast，不回退 direct pair write。
+- 现有单测和静态 guard 已覆盖不得调用 `replace_with_confirmed_relation`、direct `cancel_relation(case_id)` 或 `_persist_pair_relations(...)`。
+- `pair_relation_service` 当前只作为 withdrawability check 的 read-only compat fallback，当 facade/context 不可用时读取 active relation by case id；它不能写 canonical facts、dirty scopes、outbox、readiness、cache 或 App Status。
+- `persist_pair_relations` 参数仍被 port 构造器接收并保存为 `_persist_pair_relations`，但 port 内从未读取或调用。下一条最小实现边界应删除这个 unused callback 参数、字段和调用方 wiring。
+- 本审计不改变 turnover 业务规则、API shape、dirty scope 或 read model refresh。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
