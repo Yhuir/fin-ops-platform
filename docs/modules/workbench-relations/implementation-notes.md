@@ -315,6 +315,25 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - batch accounting pair restore helper audit
+
+目标：审计 BatchAccountingApiRoutes 的 `pair_relation_snapshot` / `restore_pair_relation_snapshot` wiring，判断 `_restore_batch_accounting_pair_relation_snapshot(...)` 是否可删除、抽离或保留为 route-local compat-only。
+
+结论：
+
+- 该 helper 不可删除；`BatchAccountingApiRoutes.submit(...)` 在 relation command 已改变内存状态后，如果 pair relation persist scheduling 失败，需要用提交前 snapshot 做 rollback。
+- 当前 helper 仍在 `server.py` 里直接调用 `WorkbenchPairRelationService.from_snapshot(...)` 并重新配置 exception application service，因此不能视为已符合新的 relation rollback 边界。
+- 下一条实现边界应为 `workbench-relations:batch-accounting-pair-restore-service-delegation`。
+- 建议保留 route callback 作为 compat-only wiring，但让 app helper 委托 `WorkbenchPairRelationRollbackRestoreService` 的 in-memory 模式，也就是 `state_store=None`，以保持当前 batch-accounting rollback 不写 state store 的行为。
+- 本审计不改变 submit/withdraw 业务规则、API shape、dirty scope、read model refresh 或 Go/Fiber/Go Worker 状态。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
