@@ -1408,6 +1408,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_oa_invoice_offset_sync_uses_relation_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
+        port_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_relation_read_port.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchOaInvoiceOffsetRelationReadPort" not in port_source:
+            violations.append("Workbench OA invoice offset relation read port is missing")
+        if "def active_relations_for_mode" not in port_source:
+            violations.append("WorkbenchOaInvoiceOffsetRelationReadPort does not expose active_relations_for_mode")
+        if "_workbench_pair_relation_service.list_active_relations" in method_source:
+            violations.append("_sync_oa_invoice_offset_auto_pair_relations still reads broad pair service directly")
+        if "_workbench_oa_invoice_offset_relation_read_port()" not in method_source:
+            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not use OA invoice offset relation read port")
+        if "active_relations_for_mode(OA_INVOICE_OFFSET_AUTO_MATCH_MODE)" not in method_source:
+            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not constrain reads to OA invoice offset mode")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

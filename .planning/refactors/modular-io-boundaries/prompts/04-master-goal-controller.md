@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:server-repair-precondition-relation-read-port-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:server-oa-invoice-offset-relation-read-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -94,8 +94,9 @@ Current state expected on start:
 - Workbench matching/orchestrator active relation reads now go through `WorkbenchMatchingRelationReadPort` backed by existing command-boundary reads.
 - Workbench payload/live-row active relation reads now go through `WorkbenchPayloadRelationReadPort`.
 - Workbench/no-OA source-version relation snapshot reads now go through `WorkbenchRelationSourceVersionProvider`.
-- OA invoice offset sync, OA attachment context repair, confirm-link context expansion and auto-pair conflict checks are classified as separate write-adjacent read surfaces.
-- The next pending boundary is workbench-relations:server-oa-invoice-offset-relation-read-port-extraction.
+- OA invoice offset sync active relation reads now go through `WorkbenchOaInvoiceOffsetRelationReadPort`.
+- Remaining write-adjacent reads include OA attachment context repair, confirm-link context expansion and auto-pair conflict checks.
+- The next pending boundary is workbench-relations:server-oa-attachment-repair-relation-read-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -191,24 +192,25 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-oa-invoice-offset-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:server-oa-attachment-repair-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-oa-invoice-offset-relation-read-port-extraction:
+For workbench-relations:server-oa-attachment-repair-relation-read-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-oa-invoice-offset-relation-read-port-extraction.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-repair-precondition-relation-read-port-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
 - Inspect `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_sync_oa_invoice_offset_auto_pair_relations`, `OA_INVOICE_OFFSET_AUTO_MATCH_MODE`, `list_active_relations`, `WorkbenchRelationCommandService`, and the OA invoice offset sync tests.
-- Add or reuse an explicit relation read port for OA invoice offset auto-pair sync precondition reads.
-- Move `_sync_oa_invoice_offset_auto_pair_relations(...)` direct `list_active_relations()` call behind that port.
-- Preserve filtering by `OA_INVOICE_OFFSET_AUTO_MATCH_MODE`, create/cancel behavior, changed case ids, changed scope keys, derived lifecycle event metadata and persistence scheduling.
+- Use CodeGraph/text search for `_repair_active_relations_with_oa_attachment_context`, `list_active_relations`, `replace_existing=True`, and `repair_missing_oa_attachment_context`.
+- Add or reuse an explicit relation read port for OA attachment context repair active relation reads.
+- Move `_repair_active_relations_with_oa_attachment_context(...)` direct `list_active_relations()` call behind that port.
+- Preserve dedicated-withdraw filtering, missing attachment detection, before relation payload, `confirm_relation(..., replace_existing=True)`, changed case ids, changed scope keys, derived lifecycle event metadata and persistence scheduling.
 - Add static guard coverage for this method.
-- Do not change `_repair_active_relations_with_oa_attachment_context(...)`, `_expand_confirm_link_row_ids_for_existing_context(...)`, or `_auto_pair_conflicts_with_manual_relation(...)`.
+- Do not change `_expand_confirm_link_row_ids_for_existing_context(...)` or `_auto_pair_conflicts_with_manual_relation(...)`.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run focused OA invoice offset sync regression tests, app check, docs verification and diff checks as applicable.
+- Run focused repair regression/static guard tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

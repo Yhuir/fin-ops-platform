@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-server-repair-precondition-relation-read-port-audit`
+Current state: `autonomous-continue-after-workbench-relations-server-oa-invoice-offset-relation-read-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:server-repair-precondition-relation-read-port-audit`. `workbench_relation` remains implementation-gap-open. Write-adjacent repair/precondition active relation reads are classified. The next smallest safe boundary is OA invoice offset sync relation read port extraction.
+Completed `workbench-relations:server-oa-invoice-offset-relation-read-port-extraction`. `workbench_relation` remains implementation-gap-open. OA invoice offset sync active relation reads now go through `WorkbenchOaInvoiceOffsetRelationReadPort`. The next smallest safe boundary is OA attachment context repair relation read port extraction.
 
 ## Closed Or Deferred Slices
 
@@ -112,6 +112,7 @@ Completed `workbench-relations:server-repair-precondition-relation-read-port-aud
 - `workbench-relations:server-workbench-payload-relation-read-port-extraction` -> `implementation-closed`
 - `workbench-relations:server-source-version-relation-snapshot-provider-extraction` -> `implementation-closed`
 - `workbench-relations:server-repair-precondition-relation-read-port-audit` -> `analysis-closed`
+- `workbench-relations:server-oa-invoice-offset-relation-read-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -119,7 +120,7 @@ Completed `workbench-relations:server-repair-precondition-relation-read-port-aud
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction and server source-version relation snapshot provider extraction are implemented. Repair/precondition active relation reads are classified and OA invoice offset sync read port extraction is next. Transaction-persist, rollback, case-id allocation and whole-state persistence surfaces remain separate later slices. ETC repair/link/migration services are already command-boundary guarded but still need later closure accounting before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction and OA invoice offset relation read port extraction are implemented. OA attachment repair, confirm-link context expansion and auto-pair conflict precondition reads remain open. Transaction-persist, rollback, case-id allocation and whole-state persistence surfaces remain separate later slices. ETC repair/link/migration services are already command-boundary guarded but still need later closure accounting before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -134,8 +135,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:server-repair-precondition-relation-read-port-audit`
+`workbench-relations:server-oa-invoice-offset-relation-read-port-extraction`
 
 ## Next Prompt
 
-`workbench-relations:server-oa-invoice-offset-relation-read-port-extraction`
+`workbench-relations:server-oa-attachment-repair-relation-read-port-extraction`

@@ -3117,3 +3117,28 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-oa-invoice-offset-relation-read-port-extraction`。
+
+## 2026-06-24 - server OA invoice offset relation read port extraction
+
+目标：把 OA 发票冲抵自动关系同步中的 active relation 读取迁移到显式 read port，保留 command-service 写路径。
+
+变更：
+
+- 新增 `WorkbenchOaInvoiceOffsetRelationReadPort`。
+- `Application._workbench_oa_invoice_offset_relation_read_port(...)` 使用 `WorkbenchRelationCommandService(require_fresh_relations=False)` 构造 port。
+- `_sync_oa_invoice_offset_auto_pair_relations(...)` 通过 `active_relations_for_mode(OA_INVOICE_OFFSET_AUTO_MATCH_MODE)` 读取目标 active relations。
+- `confirm_relation(...)` / `cancel_relation(...)` 写路径、changed case ids、scope keys、derived lifecycle event 和 persistence scheduling 不变。
+- 新增静态 guard，防止该方法回退到 direct `list_active_relations()`。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_oa_invoice_offset_relation_read_port.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_oa_invoice_offset_sync_uses_relation_read_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_invoice_offset_sync_does_not_cancel_relations_outside_current_payload tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_invoice_offset_sync_only_uses_attachment_source_link_not_case_id -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-oa-attachment-repair-relation-read-port-extraction`。

@@ -435,6 +435,9 @@ from fin_ops_platform.services.workbench_exception_rollback_restore_service impo
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
+    WorkbenchOaInvoiceOffsetRelationReadPort,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_pair_relation_persist_service import WorkbenchPairRelationPersistService
 from fin_ops_platform.services.workbench_payload_relation_read_port import WorkbenchPayloadRelationReadPort
@@ -3206,6 +3209,11 @@ class Application:
 
     def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider:
         return WorkbenchRelationSourceVersionProvider(self._workbench_pair_relation_service.snapshot)
+
+    def _workbench_oa_invoice_offset_relation_read_port(self) -> WorkbenchOaInvoiceOffsetRelationReadPort:
+        return WorkbenchOaInvoiceOffsetRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
+        )
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
         storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
@@ -18888,10 +18896,10 @@ class Application:
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
         desired_relations = self._oa_invoice_offset_desired_relations(payload)
         scanned_row_ids = self._raw_workbench_payload_row_ids(payload)
+        relation_read_port = self._workbench_oa_invoice_offset_relation_read_port()
         active_auto_relations = {
             str(relation.get("case_id")): relation
-            for relation in self._workbench_pair_relation_service.list_active_relations()
-            if str(relation.get("relation_mode")) == OA_INVOICE_OFFSET_AUTO_MATCH_MODE
+            for relation in relation_read_port.active_relations_for_mode(OA_INVOICE_OFFSET_AUTO_MATCH_MODE)
         }
         changed = False
         changed_case_ids: list[str] = []
