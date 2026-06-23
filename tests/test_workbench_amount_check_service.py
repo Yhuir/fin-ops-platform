@@ -166,6 +166,28 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_total"], "2038.02")
         self.assertEqual(result["amount_delta"], "0.00")
 
+    def test_explicit_reconciliation_amount_wins_over_legacy_detail_mismatch_fields(self) -> None:
+        oa_row = self._oa_row("2308.02", reconciliation_amount="2038.02")
+        oa_row["detail_fields"] = {
+            "金额来源": "主表总金额",
+            "明细金额合计": "1999.99",
+            "金额差异": "主表总金额 2308.02；明细合计 1999.99；差异 308.03",
+        }
+
+        result = self.service.check(
+            {
+                "oa": [oa_row],
+                "bank": [self._bank_row("2038.02")],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertFalse(result["requires_note"])
+        self.assertEqual(result["oa_total"], "2038.02")
+        self.assertEqual(result["bank_total"], "2038.02")
+        self.assertEqual(result["amount_delta"], "0.00")
+
     def test_legacy_oa_detail_sum_is_used_when_header_amount_has_recorded_mismatch(self) -> None:
         oa_row = self._oa_row("2308.02")
         oa_row["detail_fields"] = {

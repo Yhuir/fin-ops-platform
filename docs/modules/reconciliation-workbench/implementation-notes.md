@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Amount-check query contract 守卫
+
+- 目标：锁定关联预览金额核对的输入优先级，防止新 read/query payload 已有 `reconciliation_amount` 时，被旧 `detail_fields.明细金额合计` fallback 反向覆盖。
+- 影响范围：`WorkbenchAmountCheckService` 的 OA 金额取值合同；不改变 Workbench 业务状态、UI 状态、read model 状态、worker、SQL、API shape 或前端展示。
+- 关键决策：`reconciliation_amount` 是新链路的可付款/可核销金额字段，必须优先；`detail_fields.明细金额合计` 只保留为旧 read model compat-only fallback，且只在显式字段缺失时使用。
+- 文档影响：同步本模块 tests、state-machine、本实施记录，并在 `.planning/refactors/modular-io-boundaries/analysis/reconciliation-workbench-amount-check-query-contract.md` 记录全局/模块状态机 definition unchanged。
+- 测试覆盖：新增 `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_explicit_reconciliation_amount_wins_over_legacy_detail_mismatch_fields`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_amount_check_service -v`；本轮最终验证还会覆盖 app check、docs check、diff/secret scan。
+- 未测风险：本轮不连接生产 PostgreSQL，不回放真实 Workbench active generation；因为没有 runtime 行为或 read model 发布变更，生产验证不作为本 slice 完成条件。
+- 后续事项：推进 `batch-accounting:legacy-route-contract`，聚焦旧 route/server.py 写链路和 Workbench relation fan-out 边界。
+
 ## 2026-06-23 - all scope 保留被 open owner 剥离后的未认领银行流水
 
 - 目标：修复月分片中存在 `case:decision:*` 自动决策 open group，但 all scope 聚合后其中未被任何其他 group 认领的银行流水消失的问题。
