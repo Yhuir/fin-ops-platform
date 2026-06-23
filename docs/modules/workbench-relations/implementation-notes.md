@@ -3205,3 +3205,34 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-auto-pair-conflict-relation-read-port-extraction`。
+
+## 2026-06-24 - server auto-pair conflict relation read port extraction
+
+目标：把 auto-pair conflict precondition 的 active relation 读取迁移到显式 read port，保留 manual relation 阻止自动配对的语义。
+
+变更：
+
+- 新增 `WorkbenchAutoPairConflictRelationReadPort`。
+- `Application._workbench_auto_pair_conflict_relation_read_port(...)` 使用 `WorkbenchRelationCommandService(require_fresh_relations=False)` 构造 port。
+- `_auto_pair_conflicts_with_manual_relation(...)` 通过 port 读取 active relation。
+- 空 relation 不冲突、system auto-pair relation modes 允许、manual/non-system relation modes 阻止自动配对的语义不变。
+- 新增静态 guard，防止该方法回退到 broad pair service direct read。
+
+未闭环：
+
+- transaction-persist、rollback、case-id allocation、whole-state persistence snapshot surfaces 保持单独后续 slice。
+- `workbench_relation` 模块仍未完整闭环，Go/Fiber/Go Worker 仍阻塞。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_auto_pair_conflict_relation_read_port.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_auto_pair_conflict_uses_relation_read_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_keeps_salary_auto_match_as_candidate_until_no_oa_submit -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_keeps_internal_transfer_auto_match_as_candidate_until_no_oa_submit -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:post-server-precondition-local-implementation-closure-audit`。

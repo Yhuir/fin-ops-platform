@@ -407,6 +407,9 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_auto_pair_conflict_relation_read_port import (
+    WorkbenchAutoPairConflictRelationReadPort,
+)
 from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_groups_page_cache import (
     build_workbench_groups_redis_cache_key_from_version,
@@ -3228,6 +3231,11 @@ class Application:
 
     def _workbench_confirm_link_context_relation_read_port(self) -> WorkbenchConfirmLinkContextRelationReadPort:
         return WorkbenchConfirmLinkContextRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
+        )
+
+    def _workbench_auto_pair_conflict_relation_read_port(self) -> WorkbenchAutoPairConflictRelationReadPort:
+        return WorkbenchAutoPairConflictRelationReadPort(
             self._workbench_relation_command_service(require_fresh_relations=False)
         )
 
@@ -21061,8 +21069,9 @@ class Application:
         return
 
     def _auto_pair_conflicts_with_manual_relation(self, row_ids: list[str]) -> bool:
+        relation_read_port = self._workbench_auto_pair_conflict_relation_read_port()
         for row_id in row_ids:
-            active_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+            active_relation = relation_read_port.get_active_relation_by_row_id(row_id)
             if not isinstance(active_relation, dict):
                 continue
             if str(active_relation.get("relation_mode")) not in SYSTEM_AUTO_PAIR_RELATION_MODES:

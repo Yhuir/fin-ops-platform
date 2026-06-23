@@ -192,24 +192,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-auto-pair-conflict-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:post-server-precondition-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-auto-pair-conflict-relation-read-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-confirm-link-context-relation-read-port-extraction.md`.
+For workbench-relations:post-server-precondition-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-auto-pair-conflict-relation-read-port-extraction.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-relation-read-helper-boundary-audit.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-repair-precondition-relation-read-port-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_auto_pair_conflicts_with_manual_relation`, `get_active_relation_by_row_id`, and manual relation conflict checks.
-- Add or reuse an explicit relation read port for auto-pair conflict precondition relation reads.
-- Move `_auto_pair_conflicts_with_manual_relation(...)` direct relation read behind that port.
-- Preserve manual relation conflict semantics and auto-pair behavior.
-- Add static guard coverage for this method.
+- Inspect remaining references to `_workbench_pair_relation_service`, `WorkbenchPairRelationService`, relation snapshot, relation persist, case id allocation, rollback, whole-state persistence, command-service surfaces and relation read model helpers.
+- Use CodeGraph/text search for remaining direct relation service dependencies and classify each as implemented, compat-only, next implementation boundary, production-evidence-deferred, or blocked-by-human-gate.
+- Produce an analysis/accounting slice.
+- Decide whether the next safe boundary is a concrete implementation slice, a closure/defer accounting slice, or a production evidence defer.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run focused auto-pair conflict/static guard tests, app check, docs verification and diff checks as applicable.
+- Run docs verification and diff checks; run code tests only if this audit finds and fixes a testable code inconsistency.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

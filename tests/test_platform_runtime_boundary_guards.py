@@ -1477,6 +1477,29 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_auto_pair_conflict_uses_relation_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_auto_pair_conflicts_with_manual_relation")
+        port_source = (SERVICES_ROOT / "workbench_auto_pair_conflict_relation_read_port.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchAutoPairConflictRelationReadPort" not in port_source:
+            violations.append("Workbench auto-pair conflict relation read port is missing")
+        if "def get_active_relation_by_row_id" not in port_source:
+            violations.append("WorkbenchAutoPairConflictRelationReadPort does not expose get_active_relation_by_row_id")
+        if "_workbench_pair_relation_service.get_active_relation_by_row_id" in method_source:
+            violations.append("_auto_pair_conflicts_with_manual_relation still reads broad pair service directly")
+        if "_workbench_auto_pair_conflict_relation_read_port()" not in method_source:
+            violations.append("_auto_pair_conflicts_with_manual_relation does not use auto-pair conflict relation read port")
+        if "SYSTEM_AUTO_PAIR_RELATION_MODES" not in method_source:
+            violations.append("_auto_pair_conflicts_with_manual_relation no longer preserves system auto-pair mode allowlist")
+        if "return True" not in method_source or "return False" not in method_source:
+            violations.append("_auto_pair_conflicts_with_manual_relation no longer returns boolean conflict result")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
