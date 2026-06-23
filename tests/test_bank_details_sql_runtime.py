@@ -1176,7 +1176,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
-    def test_category_mutation_callback_suppresses_fallback_enqueue_audit_and_invalidate(self) -> None:
+    def test_category_mutation_side_effect_port_suppresses_fallback_enqueue_audit_and_invalidate(self) -> None:
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1187,7 +1187,8 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         queue = Queue()
         audit_records: list[dict[str, object]] = []
         invalidated: list[list[str]] = []
-        callback_calls: list[dict[str, object]] = []
+        port_calls: list[dict[str, object]] = []
+        side_effect_port = SimpleNamespace(after_mutation=lambda **kwargs: port_calls.append(dict(kwargs)))
         service = BankDetailsApplicationService(
             import_service=SimpleNamespace(),
             bank_details_service=SimpleNamespace(),
@@ -1206,7 +1207,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            after_category_mutation=lambda **kwargs: callback_calls.append(dict(kwargs)),
+            category_mutation_side_effects=side_effect_port,
         )
 
         affected_months = service._persist_category_mutation(
@@ -1219,7 +1220,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         self.assertEqual(affected_months, ["2026-04"])
         self.assertEqual(
-            callback_calls,
+            port_calls,
             [
                 {
                     "transaction_id": "txn-apr",
@@ -1234,7 +1235,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(audit_records, [])
         self.assertEqual(invalidated, [])
 
-    def test_category_mutation_callback_failure_does_not_run_fallback_side_effects(self) -> None:
+    def test_category_mutation_side_effect_port_failure_does_not_run_fallback_side_effects(self) -> None:
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1248,6 +1249,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         def failing_callback(**_kwargs: object) -> None:
             raise RuntimeError("category_uow_adapter_failed")
+        side_effect_port = SimpleNamespace(after_mutation=failing_callback)
 
         service = BankDetailsApplicationService(
             import_service=SimpleNamespace(),
@@ -1267,7 +1269,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            after_category_mutation=failing_callback,
+            category_mutation_side_effects=side_effect_port,
         )
 
         with self.assertRaisesRegex(RuntimeError, "category_uow_adapter_failed"):

@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail category side-effect port extraction
+
+- 目标：执行 `read-models:bank-detail-category-side-effect-port-extraction`，把银行明细分类写后的 read model refresh / turnover fan-out / Workbench invalidation / audit 从 `Application` callback 抽到显式 side-effect port。
+- 影响范围：`BankDetailCategoryMutationSideEffectPort`、`BankDetailsApplicationService._persist_category_mutation(...)`、`server.py` dependency wiring、read-model/bank-details 测试和 modular IO state；不改变 read model schema、worker、queue schema 或 API response shape。
+- 关键决策：side-effect port 通过注入的 gateway-backed callbacks 调度 `bank_detail` affected scopes 和 `turnover_ledger:all`，不直接 SQL 写 `job.outbox_events` / `job.read_model_dirty_scopes`，不写 readiness/cache/App Status。
+- 文档影响：新增 analysis，更新 read-models/bank-details 实施记录和测试矩阵；共享 read model 状态机定义不变。
+- 测试覆盖：更新 static guard 和 bank detail service/API regression，覆盖旧 Application callback 删除、port 注入、port 行为和 operation barrier 目标保持。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 worker drain 和 enqueue-to-fresh SLO 仍是 production evidence deferred。
+
 ## 2026-06-24 - Bank detail server read/cache helper quarantine
 
 - 目标：执行 `read-models:bank-detail-server-helper-quarantine`，移除 `server.py` 中已无调用者的银行明细 read/cache helper，并新增架构 guard 防止旧 read model helper 回归。

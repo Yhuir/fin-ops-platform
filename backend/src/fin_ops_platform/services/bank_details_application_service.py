@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_detail_category_selection import confirmation_selection, manual_assignment_selection
 from fin_ops_platform.services.bank_details_export_service import (
     BankDetailsExportResult,
@@ -57,7 +58,7 @@ class BankDetailsApplicationService:
         enqueue_bank_account_balance_refresh: Callable[..., bool],
         enqueue_turnover_ledger_refresh: Callable[..., bool] | None = None,
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
-        after_category_mutation: Callable[..., Any] | None = None,
+        category_mutation_side_effects: BankDetailCategoryMutationSideEffectPort | None = None,
     ) -> None:
         self._import_service = import_service
         self._bank_details_service = bank_details_service
@@ -78,7 +79,7 @@ class BankDetailsApplicationService:
         self._enqueue_bank_account_balance_refresh = enqueue_bank_account_balance_refresh
         self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._suggestion_provider = suggestion_provider
-        self._after_category_mutation = after_category_mutation
+        self._category_mutation_side_effects = category_mutation_side_effects
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
         if self._requires_sql_read_model_runtime():
@@ -691,8 +692,8 @@ class BankDetailsApplicationService:
         affected_months = self._affected_months_provider(transaction_ids)
         if self._state_store is not None:
             self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        if callable(self._after_category_mutation):
-            self._after_category_mutation(
+        if self._category_mutation_side_effects is not None:
+            self._category_mutation_side_effects.after_mutation(
                 transaction_id=transaction_id,
                 actor_id=actor_id,
                 action=action,

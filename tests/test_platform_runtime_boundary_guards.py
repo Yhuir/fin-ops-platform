@@ -591,13 +591,39 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
         for retained_callback in (
             "_latest_bank_detail_auto_category_suggestion",
-            "_after_bank_category_confirmation_mutation",
             "_bank_detail_available_month_scope_keys",
             "_enqueue_bank_account_balance_read_model_refresh",
             "_enqueue_turnover_ledger_read_model_refreshes",
         ):
             if retained_callback not in factory_source:
                 violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")
+        removed_side_effect_callback = "_after_bank_category_confirmation_mutation"
+        if _function_source(server_tree, server_source, removed_side_effect_callback):
+            violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")
+        if removed_side_effect_callback in factory_source:
+            violations.append("BankDetailsApplicationService factory still injects removed category side-effect callback")
+        if "BankDetailCategoryMutationSideEffectPort(" not in factory_source:
+            violations.append("BankDetailsApplicationService factory does not build the explicit category side-effect port")
+        if "category_mutation_side_effects=category_mutation_side_effects" not in factory_source:
+            violations.append("BankDetailsApplicationService factory does not inject the explicit category side-effect port")
+
+        side_effect_source = (SERVICES_ROOT / "bank_detail_category_side_effects.py").read_text(encoding="utf-8")
+        side_effect_tree = _parse(SERVICES_ROOT / "bank_detail_category_side_effects.py")
+        side_effect_class = _class_source(side_effect_tree, side_effect_source, "BankDetailCategoryMutationSideEffectPort")
+        for snippet in (
+            "def after_mutation(",
+            'reason="bank_detail_category_confirmation_changed"',
+            "entity_type=\"bank_transaction_category_confirmation\"",
+            "self._enqueue_bank_detail_refresh(",
+            "self._enqueue_turnover_ledger_refresh(",
+            "self._invalidate_workbench_after_category_mutation(",
+            "self._audit_service.record_action(",
+        ):
+            if snippet not in side_effect_class:
+                violations.append(f"category side-effect port is missing behavior {snippet}")
+        direct_job_writes = _sql_write_table_references(side_effect_class)
+        if direct_job_writes:
+            violations.append(f"category side-effect port writes job queue tables directly: {direct_job_writes}")
 
         self.assertEqual(violations, [])
 

@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail category side-effect port extraction
+
+- 目标：执行 `read-models:bank-detail-category-side-effect-port-extraction`，删除 `Application._after_bank_category_confirmation_mutation(...)`，将分类写后的银行明细刷新、turnover ledger fan-out、Workbench invalidation 和审计迁移到显式 side-effect port。
+- 影响范围：`BankDetailCategoryMutationSideEffectPort`、`BankDetailsApplicationService._persist_category_mutation(...)`、`server.py` wiring、银行明细 API/SQL runtime 测试和 modular IO planning state；不改变分类业务规则、权限、API response shape、read model schema、worker 或前端。
+- 关键决策：`Application` 只负责构造 `BankDetailCategoryMutationSideEffectPort` 并注入 application service；side-effect port 只能调用 gateway-backed refresh callbacks、Workbench invalidation 和 audit service，不直接 SQL 写 queue/readiness/cache/App Status/category facts。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：更新 service/API/static guard，证明 side-effect port 抑制 fallback、port failure 不跑 fallback、turnover ledger 仍刷新 `all` scope、旧 Application callback 不得回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/Redis/RabbitMQ 和 worker drain 未在本地执行；suggestion provider 仍是只读 compat callback，后续触碰 category suggestion 边界时再抽取。
+
 ## 2026-06-24 - Bank detail server read/cache helper quarantine
 
 - 目标：执行 `read-models:bank-detail-server-helper-quarantine`，删除 `server.py` 中已无调用者的银行明细 scope/freshness/cache/payload helper，并用静态 guard 固定 `BankDetailsApplicationService` 为 read/cache owner。

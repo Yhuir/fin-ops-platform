@@ -76,6 +76,7 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
 )
@@ -12944,34 +12945,6 @@ class Application:
         input_row = self._bank_details_service._auto_category_input_row(row)  # noqa: SLF001
         return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
 
-    def _after_bank_category_confirmation_mutation(
-        self,
-        *,
-        transaction_id: str,
-        actor_id: str,
-        action: str,
-        affected_months: list[str],
-        metadata: dict[str, object],
-    ) -> None:
-        scope_keys = affected_months or ["all"]
-        self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="bank_detail_category_confirmation_changed")
-        self._enqueue_turnover_ledger_read_model_refreshes(
-            ["all"],
-            reason="bank_detail_category_confirmation_changed",
-        )
-        self._invalidate_workbench_after_bank_transaction_categories(affected_months)
-        self._audit_service.record_action(
-            actor_id=actor_id,
-            action=action,
-            entity_type="bank_transaction_category_confirmation",
-            entity_id=str(transaction_id or ""),
-            metadata={
-                "transaction_id": str(transaction_id or ""),
-                "affected_months": list(affected_months or []),
-                **dict(metadata),
-            },
-        )
-
     def _handle_api_bank_details_transactions_export(
         self,
         query: dict[str, list[str]],
@@ -13239,7 +13212,16 @@ class Application:
 
     def _bank_details_application_service(self) -> BankDetailsApplicationService:
         suggestion_provider = self.__dict__.get("_latest_bank_detail_auto_category_suggestion")
-        after_category_mutation = self.__dict__.get("_after_bank_category_confirmation_mutation")
+        category_mutation_side_effects = BankDetailCategoryMutationSideEffectPort(
+            enqueue_bank_detail_refresh=self._enqueue_bank_detail_read_model_refreshes,
+            enqueue_turnover_ledger_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+            invalidate_workbench_after_category_mutation=getattr(
+                self,
+                "_invalidate_workbench_after_bank_transaction_categories",
+                lambda _affected_months: False,
+            ),
+            audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
+        )
         return BankDetailsApplicationService(
             import_service=getattr(self, "_import_service", SimpleNamespace(get_transaction=lambda transaction_id: (_ for _ in ()).throw(KeyError(transaction_id)))),
             bank_details_service=getattr(self, "_bank_details_service", SimpleNamespace(list_accounts=lambda **_kwargs: {}, list_transactions=lambda **_kwargs: {}, _bank_transaction_tags_payload=lambda: {})),
@@ -13268,7 +13250,7 @@ class Application:
                 lambda _scope_keys, **_kwargs: False,
             ),
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
-            after_category_mutation=after_category_mutation if callable(after_category_mutation) else None,
+            category_mutation_side_effects=category_mutation_side_effects,
         )
 
     def _bank_details_routes(self) -> BankDetailsApiRoutes:

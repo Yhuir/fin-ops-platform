@@ -77,11 +77,11 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be read-models:bank-detail-server-helper-quarantine.
+- Last completed boundary is expected to be read-models:bank-detail-category-side-effect-port-extraction.
 - Last status is expected to be implementation-closed.
 - First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be read-models:bank-detail-category-side-effect-port-extraction.
-- The bank_detail pilot is not module-closed. Category mutation side-effect callback wiring and production evidence/defer status must be closed before broader rollout or Go admission.
+- Next executable boundary is expected to be server-py:legacy-handler-extraction-implementation.
+- The bank_detail pilot is not full production-closed. Category mutation side-effect callback wiring is implemented through an explicit port, while production evidence/defer status and classified support wrappers remain visible.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
@@ -105,41 +105,25 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:bank-detail-category-side-effect-port-extraction unless a planning-state inconsistency is found first.
+Start with server-py:legacy-handler-extraction-implementation unless a planning-state inconsistency is found first.
 
-For read-models:bank-detail-category-side-effect-port-extraction:
+For server-py:legacy-handler-extraction-implementation:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-repository-port-extraction.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-freshness-operation-barrier.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-legacy-contamination-removal.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-pilot-verification-and-template-revision.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-server-helper-quarantine.md
-  - docs/modules/read-models/README.md
-  - docs/modules/read-models/state-machine.md
-  - docs/modules/read-models/tests.md
-  - docs/modules/bank-details/README.md
-  - docs/modules/bank-details/state-machine.md
-  - docs/modules/bank-details/tests.md
-  - docs/modules/runtime-workers/README.md
-  - docs/modules/runtime-workers/state-machine.md
-- Use CodeGraph first for structural lookup of bank_detail category side-effect callbacks, callers, callees, traces and impact.
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md
+  - .planning/refactors/modular-io-boundaries/analysis/server-py-route-owner-inventory.md
+  - docs/app-architecture/runtime-and-ownership.md
+  - docs/modules/README.md
+  - target module docs for the selected legacy handler before editing
+- Use CodeGraph first for structural lookup of the selected legacy handler, route owner, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
 - Keep the implementation boundary narrow:
-  - Extract or quarantine `Application._after_bank_category_confirmation_mutation(...)` behind an explicit side-effect port/collaborator.
-  - Classify `Application._latest_bank_detail_auto_category_suggestion(...)` callback ownership, or split it into a separate later boundary if extraction is too broad.
-  - Preserve category write audit, bank detail refresh, turnover ledger refresh, workbench invalidation and affected month semantics.
-  - Preserve API response shape for accounts, transactions and export.
-  - Do not add broad new implementation unless side-effect extraction exposes a concrete small missing boundary and the queue is split first.
-  - Keep regression coverage for repository port/query boundary, force refresh gateway/scope-policy usage and exact month operation barrier targets.
-  - Do not split all of postgres_repositories/read_models.py.
-  - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.
+  - Select one existing `server.py` legacy handler area with a clear route/service owner and a small testable surface.
+  - Move the handler logic to an existing `routes_*.py` or service boundary, or quarantine it with owner/caller/deletion-condition/forbidden-write guard if extraction is too broad.
+  - Preserve API response shape, permissions, audit, read model freshness and frontend behavior.
+  - Keep `server.py` limited to HTTP parsing, session/auth resolution, dependency wiring and response mapping.
+  - Do not do broad line-count splitting.
+  - Do not migrate unrelated modules in the same slice.
   - Do not implement Go/Fiber/Go Worker.
 - Produce or update an analysis file for the implementation slice under .planning/refactors/modular-io-boundaries/analysis/.
 - Update MODULE-QUEUE.md so the next pending item remains a concrete implementation boundary, not Go admission.
