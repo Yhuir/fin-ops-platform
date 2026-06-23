@@ -1136,7 +1136,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-attach-001"])
         self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-attach-001", "iv-attach-002"])
 
-    def test_candidate_case_oa_attachment_invoices_still_join_source_oa_group(self) -> None:
+    def test_candidate_case_oa_attachment_invoices_promote_with_matching_bank(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -1195,25 +1195,17 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 0)
-        self.assertEqual(payload["summary"]["open_count"], 2)
-        source_group = next(
-            group
-            for group in payload["open"]["groups"]
-            if group["reason"] == "oa_attachment_source_relation"
-        )
-        self.assertEqual(source_group["group_type"], "source_linked")
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        source_group = payload["paired"]["groups"][0]
+        self.assertEqual(source_group["group_type"], "auto_closed")
         self.assertEqual(source_group["match_confidence"], "high")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-tian"])
-        self.assertEqual(source_group["bank_rows"], [])
+        self.assertEqual([row["id"] for row in source_group["bank_rows"]], ["bk-tian"])
         self.assertCountEqual(
             [row["id"] for row in source_group["invoice_rows"]],
             ["iv-tian-70", "iv-tian-126"],
         )
-        bank_group = next(group for group in payload["open"]["groups"] if group["bank_rows"])
-        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bk-tian"])
-        self.assertEqual(bank_group["oa_rows"], [])
-        self.assertEqual(bank_group["invoice_rows"], [])
 
     def test_does_not_attach_non_candidate_oa_attachment_invoice_to_candidate_source_group(self) -> None:
         service = WorkbenchCandidateGroupingService()

@@ -498,7 +498,9 @@ function PendingInvoiceTableRow({
   const transactionSelectable = isTransactionSelectable?.(row) === true;
   const transactionSelected = selectedTransactionIds?.has(transactionId) === true;
   const invoiceTotal = row.inputInvoices.paymentSummary?.invoiceTotal || primaryInvoice?.totalWithTax || "";
-  const bankTotal = row.bankTransactions.paymentSummary?.paidTotal || row.bankTransaction.amount;
+  const bankTotal = bankHasMultiple
+    ? row.bankTransactions.paymentSummary?.paidTotal || row.bankTransaction.amount
+    : row.bankTransaction.amount;
 
   return (
     <tr className="pending-invoices-table-row" id={row.id}>

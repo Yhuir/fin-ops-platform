@@ -29,6 +29,18 @@
 
 ## 历史记录
 
+## 2026-06-23 - OA 附件 source-linked 三栏闭合分区修复
+
+- 目标：修复截图中 OA、银行流水和多张 OA 附件发票三栏金额已经闭合，且页面显示“自动匹配”，但整组仍停留在未配对区的问题。
+- 真实原因：`WorkbenchCandidateGroupingService` 的分区顺序先把 paired/open rows 分开，再从 open candidate context 中抽取 OA 附件 source-linked group。抽取过程把父 OA 和附件发票移到 `source_linked` open 证据组，银行流水留在原 candidate case；即使后续发票回挂后已经形成完整三栏，`source_linked` 在 `_split_promoted_and_candidate_groups()` 中被无条件留在 open，导致架构上无法进入 paired。
+- 影响范围：关联台 grouping service 的 open/paired 分区、OA 附件发票父 OA 回挂、候选 case 三栏闭合展示；不改变发票池事实源、不改变 `app.workbench_pair_relations` confirmed fact 语义、不在前端做本地移动。
+- 关键决策：source-linked 只是父 OA 归属证据的中间态，不是最终分区状态。抽取 OA 附件 source group 后，如果同一候选 case 中存在唯一银行流水，且 1 条 OA、1 条银行流水与 1 张或多张 OA 附件发票含税合计闭合，则把银行纳入该 source group 并重新执行 auto-close promotion。没有银行、金额不闭合或多个银行候选时仍保持 source-linked open。该变更属于 Workbench SQL projection/grouping 行为变化，必须 bump month projection 和 all-scope aggregate builder source version，避免旧 active generation 继续被当作 fresh。
+- 文档影响：同步 README、state-machine、tests 和本实施记录。
+- 测试覆盖：`tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_candidate_case_oa_attachment_invoices_promote_with_matching_bank` 覆盖截图同构场景；既有 `test_oa_attachment_source_groups_248_oa_with_three_attachment_invoices_open`、`test_keeps_oa_and_multiple_invoices_open_when_bank_transaction_is_missing` 继续保护缺银行时不误进 paired。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping -v`、`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_sql_source_versions_include_matching_rules_version_for_freshness -v`。
+- 未测风险：本地复现使用截图同构 payload，不直接读取生产登录态 Workbench API；发布后需要确认 Workbench month/all refresh worker 已重建 active generation，页面才会从旧 open generation 收敛到 paired。
+- 后续事项：所有“回挂/补投影后变完整”的流程都应在后端 grouping 层重新走 paired/open policy，不能只在来源归属阶段修改 group_type。
+
 ## 2026-06-23 - 三栏 exact-sum 自动配对矩阵补齐
 
 - 目标：把现有三栏自动配对从枚举式补丁补全为通用 exact-sum 证据闭环，覆盖截图中的 3 条 OA 合计 4450 + 1 条流水 4450 + 1 张发票 4450，以及单 OA 单流水多发票、多 OA/多流水/多发票等同类场景。

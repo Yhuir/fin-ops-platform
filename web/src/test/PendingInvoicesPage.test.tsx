@@ -54,6 +54,35 @@ function upgradedRows() {
         effective_tag_sub_label: "设备采购",
         effective_tag_label_path: ["货款", "设备采购"],
       },
+      bank_transactions: {
+        primary: {
+          id: "txn-paid-pending",
+          counterparty_name: "云南开票供应商",
+          trade_time: "2026-04-19T10:52:02+08:00",
+          amount: "1200.00",
+          debit_amount: "1200.00",
+          bank_name: "建设银行",
+          account_last4: "8106",
+          summary: "电子转账",
+        },
+        relation_count: 1,
+        linked_relation_count: 1,
+        has_multiple: false,
+        detail_mode: "single",
+        summaries: [
+          {
+            id: "txn-paid-pending",
+            counterparty_name: "云南开票供应商",
+            trade_time: "2026-04-19T10:52:02+08:00",
+            amount: "1200.00",
+            debit_amount: "1200.00",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            summary: "电子转账",
+          },
+        ],
+        payment_summary: { paid_total: "0.00" },
+      },
       invoice_acquisition_status: {
         code: "paid_pending_invoice",
         label: "已支付待开票",
@@ -929,6 +958,8 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("发票价税合计大于已付合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
     const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
+    expect(within(pendingRow).getByText("1,200.00")).toBeInTheDocument();
+    expect(within(pendingRow).queryByText("0.00")).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
