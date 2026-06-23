@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Workbench active generation 特例合同守卫
+
+- 目标：执行 `read-models:workbench-active-generation-contract`，锁定 Workbench 作为 active generation read model 的特殊合同，防止后续模块化时误套普通 read model rebuild/gateway 语义。
+- 影响范围：`tests/test_read_model_manifest.py`、read-models 模块文档和 planning analysis；不改变 Workbench SQL、worker、matching、route、API 或生产 runtime 行为。
+- 关键决策：Workbench 保留 `active_generation_scoped_publish` 与 `equivalent_active_generation`，`all` scope 是 active month shard aggregate。manifest 必须覆盖 Workbench view、summary、groups page、group detail、row detail、refresh status、groups freshness status 和 load/save read model ports。
+- 文档影响：同步测试矩阵和 planning analysis；长期 Workbench active generation 边界不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_workbench_manifest_preserves_active_generation_exception`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v`。
+- 未测风险：本轮不连接真实 PostgreSQL，不运行完整 Workbench SQL runtime；既有 Workbench SQL/query facade tests 是后续改 Workbench SQL 时的必跑集。
+- 后续事项：推进 `read-models:bank-detail-and-bank-account-balance-contract`。
+
 ## 2026-06-23 - Repository port owner map 合同守卫
 
 - 目标：执行 `read-models:repository-port-and-sql-owner-split-plan`，在拆分 `postgres_repositories/read_models.py` 前，先把每个 read model 当前占用的 public repository port 方法登记成代码级合同。

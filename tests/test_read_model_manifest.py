@@ -142,6 +142,26 @@ class ReadModelManifestTests(unittest.TestCase):
                     f"{method_name} is declared by both {previous_owner} and {entry.key}",
                 )
 
+    def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
+        entry = READ_MODEL_MANIFEST["workbench"]
+        required_active_generation_ports = {
+            "get_workbench_view",
+            "get_workbench_summary",
+            "get_workbench_groups_page",
+            "get_workbench_group_detail",
+            "get_workbench_row_detail",
+            "get_workbench_refresh_status",
+            "get_workbench_groups_freshness_status",
+            "save_workbench_read_models",
+            "load_workbench_read_models",
+        }
+
+        self.assertEqual(entry.query_status_contract, "equivalent_active_generation")
+        self.assertEqual(entry.projection_strategy, "active_generation_scoped_publish")
+        self.assertEqual(entry.all_scope_semantics, "active_month_shard_aggregate")
+        self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh_active_generation_scope")
+        self.assertLessEqual(required_active_generation_ports, set(entry.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()
