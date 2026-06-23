@@ -1,23 +1,24 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:pending-invoice-mutation-freshness-target-contract` slice.
+Continue the autonomous modular IO refactor after the `read-models:pending-invoice-local-implementation-closure-audit` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:pending-invoice-mutation-freshness-target-contract`
-- Last status: `implementation-closed`
+- Last completed boundary: `read-models:pending-invoice-local-implementation-closure-audit`
+- Last status: `production-evidence-deferred`
 - Queue semantics remain corrected: slice status is not module closure.
-- `pending_invoice` is the active non-Go read model implementation pilot.
+- `pending_invoice` was the active non-Go read model implementation pilot and is now locally accounted for.
 - `PendingInvoiceReadModelRepositoryPort` is wired.
 - Freshness/barrier audit is analysis-closed.
 - Pending invoice scope policy now rejects unsupported expense/income filter groups at gateway validation.
 - Income-status mutations now wait for `pending_invoice` operation barrier targets before refetching rows; backend response shape remains unchanged.
+- Real pending_invoice PostgreSQL/worker/App Status/high-row/browser evidence remains deferred, so the module is not globally closed.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:pending-invoice-local-implementation-closure-audit`
+`read-models:next-pilot-selection-after-pending-invoice`
 
 ## Required First Steps On Resume
 
@@ -25,33 +26,27 @@ Continue the autonomous modular IO refactor after the `read-models:pending-invoi
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-mutation-freshness-target-contract.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-scope-policy-filter-allowlist.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-refresh-freshness-operation-barrier-audit.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-repository-port-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-local-implementation-closure-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`
+   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - `docs/modules/pending-invoices/README.md`
-   - `docs/modules/pending-invoices/tests.md`
-   - `docs/modules/pending-invoices/implementation-notes.md`
-   - `backend/src/fin_ops_platform/app/routes_pending_invoices.py`
-   - `backend/src/fin_ops_platform/services/pending_invoice_service.py`
-   - `backend/src/fin_ops_platform/services/pending_invoice_read_model_repository.py`
-   - `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`
-   - `backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py`
-   - `backend/src/fin_ops_platform/services/operation_freshness_barrier.py`
-   - relevant frontend pending invoice operation barrier callers.
-5. Use CodeGraph for pending invoice read model/service/route impact before editing.
+   - module docs/tests/implementation notes for the top remaining candidate modules.
+   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
+5. Use CodeGraph for top candidate service/route/read model impact before editing.
 6. Update analysis/docs/state after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Audit `pending_invoice` local implementation support after repository port extraction, freshness/barrier audit, scope policy filter allowlist and mutation barrier slices.
-- Decide whether local implementation support can be recorded as production-evidence-deferred, or whether another small non-Go implementation gap remains.
-- Verify read boundary, refresh boundary, mutation barrier, scope policy, legacy contamination, docs and tests are accounted for.
-- If a new local implementation gap is found and is narrow, insert it before Go candidates and execute it next; otherwise record closure/defer accounting and select the next non-Go read model pilot.
+- Select the next non-Go read model implementation pilot after pending_invoice.
+- Compare remaining candidates using current manifest contracts, module docs, tests, cross-page freshness value, blast radius, and existing local coverage.
+- Decide the next first implementation boundary, preferably a narrow repository-port or owner-boundary extraction matching the successful bank_detail/workbench_relation/pending_invoice pattern.
+- Insert the selected next implementation boundary before Go candidates.
 
 Forbidden:
 
@@ -63,13 +58,12 @@ Forbidden:
 
 ## Expected Output
 
-- One verified pending invoice local implementation closure audit/accounting slice.
+- One verified next-pilot selection slice.
 - Updated analysis/docs/state/queue/next prompt.
-- Targeted backend/frontend tests if behavior changes; otherwise document why analysis-only verification is sufficient.
-- Docs verification and `git diff --check`; run targeted tests only if the audit changes behavior.
+- No runtime tests unless code changes; otherwise docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
 - Continue to the next pending boundary if safe.
 
 ## Stop Condition
 
-Complete one verified pending invoice local implementation closure audit/accounting slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one verified next-pilot selection slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the selected implementation boundary unless a hard stop gate is hit.

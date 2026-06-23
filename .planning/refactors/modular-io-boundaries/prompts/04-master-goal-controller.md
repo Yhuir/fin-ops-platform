@@ -204,25 +204,27 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:pending-invoice-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-pending-invoice unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:pending-invoice-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-repository-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-refresh-freshness-operation-barrier-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-scope-policy-filter-allowlist.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-mutation-freshness-target-contract.md`.
-- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/pending-invoices/README.md`, `docs/modules/pending-invoices/tests.md`, and `docs/modules/pending-invoices/implementation-notes.md`.
-- Use CodeGraph for pending invoice read model/service/route impact before editing code.
-- Audit `pending_invoice` local implementation support after the repository port, freshness/barrier, scope policy and mutation barrier slices.
-- Decide whether local implementation support can be recorded as production-evidence-deferred, or whether another small non-Go implementation gap remains.
-- If a new narrow implementation gap remains, insert it before Go candidates and execute it next.
-- If no local implementation gap remains, record production evidence as deferred, keep the module not globally closed, and select the next non-Go read model pilot.
+For read-models:next-pilot-selection-after-pending-invoice:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-local-implementation-closure-audit.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`.
+- Read `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`.
+- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, and module docs/tests/implementation notes for the top remaining candidate modules.
+- Read `backend/src/fin_ops_platform/services/read_model_manifest.py`.
+- Use CodeGraph for top candidate service/route/read model impact before editing code.
+- Compare remaining read model candidates by cross-page freshness value, current structure, blast radius, tests, repository port gap, worker/freshness complexity, and local verification feasibility.
+- Select the next non-Go read model implementation pilot and its first narrow implementation boundary.
+- Insert the selected implementation boundary before Go candidates.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks; run targeted tests if behavior changes.
+- Run docs verification and diff checks; run targeted tests only if behavior changes.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

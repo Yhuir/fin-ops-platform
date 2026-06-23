@@ -325,6 +325,13 @@
 - 保持不变：后端 API shape、业务状态、relation 写行为和收入状态校验不变；失败写入仍保留选择并显示错误。
 - 测试覆盖：更新 `PendingInvoicesPage.test.tsx`，新增 barrier target 断言；复跑 `PendingInvoicesRulesSaveTimeout.test.tsx` 保持规则保存超时语义。
 
+## 2026-06-24 - pending invoice local implementation closure audit
+
+- 目标：在 repository port、freshness/barrier、scope policy 和 mutation barrier slice 后，复核待找发票本地实现支持是否仍有必须先修的模块化 IO 缺口。
+- 结论：本地实现支持已 accounted；query fresh gate、source-version proof、refresh gateway/scope policy、worker fan-out、projection save/mark port、写后 operation barrier、legacy guard 和测试/docs 均有证据。
+- 保留面：`list_pending_invoice_scope_shards(...)` 继续作为 projection source-fact 月份枚举；后端 mutation response 暂不新增 `freshness_targets`，继续使用 `affectedMonths` 与页面 scope 组合生成 barrier target。
+- 状态：本模块不标记全局 closed；真实 PostgreSQL/worker/App Status/high-row/browser 证据仍按 production-evidence-deferred 处理。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。

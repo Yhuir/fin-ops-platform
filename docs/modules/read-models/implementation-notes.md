@@ -673,6 +673,14 @@
 - API 决策：不新增后端 `freshness_targets` 字段；当前 `affectedMonths` 足够让页面构造稳定 target，避免扩大 API shape。
 - 测试覆盖：`web/src/test/PendingInvoicesPage.test.tsx` 断言收入批量状态保存会请求 `pending_invoice:income:all:2026-05` barrier；保留规则保存 timeout 回归。
 
+## 2026-06-24 - pending invoice local implementation closure audit
+
+- 目标：审计 `pending_invoice` 在 repository port、freshness gate、source-version proof、scope policy、worker fan-out、operation barrier、legacy contamination guard 和测试/docs 方面是否还有本地非 Go 小缺口。
+- 结论：本地实现支持已可记为 accounted；未发现必须阻塞下一试点的本地 P0/P1 实现缺口。
+- 保留面：`SearchPendingSqlProjectionBuilder.list_pending_invoice_scope_shards(...)` 仍作为 source-fact 月份枚举保留，不属于 pending invoice read-model repository port；未来若需要可单独抽 source-fact/provider port。
+- 状态：`read-models:pending-invoice-local-implementation-closure-audit` 进入 `production-evidence-deferred`，但 `pending_invoice` 不标记为 module-closed；真实 PostgreSQL/worker/App Status/high-row/browser 证据仍延期。
+- 下一步：先执行 `read-models:next-pilot-selection-after-pending-invoice`，重选下一个非 Go read model pilot；Go admission 继续 blocked。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。
