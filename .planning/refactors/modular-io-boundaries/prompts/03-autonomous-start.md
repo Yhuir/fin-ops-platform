@@ -12,6 +12,7 @@ Autonomously continue the modular IO boundary refactor until the refactor plan r
 
 Definition of "closure":
 - Every boundary in .planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md is either closed with verified code/docs/tests, production-evidence-deferred with explicit evidence gap, go-candidate-deferred with admission evidence, or needs-human-production-gate for a true hard gate.
+- .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md, autonomous/STATE.md, autonomous/MODULE-QUEUE.md, autonomous/JOURNAL.md, and autonomous/NEXT-PROMPT.md reflect the same current state, completed boundary, next boundary, transition reason, evidence, and stop/defer gate.
 - No completed slice leaves known broken behavior.
 - Every pushed dev commit is reviewable, reversible, and merge-to-main ready for the completed slice.
 - Old code paths are removed whenever tests/call graph prove they are unused. Retained old paths are quarantined as compat-only with owner, callers, deletion condition, forbidden writes, and tests.
@@ -121,6 +122,17 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
 
 2. Contract and plan
    - Fill or update the module IO contract using 02-MODULE-IO-CONTRACT-TEMPLATE.md.
+   - Before implementation, identify the relevant state machine files:
+     - .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md for the global refactor workflow state machine.
+     - docs/modules/<module>/state-machine.md for module business/UI/read model/worker states when the selected boundary changes module state semantics or state transitions.
+     - .planning/refactors/modular-io-boundaries/autonomous/STATE.md for the current autonomous execution state.
+   - Record the intended state transition in the analysis file before editing code:
+     - previous state
+     - selected boundary
+     - transition guard
+     - expected evidence
+     - next state on success
+     - defer/block state if evidence is missing
    - Every module must explicitly define:
      - inputs
      - outputs
@@ -248,12 +260,24 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - Confirm docs impact is handled.
 
 12. State update
+   - Updating state is mandatory after every closed, deferred, blocked, or failed boundary. Do not treat NEXT-PROMPT.md alone as the state machine.
+   - Update .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md when the run introduces, renames, or clarifies any workflow state, transition, guard, stop/defer condition, or completion criterion.
+   - If the selected boundary changes business state, UI state, read model state, worker state, operation barrier state, force-refresh state, permission state, or legacy-retirement state, update docs/modules/<module>/state-machine.md in the same slice.
    - Update the relevant module docs if long-term facts changed.
    - Update .planning/refactors/modular-io-boundaries/analysis/<boundary>.md.
    - Update autonomous/STATE.md.
    - Update autonomous/JOURNAL.md.
    - Update autonomous/MODULE-QUEUE.md.
    - Update autonomous/NEXT-PROMPT.md with the next executable prompt.
+   - The state update must record:
+     - previous state
+     - completed/deferred/blocked boundary
+     - status value
+     - verification evidence
+     - production evidence status
+     - legacy removal/quarantine status
+     - next boundary
+     - next state
    - If a module is complete locally but lacks real production evidence, mark production-evidence-deferred, not closed as production-proven.
    - If a Go candidate fails admission, mark go-candidate-deferred.
    - If a hard gate is hit, mark blocked-hard-stop with concrete evidence and stop.
