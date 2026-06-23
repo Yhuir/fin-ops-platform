@@ -69,12 +69,13 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: planning:semantic-queue-state-and-master-goal-refresh.
-- Last status: planning-closed.
+- Last completed boundary: read-models:next-pilot-selection-after-bank-detail.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
-- The next pending boundary is read-models:next-pilot-selection-after-bank-detail.
+- workbench_relation is selected as the next read model implementation pilot.
+- The next pending boundary is read-models:workbench-relation-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -170,27 +171,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-bank-detail unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:workbench-relation-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-bank-detail:
-- Compare remaining read model candidates:
-  - workbench_relation
-  - pending_invoice
-  - oa_pending_payment
-  - invoice_lifecycle
-  - input_invoice_usage
-  - output_invoice_collection
-  - cost_statistics
-  - tax_offset
-  - turnover_ledger
-  - search
-  - no_oa_bank_batch
-- Choose the next highest-value implementation pilot using bug frequency, cross-page freshness risk, legacy contamination, test coverage, scope size, and sequencing.
-- Queue the first narrow implementation boundary for that pilot.
+For read-models:workbench-relation-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
+- Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
+- Use CodeGraph for `WorkbenchRelationReadFacade`, `WorkbenchRelationSqlProjectionBuilder`, `WorkbenchRelationReadModelRefreshService`, and `PostgresReadModelRepository` workbench relation methods.
+- Add or identify a narrow `WorkbenchRelationReadModelRepositoryPort`.
+- Expose only relation read-model methods needed by the facade/projection builder.
+- Wire app/facade/projection builder through the port where broad repository access is currently passed.
+- Add tests proving unrelated read model repository methods are not exposed through the port.
+- Preserve candidate/linked/unlinked semantics, source-version behavior, freshness statuses, stale/missing enqueue behavior, payload shapes and refresh behavior.
+- Do not migrate canonical relation write lifecycle in this slice.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks.
+- Run targeted tests, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the queued implementation boundary if verification passes.
 

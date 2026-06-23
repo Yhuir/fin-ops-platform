@@ -1,21 +1,20 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `planning:semantic-queue-state-and-master-goal-refresh` slice.
+Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-bank-detail` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `planning:semantic-queue-state-and-master-goal-refresh`
-- Last status: `planning-closed`
+- Last completed boundary: `read-models:next-pilot-selection-after-bank-detail`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure.
-- `bank_detail` full module closure is not claimed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- The remaining `Application._bank_details_application_service(...)` code has been audited as acceptable dependency assembly/wiring.
+- `workbench_relation` is selected as the next read model implementation pilot.
 - Go hot-path candidates remain blocked by prerequisites.
 
 ## Next Boundary
 
-`read-models:next-pilot-selection-after-bank-detail`
+`read-models:workbench-relation-repository-port-extraction`
 
 ## Required First Steps On Resume
 
@@ -23,36 +22,51 @@ Continue the autonomous modular IO refactor after the `planning:semantic-queue-s
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Perform planning-state preflight by reading `.planning/ROADMAP.md`, `.planning/refactors/README.md`, the modular IO requirements/state/roadmap/gates/runbook/stop-gates/Go carve-out docs, and all files in `.planning/refactors/modular-io-boundaries/autonomous/`.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-service-factory-collaborator-closure-audit.md`
-   - `docs/app-architecture/runtime-and-ownership.md`
-   - `docs/modules/README.md`
-5. Select the next read model implementation pilot from current manifest/roadmap evidence. Do not select Go/Fiber/Go Worker.
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`
+   - `docs/modules/workbench-relations/README.md`
+   - `docs/modules/workbench-relations/state-machine.md`
+   - `docs/modules/workbench-relations/tests.md`
+   - `docs/modules/workbench-relations/implementation-notes.md`
+   - `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`
+   - `backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+   - `tests/test_workbench_relation_read_facade.py`
+5. Use CodeGraph for structural lookup of `WorkbenchRelationReadFacade`, `WorkbenchRelationSqlProjectionBuilder`, `PostgresReadModelRepository` workbench relation methods, callers and impact.
 6. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Compare remaining read model candidates such as `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `invoice_lifecycle`, `input_invoice_usage`, `output_invoice_collection`, `cost_statistics`, `tax_offset`, `turnover_ledger`, `search` and `no_oa_bank_batch`.
-- Choose the next highest-value implementation pilot based on bug frequency, cross-page freshness risk, remaining legacy contamination, test coverage, scope size and implementation sequencing.
-- Queue the first narrow implementation boundary for that pilot.
-- Keep Go hot-path admission blocked until prerequisite modular IO implementation evidence exists.
+- Add or identify a narrow `WorkbenchRelationReadModelRepositoryPort`.
+- Expose only the relation read-model repository methods needed by facade/projection builder:
+  - `get_workbench_relation_rows_by_ids`
+  - `list_workbench_relation_rows`
+  - `get_workbench_relation_groups_by_ids`
+  - `workbench_relation_source_versions`
+  - `save_workbench_relation_distribution`
+  - `mark_workbench_relation_scope_empty`
+- Wire `WorkbenchRelationReadFacade` and `WorkbenchRelationSqlProjectionBuilder` through that port where app wiring currently passes the broad read model repository.
+- Add tests proving unrelated read model repository methods are not exposed through the port.
+- Preserve candidate/linked/unlinked semantics, source-version behavior, freshness statuses, stale/missing enqueue behavior, payload shapes and refresh behavior.
 
 Forbidden:
 
+- Do not migrate the canonical relation write lifecycle in this slice.
+- Do not move `app.workbench_pair_relations` write logic.
+- Do not migrate pending invoice, OA pending, invoice usage/collection, no-OA, turnover, batch accounting, cost/tax/search in the same slice.
 - Do not implement Go/Fiber/Go Worker.
 - Do not touch production state.
-- Do not perform runtime code changes unless a tiny static verification helper is required for the selection artifact.
 
 ## Expected Output
 
-- An analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- Updated queue/state/journal/next prompt.
-- Docs verification and diff checks.
+- Runtime code changes scoped to the repository port boundary.
+- Focused tests for the port and existing workbench relation facade/projection behavior.
+- Updated analysis/docs/state/queue/journal/next prompt.
+- Targeted verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one verified `read-models:next-pilot-selection-after-bank-detail` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one verified `read-models:workbench-relation-repository-port-extraction` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.

@@ -1,5 +1,23 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - read model 第二试点选择
+
+目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
+
+决策：
+
+- 选择 `workbench_relation` 作为第二个 read model implementation pilot。
+- 原因是它是待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签、no-OA、外部往来、批量账务、成本/税金/search source-version 检查的共享 relation distribution read model，最能降低跨页面 read model 不同步风险。
+- 第一刀只做 `read-models:workbench-relation-repository-port-extraction`，先把 `WorkbenchRelationReadFacade` / `WorkbenchRelationSqlProjectionBuilder` 依赖的 `PostgresReadModelRepository` 方法收窄成显式 read-model repository port。
+- 本次不迁移 relation 写生命周期，不做 Go/Fiber/Go Worker，不声明模块闭环。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
