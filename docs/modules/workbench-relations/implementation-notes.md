@@ -3540,3 +3540,16 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:local-implementation-closure-and-production-evidence-defer`。
+
+## 2026-06-24 - local implementation closure and production evidence defer audit
+
+目标：判断当前 `workbench_relation` 本地实现是否可以进入 `production-evidence-deferred`。
+
+结论：
+
+- 不能进入 `production-evidence-deferred`。
+- 缺口不是单纯缺少真实 PostgreSQL/worker/App Status/high-row/browser 证据。
+- ETC repair/link/migration 服务仍有 `persist_pair_relations` callback accounting 缺口，需要先审计 callback 是否可删除、是否是显式 post-command persist boundary、是否只是 tool/test compat-only，或是否需要 port extraction。
+- Go hot-path 仍保持 blocked，不应成为下一步。
+
+下一条边界：`workbench-relations:etc-repair-link-migration-persist-callback-closure-audit`。

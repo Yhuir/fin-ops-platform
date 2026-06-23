@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:settings-data-reset-pair-snapshot-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:local-implementation-closure-and-production-evidence-defer.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -102,8 +102,8 @@ Current state expected on start:
 - Relation case-id collision avoidance now goes through `WorkbenchRelationCaseIdAllocator`.
 - Broad app `_persist_state(...)` no longer serializes Workbench relation snapshot facts.
 - Turnover primary builders and `TurnoverLedgerLocalClosureConnection` now depend on explicit `TurnoverLedgerLocalPairSnapshotPort` instead of broad pair service injection.
-- Settings data reset now uses explicit `SettingsDataResetPairSnapshotPort` instead of broad pair service injection.
-- The next pending boundary is workbench-relations:local-implementation-closure-and-production-evidence-defer.
+- Local closure cannot move to production-evidence-deferred yet because ETC repair/link/migration `persist_pair_relations` callback accounting remains open.
+- The next pending boundary is workbench-relations:etc-repair-link-migration-persist-callback-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -199,18 +199,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:local-implementation-closure-and-production-evidence-defer unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:etc-repair-link-migration-persist-callback-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:local-implementation-closure-and-production-evidence-defer:
-- Read the latest workbench relation closure/accounting analysis files.
+For workbench-relations:etc-repair-link-migration-persist-callback-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-local-implementation-closure-and-production-evidence-defer.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `04-IMPLEMENTATION-ROADMAP.md` and `11-GO-HOT-PATH-CARVE-OUT.md`.
-- Inspect remaining direct pair service references in app, services, tools and tests.
-- Use CodeGraph/text search for `_workbench_pair_relation_service`, `pair_relation_service=`, `save_workbench_pair_relations`, `load_workbench_pair_relations`, `replace_pair_relation_service` and `persist_pair_relations`.
-- Decide whether local `workbench_relation` implementation support can be marked `production-evidence-deferred` or whether more local implementation slices are required.
-- Classify every remaining broad pair relation service use as legitimate explicit boundary, compat-only, test-only, tool-only, pending implementation gap, or production evidence gap.
-- Confirm old paths cannot write canonical relation facts, dirty scopes, outbox, read model readiness, cache or App Status outside approved boundaries.
-- Confirm Go hot-path admission remains blocked unless prerequisites are actually satisfied.
+- Inspect historical ETC repair, historical ETC business batch migration, existing ETC batch link services, app wiring, tools and relevant tests.
+- Use CodeGraph/text search for `persist_pair_relations`, `_persist_pair_relations`, `relation_command_service`, `confirm_relation`, `update_relation_metadata_for_case_id`, `get_active_relation_by_case_id`, `HistoricalEtcRepairService`, `HistoricalEtcBusinessBatchMigrationService`, and `ExistingEtcBatchLinkService`.
+- Audit whether ETC repair/link/migration `persist_pair_relations` callbacks are still required.
+- Classify callbacks as removable, explicit post-command persist boundary, compat-only test/tool wiring, or implementation gap requiring a port.
+- Confirm command-service relation writes are mandatory before ETC local writes.
+- Confirm old direct pair relation mutation fallback cannot return.
+- Decide the next smallest boundary: implementation removal/port extraction, or local closure/defer accounting.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
