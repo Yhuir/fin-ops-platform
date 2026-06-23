@@ -16,4 +16,4 @@
 | --- | --- |
 | `01-module-io-audit.md` | 对一个模块做 IO 合同审计，不改代码。 |
 | `02-refactor-phase-planning.md` | 基于已完成 IO 合同，为一个模块生成实现 phase 计划。 |
-| `03-autonomous-start.md` | 启动无人值守自动推进，在主 repo 直接使用 `dev` 分支，按模块队列循环执行。 |
+| `03-autonomous-start.md` | 完整 GSD 自动推进 goal prompt：启动或续跑无人值守重构，在主 repo 直接使用 `dev` 分支，按模块队列循环执行直到闭环或硬停止。 |
