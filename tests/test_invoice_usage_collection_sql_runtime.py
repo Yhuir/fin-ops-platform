@@ -1642,6 +1642,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._oa_projection_repository = EmptyOAProjectionRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         builder._oa_projection_repository = type(
             "OaProjection",
@@ -1685,6 +1686,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = StaticOAProjectionRepository([
             self._oa("oa-cross-month", "杨丽萍", "75799.00")
         ])
@@ -1742,6 +1744,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = oa_source_adapter
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -1784,6 +1787,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
 
@@ -1814,6 +1818,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
 
@@ -1845,6 +1850,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
 
@@ -1873,6 +1879,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = StaticOAProjectionRepository([
             self._oa("oa-completed-unified", "张三", "80.00", workflow_status="completed"),
             self._oa("oa-completed-other-month", "李四", "90.00", workflow_status="completed", month="2026-04"),
@@ -1890,6 +1897,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         builder.mark_input_invoice_usage_scope_empty("2026-05")
         builder.mark_output_invoice_collection_scope_empty("2026-05")
@@ -1903,6 +1911,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
 
         builder.prune_input_invoice_usage_scope_shards(["2026-06"])
         builder.prune_output_invoice_collection_scope_shards(["2026-05"])

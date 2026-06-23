@@ -689,6 +689,15 @@
 - 首切范围：新增 `OaPendingPaymentReadModelRepositoryPort`，只暴露 manifest 登记的 rows/detail/save/mark/prune 方法，先收窄 SQL read model surface；不改 OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI 或共享 worker 语义。
 - 状态：Go/Fiber/Go Worker admission 继续 blocked。
 
+## 2026-06-24 - OA pending payment repository port extraction
+
+- 目标：为 `oa_pending_payment` 建立窄 read-model repository port，避免 rows/detail 和 projection save/mark/prune 继续依赖宽 `PostgresReadModelRepository` surface。
+- 改动：新增 `OaPendingPaymentReadModelRepositoryPort`；`PostgresStateStore.oa_pending_payment_sql_read_repository` 返回该 port；`InvoiceUsageCollectionSqlProjectionBuilder` 的 OA pending payment save/mark/prune 走该 port；worker 构造时注入该 port。
+- 边界决策：`workbench_relation_source_versions(...)` 不属于 OA port。`Application._oa_pending_payment_expected_source_versions(...)` 改为从 Workbench relation port 读取 relation source versions，避免 relation 事实污染 OA repository port。
+- 保持不变：completed/in-progress 视图、OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI、shared worker event semantics、API shape 均不变。
+- 测试覆盖：新增 `OaPendingPaymentReadModelRepositoryPortTests`；新增 source-version owner 回归；复跑 OA API fresh/stale/source-version 目标测试和 invoice usage collection projection save/mark/prune/fan-out 目标测试。
+- 下一步：审计 OA pending payment freshness、force-refresh、all fan-out/month proof 和 operation barrier 行为。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

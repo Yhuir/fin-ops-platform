@@ -52,6 +52,7 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import OaPendingPaymentRelationPromotionService
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
@@ -458,6 +459,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             workbench_relation_read_facade=workbench_relation_read_facade,
             payment_status_repository=oa_payment_status_repository,
             oa_source_adapter=_oa_payment_source_adapter(),
+            oa_pending_payment_read_model_repository=(
+                OaPendingPaymentReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
         )
         refresh_service = InvoiceUsageCollectionReadModelRefreshService(
             projection_builder=projection_builder,

@@ -16,6 +16,7 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
 )
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
+from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
@@ -41,10 +42,15 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
         oa_source_adapter: Any | None = None,
+        oa_pending_payment_read_model_repository: Any | None = None,
     ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = PostgresReadModelRepository(connection)
+        self._oa_pending_payment_read_model_repository = (
+            oa_pending_payment_read_model_repository
+            or OaPendingPaymentReadModelRepositoryPort(self._read_repository)
+        )
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._payment_status_repository = payment_status_repository
         self._oa_source_adapter = oa_source_adapter
@@ -83,7 +89,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return sorted(months, reverse=True)
 
     def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._read_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
+        self._oa_pending_payment_read_model_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
@@ -172,7 +178,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
-        self._read_repository.save_oa_pending_payment_rows(
+        self._oa_pending_payment_read_model_repository.save_oa_pending_payment_rows(
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
@@ -201,7 +207,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
 
     def mark_oa_pending_payment_scope_empty(self, scope_key: str) -> None:
-        self._read_repository.mark_oa_pending_payment_scope(
+        self._oa_pending_payment_read_model_repository.mark_oa_pending_payment_scope(
             scope_key=scope_key,
             row_count=0,
             source_versions=oa_pending_payment_source_versions(),

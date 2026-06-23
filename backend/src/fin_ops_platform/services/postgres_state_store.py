@@ -14,6 +14,7 @@ from uuid import NAMESPACE_URL, uuid5
 from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
+from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
@@ -137,6 +138,7 @@ class PostgresStateStore:
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
         self._pending_invoice_sql_read_repository = PendingInvoiceReadModelRepositoryPort(self._sql_read_model_repository)
+        self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
@@ -774,8 +776,8 @@ class PostgresStateStore:
         return self._sql_read_model_repository
 
     @property
-    def oa_pending_payment_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
+    def oa_pending_payment_sql_read_repository(self) -> OaPendingPaymentReadModelRepositoryPort:
+        return self._oa_pending_payment_sql_read_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)

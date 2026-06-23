@@ -11,6 +11,15 @@
 - 首切范围：新增 `OaPendingPaymentReadModelRepositoryPort`，只暴露 rows/detail/save/mark/prune read model 方法；不改 OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI workflow 或 shared worker event semantics。
 - 状态：Go/Fiber/Go Worker admission 继续 blocked。
 
+## 2026-06-24 - read model repository port extraction
+
+- 目标：把 OA 待付款 rows/detail 读取和 projection save/mark/prune 从宽 read model repository surface 收敛到 `OaPendingPaymentReadModelRepositoryPort`。
+- 改动：新增 OA pending payment read-model port；Postgres runtime 下 `oa_pending_payment_sql_read_repository` 返回该 port；`InvoiceUsageCollectionSqlProjectionBuilder` 和 worker 的 OA pending payment projection 写入路径使用该 port。
+- 边界决策：Workbench relation source-version proof 不挂在 OA port 上，改由 Workbench relation port 提供，防止关系事实源污染 OA read-model repository 边界。
+- 保持不变：completed/in-progress rows、filter-options/detail API shape、OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI workflow 和 shared worker event semantics 不变。
+- 测试覆盖：新增 port shape guard 和 source-version owner 回归；复跑 OA API fresh/stale/source-version 目标测试，以及 invoice usage collection projection save/mark/prune/fan-out 目标测试。
+- 后续事项：继续执行 `read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit`。
+
 ## 2026-06-23 - 右侧抽屉候选流水按已选 OA 月份收敛
 
 - 目标：修复 OA 待付款核对进行中视图中，勾选 OA 后打开“关联支出流水”右侧抽屉长期停留在“加载中”的问题。

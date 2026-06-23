@@ -18,6 +18,7 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
+from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -92,6 +93,46 @@ class FakeRelationFacade:
                 "special_metadata": dict(relation.get("special_metadata") or {}),
             },
         }
+
+
+class OaPendingPaymentReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Underlying:
+            def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {"rows": [], "refresh_status": "fresh"}
+
+            def save_oa_pending_payment_rows(self, **_kwargs: object) -> None:
+                return None
+
+            def mark_oa_pending_payment_scope(self, **_kwargs: object) -> None:
+                return None
+
+            def prune_oa_pending_payment_scope_shards(self, _current_scope_keys: list[str]) -> None:
+                return None
+
+            def get_oa_pending_payment_row_by_row_id(self, _row_id: str) -> dict[str, object]:
+                return {"row": {}}
+
+            def get_oa_pending_payment_row_by_oa_id(self, _oa_id: str) -> dict[str, object]:
+                return {"row": {}}
+
+            def get_oa_pending_payment_row_by_bank_transaction_id(self, _bank_transaction_id: str) -> dict[str, object]:
+                return {"row": {}}
+
+            def get_oa_pending_payment_row_by_invoice_id(self, _invoice_id: str) -> dict[str, object]:
+                return {"row": {}}
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("OA pending payment port must not expose pending invoice reads.")
+
+            def workbench_relation_source_versions(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("OA pending payment port must not expose workbench relation source versions.")
+
+        port = OaPendingPaymentReadModelRepositoryPort(Underlying())
+
+        self.assertEqual(port.list_oa_pending_payment_rows()["rows"], [])
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertFalse(hasattr(port, "workbench_relation_source_versions"))
 
 
 class FakeCommandService:
@@ -878,6 +919,32 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(payload["read_model_scope_key"], "all")
         self.assertEqual(queue.refreshes, [])
+
+    def test_expected_source_versions_use_workbench_relation_repository_not_oa_repository(self) -> None:
+        class OaRepo:
+            def workbench_relation_source_versions(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("OA repository must not own workbench relation source versions.")
+
+        class WorkbenchRelationRepo:
+            def __init__(self) -> None:
+                self.requested_scope_key: str | None = None
+
+            def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
+                self.requested_scope_key = scope_key
+                return {"workbench_pair_relations_updated_at": "2026-06-24 10:00:00+08"}
+
+        relation_repo = WorkbenchRelationRepo()
+        app = object.__new__(Application)
+        app._oa_pending_payment_sql_read_repository = OaRepo()
+        app._workbench_relation_sql_read_repository = relation_repo
+
+        payload = app._oa_pending_payment_expected_source_versions(scope_key="2026-05")
+
+        self.assertEqual(relation_repo.requested_scope_key, "2026-05")
+        self.assertEqual(
+            payload["workbench_relation_source_versions"],
+            {"workbench_pair_relations_updated_at": "2026-06-24 10:00:00+08"},
+        )
 
     def test_production_rows_passes_view_mode_to_sql_read_repository(self) -> None:
         queue = QueueRecorder()

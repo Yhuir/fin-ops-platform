@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-pending-invoice`
+Current state: `autonomous-continue-after-read-models-oa-pending-payment-repository-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:next-pilot-selection-after-pending-invoice`. `oa_pending_payment` is selected as the next non-Go read model implementation pilot because it combines completed OA projection, in-progress payment-admitted OA, Workbench relation, invoice lifecycle and pending bank claims while still allowing a narrow repository-port first slice. The next executable boundary is `read-models:oa-pending-payment-repository-port-extraction`.
+Completed `read-models:oa-pending-payment-repository-port-extraction`. OA pending payment read route and projection save/mark/prune paths now use `OaPendingPaymentReadModelRepositoryPort`, and Workbench relation source-version lookup is owned by the Workbench relation port instead of the OA repository. `oa_pending_payment` remains implementation-gap-open; the next executable boundary is freshness/force-refresh/operation-barrier audit.
 
 ## Closed Or Deferred Slices
 
@@ -138,6 +138,7 @@ Completed `read-models:next-pilot-selection-after-pending-invoice`. `oa_pending_
 - `read-models:pending-invoice-mutation-freshness-target-contract` -> `implementation-closed`
 - `read-models:pending-invoice-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `read-models:next-pilot-selection-after-pending-invoice` -> `analysis-closed`
+- `read-models:oa-pending-payment-repository-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -149,7 +150,7 @@ Completed `read-models:next-pilot-selection-after-pending-invoice`. `oa_pending_
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - `pending_invoice` was the third non-Go read model implementation pilot after `bank_detail` and `workbench_relation`. Repository port extraction is implemented, freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, income-status mutations now wait for pending invoice operation barrier targets before refetching rows, and local implementation support is accounted for. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `oa_pending_payment` is selected as the next non-Go read model pilot. The first implementation boundary is repository port extraction for rows/detail lookup and projection save/mark/prune paths; it must not change OA write-back, payment-admitted source adapter behavior, pending relation promotion, command service behavior, UI workflow, shared worker runtime or Go/Fiber/Go Worker.
+- `oa_pending_payment` is the current non-Go read model pilot. Repository port extraction is implemented: PostgreSQL read route and OA projection save/mark/prune paths now use `OaPendingPaymentReadModelRepositoryPort`, while Workbench relation source-version lookup uses the Workbench relation port. Freshness/force-refresh/operation-barrier audit remains open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -164,8 +165,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:next-pilot-selection-after-pending-invoice`
+`read-models:oa-pending-payment-repository-port-extraction`
 
 ## Next Prompt
 
-`read-models:oa-pending-payment-repository-port-extraction`
+`read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit`

@@ -10146,7 +10146,7 @@ class Application:
     def _oa_pending_payment_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = oa_pending_payment_source_versions()
         relation_source_versions = self._workbench_relation_source_versions_from_repository(
-            getattr(self, "_oa_pending_payment_sql_read_repository", None),
+            getattr(self, "_workbench_relation_sql_read_repository", None),
             scope_key=scope_key,
         )
         if relation_source_versions:
