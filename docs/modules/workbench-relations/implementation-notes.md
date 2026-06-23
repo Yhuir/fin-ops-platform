@@ -2837,3 +2837,30 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check
 ```
+
+## 2026-06-24 - WorkbenchWriteFacade cash special metadata port extraction
+
+目标：把 `WorkbenchWriteFacade` 中 cash special metadata 的 update/clear mutation 调用从 broad pair service 依赖中抽出，放到显式 mutation port 后面。
+
+变更：
+
+- 新增 `WorkbenchWriteRelationSpecialMetadataMutationPort`。
+- `confirm_cash_pass_through(...)`、`confirm_cash_ticket_purchase(...)` 和 `cancel_cash_special(...)` 不再直接调用 `_pair_relation_service.update_special_metadata_for_row_ids(...)` 或 `_pair_relation_service.clear_special_metadata_for_row_ids(...)`。
+- `Application._workbench_write_facade(...)` 显式注入 `WorkbenchWriteRelationSpecialMetadataMutationPort(self._workbench_pair_relation_service)`。
+- `WorkbenchWriteFacade` 不再保存 broad `_pair_relation_service` 字段。
+- cash special validation、stale conflict、metadata payload、history operation、response shape、pair relation persist scheduling 和 read model scheduling 保持不变。
+- 静态 guard 已更新，要求 WorkbenchWriteFacade 的 read/snapshot 和 cash special mutation 都通过显式 port。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_write_facade_relation_reads_and_cash_special_mutations_use_ports tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_personal_advance_repayment_uses_relation_command_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_cash_special_updates_and_clears_are_replayed_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_stale_cash_special_updates_first_active_relation_for_rows_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cash_special_with_stale_expected_relation_rejects_all_entrypoints tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cash_special_scheduling_failure_propagates_after_metadata_mutation -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:workbench-write-facade-post-port-local-implementation-closure-audit`。

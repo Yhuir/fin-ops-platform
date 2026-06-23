@@ -422,6 +422,7 @@ from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacad
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
+    WorkbenchWriteRelationSpecialMetadataMutationPort,
     WorkbenchWriteResult,
 )
 from fin_ops_platform.services.workbench_exception_application_service import (
@@ -3076,6 +3077,9 @@ class Application:
         return WorkbenchWriteFacade(
             pair_relation_service=self._workbench_pair_relation_service,
             relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(
+                self._workbench_pair_relation_service
+            ),
+            relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
                 self._workbench_pair_relation_service
             ),
             exception_service=self._workbench_exception_application_service,

@@ -1170,12 +1170,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_write_facade_relation_reads_use_read_snapshot_port(self) -> None:
+    def test_workbench_write_facade_relation_reads_and_cash_special_mutations_use_ports(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         facade_source = _class_source(tree, source, "WorkbenchWriteFacade")
-        port_source = _class_source(tree, source, "WorkbenchWriteRelationReadSnapshotPort")
+        read_port_source = _class_source(tree, source, "WorkbenchWriteRelationReadSnapshotPort")
+        metadata_port_source = _class_source(tree, source, "WorkbenchWriteRelationSpecialMetadataMutationPort")
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -1200,16 +1201,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "preview_withdraw_for_row_ids",
             "snapshot",
         ):
-            if required not in port_source:
+            if required not in read_port_source:
                 violations.append(f"WorkbenchWriteRelationReadSnapshotPort is missing {required}")
         if "relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(" not in factory_source:
             violations.append("Application does not inject WorkbenchWriteRelationReadSnapshotPort")
-        for retained in (
+        if "WorkbenchWriteRelationSpecialMetadataMutationPort" not in source:
+            violations.append("WorkbenchWriteFacade module lacks explicit special metadata mutation port")
+        if "_relation_special_metadata_mutation_port" not in facade_source:
+            violations.append("WorkbenchWriteFacade does not store special metadata mutation port")
+        for forbidden in (
             "_pair_relation_service.update_special_metadata_for_row_ids",
             "_pair_relation_service.clear_special_metadata_for_row_ids",
         ):
-            if retained not in facade_source:
-                violations.append(f"cash special metadata mutation is no longer explicitly visible for later boundary {retained}")
+            if forbidden in facade_source:
+                violations.append(f"WorkbenchWriteFacade keeps direct pair special metadata mutation {forbidden}")
+        for required in (
+            "update_special_metadata_for_row_ids",
+            "clear_special_metadata_for_row_ids",
+        ):
+            if required not in metadata_port_source:
+                violations.append(f"WorkbenchWriteRelationSpecialMetadataMutationPort is missing {required}")
+        if "relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(" not in factory_source:
+            violations.append("Application does not inject WorkbenchWriteRelationSpecialMetadataMutationPort")
 
         self.assertEqual(violations, [])
 

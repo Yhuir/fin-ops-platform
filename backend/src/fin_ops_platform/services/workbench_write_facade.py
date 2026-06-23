@@ -147,12 +147,48 @@ class WorkbenchWriteRelationReadSnapshotPort:
         return snapshot if isinstance(snapshot, dict) else {}
 
 
+class WorkbenchWriteRelationSpecialMetadataMutationPort:
+    def __init__(self, pair_relation_service: Any) -> None:
+        self._pair_relation_service = pair_relation_service
+
+    def update_special_metadata_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        special_metadata: dict[str, object],
+        updated_by: str,
+        note: str | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        updated_relation, history = self._pair_relation_service.update_special_metadata_for_row_ids(
+            row_ids,
+            special_metadata=special_metadata,
+            updated_by=updated_by,
+            note=note,
+        )
+        return dict(updated_relation), dict(history)
+
+    def clear_special_metadata_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        updated_by: str,
+        note: str | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        updated_relation, history = self._pair_relation_service.clear_special_metadata_for_row_ids(
+            row_ids,
+            updated_by=updated_by,
+            note=note,
+        )
+        return dict(updated_relation), dict(history)
+
+
 class WorkbenchWriteFacade:
     def __init__(
         self,
         *,
         pair_relation_service: Any,
         relation_read_snapshot_port: WorkbenchWriteRelationReadSnapshotPort | None = None,
+        relation_special_metadata_mutation_port: WorkbenchWriteRelationSpecialMetadataMutationPort | None = None,
         exception_service: Any,
         exception_case_service: Any,
         override_service: Any,
@@ -201,9 +237,12 @@ class WorkbenchWriteFacade:
         relation_command_service_factory: Callable[..., Any] | None = None,
         reconciliation_decision_store: Any | None = None,
     ) -> None:
-        self._pair_relation_service = pair_relation_service
         self._relation_read_snapshot_port = relation_read_snapshot_port or WorkbenchWriteRelationReadSnapshotPort(
             pair_relation_service
+        )
+        self._relation_special_metadata_mutation_port = (
+            relation_special_metadata_mutation_port
+            or WorkbenchWriteRelationSpecialMetadataMutationPort(pair_relation_service)
         )
         self._exception_service = exception_service
         self._exception_case_service = exception_case_service
@@ -2502,7 +2541,7 @@ class WorkbenchWriteFacade:
                 "created_by": "system",
                 "updated_by": "system",
             }
-            updated_relation, _history = self._pair_relation_service.update_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_row_ids(
                 row_ids,
                 special_metadata=special_metadata,
                 updated_by="system",
@@ -2569,7 +2608,7 @@ class WorkbenchWriteFacade:
                 "created_by": "system",
                 "updated_by": "system",
             }
-            updated_relation, _history = self._pair_relation_service.update_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_row_ids(
                 row_ids,
                 special_metadata=special_metadata,
                 updated_by="system",
@@ -2618,7 +2657,7 @@ class WorkbenchWriteFacade:
             if conflict is not None:
                 conflict_payload = conflict.to_response_payload()
                 return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
-            updated_relation, _history = self._pair_relation_service.clear_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.clear_special_metadata_for_row_ids(
                 row_ids,
                 updated_by="system",
                 note=note,
