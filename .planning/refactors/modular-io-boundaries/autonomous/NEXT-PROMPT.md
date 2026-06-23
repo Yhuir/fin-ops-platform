@@ -5,13 +5,13 @@ Continue the autonomous modular IO refactor from the current state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:pending-invoice-and-oa-pending-payment-contract`
+- Last completed boundary: `read-models:invoice-lifecycle-and-usage-contract`
 - Last status: `closed-autonomous`
-- Pending invoice is guarded as a page-first-screen scoped read model that rejects bare `all`; OA pending payment is guarded as a fan-out `all` read model with separate repository/detail ports.
+- Invoice lifecycle, input invoice usage and output invoice collection are guarded as scoped incremental fan-out read models with explicit worker/query/permission owners and disjoint repository ports.
 
 ## Next Boundary
 
-`read-models:invoice-lifecycle-and-usage-contract`
+`read-models:cost-tax-ledger-summary-contract`
 
 ## Required First Steps On Resume
 
@@ -22,21 +22,21 @@ Continue the autonomous modular IO refactor from the current state.
    - `docs/modules/read-models/state-machine.md`
    - `docs/modules/read-models/tests.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - `docs/product-specs/invoice-lifecycle.md`
-   - `docs/modules/domain-events-lifecycle/README.md`
-   - `docs/modules/domain-events-lifecycle/state-machine.md`
-   - `docs/modules/domain-events-lifecycle/tests.md`
-   - `docs/modules/input-invoice-usage/README.md`
-   - `docs/modules/input-invoice-usage/state-machine.md`
-   - `docs/modules/input-invoice-usage/tests.md`
-   - `docs/modules/output-invoice-collections/README.md`
-   - `docs/modules/output-invoice-collections/state-machine.md`
-   - `docs/modules/output-invoice-collections/tests.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-and-oa-pending-payment-contract.md`
-4. Use CodeGraph for `InvoiceLifecycleReadFacade`, `InvoiceLifecycleReadModelRefreshService`, `InputInvoiceUsageReadModelService`, `OutputInvoiceCollectionService`, `InvoiceUsageCollectionReadModelRefreshService`, invoice usage repository methods, relation source version reads, and production fail-closed behavior for missing SQL repositories.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`.
-6. If implementation starts in that boundary, keep it to invoice lifecycle / input usage / output collection manifest contract tests, owner refinement, or one tiny guard. Do not rewrite import processing, invoice lifecycle business policy, worker rebuild, Go/Fiber, Go Worker, or production state.
+   - `docs/product-specs/cost-tax.md`
+   - `docs/modules/cost-statistics/README.md`
+   - `docs/modules/cost-statistics/state-machine.md`
+   - `docs/modules/cost-statistics/tests.md`
+   - `docs/modules/tax-offset/README.md`
+   - `docs/modules/tax-offset/state-machine.md`
+   - `docs/modules/tax-offset/tests.md`
+   - `docs/modules/turnover-ledger/README.md`
+   - `docs/modules/turnover-ledger/state-machine.md`
+   - `docs/modules/turnover-ledger/tests.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`
+4. Use CodeGraph for `CostStatisticsQueryService`, `TaxOffsetQueryService`, `TurnoverLedgerQueryService`, cost/tax/turnover repository methods, query gateway ownership, scope policy entries, parent/fan-out semantics, and production fail-closed behavior.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`.
+6. If implementation starts in that boundary, keep it to cost statistics / tax offset / turnover ledger manifest contract tests, owner refinement, or one tiny guard. Do not rewrite rollup SQL, tax certification business policy, turnover relation writes, worker rebuild, Go/Fiber, Go Worker, or production state.
 
 ## Stop Condition
 
-Complete one narrow verified invoice lifecycle / invoice usage contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one narrow verified cost/tax/turnover ledger summary contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

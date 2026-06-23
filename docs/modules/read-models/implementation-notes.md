@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Invoice lifecycle 与发票使用/收款 read model 合同守卫
+
+- 目标：执行 `read-models:invoice-lifecycle-and-usage-contract`，把 `invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection` 的 scoped incremental、fan-out `all`、owner、permission 和 repository port 边界固化为 manifest guard。
+- 影响范围：`tests/test_read_model_manifest.py`、read-models/input-invoice-usage/output-invoice-collections/domain-events-lifecycle 模块文档和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：`invoice_lifecycle` 是跨页面生命周期分发边界；input/output 页面 read model 继续拥有筛选、分页、导出和 DTO。input/output 可共享 `invoice-usage-collection` worker，但 repository ports、query owner 和 permission owner 必须独立。
+- 文档影响：同步 read-models 测试矩阵、input/output/domain-events-lifecycle 状态机变更记录和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_invoice_lifecycle_read_model_refresh tests.test_invoice_lifecycle_read_facade tests.test_invoice_lifecycle_page_integration tests.test_invoice_usage_collection_sql_runtime tests.test_input_invoice_usage_api tests.test_output_invoice_collection_api -v`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ，未执行生产 worker drain；本轮不需要生产写或真实 read model 重建证据。
+- 后续事项：推进 `read-models:cost-tax-ledger-summary-contract`。
+
 ## 2026-06-23 - Pending invoice 与 OA 待付款 read model 合同守卫
 
 - 目标：执行 `read-models:pending-invoice-and-oa-pending-payment-contract`，锁定待找发票和 OA 待付款两个页面 read model 的 scope、force refresh、repository port 和 owner 合同。

@@ -240,6 +240,62 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertLessEqual(required_oa_ports, set(oa_payment.repository_port_contract))
         self.assertFalse(set(pending_invoice.repository_port_contract).intersection(oa_payment.repository_port_contract))
 
+    def test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts(self) -> None:
+        lifecycle = READ_MODEL_MANIFEST["invoice_lifecycle"]
+        input_usage = READ_MODEL_MANIFEST["input_invoice_usage"]
+        output_collection = READ_MODEL_MANIFEST["output_invoice_collection"]
+        required_lifecycle_ports = {
+            "save_invoice_lifecycle_rows",
+            "mark_invoice_lifecycle_scope",
+            "get_invoice_lifecycle_rows_by_subject_ids",
+            "get_invoice_lifecycle_rows_by_identity_keys",
+            "list_invoice_lifecycle_rows",
+        }
+        required_input_ports = {
+            "list_input_invoice_usage_rows",
+            "save_input_invoice_usage_rows",
+            "mark_input_invoice_usage_scope",
+            "prune_input_invoice_usage_scope_shards",
+            "get_input_invoice_usage_row_by_row_id",
+        }
+        required_output_ports = {
+            "list_output_invoice_collection_rows",
+            "save_output_invoice_collection_rows",
+            "mark_output_invoice_collection_scope",
+            "prune_output_invoice_collection_scope_shards",
+        }
+
+        for entry in (lifecycle, input_usage, output_collection):
+            with self.subTest(read_model_key=entry.key):
+                self.assertEqual(entry.query_status_contract, "self_managed_freshness")
+                self.assertEqual(entry.projection_strategy, "scoped_incremental")
+                self.assertEqual(entry.all_scope_semantics, "fan_out_command")
+                self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
+                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
+                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
+
+        self.assertEqual(lifecycle.scope_type, "invoice_lifecycle")
+        self.assertEqual(input_usage.scope_type, "input_invoice_usage")
+        self.assertEqual(output_collection.scope_type, "output_invoice_collection")
+        self.assertEqual(lifecycle.primary_worker_instance, "invoice-lifecycle")
+        self.assertEqual(input_usage.primary_worker_instance, "invoice-usage-collection")
+        self.assertEqual(output_collection.primary_worker_instance, "invoice-usage-collection")
+        self.assertEqual(lifecycle.auxiliary_refresh_worker_instances, ("invoice-lifecycle-secondary",))
+        self.assertEqual(input_usage.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(output_collection.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(lifecycle.query_owner, "InvoiceLifecycleReadFacade")
+        self.assertEqual(input_usage.query_owner, "InputInvoiceUsageReadModelService")
+        self.assertEqual(output_collection.query_owner, "OutputInvoiceCollectionService")
+        self.assertEqual(lifecycle.permission_owner, "invoice_lifecycle_page_api_session")
+        self.assertEqual(input_usage.permission_owner, "input_invoice_usage_api_session")
+        self.assertEqual(output_collection.permission_owner, "output_invoice_collection_api_session")
+        self.assertLessEqual(required_lifecycle_ports, set(lifecycle.repository_port_contract))
+        self.assertLessEqual(required_input_ports, set(input_usage.repository_port_contract))
+        self.assertLessEqual(required_output_ports, set(output_collection.repository_port_contract))
+        self.assertFalse(set(lifecycle.repository_port_contract).intersection(input_usage.repository_port_contract))
+        self.assertFalse(set(lifecycle.repository_port_contract).intersection(output_collection.repository_port_contract))
+        self.assertFalse(set(input_usage.repository_port_contract).intersection(output_collection.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()

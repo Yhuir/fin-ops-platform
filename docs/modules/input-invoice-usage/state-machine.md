@@ -92,6 +92,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 补 read model manifest 合同守卫 | 不改变进项发票使用情况业务/UI/read model/worker 状态；锁定 `input_invoice_usage` 为 scoped incremental、fan-out `all`、自管 freshness，并保持 query owner、permission owner 和 repository ports 不与 `invoice_lifecycle` / `output_invoice_collection` 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-10 | 明确 all scope source_versions 聚合规则 | 修复默认 all 查询因月份间 workbench 关系嵌套版本不同而被 API 误判 `refreshing` 的风险 | `tests.test_invoice_usage_collection_sql_runtime`、`tests.test_input_invoice_usage_api`、`tests.test_read_model_freshness`、`web/src/test/InputInvoiceUsagePage.test.tsx` |
 | 2026-06-10 | 新增以发票反提 OA 本地状态机设计 | 明确 `创建 OA 草稿`、手动 OA 提交、`已提交 OA` 确认和 `未提交 OA` 本地回滚的状态边界 | 文档设计阶段，实施时按 `tests.md` 新增/更新测试 |

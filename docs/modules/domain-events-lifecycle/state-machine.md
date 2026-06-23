@@ -73,5 +73,6 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 补 invoice lifecycle/read model manifest 合同守卫记录 | 不改变 lifecycle event、plan、executor 或前端 finance event 状态；只登记 `invoice_lifecycle` 继续作为跨页面生命周期 read boundary，input/output 页面 read model 通过独立合同消费生命周期结果 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts` |
 | 2026-06-11 | 补齐 domain events / derived lifecycle 状态机 | 明确后端 lifecycle plan、executor summary、前端刷新事件和 read model/worker 状态边界 | 待本轮 domain-events-lifecycle 验证 |
 | 2026-06-13 | 收窄 startup stale scan 影响域并改为 opt-in | 默认启动不再执行补扫；启用时只标记 stale workbench matching dirty scopes，不再刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model | `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_workbench_dirty_queue_wiring -v` |

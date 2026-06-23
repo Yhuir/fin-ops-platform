@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-pending-invoice-and-oa-pending-payment-contract`
+Current state: `autonomous-continue-after-invoice-lifecycle-and-usage-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:pending-invoice-and-oa-pending-payment-contract`; next execution should start with invoice lifecycle and invoice usage/collection read model contracts.
+Completed `read-models:invoice-lifecycle-and-usage-contract`; next execution should start with cost, tax and turnover ledger summary read model contracts.
 
 ## Completed Modules
 
@@ -41,6 +41,7 @@ Completed `read-models:pending-invoice-and-oa-pending-payment-contract`; next ex
 - `read-models:workbench-active-generation-contract` -> `closed-autonomous`
 - `read-models:bank-detail-and-bank-account-balance-contract` -> `closed-autonomous`
 - `read-models:pending-invoice-and-oa-pending-payment-contract` -> `closed-autonomous`
+- `read-models:invoice-lifecycle-and-usage-contract` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -52,8 +53,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:pending-invoice-and-oa-pending-payment-contract`
+`read-models:invoice-lifecycle-and-usage-contract`
 
 ## Next Prompt
 
-`read-models:invoice-lifecycle-and-usage-contract`
+`read-models:cost-tax-ledger-summary-contract`
