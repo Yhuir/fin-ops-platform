@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-model-refresh-barrier-contract`
+Current state: `autonomous-continue-after-read-model-repository-port-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:refresh-gateway-force-refresh-and-operation-barrier`; next execution should start with repository port and SQL owner split planning before page-specific slices.
+Completed `read-models:repository-port-and-sql-owner-split-plan`; next execution should start with Workbench active generation contract before page-specific slices.
 
 ## Completed Modules
 
@@ -37,6 +37,7 @@ Completed `read-models:refresh-gateway-force-refresh-and-operation-barrier`; nex
 - `read-models:manifest-and-boundary-inventory` -> `closed-autonomous`
 - `read-models:query-gateway-contract-and-status-parity` -> `closed-autonomous`
 - `read-models:refresh-gateway-force-refresh-and-operation-barrier` -> `closed-autonomous`
+- `read-models:repository-port-and-sql-owner-split-plan` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -48,8 +49,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:refresh-gateway-force-refresh-and-operation-barrier`
+`read-models:repository-port-and-sql-owner-split-plan`
 
 ## Next Prompt
 
-`read-models:repository-port-and-sql-owner-split-plan`
+`read-models:workbench-active-generation-contract`

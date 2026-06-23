@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
     read_model_manifest_by_refresh_event_type,
@@ -88,6 +89,7 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertIn(entry.all_scope_semantics, allowed_all_scope_semantics)
                 self.assertIn(entry.force_refresh_contract, allowed_force_refresh_contracts)
                 self.assertIn(entry.operation_barrier_contract, allowed_operation_barrier_contracts)
+                self.assertTrue(entry.repository_port_contract)
                 self.assertTrue(entry.projection_strategy)
                 self.assertTrue(entry.query_owner)
                 self.assertTrue(entry.repository_owner)
@@ -118,6 +120,27 @@ class ReadModelManifestTests(unittest.TestCase):
 
                 self.assertEqual(entry.force_refresh_contract, expected_contract)
                 self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
+
+    def test_manifest_repository_port_contract_methods_exist(self) -> None:
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                for method_name in entry.repository_port_contract:
+                    self.assertTrue(
+                        callable(getattr(PostgresReadModelRepository, method_name, None)),
+                        f"{entry.key} repository port method is missing: {method_name}",
+                    )
+
+    def test_manifest_repository_port_contract_methods_have_single_owner(self) -> None:
+        owners_by_method: dict[str, str] = {}
+
+        for entry in READ_MODEL_MANIFEST.values():
+            for method_name in entry.repository_port_contract:
+                previous_owner = owners_by_method.setdefault(method_name, entry.key)
+                self.assertEqual(
+                    previous_owner,
+                    entry.key,
+                    f"{method_name} is declared by both {previous_owner} and {entry.key}",
+                )
 
 
 if __name__ == "__main__":

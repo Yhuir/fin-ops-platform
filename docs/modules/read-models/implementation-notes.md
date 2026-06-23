@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Repository port owner map 合同守卫
+
+- 目标：执行 `read-models:repository-port-and-sql-owner-split-plan`，在拆分 `postgres_repositories/read_models.py` 前，先把每个 read model 当前占用的 public repository port 方法登记成代码级合同。
+- 影响范围：`backend/src/fin_ops_platform/services/read_model_manifest.py`、`tests/test_read_model_manifest.py`、read-models 模块文档和 planning analysis；不改变 SQL、API、worker、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：不一次性拆 1 万行级 `read_models.py`。先让 manifest 成为 owner map：每个登记方法必须存在于 `PostgresReadModelRepository`，且只能有一个 read model owner。后续拆分按 key/port 小步迁移。
+- 文档影响：同步 README、测试矩阵和 planning analysis；长期 read model 事实源不变。
+- 测试覆盖：扩展 `tests/test_read_model_manifest.py`，覆盖 repository port contract 非空、方法存在和单 owner。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v`。
+- 未测风险：本轮不连接真实 PostgreSQL，不执行 repository SQL，不证明页面行为；这是拆分前的静态 contract guard。
+- 后续事项：推进 `read-models:workbench-active-generation-contract`，因为 Workbench active generation 是特殊 read model，必须先锁定后再做通用 page slice。
+
 ## 2026-06-23 - Force refresh 与 operation barrier manifest 合同守卫
 
 - 目标：执行 `read-models:refresh-gateway-force-refresh-and-operation-barrier`，把受控强制刷新入口和写后 operation barrier 目标纳入 read model manifest，防止后续新增 read model 只改 worker/App Status 而漏掉刷新闭环。

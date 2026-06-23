@@ -9,7 +9,7 @@
 | 2 | `read-models:manifest-and-boundary-inventory` | closed-autonomous | Manifest/owner/IO/state/event/permission/test inventory completed as analysis only; no behavior change. |
 | 3 | `read-models:query-gateway-contract-and-status-parity` | closed-autonomous | Added code-level read model manifest and parity guard covering App Status registry, worker events, RabbitMQ dispatch and scope policy contracts; no runtime behavior change. |
 | 4 | `read-models:refresh-gateway-force-refresh-and-operation-barrier` | closed-autonomous | Added manifest force refresh and operation barrier contract guards; no runtime behavior change. |
-| 5 | `read-models:repository-port-and-sql-owner-split-plan` | pending | Owner-map `read_models.py`, define repository ports, and split only behind tests. |
+| 5 | `read-models:repository-port-and-sql-owner-split-plan` | closed-autonomous | Added manifest repository port contract owner map and guard tests; no SQL split yet. |
 | 6 | `read-models:workbench-active-generation-contract` | pending | Workbench is special: preserve active generation atomic publish instead of forcing generic rebuild semantics. |
 | 7 | `read-models:bank-detail-and-bank-account-balance-contract` | pending | Bank detail, auto-tag source version, account/month partition and balance read model contract. |
 | 8 | `read-models:pending-invoice-and-oa-pending-payment-contract` | pending | Pending invoice list/detail/drawer and OA pending payment relation/read model contract. |
