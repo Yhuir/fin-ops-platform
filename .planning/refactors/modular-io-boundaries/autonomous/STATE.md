@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `paused-after-bank-details-slice`
+Current state: `paused-before-read-model-foundation`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Paused after `bank-details:auto-tag-category-boundary`.
+Paused after `bank-details:auto-tag-category-boundary`; next execution should start with read model foundation analysis before additional page-specific slices.
 
 ## Completed Modules
 
@@ -49,4 +49,4 @@ No Go candidate has passed admission.
 
 ## Next Prompt
 
-`reconciliation-workbench:amount-check-query-contract`
+`read-models:manifest-and-boundary-inventory`

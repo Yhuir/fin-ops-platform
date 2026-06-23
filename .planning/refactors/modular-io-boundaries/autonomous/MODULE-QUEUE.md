@@ -6,16 +6,24 @@
 | Order | Boundary | Status | Notes |
 | ---: | --- | --- | --- |
 | 1 | `bank-details:auto-tag-category-boundary` | production-evidence-deferred | Local contract/code guard/doc slice completed; real production DB/worker evidence deferred because no local PGSQL_URL or staging DB. |
-| 2 | `reconciliation-workbench:amount-check-query-contract` | pending | Narrow workbench contract; avoid full workbench rewrite. |
-| 3 | `pending-invoices:read-side-contract` | pending | Read model/detail/drawer contract first; avoid rule write expansion. |
-| 4 | `oa-pending-payments:read-side-and-relation-contract` | pending | Builds on pending invoice/OA projection read-side evidence. |
-| 5 | `batch-accounting:legacy-route-contract` | pending | Route/server.py extraction candidate. |
-| 6 | `read-model-refresh-gateway:force-refresh-and-freshness-registry` | pending | Shared refresh, force refresh, freshness proof, scope policy and operation barrier registry after pilot evidence. |
-| 7 | `server-py:route-owner-inventory` | pending | Inventory and small route ownership hardening only; no broad rewrite. |
-| 8 | `go-hot-path:workbench-compute-admission` | pending | Admission review only for `workbench:matching-grouping-check`; no Go implementation until gates pass. |
-| 9 | `go-hot-path:workbench-read-model-builder-admission` | pending | Admission review only for active generation / scoped incremental Go Worker candidate. |
-| 10 | `go-hot-path:import-parser-admission` | pending | Admission review only for parse/normalize/preview Go Processor candidate. |
-| 11 | `go-hot-path:cost-summary-rollup-admission` | pending | Admission review only for summary/rollup candidate after cost read model contract is stable. |
+| 2 | `read-models:manifest-and-boundary-inventory` | pending | Build the full read model manifest/owner/IO/state/event/permission/test inventory first; no behavior change. |
+| 3 | `read-models:query-gateway-contract-and-status-parity` | pending | Ensure every page read path has freshness/status/enqueue semantics or an explicit equivalent contract. |
+| 4 | `read-models:refresh-gateway-force-refresh-and-operation-barrier` | pending | Shared refresh, force refresh, freshness proof, scope policy and operation barrier registry before page slices. |
+| 5 | `read-models:repository-port-and-sql-owner-split-plan` | pending | Owner-map `read_models.py`, define repository ports, and split only behind tests. |
+| 6 | `read-models:workbench-active-generation-contract` | pending | Workbench is special: preserve active generation atomic publish instead of forcing generic rebuild semantics. |
+| 7 | `read-models:bank-detail-and-bank-account-balance-contract` | pending | Bank detail, auto-tag source version, account/month partition and balance read model contract. |
+| 8 | `read-models:pending-invoice-and-oa-pending-payment-contract` | pending | Pending invoice list/detail/drawer and OA pending payment relation/read model contract. |
+| 9 | `read-models:invoice-lifecycle-and-usage-contract` | pending | Invoice lifecycle, input usage and output collection scoped incremental contracts. |
+| 10 | `read-models:cost-tax-ledger-summary-contract` | pending | Cost statistics, tax offset and turnover ledger partitioned scoped rollup contracts. |
+| 11 | `read-models:search-and-no-oa-bank-batch-contract` | pending | Search and no-OA bank batch read-side freshness/status contracts. |
+| 12 | `read-models:legacy-read-path-removal-guards` | pending | Remove or quarantine live scan, direct queue write and legacy refresh paths that can pollute new links. |
+| 13 | `reconciliation-workbench:amount-check-query-contract` | pending | Narrow workbench compute/query contract after read model foundation; avoid full workbench rewrite. |
+| 14 | `batch-accounting:legacy-route-contract` | pending | Route/server.py extraction candidate. |
+| 15 | `server-py:route-owner-inventory` | pending | Inventory and small route ownership hardening only; no broad rewrite. |
+| 16 | `go-hot-path:workbench-compute-admission` | pending | Admission review only for `workbench:matching-grouping-check`; no Go implementation until gates pass. |
+| 17 | `go-hot-path:workbench-read-model-builder-admission` | pending | Admission review only for active generation / scoped incremental Go Worker candidate after read model contracts are stable. |
+| 18 | `go-hot-path:import-parser-admission` | pending | Admission review only for parse/normalize/preview Go Processor candidate. |
+| 19 | `go-hot-path:cost-summary-rollup-admission` | pending | Admission review only for summary/rollup candidate after cost read model contract is stable. |
 
 ## Status Values
 
