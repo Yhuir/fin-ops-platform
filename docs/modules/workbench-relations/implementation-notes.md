@@ -2955,3 +2955,25 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
 下一条边界：`workbench-relations:workbench-matching-pair-service-boundary-audit`。
+
+## 2026-06-24 - Workbench matching pair service boundary audit
+
+目标：审计 Workbench matching/orchestrator 对 broad `WorkbenchPairRelationService` 的剩余读取依赖，决定下一条最小安全实现边界。
+
+结论：
+
+- `WorkbenchMatchingOrchestrator` 仍直接接收并保存 `pair_relation_service`。
+- legacy candidate mode 使用 `list_active_relations()` 抑制已被 active relation 占用的 row，属于 canonical active relation read，不是 relation write，也不是 downstream distribution read model。
+- `WorkbenchReconciliationEngine` 使用 `list_active_relations()` 做 held-row suppression 和可补齐两栏关系判断。
+- `WorkbenchReconciliationEngine` 使用 `active_relations_for_row_ids(...)` 为自动三栏补齐找到唯一 active relation，并通过 `WorkbenchRelationCommandService.confirm_relation(..., replace_existing=True)` 升级。
+- `WorkbenchRelationCommandService` 已提供 `list_active_relations()` 和 `active_relations_for_row_ids(...)`，下一刀可抽 matching relation read port 并由 command-boundary read 支撑。
+- 不应直接改为 `WorkbenchRelationReadFacade`，因为这里需要 canonical active relation identity 和 before-relation snapshot，而不是下游 distribution payload。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:workbench-matching-relation-read-port-extraction`。
