@@ -3294,3 +3294,22 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-case-id-allocation-relation-read-owner-audit`。
+
+## 2026-06-24 - server case-id allocation relation read owner audit
+
+目标：审计 `_next_workbench_relation_case_id(...)` 中用于避让 active relation case id 的直接 snapshot 读取。
+
+结论：
+
+- 该逻辑是必要的：confirm-link 未传 `case_id` 时需要避让已存在 active `CASE-AUTO-*`，避免 `pair relation case_id already active for different rows`。
+- 但 `server.py` 不应解析 `pair_relations` snapshot shape。
+- 下一条最小实现边界应抽 `WorkbenchRelationCaseIdAllocator`，把 relation snapshot parsing 和 collision avoidance 移到显式服务。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-case-id-allocation-service-extraction`。

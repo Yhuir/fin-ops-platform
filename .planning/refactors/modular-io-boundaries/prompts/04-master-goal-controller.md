@@ -192,23 +192,24 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-case-id-allocation-relation-read-owner-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:server-case-id-allocation-service-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-case-id-allocation-relation-read-owner-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-retained-oa-supplemental-relation-read-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-server-precondition-local-implementation-closure-audit.md`.
+For workbench-relations:server-case-id-allocation-service-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-case-id-allocation-relation-read-owner-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_next_workbench_relation_case_id`, relation snapshot case ids, confirm-link case id allocation and collision tests.
-- Audit `_next_workbench_relation_case_id(...)` direct relation snapshot read.
-- Decide whether the next safe boundary is a case-id allocation read port/service extraction or a narrower guard/accounting slice.
-- Preserve case-id collision avoidance and confirm-link behavior.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_next_workbench_relation_case_id`, `next_case_id`, `CASE-AUTO-0001`, and case id collision behavior.
+- Add `WorkbenchRelationCaseIdAllocator`.
+- Move relation snapshot parsing and used-case-id collision avoidance out of `Application._next_workbench_relation_case_id(...)`.
+- Keep `Application._next_workbench_relation_case_id(...)` as a thin delegate or inject allocator method directly into `WorkbenchWriteFacade`.
+- Preserve confirm-link auto case id behavior, especially skipping active `CASE-AUTO-0001`.
+- Add static guard coverage.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks; run code tests only if this audit finds and fixes a testable code inconsistency.
+- Run focused case-id allocation/static guard tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 
