@@ -277,7 +277,27 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
      - Every affected docs/modules/<module>/state-machine.md is updated when module states/transitions changed, or the analysis explicitly says "module state-machine definition unchanged" with evidence.
    - Do not commit if state-machine accounting is missing, contradictory, or only represented by NEXT-PROMPT.md.
 
-12. State update
+12. State-machine update gate
+   - This gate is mandatory before every commit. Do not skip it for documentation-only, test-only, manifest-only, or "no behavior change" slices.
+   - Decide explicitly whether the slice changes any state-machine definition:
+     - global refactor workflow states, transitions, guards, stop gates, defer gates, completion criteria, or autonomous continuation rules.
+     - module business states, UI states, read model states, worker states, operation barrier states, force-refresh states, permission states, legacy-retirement states, or state transition evidence.
+   - If any global workflow definition changed, update `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md` in the same slice.
+   - If any module state definition or transition changed, update every affected `docs/modules/<module>/state-machine.md` in the same slice.
+   - If definitions did not change, record this explicitly in `.planning/refactors/modular-io-boundaries/analysis/<boundary>.md` with:
+     - reviewed global state-machine file.
+     - reviewed module state-machine files.
+     - reason definitions are unchanged.
+     - evidence that only progress/accounting changed.
+   - Update progress/accounting state separately from definition state:
+     - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
+     - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
+   - The commit is invalid if it updates only `NEXT-PROMPT.md` without matching `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and analysis evidence.
+   - The commit is invalid if the analysis says "state-machine definition unchanged" but the code/docs changed state names, status values, transition guards, read model freshness states, worker lifecycle states, permission states, or legacy-retirement states.
+
+13. State update
    - Updating state is mandatory after every closed, deferred, blocked, or failed boundary. Do not treat NEXT-PROMPT.md alone as the state machine.
    - Update .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md when the run introduces, renames, or clarifies any workflow state, transition, guard, stop/defer condition, or completion criterion.
    - If the selected boundary changes business state, UI state, read model state, worker state, operation barrier state, force-refresh state, permission state, or legacy-retirement state, update docs/modules/<module>/state-machine.md in the same slice.
@@ -301,7 +321,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - If a Go candidate fails admission, mark go-candidate-deferred.
    - If a hard gate is hit, mark blocked-hard-stop with concrete evidence and stop.
 
-13. Commit and push
+14. Commit and push
    - Stage only files for the completed slice.
    - Commit with a scoped message such as:
      - refactor(read-models): tighten query freshness manifest guards
@@ -312,7 +332,7 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - After push, confirm branch status is clean and up to date with origin/dev.
    - Then continue to the next pending boundary without waiting for me unless a hard stop gate exists.
 
-14. Next prompt execution
+15. Next prompt execution
    - Generate or update autonomous/NEXT-PROMPT.md after every closed/deferred slice.
    - Treat NEXT-PROMPT.md as resume state, but do not stop merely because it was updated.
    - Immediately execute the next prompt unless the current run hit a hard stop gate or no safe module remains.

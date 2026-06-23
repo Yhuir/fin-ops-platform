@@ -125,6 +125,8 @@ AnalysisOnly
 - 这是软状态，不阻塞继续处理其它模块。
 - 若无 staging/`PGSQL_URL` 是唯一缺口，记录 `production-evidence-deferred` 后进入 `AutonomousContinue`。
 - 只有需要生产写入、secret 或特权操作时才进入 hard stop。
+- 每个自动推进 slice 在进入 commit 前必须经过状态机更新闸门：先判断是否改变全局 workflow state/transition/guard 或模块状态定义；若改变，必须同步本文件或对应 `docs/modules/<module>/state-machine.md`；若未改变，必须在 analysis 文件中记录 reviewed files、definition unchanged 原因和只更新 progress/accounting 的证据。
+- `autonomous/NEXT-PROMPT.md` 只是续跑入口，不是完整状态机。任何 closed/deferred/blocked/failed slice 都必须同步更新 `autonomous/STATE.md`、`autonomous/MODULE-QUEUE.md`、`autonomous/JOURNAL.md` 和对应 analysis 文件。
 
 ### AutonomousContinue
 
