@@ -204,18 +204,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:oa-pending-payment-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit:
+For read-models:oa-pending-payment-local-implementation-closure-audit:
 - Read `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-repository-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-refresh-freshness-operation-barrier-audit.md`.
 - Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/oa-pending-payments/tests.md`, and `docs/modules/oa-pending-payments/implementation-notes.md`.
 - Read `backend/src/fin_ops_platform/services/read_model_manifest.py`.
 - Read `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_repository.py`, `oa_pending_payment_read_model_service.py`, `invoice_usage_collection_sql_projection.py`, `invoice_usage_collection_read_model_refresh.py`, `read_model_scope_policy.py`, `read_model_refresh_gateway.py`, `operation_freshness_barrier.py`, `postgres_state_store.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/worker.py`, and relevant OA pending payment tests.
-- Use CodeGraph for OA pending payment freshness/refresh/barrier impact before editing code.
-- Audit OA pending payment rows/filter-options/detail fresh gates, all scope semantics, worker expansion, source-version proof, command response barrier targets and frontend operation barrier waits.
-- Identify whether any non-Go implementation gap remains before local closure/defer accounting.
-- If a narrow gap is found, insert and implement it before Go candidates; otherwise close as analysis and move toward local implementation closure audit.
+- Use CodeGraph for remaining OA pending payment local implementation gap discovery before editing code.
+- Audit whether local OA pending payment repository port, query fresh gate, source-version proof, force refresh/scope policy, worker fan-out, operation barrier, legacy contamination, frontend stale/read-after-write behavior, tests and docs are accounted for.
+- Classify remaining local references as removed, explicit port, compat-only with deletion condition, blocked-by-human production gate, or implementation gap.
+- If a narrow local non-Go implementation gap remains, insert and implement it before Go candidates; otherwise record production-evidence-deferred for real PostgreSQL/worker/App Status/high-row/browser evidence without claiming global module closure.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.

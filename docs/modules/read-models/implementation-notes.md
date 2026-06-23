@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - OA pending payment freshness / operation barrier audit
+
+- 目标：执行 `read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit`，审计 OA 待付款 read model fresh gate、force refresh、`all` fan-out/month proof、source-version proof 和写后 operation barrier 行为。
+- 影响范围：`OaPendingPaymentsPage` 写后 barrier target 选择、OA pending payment/read-models 文档和 modular IO state；不改后端 API shape、OA 支付状态、OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service 或 worker event semantics。
+- 关键决策：`oa_pending_payment:all` 仍是 fan-out control scope。当 mutation 响应包含具体月份和 `all` 时，前端写后 barrier 必须优先等待具体 `oa_pending_payment:<YYYY-MM>`，不能把 fan-out-only `all` 当作优先可见性证明；没有具体 scope 时才 fallback 到当前 visible scope。
+- 文档影响：新增 modular IO analysis，更新 read-models/OA pending payments 实施记录、autonomous queue/state/next prompt；状态机定义不变。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，覆盖 auto-reconcile 与 link-bank 成功后的具体月份 barrier target。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 worker drain、App Status target readiness、high-row HTTP 和 browser smoke 仍需生产证据或 defer accounting。
+
 ## 2026-06-24 - Bank detail category side-effect port extraction
 
 - 目标：执行 `read-models:bank-detail-category-side-effect-port-extraction`，把银行明细分类写后的 read model refresh / turnover fan-out / Workbench invalidation / audit 从 `Application` callback 抽到显式 side-effect port。

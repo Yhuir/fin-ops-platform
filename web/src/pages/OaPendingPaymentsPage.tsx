@@ -101,6 +101,10 @@ function normalizedRefreshScopeKeys(refresh: OaPendingPaymentReadModelRefresh | 
 function oaPendingPaymentBarrierTargets(refresh: OaPendingPaymentReadModelRefresh | undefined, currentScopeKey: string) {
   const visibleScopeKey = currentScopeKey.trim() || "all";
   const refreshScopeKeys = normalizedRefreshScopeKeys(refresh);
+  const concreteRefreshScopeKeys = refreshScopeKeys.filter((scopeKey) => scopeKey !== "all");
+  if (visibleScopeKey === "all" && concreteRefreshScopeKeys.length > 0) {
+    return operationBarrierTargets("oa_pending_payment", concreteRefreshScopeKeys);
+  }
   if (refreshScopeKeys.includes(visibleScopeKey)) {
     return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
   }

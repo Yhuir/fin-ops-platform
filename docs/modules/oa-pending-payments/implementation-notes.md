@@ -20,6 +20,15 @@
 - 测试覆盖：新增 port shape guard 和 source-version owner 回归；复跑 OA API fresh/stale/source-version 目标测试，以及 invoice usage collection projection save/mark/prune/fan-out 目标测试。
 - 后续事项：继续执行 `read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit`。
 
+## 2026-06-24 - read model freshness / operation barrier audit
+
+- 目标：审计 OA 待付款 read model fresh gate、force refresh、`all` fan-out/month proof、source-version proof 和写后 operation barrier 行为。
+- 发现：后端命令响应已返回具体月份 scope 与 `all`，例如 `["2026-05", "all"]`；但前端默认 all 视图会优先等待 `oa_pending_payment:all`，容易把 fan-out-only control scope 当作写后可见性证明。
+- 改动：`OaPendingPaymentsPage` 在当前视图为 `all` 且 mutation 响应包含具体月份时，改为等待具体 `oa_pending_payment:<YYYY-MM>` barrier target；只有没有具体 scope 时才 fallback 到 `all`。
+- 保持不变：OA 支付状态语义、OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、API response shape、worker event semantics 不变。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定 auto-reconcile 与 link-bank 成功后，`scopeKeys: ["2026-05", "all"]` 会请求 `oa_pending_payment:2026-05` barrier，而不是优先请求 `all`。
+- 后续事项：继续执行 `read-models:oa-pending-payment-local-implementation-closure-audit`，确认是否还有本地非 Go 实现缺口，并记录真实生产 PostgreSQL/worker/App Status/high-row/browser evidence defer。
+
 ## 2026-06-23 - 右侧抽屉候选流水按已选 OA 月份收敛
 
 - 目标：修复 OA 待付款核对进行中视图中，勾选 OA 后打开“关联支出流水”右侧抽屉长期停留在“加载中”的问题。
@@ -135,7 +144,7 @@
 - 目标：修复写操作成功后前端立即刷新 rows，可能读到旧 `oa_pending_payment` read model 的缺口。该记录创建时覆盖进行中 OA `confirm-paid`、`link-bank-transactions` 和支出流水无需开票规则保存；2026-06-22 自动匹配/写回上线后，前端主写回入口由 auto-reconcile 替代 `confirm-paid`。
 - 影响范围：`OaPendingPaymentsPage`、`PendingInvoiceRulesDrawer` async callback contract、`operationBarrier` 前端 label、`OaPendingPaymentsPage.test.tsx` 和本模块测试矩阵；后端 API contract 不变，confirm/link 继续复用响应中的 `readModelRefresh.scopeKeys`。
 - 关键决策：前端写 API 成功后先用当前页面可见 scope 构造 `oa_pending_payment` operation barrier target，barrier fresh 后才 `loadRows("refresh")`；barrier blocked/timeout 属于 post-commit 同步未完成，只显示“后台同步尚未完成”，不把已成功写入渲染成操作失败，也不提前读取旧投影。
-- 测试覆盖：新增/维护 Vitest 回归，锁定写回、link-bank 和规则保存，在 barrier resolve 前不得增加 rows 请求，且 barrier request body 使用 `oa_pending_payment:all`。
+- 测试覆盖：新增/维护 Vitest 回归，锁定写回、link-bank 和规则保存，在 barrier resolve 前不得增加 rows 请求；当后端返回具体月份 scope 与 `all` 时，写回和 link-bank 优先等待具体 `oa_pending_payment:<YYYY-MM>`，无具体 scope 的规则保存 fallback 到当前可见 scope。
 - 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`。
 
 ## 2026-06-22 - OA 自动匹配支出流水并自动写回

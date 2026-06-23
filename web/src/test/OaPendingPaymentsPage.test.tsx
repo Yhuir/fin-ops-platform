@@ -512,7 +512,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         bankTransactionIds: ["bank-candidate-004"],
         paymentStatus: { code: "paid", label: "已支付", reason: "已确认支出流水" },
         oaPaymentWriteback: { code: "written", label: "已写回", flowIds: ["proc-candidate"], syncStatus: "ready" },
-        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
       }), {
         status: init?.method === "POST" ? 200 : 405,
         headers: { "Content-Type": "application/json" },
@@ -573,7 +573,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         relation: { status: "confirmed" },
         autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
         oaPaymentWritebacks: [{ code: "written", label: "已写回", flowId: "proc-candidate", syncStatus: "ready" }],
-        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
       }), {
         status: init?.method === "POST" ? 200 : 405,
         headers: { "Content-Type": "application/json" },
@@ -1178,7 +1178,7 @@ describe("OA pending payments page", () => {
         action: "oa_pending_payment_auto_reconcile_bank_transactions",
         autoMatchedCount: 1,
         writebackCount: 1,
-        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
       },
     });
 
@@ -1192,7 +1192,7 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
     expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
+      targets: [{ read_model_key: "oa_pending_payment", scope_key: "2026-05" }],
     });
     expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
 
@@ -1284,7 +1284,7 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
     expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
+      targets: [{ read_model_key: "oa_pending_payment", scope_key: "2026-05" }],
     });
     expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
 
