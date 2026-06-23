@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-pending-invoice-scope-policy-filter-allowlist`
+Current state: `autonomous-continue-after-read-models-pending-invoice-mutation-freshness-target-contract`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:pending-invoice-scope-policy-filter-allowlist`. Pending invoice refresh scope policy now rejects unsupported direction/filter combinations at `ReadModelRefreshGateway` validation, before durable queue enqueue or runtime worker/projection handling. `pending_invoice` remains implementation-gap-open; the next executable boundary is mutation freshness target contract audit/implementation.
+Completed `read-models:pending-invoice-mutation-freshness-target-contract`. Income-status pending invoice mutations now wait for `pending_invoice` operation barrier targets before refetching rows, using the existing affected-month response contract. Backend response shape, status semantics and relation write behavior remain unchanged. `pending_invoice` remains implementation-gap-open; the next executable boundary is local implementation closure audit.
 
 ## Closed Or Deferred Slices
 
@@ -135,6 +135,7 @@ Completed `read-models:pending-invoice-scope-policy-filter-allowlist`. Pending i
 - `read-models:pending-invoice-repository-port-extraction` -> `implementation-closed`
 - `read-models:pending-invoice-refresh-freshness-operation-barrier-audit` -> `analysis-closed`
 - `read-models:pending-invoice-scope-policy-filter-allowlist` -> `implementation-closed`
+- `read-models:pending-invoice-mutation-freshness-target-contract` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -145,7 +146,7 @@ Completed `read-models:pending-invoice-scope-policy-filter-allowlist`. Pending i
 - `workbench_relation` local implementation support is accounted for through final closure/defer accounting. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, turnover local pair snapshot port extraction, settings data reset pair snapshot port extraction, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence, app health / route builder pair-service injection, settings data reset pair-service dependency, first local closure/defer accounting and ETC repair/link/migration callback accounting are analysis-closed. The module is still not globally closed because production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
-- `pending_invoice` is selected as the next non-Go read model implementation pilot. Repository port extraction is implemented: PostgreSQL runtime read path and pending invoice projection save/mark paths now use `PendingInvoiceReadModelRepositoryPort`, while search index behavior remains on the search repository. Freshness/barrier audit is analysis-closed and scope policy filter allowlist enforcement is implemented. Mutation freshness target contract work remains open.
+- `pending_invoice` is selected as the next non-Go read model implementation pilot. Repository port extraction is implemented: PostgreSQL runtime read path and pending invoice projection save/mark paths now use `PendingInvoiceReadModelRepositoryPort`, while search index behavior remains on the search repository. Freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, and income-status mutations now wait for pending invoice operation barrier targets before refetching rows. Local implementation closure audit remains open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -159,8 +160,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:pending-invoice-scope-policy-filter-allowlist`
+`read-models:pending-invoice-mutation-freshness-target-contract`
 
 ## Next Prompt
 
-`read-models:pending-invoice-mutation-freshness-target-contract`
+`read-models:pending-invoice-local-implementation-closure-audit`

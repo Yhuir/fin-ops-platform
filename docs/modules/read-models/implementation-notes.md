@@ -665,6 +665,14 @@
 - 非目标：不改业务筛选语义、API shape、SQL projection、worker expansion 或 UI。Projection 级 filter 校验仍作为 defense-in-depth。
 - 后续事项：继续审/补 pending invoice mutation freshness target contract。
 
+## 2026-06-24 - pending invoice mutation freshness target contract
+
+- 目标：检查待找发票 mutation 后的页面 read model 同步语义，避免写成功后立即读旧 pending invoice rows。
+- 结论：规则保存和 attach-existing 已在 `PendingInvoicesPage` 中等待 operation barrier；收入批量状态保存缺少 barrier wait。
+- 改动：收入批量状态保存成功后，现在等待 `pending_invoice` 的当前 income filter/month scopes fresh，再 refetch rows；超时按现有规则保存/attach-existing 语义容忍后继续刷新。
+- API 决策：不新增后端 `freshness_targets` 字段；当前 `affectedMonths` 足够让页面构造稳定 target，避免扩大 API shape。
+- 测试覆盖：`web/src/test/PendingInvoicesPage.test.tsx` 断言收入批量状态保存会请求 `pending_invoice:income:all:2026-05` barrier；保留规则保存 timeout 回归。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

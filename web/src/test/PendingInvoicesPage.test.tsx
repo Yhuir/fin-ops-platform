@@ -461,6 +461,15 @@ function installPendingInvoiceFetch(options: {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       return options.operationBarrierResponse(body, url);
     }
+    if (url.pathname === "/api/operation-barrier/status" && method === "POST") {
+      return new Response(JSON.stringify({
+        status: "fresh",
+        fresh: true,
+        targets: [],
+        blocked_targets: [],
+        refreshing_targets: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/pending-invoices/filter-options") {
       return new Response(JSON.stringify({
         fields: [
@@ -1687,7 +1696,18 @@ describe("Pending invoices page", () => {
         amount: "200.00",
       },
     };
+    let lastBarrierBody: Record<string, unknown> | null = null;
     const fetchMock = installPendingInvoiceFetch({
+      operationBarrierResponse: (body) => {
+        lastBarrierBody = body;
+        return new Response(JSON.stringify({
+          status: "fresh",
+          fresh: true,
+          targets: [],
+          blocked_targets: [],
+          refreshing_targets: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
       rowsPayload: (url) => (url.searchParams.get("direction") === "income" ? [firstIncomeRow, secondIncomeRow] : upgradedRows()),
     });
     renderAppAt("/pending-invoices");
@@ -1715,6 +1735,12 @@ describe("Pending invoices page", () => {
       });
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(2);
     });
+    await waitFor(() => {
+      expect(operationBarrierRequests(fetchMock).length).toBeGreaterThan(0);
+    });
+    expect(lastBarrierBody?.targets).toEqual([
+      { read_model_key: "pending_invoice", scope_key: "income:all:2026-05" },
+    ]);
   }, 45_000);
 
   test("does not expose manual invoice dialog or API calls", async () => {

@@ -204,22 +204,25 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:pending-invoice-mutation-freshness-target-contract unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:pending-invoice-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:pending-invoice-mutation-freshness-target-contract:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-scope-policy-filter-allowlist.md`.
+For read-models:pending-invoice-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-repository-port-extraction.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-refresh-freshness-operation-barrier-audit.md`.
-- Read `docs/modules/read-models/README.md`, `docs/modules/pending-invoices/README.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/app/routes_pending_invoices.py`, `pending_invoice_service.py`, `pending_invoice_rules_application_service.py`, and operation barrier related frontend/backend tests.
-- Audit pending invoice mutation responses and frontend callers for rules update, attach-existing confirm and income-status updates.
-- Decide whether to add `freshness_targets` now or split a narrower implementation boundary.
-- If behavior/API shape changes, add targeted backend/frontend tests.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-scope-policy-filter-allowlist.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-mutation-freshness-target-contract.md`.
+- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/pending-invoices/README.md`, `docs/modules/pending-invoices/tests.md`, and `docs/modules/pending-invoices/implementation-notes.md`.
+- Use CodeGraph for pending invoice read model/service/route impact before editing code.
+- Audit `pending_invoice` local implementation support after the repository port, freshness/barrier, scope policy and mutation barrier slices.
+- Decide whether local implementation support can be recorded as production-evidence-deferred, or whether another small non-Go implementation gap remains.
+- If a new narrow implementation gap remains, insert it before Go candidates and execute it next.
+- If no local implementation gap remains, record production evidence as deferred, keep the module not globally closed, and select the next non-Go read model pilot.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests, docs verification and diff checks.
+- Run docs verification and diff checks; run targeted tests if behavior changes.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

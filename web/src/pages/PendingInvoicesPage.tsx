@@ -619,12 +619,34 @@ export default function PendingInvoicesPage() {
       return next;
     });
     savePendingInvoiceIncomeStatuses(transactionIds, statusCode)
-      .then((result) => {
-        if (result.rows.length > 0) {
-          const updatedRows = new Map(result.rows.map((row) => [row.id, row]));
-          setRows((current) => current.map((item) => updatedRows.get(item.id) ?? item));
+      .then(async (result) => {
+        const operationResult = await runOperation({
+          loadingMessage: "正在等待待找发票同步...",
+          blockOnError: false,
+          action: async ({ setMessage }) => {
+            if (result.rows.length > 0) {
+              const updatedRows = new Map(result.rows.map((row) => [row.id, row]));
+              setRows((current) => current.map((item) => updatedRows.get(item.id) ?? item));
+            }
+            try {
+              await waitForOperationFreshness(
+                operationBarrierTargets("pending_invoice", pendingInvoiceAttachRefreshScopes("income", statusFilters, result.affectedMonths)),
+              );
+            } catch (caught) {
+              if (!(caught instanceof OperationBarrierTimeoutError)) {
+                throw caught;
+              }
+            }
+            setMessage("正在刷新待找发票...");
+            const rowsPayload = await fetchPendingInvoiceRows(query);
+            applyRowsPayload(rowsPayload);
+            return result;
+          },
+          errorMessage: (caught) => caught instanceof Error ? caught.message : "收入流水状态同步失败。",
+        });
+        if (operationResult.status !== "success") {
+          throw operationResult.error;
         }
-        setRefreshToken((current) => current + 1);
         clearSelectedTransactions();
       })
       .catch((caught) => {
@@ -639,7 +661,7 @@ export default function PendingInvoicesPage() {
           return next;
         });
       });
-  }, [canMutateData, clearSelectedTransactions, selectedRows]);
+  }, [applyRowsPayload, canMutateData, clearSelectedTransactions, query, runOperation, selectedRows, statusFilters]);
 
   const compactStatusText = error
     ? error

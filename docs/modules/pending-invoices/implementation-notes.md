@@ -318,6 +318,13 @@
 - 影响：不改变页面筛选、业务状态、API response shape 或 projection 行为；只提前拒绝无效 refresh scope。
 - 后续事项：继续处理 pending invoice mutation freshness target contract。
 
+## 2026-06-24 - pending invoice mutation freshness target contract
+
+- 目标：让收入批量状态 mutation 与规则保存、选择已有发票一样，在刷新 rows 前等待待找发票 read model barrier。
+- 改动：`PendingInvoicesPage` 的收入批量状态保存成功后，基于响应 `affectedMonths` 和当前 income filter 构造 `pending_invoice` operation barrier targets；等待 fresh 或 timeout 后再重新拉取 rows。
+- 保持不变：后端 API shape、业务状态、relation 写行为和收入状态校验不变；失败写入仍保留选择并显示错误。
+- 测试覆盖：更新 `PendingInvoicesPage.test.tsx`，新增 barrier target 断言；复跑 `PendingInvoicesRulesSaveTimeout.test.tsx` 保持规则保存超时语义。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。
