@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail refresh producer port extraction
+
+- 目标：执行 `read-models:bank-detail-refresh-producer-port-extraction`，把银行明细 read model refresh enqueue 和 Redis wakeup 从 `Application` app-level wrapper 抽到显式 services-layer producer。
+- 影响范围：`BankDetailReadModelRefreshProducer`、`server.py` bank detail refresh 调用点、category side-effect port 注入、银行明细 API/guard 测试和 modular IO planning state；不改变分类规则、权限、API response shape、审计、operation barrier、read model freshness、worker 或前端。
+- 关键决策：`Application._enqueue_bank_detail_read_model_refreshes(...)` 和 `_delete_bank_detail_redis_cache(...)` 删除；producer 继续通过 `ReadModelRefreshGateway` enqueue，Redis 只作为 optional wakeup，不作为 freshness/dirty scope 事实源。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：新增 refresh producer 单测，更新 category mutation side-effect API 测试注入点，并扩展静态 guard 防止旧 app-level refresh/wakeup wrapper 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-producer-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status 和生产历史数据未在本地验证；available-month scope helper、derived lifecycle executor 仍是后续本地实现缺口。
+
 ## 2026-06-24 - Bank detail suggestion provider port extraction
 
 - 目标：执行 `read-models:bank-detail-suggestion-provider-port-extraction`，把最新自动分类 suggestion callback 从 `Application` 抽到显式 provider。

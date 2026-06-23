@@ -1078,7 +1078,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._invalidate_workbench_after_bank_transaction_categories = lambda _months: True
         app._audit_service = SimpleNamespace(record_action=lambda **_kwargs: None)
         side_effect_port = BankDetailCategoryMutationSideEffectPort(
-            enqueue_bank_detail_refresh=app._enqueue_bank_detail_read_model_refreshes,
+            enqueue_bank_detail_refresh=app._bank_detail_read_model_refresh_producer().enqueue,
             enqueue_turnover_ledger_refresh=app._enqueue_turnover_ledger_read_model_refreshes,
             invalidate_workbench_after_category_mutation=app._invalidate_workbench_after_bank_transaction_categories,
             audit_service=app._audit_service,

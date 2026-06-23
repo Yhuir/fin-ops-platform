@@ -33,7 +33,7 @@ Spec-first Browser e2e 审计入口：
 | 候选确认防伪造 | P0 | `tests/test_bank_auto_tag_rules_api.py` | covered | 非当前候选、非自动规则、单一 auto match、unmatched 行均拒绝。 |
 | 外部往来第三层候选和人工补分类 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-category-flow.spec.ts` | covered | 候选确认和人工补分类均覆盖第三层标签、动作语义和前端选择；Browser 覆盖外部往来三层人工补分类请求体、保存后刷新和清除。 |
 | 人工补分类只允许 unmatched | P0 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_transaction_category_service.py` | covered | 禁止绕过自动候选或覆盖确定性自动结果。 |
-| 分类/规则写入事务和 outbox | P0 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py` | covered | 版本冲突、rollback、dirty/outbox、turnover/no-OA fan-out。 |
+| 分类/规则写入事务和 outbox | P0 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_detail_read_model_refresh_producer.py` | covered | 版本冲突、rollback、dirty/outbox、turnover/no-OA fan-out；refresh producer 测试固定 bank detail enqueue 只能走 gateway，Redis 只作为 optional wakeup。 |
 | 银行明细 SQL read model freshness | P0 | `tests/test_bank_details_sql_runtime.py` | covered | missing、fresh empty、schema mismatch、dirty scope refreshing、规则版本 stale、cache key。 |
 | 下游标签读取 facade | P0 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests` | covered | fresh bank_detail 给 turnover/no-OA 等下游发布标签事实时必须保留 `category_version`、`manual_category_version`、`version`，否则下游 fresh read model 会携带旧 expected version。 |
 | read model refresh worker | P0 | `tests/test_bank_details_sql_runtime.py` | covered | `all` fan-out 到月份 shard；月份 scope rebuild 后按 source version complete。 |

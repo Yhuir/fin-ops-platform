@@ -79,6 +79,7 @@ from fin_ops_platform.services.batch_accounting_service import BatchAccountingEr
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
+from fin_ops_platform.services.bank_detail_read_model_refresh_producer import BankDetailReadModelRefreshProducer
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
 )
@@ -12743,21 +12744,6 @@ class Application:
         except (TypeError, ValueError):
             return None
 
-    def _enqueue_bank_detail_read_model_refreshes(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> bool:
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return False
-        target_scope_keys = [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]
-        for scope_key in target_scope_keys:
-            self._delete_bank_detail_redis_cache(scope_key)
-        return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason, metadata=metadata))
-
     def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
@@ -12796,15 +12782,6 @@ class Application:
                 metadata=metadata,
             )
         )
-
-    def _delete_bank_detail_redis_cache(self, scope_key: str) -> None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        publish_wakeup = getattr(redis_helper, "publish_wakeup", None)
-        if callable(publish_wakeup):
-            try:
-                publish_wakeup("bank_detail_read_model_refresh", {"scope_key": scope_key})
-            except Exception:
-                pass
 
     def _handle_api_import_fact_invoices(self, query: dict[str, list[str]]) -> Response:
         repository = getattr(self._state_store, "import_fact_repository", None)
@@ -12944,7 +12921,7 @@ class Application:
             latest = getattr(suggestion_provider, "latest", None)
             suggestion_provider = latest if callable(latest) else None
         category_mutation_side_effects = BankDetailCategoryMutationSideEffectPort(
-            enqueue_bank_detail_refresh=self._enqueue_bank_detail_read_model_refreshes,
+            enqueue_bank_detail_refresh=self._bank_detail_read_model_refresh_producer().enqueue,
             enqueue_turnover_ledger_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
             invalidate_workbench_after_category_mutation=getattr(
                 self,
@@ -12986,6 +12963,12 @@ class Application:
 
     def _bank_details_routes(self) -> BankDetailsApiRoutes:
         return BankDetailsApiRoutes(self._bank_details_application_service())
+
+    def _bank_detail_read_model_refresh_producer(self) -> BankDetailReadModelRefreshProducer:
+        return BankDetailReadModelRefreshProducer(
+            refresh_gateway_provider=self._read_model_refresh_gateway,
+            redis_helper_provider=lambda: getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
+        )
 
     def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._no_oa_bank_batch_routes().list_batches(query)
@@ -13796,7 +13779,7 @@ class Application:
                     method(event)
                 break
         self._search_service.clear_cache()
-        self._enqueue_bank_detail_read_model_refreshes(["all"], reason="bank_transaction_tag_settings_changed")
+        self._bank_detail_read_model_refresh_producer().enqueue(["all"], reason="bank_transaction_tag_settings_changed")
         self._enqueue_turnover_ledger_read_model_refreshes(
             ["all"],
             reason="bank_transaction_tag_settings_changed",
@@ -16141,7 +16124,7 @@ class Application:
             scope_types=["oa_pending_payment"],
         )
         if bank_detail_scope_keys:
-            self._enqueue_bank_detail_read_model_refreshes(bank_detail_scope_keys, reason="import_facts_changed")
+            self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
             self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
         if invalidate_cost_statistics:
             if cost_statistics_scope_keys is None:
@@ -16232,7 +16215,7 @@ class Application:
             scope_types=["oa_pending_payment"],
         )
         if bank_detail_scope_keys:
-            self._enqueue_bank_detail_read_model_refreshes(bank_detail_scope_keys, reason="import_facts_changed")
+            self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
             self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
         if invalidate_cost_statistics:
             self._invalidate_cost_statistics_read_model_scopes(
@@ -19610,7 +19593,7 @@ class Application:
             target_scope_keys = self._bank_detail_available_month_scope_keys()
         else:
             target_scope_keys = ["all"]
-        enqueued = self._enqueue_bank_detail_read_model_refreshes(
+        enqueued = self._bank_detail_read_model_refresh_producer().enqueue(
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_detail"),
             metadata=self._read_model_refresh_metadata(domain_plan),

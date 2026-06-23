@@ -552,9 +552,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_bank_detail_transactions_refreshing_payload",
             "_with_bank_detail_tag_dictionary",
             "_enqueue_bank_detail_read_model_refreshes_unless_refreshing",
+            "_enqueue_bank_detail_read_model_refreshes",
             "_bank_detail_redis_cache_key",
             "_get_bank_detail_cached_payload",
             "_set_bank_detail_cached_payload",
+            "_delete_bank_detail_redis_cache",
         }
         for helper_name in sorted(removed_application_helpers):
             if _function_source(server_tree, server_source, helper_name):
@@ -576,19 +578,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if not _function_source(service_tree, service_source, helper_name):
                 violations.append(f"BankDetailsApplicationService is missing bank detail read/cache owner {helper_name}")
 
-        enqueue_source = _function_source(server_tree, server_source, "_enqueue_bank_detail_read_model_refreshes")
-        if not enqueue_source:
-            violations.append("server.py is missing the classified bank detail gateway-backed refresh wrapper")
-        else:
-            for snippet in (
-                "refresh_gateway = self._read_model_refresh_gateway()",
-                'refresh_gateway.enqueue_many("bank_detail"',
-            ):
-                if snippet not in enqueue_source:
-                    violations.append(f"bank detail refresh wrapper no longer uses gateway boundary: {snippet}")
-            direct_job_writes = _sql_write_table_references(enqueue_source)
-            if direct_job_writes:
-                violations.append(f"bank detail refresh wrapper writes job queue tables directly: {direct_job_writes}")
+        producer_source = (SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py").read_text(encoding="utf-8")
+        producer_tree = _parse(SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py")
+        producer_class = _class_source(producer_tree, producer_source, "BankDetailReadModelRefreshProducer")
+        for snippet in (
+            "def enqueue(",
+            "refresh_gateway = self._refresh_gateway_provider()",
+            'refresh_gateway.enqueue_many("bank_detail"',
+            'publish_wakeup("bank_detail_read_model_refresh"',
+        ):
+            if snippet not in producer_class:
+                violations.append(f"bank detail refresh producer is missing gateway/wakeup behavior {snippet}")
+        direct_job_writes = _sql_write_table_references(producer_class)
+        if direct_job_writes:
+            violations.append(f"bank detail refresh producer writes job queue tables directly: {direct_job_writes}")
 
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
         if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
@@ -598,6 +601,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
         for retained_callback in (
             "_bank_detail_auto_category_suggestion_provider",
+            "_bank_detail_read_model_refresh_producer",
             "_bank_detail_available_month_scope_keys",
             "_enqueue_bank_account_balance_read_model_refresh",
             "_enqueue_turnover_ledger_read_model_refreshes",
