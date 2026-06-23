@@ -419,7 +419,11 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
-from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade, WorkbenchWriteResult
+from fin_ops_platform.services.workbench_write_facade import (
+    WorkbenchWriteFacade,
+    WorkbenchWriteRelationReadSnapshotPort,
+    WorkbenchWriteResult,
+)
 from fin_ops_platform.services.workbench_exception_application_service import (
     WorkbenchExceptionApplicationConflict,
     WorkbenchExceptionApplicationService,
@@ -3071,6 +3075,9 @@ class Application:
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
         return WorkbenchWriteFacade(
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(
+                self._workbench_pair_relation_service
+            ),
             exception_service=self._workbench_exception_application_service,
             exception_case_service=self._workbench_exception_case_service,
             override_service=self._workbench_override_service,

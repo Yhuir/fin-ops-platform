@@ -128,11 +128,31 @@ ACTIVE_RECONCILIATION_DECISION_DISPLAY_STATES = {DISPLAY_STATE_OPEN, DISPLAY_STA
 SPLIT_RECONCILIATION_DECISION_SUPPRESSION_MARKER = "workbench_split_candidate"
 
 
+class WorkbenchWriteRelationReadSnapshotPort:
+    def __init__(self, pair_relation_service: Any) -> None:
+        self._pair_relation_service = pair_relation_service
+
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        return self._pair_relation_service.active_relations_for_row_ids(row_ids)
+
+    def active_relation_by_row_id(self, row_id: str) -> dict[str, object] | None:
+        relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
+        return relation if isinstance(relation, dict) else None
+
+    def preview_withdraw_for_row_ids(self, row_ids: list[str]) -> dict[str, object]:
+        return self._pair_relation_service.preview_withdraw_for_row_ids(row_ids)
+
+    def snapshot(self) -> dict[str, object]:
+        snapshot = self._pair_relation_service.snapshot()
+        return snapshot if isinstance(snapshot, dict) else {}
+
+
 class WorkbenchWriteFacade:
     def __init__(
         self,
         *,
         pair_relation_service: Any,
+        relation_read_snapshot_port: WorkbenchWriteRelationReadSnapshotPort | None = None,
         exception_service: Any,
         exception_case_service: Any,
         override_service: Any,
@@ -182,6 +202,9 @@ class WorkbenchWriteFacade:
         reconciliation_decision_store: Any | None = None,
     ) -> None:
         self._pair_relation_service = pair_relation_service
+        self._relation_read_snapshot_port = relation_read_snapshot_port or WorkbenchWriteRelationReadSnapshotPort(
+            pair_relation_service
+        )
         self._exception_service = exception_service
         self._exception_case_service = exception_case_service
         self._override_service = override_service
@@ -245,7 +268,7 @@ class WorkbenchWriteFacade:
         rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
         rows_by_type = self._rows_by_type(rows)
         amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-        before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         active_relation_preview = self._already_active_relation_preview(
             before_relations=before_relations,
             selected_row_ids=row_ids,
@@ -327,7 +350,7 @@ class WorkbenchWriteFacade:
             return result
 
         try:
-            preview = self._pair_relation_service.preview_withdraw_for_row_ids(sorted(active_row_ids))
+            preview = self._relation_read_snapshot_port.preview_withdraw_for_row_ids(sorted(active_row_ids))
         except Exception:
             return self._blocked_confirm_preview_payload(
                 before_relations=before_relations,
@@ -433,7 +456,7 @@ class WorkbenchWriteFacade:
         )
 
         resolved_case_id = case_id or self._next_case_id()
-        before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
             row_ids=row_ids,
@@ -464,7 +487,7 @@ class WorkbenchWriteFacade:
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             ),
         )
-        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
             month=month,
             rows=selected_rows,
@@ -1122,7 +1145,7 @@ class WorkbenchWriteFacade:
             return replayed
 
         resolve_rows_started_at = monotonic()
-        active_relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
+        active_relation = self._relation_read_snapshot_port.active_relation_by_row_id(row_id)
         if not isinstance(active_relation, dict):
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -1167,7 +1190,7 @@ class WorkbenchWriteFacade:
 
         relation_command = self._relation_command_service_for()
         if relation_command is not None:
-            previous_pair_snapshot = self._pair_relation_service.snapshot()
+            previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
             pair_relation_started_at = monotonic()
             try:
                 command_result = self._cancel_relation_via_command_service(
@@ -1280,7 +1303,7 @@ class WorkbenchWriteFacade:
         changed_case_ids: list[str],
     ) -> WorkbenchWriteResult:
         action_name = "cancel_link"
-        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         command = _WorkbenchCancelLinkCommand(
             action_name=action_name,
             month=month,
@@ -1423,7 +1446,7 @@ class WorkbenchWriteFacade:
         if not isinstance(expected_versions, dict) or not expected_versions:
             return None
         row_id = str(row.get("id") or "")
-        active_relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
+        active_relation = self._relation_read_snapshot_port.active_relation_by_row_id(row_id)
         current_row_status = "confirmed" if isinstance(active_relation, dict) else "open"
         try:
             assert_workbench_stale_preconditions(
@@ -1578,7 +1601,7 @@ class WorkbenchWriteFacade:
                     preview=preview,
                     note=note,
                 )
-            previous_pair_snapshot = self._pair_relation_service.snapshot()
+            previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
             result = self._withdraw_relation_via_command_service(
                 relation_command,
                 payload=payload,
@@ -1715,7 +1738,7 @@ class WorkbenchWriteFacade:
             preview=preview,
             affected_row_ids=affected_row_ids,
         )
-        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         relation_refresh_metadata = self._relation_refresh_metadata(
             relation=active_relation,
             row_ids=affected_row_ids,
@@ -2749,7 +2772,7 @@ class WorkbenchWriteFacade:
             )
 
         changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-        before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
             self._synthetic_existing_case_relations(
@@ -2762,7 +2785,7 @@ class WorkbenchWriteFacade:
         if relation_command is None:
             return self._relation_command_unavailable_result()
         previous_exception_snapshot = self._exception_case_service.snapshot()
-        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         try:
             exception_case = self._exception_case_service.create_settlement_case(
                 rows=rows,
@@ -3164,7 +3187,7 @@ class WorkbenchWriteFacade:
     def _active_relation_for_cash_special(self, row_ids: list[str]) -> dict[str, object]:
         if not row_ids:
             raise ValueError("row_ids is required.")
-        relation = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        relation = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         if not relation:
             raise KeyError("workbench_pair_relation_not_found")
         return relation[0]
@@ -3405,7 +3428,7 @@ class WorkbenchWriteFacade:
         action_name: str = "exception_apply",
     ) -> dict[str, object]:
         previous_exception_snapshot = self._exception_case_service.snapshot()
-        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         previous_candidate_snapshot = self._candidate_match_service.snapshot()
         previous_override_snapshot = self._override_service.snapshot()
         try:

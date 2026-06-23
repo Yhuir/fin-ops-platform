@@ -2794,3 +2794,27 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_slo_smoke.py test
 剩余风险：
 
 - 该阶段需要发布后重新执行 direct read model SLO 与登录态 HTTP SLO，证明 `expense:all` 不再在页面首屏才触发刷新。
+
+## 2026-06-24 - WorkbenchWriteFacade relation read/snapshot port extraction
+
+目标：把 `WorkbenchWriteFacade` 中 active relation 读取、withdraw preview fallback 和 rollback snapshot 调用从 broad pair service 依赖中抽出，放到显式 read/snapshot port 后面。
+
+变更：
+
+- 新增 `WorkbenchWriteRelationReadSnapshotPort`。
+- `WorkbenchWriteFacade` 的 `active_relations_for_row_ids(...)`、`get_active_relation_by_row_id(...)`、`preview_withdraw_for_row_ids(...)` 和 `snapshot()` 调用改为通过 `_relation_read_snapshot_port`。
+- `Application._workbench_write_facade(...)` 显式注入 `WorkbenchWriteRelationReadSnapshotPort(self._workbench_pair_relation_service)`。
+- confirm/cancel/withdraw/UoW/idempotency/rollback/read model scheduling 行为不变。
+- cash special metadata mutation 的 `update_special_metadata_for_row_ids(...)` 与 `clear_special_metadata_for_row_ids(...)` 保留为下一条边界，不在本 slice 迁移。
+- 新增静态 guard，防止 WorkbenchWriteFacade 重新直接调用 pair service read/snapshot 方法，同时保留 cash special metadata mutation 的显式可见性。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_write_facade_relation_reads_use_read_snapshot_port tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_personal_advance_repayment_uses_relation_command_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+下一条边界：`workbench-relations:workbench-write-facade-cash-special-metadata-boundary-audit`。

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-workbench-write-facade-pair-service-boundary-audit`
+Current state: `autonomous-continue-after-workbench-relations-workbench-write-facade-relation-read-snapshot-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:workbench-write-facade-pair-service-boundary-audit`. `workbench_relation` remains implementation-gap-open. WorkbenchWriteFacade pair service call sites are classified; the next implementation boundary is to extract active relation reads, withdraw preview fallback and pair snapshots behind an explicit read/snapshot port while preserving command-service writes. The next boundary is `workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction`.
+Completed `workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction`. `workbench_relation` remains implementation-gap-open. WorkbenchWriteFacade active relation reads, withdraw preview fallback and pair snapshots now go through `WorkbenchWriteRelationReadSnapshotPort`, while command-service-backed writes remain unchanged. Cash special metadata mutation still directly uses pair service methods and is the next boundary to audit. The next boundary is `workbench-relations:workbench-write-facade-cash-special-metadata-boundary-audit`.
 
 ## Closed Or Deferred Slices
 
@@ -99,6 +99,7 @@ Completed `workbench-relations:workbench-write-facade-pair-service-boundary-audi
 - `workbench-relations:no-oa-domain-repair-read-port-extraction` -> `implementation-closed`
 - `workbench-relations:post-no-oa-local-implementation-closure-audit` -> `analysis-closed`
 - `workbench-relations:workbench-write-facade-pair-service-boundary-audit` -> `analysis-closed`
+- `workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -106,7 +107,7 @@ Completed `workbench-relations:workbench-write-facade-pair-service-boundary-audi
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal, no-OA application pair snapshot port extraction and no-OA domain repair/read port extraction are implemented. WorkbenchWriteFacade pair service surfaces are audited and selected read/snapshot port extraction next. ETC still needs later focused classification before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction and WorkbenchWriteFacade relation read/snapshot port extraction are implemented. WorkbenchWriteFacade cash special metadata mutation still needs focused audit and boundary selection. ETC still needs later focused classification before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -121,8 +122,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:workbench-write-facade-pair-service-boundary-audit`
+`workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction`
 
 ## Next Prompt
 
-`workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction`
+`workbench-relations:workbench-write-facade-cash-special-metadata-boundary-audit`

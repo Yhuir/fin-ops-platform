@@ -1170,6 +1170,49 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_write_facade_relation_reads_use_read_snapshot_port(self) -> None:
+        path = SERVICES_ROOT / "workbench_write_facade.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        facade_source = _class_source(tree, source, "WorkbenchWriteFacade")
+        port_source = _class_source(tree, source, "WorkbenchWriteRelationReadSnapshotPort")
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        factory_source = _function_source(server_tree, server_source, "_workbench_write_facade")
+
+        violations: list[str] = []
+        if "WorkbenchWriteRelationReadSnapshotPort" not in source:
+            violations.append("WorkbenchWriteFacade module lacks explicit relation read/snapshot port")
+        if "_relation_read_snapshot_port" not in facade_source:
+            violations.append("WorkbenchWriteFacade does not store relation read/snapshot port")
+        for forbidden in (
+            "_pair_relation_service.active_relations_for_row_ids",
+            "_pair_relation_service.get_active_relation_by_row_id",
+            "_pair_relation_service.preview_withdraw_for_row_ids",
+            "_pair_relation_service.snapshot",
+        ):
+            if forbidden in facade_source:
+                violations.append(f"WorkbenchWriteFacade keeps direct pair read/snapshot call {forbidden}")
+        for required in (
+            "active_relations_for_row_ids",
+            "get_active_relation_by_row_id",
+            "preview_withdraw_for_row_ids",
+            "snapshot",
+        ):
+            if required not in port_source:
+                violations.append(f"WorkbenchWriteRelationReadSnapshotPort is missing {required}")
+        if "relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(" not in factory_source:
+            violations.append("Application does not inject WorkbenchWriteRelationReadSnapshotPort")
+        for retained in (
+            "_pair_relation_service.update_special_metadata_for_row_ids",
+            "_pair_relation_service.clear_special_metadata_for_row_ids",
+        ):
+            if retained not in facade_source:
+                violations.append(f"cash special metadata mutation is no longer explicitly visible for later boundary {retained}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_personal_advance_repayment_uses_relation_command_boundary(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")
