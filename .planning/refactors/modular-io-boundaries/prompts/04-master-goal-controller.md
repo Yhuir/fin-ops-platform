@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:no-oa-pair-service-boundary-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:no-oa-application-pair-snapshot-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -83,9 +83,11 @@ Current state expected on start:
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
 - Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- No-OA normal relation writes are command-service gated and active reads mostly use `relation_facade`, but application snapshot/persist/rollback pair service usage still needs extraction.
+- No-OA normal relation writes are command-service gated and active reads mostly use `relation_facade`.
+- No-OA application snapshot/version/persist/rollback pair service usage now goes through `NoOaPairRelationSnapshotPort`.
+- No-OA domain repair/read pair service usage remains in `NoOaBankBatchService` and needs audit before extraction.
 - ETC and WorkbenchWriteFacade relation dependencies still need focused classification.
-- The next pending boundary is workbench-relations:no-oa-application-pair-snapshot-port-extraction.
+- The next pending boundary is workbench-relations:no-oa-domain-repair-read-port-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -181,21 +183,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:no-oa-application-pair-snapshot-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:no-oa-domain-repair-read-port-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:no-oa-application-pair-snapshot-port-extraction:
+For workbench-relations:no-oa-domain-repair-read-port-audit:
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-no-oa-pair-service-boundary-audit.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-no-oa-application-pair-snapshot-port-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
 - Read `docs/modules/no-oa-bank-batches/README.md`, `state-machine.md`, and `tests.md`.
-- Read `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant no-OA relation tests.
-- Use CodeGraph/text search for `NoOaBankBatchApplicationService`, `pair_relation_service`, `_pair_relation_service`, `snapshot_case_ids`, `save_no_oa_bank_batch_mutation`, `save_workbench_pair_relations`, `_restore_snapshots`, and `pair_relation_snapshot_by_case_id`.
-- Extract no-OA application pair snapshot/version/persist/rollback usage into an explicit collaborator or port.
-- Preserve existing `save_no_oa_bank_batch_mutation(...)` and fallback persistence payload shapes.
-- Preserve rollback behavior for submit/submit-selection/internal-transfer/withdraw persistence failures.
-- Keep normal relation writes on `WorkbenchRelationCommandService`.
-- Keep active relation reads on `WorkbenchRelationReadFacade`.
-- Do not migrate `NoOaBankBatchService._repair_submitted_no_oa_relation_consistency(...)` or `_has_active_no_oa_relation(...)` in this slice.
-- Add/strengthen tests proving no-OA application relation writes still do not call direct pair mutation and app service no longer reaches into `_pair_relations` / `_pair_relation_history` directly.
+- Read `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, and relevant no-OA relation tests.
+- Use CodeGraph/text search for `NoOaBankBatchService`, `_pair_relation_service`, `_repair_submitted_no_oa_relation_consistency`, `_has_active_no_oa_relation`, `_build_batches_for_month_scope`, `active_relations_for_row_ids`, `get_active_relation_by_case_id`, `relation_facade`, and `relation_command_service`.
+- Audit `NoOaBankBatchService` pair relation service usage in submitted relation repair and relation-backed stale/submitted projection.
+- Classify each usage as removable, compat-only, or requiring a read/repair port.
+- Determine whether the next boundary should be an implementation extraction, a guard-only slice, or another smaller audit.
+- Preserve the existing command-service write path for no-OA relation repair.
+- Preserve relation-backed stale projection behavior until a tested replacement exists.
+- Do not migrate `NoOaBankBatchApplicationService`; it was handled in the previous slice.
+- Do not remove domain repair/read behavior without tests proving equivalent behavior.
 - Do not change no-OA submit/withdraw/internal transfer business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.

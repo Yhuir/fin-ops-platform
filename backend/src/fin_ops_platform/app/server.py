@@ -245,7 +245,10 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_RELATION_MODE,
     NoOaBankBatchService,
 )
-from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchApplicationService
+from fin_ops_platform.services.no_oa_bank_batch_application_service import (
+    NoOaBankBatchApplicationService,
+    NoOaPairRelationSnapshotPort,
+)
 from fin_ops_platform.services.no_oa_bank_batch_tag_selection_service import (
     NoOaBankBatchTagSelectionApplicationService,
 )
@@ -12851,7 +12854,7 @@ class Application:
             no_oa_bank_batch_service=self._no_oa_bank_batch_service,
             app_settings_service=self._app_settings_service,
             bank_transaction_category_service=self._bank_transaction_category_service,
-            pair_relation_service=self._workbench_pair_relation_service,
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(self._workbench_pair_relation_service),
             workbench_read_model_service=self._workbench_read_model_service,
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,

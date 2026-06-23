@@ -50,6 +50,39 @@ class NoOaBankBatchRelationMutationError(ValueError):
         self.payload = dict(payload or {})
 
 
+class NoOaPairRelationSnapshotPort:
+    def __init__(self, pair_relation_service: Any) -> None:
+        self._pair_relation_service = pair_relation_service
+
+    def snapshot(self) -> dict[str, Any]:
+        snapshot = getattr(self._pair_relation_service, "snapshot", None)
+        return deepcopy(snapshot() or {}) if callable(snapshot) else {}
+
+    def snapshot_case_ids(self, case_ids: list[str]) -> dict[str, Any]:
+        snapshot_case_ids = getattr(self._pair_relation_service, "snapshot_case_ids", None)
+        if callable(snapshot_case_ids):
+            return deepcopy(snapshot_case_ids(case_ids) or {})
+        return self.snapshot()
+
+    def snapshot_version(self) -> str:
+        return WorkbenchReadModelService.snapshot_version(self.snapshot())
+
+    def snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        normalized_case_id = str(case_id or "").strip()
+        if not normalized_case_id:
+            return None
+        pair_relations = self.snapshot().get("pair_relations", {})
+        relation = pair_relations.get(normalized_case_id) if isinstance(pair_relations, dict) else None
+        return dict(relation) if isinstance(relation, dict) else None
+
+    def restore(self, relation_snapshot: dict[str, Any]) -> None:
+        restored_relation_service = WorkbenchPairRelationService.from_snapshot(relation_snapshot)
+        if hasattr(self._pair_relation_service, "_pair_relations"):
+            self._pair_relation_service._pair_relations = deepcopy(restored_relation_service._pair_relations)
+        if hasattr(self._pair_relation_service, "_pair_relation_history"):
+            self._pair_relation_service._pair_relation_history = deepcopy(restored_relation_service._pair_relation_history)
+
+
 class NoOaBankBatchApplicationService:
     def __init__(
         self,
@@ -59,7 +92,7 @@ class NoOaBankBatchApplicationService:
         no_oa_bank_batch_service: NoOaBankBatchService,
         app_settings_service: AppSettingsService,
         bank_transaction_category_service: BankTransactionCategoryService,
-        pair_relation_service: WorkbenchPairRelationService,
+        pair_relation_snapshot_port: NoOaPairRelationSnapshotPort,
         workbench_read_model_service: WorkbenchReadModelService,
         state_store: Any | None,
         tag_selection_service: Any | None = None,
@@ -79,7 +112,7 @@ class NoOaBankBatchApplicationService:
         self._tag_selection_service = tag_selection_service
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
-        self._pair_relation_service = pair_relation_service
+        self._pair_relation_snapshot_port = pair_relation_snapshot_port
         self._workbench_read_model_service = workbench_read_model_service
         self._state_store = state_store
         self._workbench_sql_read_repository = workbench_sql_read_repository
@@ -223,7 +256,7 @@ class NoOaBankBatchApplicationService:
         persist: bool = True,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
             self.refresh_batches()
             before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
@@ -250,7 +283,7 @@ class NoOaBankBatchApplicationService:
         note: str | None,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
             bank_rows, categories_by_transaction_id = self.refresh_batches()
             self._validate_internal_transfer_selection(
@@ -283,7 +316,7 @@ class NoOaBankBatchApplicationService:
         note: str | None,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
             bank_rows, categories_by_transaction_id = self.refresh_batches()
             batch = self._internal_transfer_batch_for_workbench_rows(
@@ -315,7 +348,7 @@ class NoOaBankBatchApplicationService:
         reason: str | None,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
             before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
             already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
@@ -785,9 +818,7 @@ class NoOaBankBatchApplicationService:
             "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
             "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "pair_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._pair_relation_service.snapshot()
-            ),
+            "pair_relation_snapshot_version": self._pair_relation_snapshot_port.snapshot_version(),
             "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._bank_transaction_category_service.snapshot()
             ),
@@ -987,9 +1018,9 @@ class NoOaBankBatchApplicationService:
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
             if callable(save_mutation):
                 save_mutation(
-                    pair_relation_snapshot=self._pair_relation_service.snapshot_case_ids(changed_case_ids)
+                    pair_relation_snapshot=self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids)
                     if changed_case_ids
-                    else self._pair_relation_service.snapshot(),
+                    else self._pair_relation_snapshot_port.snapshot(),
                     no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
                     workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                     changed_case_ids=changed_case_ids,
@@ -998,7 +1029,7 @@ class NoOaBankBatchApplicationService:
             else:
                 if changed_case_ids:
                     self._state_store.save_workbench_pair_relations(
-                        self._pair_relation_service.snapshot_case_ids(changed_case_ids),
+                        self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids),
                         changed_case_ids=changed_case_ids,
                     )
                 self._state_store.save_no_oa_bank_batches(self._no_oa_public_snapshot())
@@ -1053,9 +1084,7 @@ class NoOaBankBatchApplicationService:
         normalized_case_id = str(case_id or "").strip()
         if not normalized_case_id:
             return None
-        pair_relations = self._pair_relation_service.snapshot().get("pair_relations", {})
-        relation = pair_relations.get(normalized_case_id) if isinstance(pair_relations, dict) else None
-        return dict(relation) if isinstance(relation, dict) else None
+        return self._pair_relation_snapshot_port.snapshot_by_case_id(normalized_case_id)
 
     def _validate_internal_transfer_selection(
         self,
@@ -1199,9 +1228,7 @@ class NoOaBankBatchApplicationService:
         restored_batch_service = NoOaBankBatchService.from_snapshot(batch_snapshot)
         self._no_oa_bank_batch_service._batches = deepcopy(restored_batch_service._batches)
         self._no_oa_bank_batch_service._audit_log = deepcopy(restored_batch_service._audit_log)
-        restored_relation_service = WorkbenchPairRelationService.from_snapshot(relation_snapshot)
-        self._pair_relation_service._pair_relations = deepcopy(restored_relation_service._pair_relations)
-        self._pair_relation_service._pair_relation_history = deepcopy(restored_relation_service._pair_relation_history)
+        self._pair_relation_snapshot_port.restore(relation_snapshot)
 
     def bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()

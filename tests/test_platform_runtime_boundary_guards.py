@@ -165,16 +165,14 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
         class_name = self._class_stack[-1] if self._class_stack else ""
         function_name = self._function_stack[-1] if self._function_stack else ""
         allowed_methods = {
+            "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
+                "NoOaPairRelationSnapshotPort.restore",
+            },
             "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
                 "BatchAccountingService._submit_unlocked",
                 "BatchAccountingService.repair_legacy_case_id_collisions",
                 "BatchAccountingService.withdraw",
                 "BatchAccountingService._withdraw_unlocked",
-            },
-            "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
-                "NoOaBankBatchApplicationService._validate_internal_transfer_selection",
-                "NoOaBankBatchApplicationService._restore_snapshots",
-                "NoOaBankBatchApplicationService.pair_relation_snapshot_by_case_id",
             },
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
                 "NoOaBankBatchService._repair_submitted_no_oa_relation_consistency",
@@ -772,6 +770,40 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     and node.module == "fin_ops_platform.services.workbench_pair_relation_service"
                 ):
                     violations.append(f"{rel_path}:{node.lineno} imports WorkbenchPairRelationService")
+
+        self.assertEqual(violations, [])
+
+    def test_no_oa_application_uses_pair_relation_snapshot_port(self) -> None:
+        path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        app_source = _class_source(tree, source, "NoOaBankBatchApplicationService")
+        port_source = _class_source(tree, source, "NoOaPairRelationSnapshotPort")
+
+        violations: list[str] = []
+        if "NoOaPairRelationSnapshotPort" not in source:
+            violations.append("no-OA application module lacks explicit pair relation snapshot port")
+        if "_pair_relation_snapshot_port" not in app_source:
+            violations.append("NoOaBankBatchApplicationService does not store pair relation snapshot port")
+        for forbidden in (
+            "pair_relation_service:",
+            "pair_relation_service=",
+            "self._pair_relation_service",
+            "._pair_relations",
+            "._pair_relation_history",
+            "WorkbenchPairRelationService.from_snapshot",
+        ):
+            if forbidden in app_source:
+                violations.append(f"NoOaBankBatchApplicationService keeps direct pair relation dependency {forbidden}")
+        for required in (
+            "snapshot_case_ids",
+            "snapshot_version",
+            "snapshot_by_case_id",
+            "restore",
+            "WorkbenchPairRelationService.from_snapshot",
+        ):
+            if required not in port_source:
+                violations.append(f"NoOaPairRelationSnapshotPort is missing {required}")
 
         self.assertEqual(violations, [])
 

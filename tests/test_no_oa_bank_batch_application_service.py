@@ -4,7 +4,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 
-from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchApplicationService
+from fin_ops_platform.services.no_oa_bank_batch_application_service import (
+    NoOaBankBatchApplicationService,
+    NoOaPairRelationSnapshotPort,
+)
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -183,7 +186,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 snapshot=lambda: {},
                 tag_dictionary_payload=lambda: {"definitions": []},
             ),
-            pair_relation_service=pair_service,
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_service),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
             state_store=None,
             relation_facade=EmptyWorkbenchRelationFacade(),
@@ -562,10 +565,10 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             no_oa_bank_batch_service=SimpleNamespace(snapshot=lambda: {"batches": {}}),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
-            pair_relation_service=SimpleNamespace(
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace(
                 snapshot=lambda: {"relations": "all"},
                 snapshot_case_ids=lambda case_ids: {"relations": list(case_ids)},
-            ),
+            )),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
             state_store=state_store,
             execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
@@ -621,7 +624,9 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             no_oa_bank_batch_service=SimpleNamespace(snapshot=lambda: {}),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
-            pair_relation_service=SimpleNamespace(snapshot=lambda: {}, snapshot_case_ids=lambda _case_ids: {}),
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(
+                SimpleNamespace(snapshot=lambda: {}, snapshot_case_ids=lambda _case_ids: {})
+            ),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
             state_store=StateStore(),
             execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
@@ -650,7 +655,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             no_oa_bank_batch_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
-            pair_relation_service=SimpleNamespace(),
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
             workbench_read_model_service=SimpleNamespace(),
             state_store=None,
             queue_repository=queue,

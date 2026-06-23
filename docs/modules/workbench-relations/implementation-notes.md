@@ -64,6 +64,30 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - no-OA application pair snapshot port extraction
+
+目标：把 `NoOaBankBatchApplicationService` 中仍直接依赖 broad pair service 的 snapshot/version/persist/rollback 行为抽成显式 port，避免应用服务继续触碰旧 pair relation 内部状态。
+
+变更：
+
+- 新增 `NoOaPairRelationSnapshotPort`，集中适配 pair relation snapshot、case-id scoped snapshot、snapshot version、case-id lookup 和 rollback restore。
+- `NoOaBankBatchApplicationService` 改为接收 `pair_relation_snapshot_port`，不再接收或保存 `pair_relation_service`。
+- no-OA submit、submit-selection、internal transfer、withdraw 前的 relation snapshot、source version、`save_no_oa_bank_batch_mutation(...)` payload、fallback `save_workbench_pair_relations(...)` payload 和 `_restore_snapshots(...)` 统一通过 port。
+- `Application` 构造 no-OA application service 时注入 `NoOaPairRelationSnapshotPort(self._workbench_pair_relation_service)`。
+- `NoOaBankBatchService` 的 `_pair_relation_service` 保留，后续单独审计 domain repair/read port；本次不迁移 `_repair_submitted_no_oa_relation_consistency(...)` 或 `_has_active_no_oa_relation(...)`。
+- 新增静态 guard，防止 `NoOaBankBatchApplicationService` 重新接收 broad pair service 或直接写 `_pair_relations` / `_pair_relation_history`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_api.NoOaBankBatchApiTests.test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_no_oa_application_uses_pair_relation_snapshot_port tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_downstream_relation_read_models_use_workbench_relation_distribution -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+下一条边界：`workbench-relations:no-oa-domain-repair-read-port-audit`。
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
