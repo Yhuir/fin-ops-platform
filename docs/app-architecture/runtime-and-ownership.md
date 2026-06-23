@@ -157,6 +157,7 @@ Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须
 ## 仍需关注的 legacy 边界
 
 - `server.py` 仍有部分 route handler 和 dependency wiring，需要按 `docs/architecture/backend-refactor/` 的 Python-first 方向继续拆分。
+- 已拆出的 `routes_*.py` route owner 需要保持登记、导入、factory/accessor 和 handler 委托关系；`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_route_owner_inventory_stays_registered` 作为静态 guard，防止新增 route module 未登记或既有 owner 回退到无归属的 `server.py` 私有链路。
 - service 构造必须接收明确依赖，不把整个 `Application` 注入 service。
 - repository 可以知道 SQL 表结构；业务 service 不应散落 SQL。
 - worker 不依赖 `Application`、HTTP response、cookie/header 或 auth module。

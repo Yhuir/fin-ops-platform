@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-batch-accounting-legacy-route-contract`
+Current state: `autonomous-continue-after-server-py-route-owner-inventory`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `batch-accounting:legacy-route-contract`; next execution should start with server.py route owner inventory.
+Completed `server-py:route-owner-inventory`; next execution should start with Workbench Go hot-path compute admission review.
 
 ## Completed Modules
 
@@ -47,6 +47,7 @@ Completed `batch-accounting:legacy-route-contract`; next execution should start 
 - `read-models:legacy-read-path-removal-guards` -> `closed-autonomous`
 - `reconciliation-workbench:amount-check-query-contract` -> `closed-autonomous`
 - `batch-accounting:legacy-route-contract` -> `closed-autonomous`
+- `server-py:route-owner-inventory` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -58,8 +59,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`batch-accounting:legacy-route-contract`
+`server-py:route-owner-inventory`
 
 ## Next Prompt
 
-`server-py:route-owner-inventory`
+`go-hot-path:workbench-compute-admission`

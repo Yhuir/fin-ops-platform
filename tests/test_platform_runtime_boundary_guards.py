@@ -364,6 +364,90 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("def execute_file_import_confirm_job", service_source)
         self.assertIn("def execute_etc_invoice_import_confirm_job", service_source)
 
+    def test_server_route_owner_inventory_stays_registered(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_owners = {
+            "routes_bank_details.py": {
+                "module": "fin_ops_platform.app.routes_bank_details",
+                "class": "BankDetailsApiRoutes",
+                "server_markers": ("def _bank_details_routes", "_bank_details_routes()."),
+            },
+            "routes_cost_statistics.py": {
+                "module": "fin_ops_platform.app.routes_cost_statistics",
+                "class": "CostStatisticsApiRoutes",
+                "server_markers": ("def _cost_statistics_routes", "_cost_statistics_routes()."),
+            },
+            "routes_etc.py": {
+                "module": "fin_ops_platform.app.routes_etc",
+                "class": "EtcBusinessBatchApiRoutes",
+                "server_markers": ("def _etc_business_routes", "_etc_business_routes()."),
+            },
+            "routes_no_oa_bank_batches.py": {
+                "module": "fin_ops_platform.app.routes_no_oa_bank_batches",
+                "class": "NoOaBankBatchApiRoutes",
+                "server_markers": ("def _no_oa_bank_batch_routes", "_no_oa_bank_batch_routes()."),
+            },
+            "routes_oa_pending_payments.py": {
+                "module": "fin_ops_platform.app.routes_oa_pending_payments",
+                "class": "OaPendingPaymentApiRoutes",
+                "server_markers": ("def _oa_pending_payment_routes", "_oa_pending_payment_routes()."),
+            },
+            "routes_output_invoice_collections.py": {
+                "module": "fin_ops_platform.app.routes_output_invoice_collections",
+                "class": "OutputInvoiceCollectionApiRoutes",
+                "server_markers": ("def _output_invoice_collection_routes", "_output_invoice_collection_routes()."),
+            },
+            "routes_pending_invoices.py": {
+                "module": "fin_ops_platform.app.routes_pending_invoices",
+                "class": "PendingInvoiceApiRoutes",
+                "server_markers": ("def _pending_invoice_routes", "_pending_invoice_routes()."),
+            },
+            "routes_tax.py": {
+                "module": "fin_ops_platform.app.routes_tax",
+                "class": "TaxApiRoutes",
+                "server_markers": ("def _tax_offset_routes", "_tax_offset_routes().", "_tax_api_routes"),
+            },
+            "routes_turnover_ledger.py": {
+                "module": "fin_ops_platform.app.routes_turnover_ledger",
+                "class": "TurnoverLedgerApiRoutes",
+                "server_markers": ("_turnover_ledger_api_routes = TurnoverLedgerApiRoutes(", "_turnover_ledger_api_routes."),
+            },
+            "routes_workbench.py": {
+                "module": "fin_ops_platform.app.routes_workbench",
+                "class": "WorkbenchApiRoutes",
+                "server_markers": ("_workbench_api_routes = WorkbenchApiRoutes(", "_workbench_api_routes."),
+            },
+        }
+        discovered_route_modules = {path.name for path in APP_ROOT.glob("routes_*.py")}
+        violations: list[str] = []
+
+        missing_from_inventory = sorted(discovered_route_modules - set(route_owners))
+        stale_inventory = sorted(set(route_owners) - discovered_route_modules)
+        if missing_from_inventory:
+            violations.append(f"routes_*.py files missing route owner inventory: {missing_from_inventory}")
+        if stale_inventory:
+            violations.append(f"route owner inventory references missing files: {stale_inventory}")
+
+        for filename, owner in sorted(route_owners.items()):
+            route_path = APP_ROOT / filename
+            if not route_path.exists():
+                continue
+            route_source = route_path.read_text(encoding="utf-8")
+            route_tree = _parse(route_path)
+            route_class = str(owner["class"])
+            module = str(owner["module"])
+            if not _class_source(route_tree, route_source, route_class):
+                violations.append(f"{filename} does not define {route_class}")
+            if not _imports_name_from_module(server_tree, module=module, name=route_class):
+                violations.append(f"server.py does not import {route_class} from {module}")
+            for marker in owner["server_markers"]:
+                if marker not in server_source:
+                    violations.append(f"server.py route owner {route_class} is missing marker {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

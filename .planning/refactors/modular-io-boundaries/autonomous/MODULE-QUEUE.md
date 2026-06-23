@@ -19,7 +19,7 @@
 | 12 | `read-models:legacy-read-path-removal-guards` | closed-autonomous | Added static guard classifying direct read model refresh enqueue wrappers so new legacy producers cannot bypass gateway/scope policy unnoticed. |
 | 13 | `reconciliation-workbench:amount-check-query-contract` | closed-autonomous | Added amount-check input priority guard proving explicit `reconciliation_amount` wins over legacy `detail_fields.明细金额合计` fallback; no runtime behavior change. |
 | 14 | `batch-accounting:legacy-route-contract` | closed-autonomous | Added route handler static guard preventing GET repair/write/read-model scheduling and submit/withdraw direct relation write bypasses; no runtime behavior change. |
-| 15 | `server-py:route-owner-inventory` | pending | Inventory and small route ownership hardening only; no broad rewrite. |
+| 15 | `server-py:route-owner-inventory` | closed-autonomous | Added static inventory guard proving every existing `routes_*.py` owner is registered/imported/delegated from `server.py`; no runtime behavior change. |
 | 16 | `go-hot-path:workbench-compute-admission` | pending | Admission review only for `workbench:matching-grouping-check`; no Go implementation until gates pass. |
 | 17 | `go-hot-path:workbench-read-model-builder-admission` | pending | Admission review only for active generation / scoped incremental Go Worker candidate after read model contracts are stable. |
 | 18 | `go-hot-path:import-parser-admission` | pending | Admission review only for parse/normalize/preview Go Processor candidate. |
