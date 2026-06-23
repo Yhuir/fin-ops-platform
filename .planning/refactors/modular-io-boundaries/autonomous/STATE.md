@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-persist-state-relation-snapshot-quarantine`
+Current state: `autonomous-continue-after-workbench-relations-app-health-route-builder-pair-service-injection-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:persist-state-relation-snapshot-quarantine`. `workbench_relation` remains implementation-gap-open. Broad `Application._persist_state(...)` no longer serializes Workbench relation snapshot facts; relation-specific save/load boundaries remain intact. The next smallest safe boundary is app health / route builder pair-service injection audit.
+Completed `workbench-relations:app-health-route-builder-pair-service-injection-audit`. `workbench_relation` remains implementation-gap-open. App Health services have no pair-service dependency; route/builder accounting found turnover primary builders still pass broad pair service into local snapshot/restore support. The next smallest safe boundary is turnover local pair snapshot port extraction.
 
 ## Closed Or Deferred Slices
 
@@ -124,6 +124,7 @@ Completed `workbench-relations:persist-state-relation-snapshot-quarantine`. `wor
 - `workbench-relations:rollback-closure-accounting-audit` -> `analysis-closed`
 - `workbench-relations:whole-state-persistence-closure-accounting-audit` -> `analysis-closed`
 - `workbench-relations:persist-state-relation-snapshot-quarantine` -> `implementation-closed`
+- `workbench-relations:app-health-route-builder-pair-service-injection-audit` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -131,7 +132,7 @@ Completed `workbench-relations:persist-state-relation-snapshot-quarantine`. `wor
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback and whole-state persistence closure accounting are analysis-closed. App health / route builder pair-service injection accounting remains a separate slice. ETC repair/link/migration services are already command-boundary guarded but still need later closure accounting before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence and app health / route builder pair-service injection closure accounting are analysis-closed. Turnover local pair snapshot/restore support remains a separate implementation slice. ETC repair/link/migration services are already command-boundary guarded but still need later closure accounting before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -146,8 +147,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:persist-state-relation-snapshot-quarantine`
+`workbench-relations:app-health-route-builder-pair-service-injection-audit`
 
 ## Next Prompt
 
-`workbench-relations:app-health-route-builder-pair-service-injection-audit`
+`workbench-relations:turnover-local-pair-snapshot-port-extraction`

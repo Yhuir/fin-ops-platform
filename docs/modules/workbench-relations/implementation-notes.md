@@ -3450,3 +3450,28 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:app-health-route-builder-pair-service-injection-audit`。
+
+## 2026-06-24 - app health route builder pair-service injection audit
+
+目标：审计 App Health services 和 route/builder 中剩余的 pair-service injection。
+
+结论：
+
+- `AppHealthAlertService` 和 `AppStatusOverviewService` 没有 `pair_relation_service` / `_workbench_pair_relation_service` 依赖。
+- no-OA route/application 已通过 `NoOaPairRelationSnapshotPort` 显式声明 snapshot 边界。
+- batch-accounting route-local rollback callback 已在 rollback accounting 中分类为 compat-only，restore 委托 `WorkbenchPairRelationRollbackRestoreService(state_store=None)`。
+- `SettingsDataResetService(workbench_pair_relation_service=...)` 仍是 later accounting candidate；它当前用于 reset OA 时保留非 OA relation 并移除 OA/附件 relation。
+- turnover primary builders 仍把 broad pair service 传给 local transaction snapshot/restore support；`TurnoverLedgerLocalClosureConnection` 直接 snapshot/save/restore pair service state，并写入私有 `_pair_relations` / `_pair_relation_history` 字段。
+
+下一条最小实现边界：
+
+- `workbench-relations:turnover-local-pair-snapshot-port-extraction`
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:turnover-local-pair-snapshot-port-extraction`。
