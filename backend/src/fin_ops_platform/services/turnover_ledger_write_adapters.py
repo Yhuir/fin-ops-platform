@@ -462,7 +462,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
         pair_relation_service: Any | None = None,
-        persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -478,7 +477,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
         self._pair_relation_service = pair_relation_service
-        self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
@@ -503,7 +501,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     pair_relation_service=self._pair_relation_service,
-                    persist_pair_relations=self._persist_pair_relations_in_transaction,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
@@ -578,7 +575,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
         pair_relation_service: Any | None = None,
-        persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -594,7 +590,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
         self._pair_relation_service = pair_relation_service
-        self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
@@ -619,7 +614,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     pair_relation_service=self._pair_relation_service,
-                    persist_pair_relations=self._persist_pair_relations_in_transaction,
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
                 )
@@ -1021,7 +1015,6 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
         routes: Any,
         after_mutation: Callable[[list[str]], None],
         pair_relation_service: Any,
-        persist_pair_relations: Callable[..., None],
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -1030,9 +1023,6 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
         self._after_mutation = after_mutation
         self._pair_port = TurnoverLedgerWorkbenchPairPort(
             pair_relation_service=pair_relation_service,
-            persist_pair_relations=lambda *, transaction, changed_case_ids: persist_pair_relations(
-                changed_case_ids=changed_case_ids
-            ),
             relation_command_service_factory=relation_command_service_factory,
             relation_facade=relation_facade,
         )
@@ -1556,7 +1546,6 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         routes: Any,
         after_mutation: Callable[[list[str]], None],
         pair_relation_service: Any | None = None,
-        persist_pair_relations: Callable[..., None] | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
@@ -1565,17 +1554,10 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         self._pair_port = (
             TurnoverLedgerWorkbenchPairPort(
                 pair_relation_service=pair_relation_service,
-                persist_pair_relations=lambda *, transaction, changed_case_ids: persist_pair_relations(
-                    changed_case_ids=changed_case_ids
-                ),
                 relation_command_service_factory=relation_command_service_factory,
                 relation_facade=relation_facade,
             )
-            if (
-                pair_relation_service is not None
-                and persist_pair_relations is not None
-            )
-            or relation_command_service_factory is not None
+            if pair_relation_service is not None or relation_command_service_factory is not None
             else None
         )
 
@@ -1774,12 +1756,10 @@ class TurnoverLedgerWorkbenchPairPort:
         self,
         *,
         pair_relation_service: Any | None = None,
-        persist_pair_relations: Callable[..., None] | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
         self._pair_relation_service = pair_relation_service
-        self._persist_pair_relations = persist_pair_relations
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 

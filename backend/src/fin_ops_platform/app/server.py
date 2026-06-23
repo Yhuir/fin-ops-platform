@@ -3406,7 +3406,6 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             pair_relation_service=self._workbench_pair_relation_service,
-            persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         ).build()
@@ -3423,7 +3422,6 @@ class Application:
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
             pair_relation_service=self._workbench_pair_relation_service,
-            persist_pair_relations=self._persist_workbench_pair_relations,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         )
@@ -3459,7 +3457,6 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_withdraw_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_withdraw_local_idempotency_store,
             pair_relation_service=self._workbench_pair_relation_service,
-            persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         ).build()
@@ -3480,7 +3477,6 @@ class Application:
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
             pair_relation_service=self._workbench_pair_relation_service,
-            persist_pair_relations=self._persist_workbench_pair_relations,
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
             relation_facade=self._workbench_relation_read_facade(),
         )

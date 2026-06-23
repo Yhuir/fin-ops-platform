@@ -395,6 +395,31 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - turnover workbench pair port unused persist callback removal
+
+目标：删除 `TurnoverLedgerWorkbenchPairPort` 上未使用的 `persist_pair_relations` callback wiring，不改变外部往来确认/撤回业务行为。
+
+变更：
+
+- 删除 `TurnoverLedgerWorkbenchPairPort.__init__(...)` 的 `persist_pair_relations` 参数。
+- 删除 `_persist_pair_relations` 字段。
+- 删除 turnover primary builders 和 legacy fallback facades 构造 port 时传入的 `persist_pair_relations=...`。
+- 删除 `server.py` 向 turnover primary/fallback builder 传入的、仅用于该 port 的 `persist_pair_relations(_in_transaction)` wiring。
+- 静态 guard 现在阻止 `_persist_pair_relations` 字段名回到 `TurnoverLedgerWorkbenchPairPort`。
+
+决策：
+
+- `pair_relation_service` 继续保留为 withdrawability check 的 read-only compat fallback，本 slice 不移除。
+- confirm/withdraw/cash-closure 写入仍必须通过 `WorkbenchRelationCommandService`，缺 command service 时 fail fast。
+- 本 slice 不改变 API shape、dirty scope、read model refresh 或 production state。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure_withdraw tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_delegates_cash_closure_withdraw_to_relation_command_service tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_workbench_pair_port_has_no_direct_pair_write_fallback -v
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

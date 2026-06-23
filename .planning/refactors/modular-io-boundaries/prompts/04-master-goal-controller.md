@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:turnover-workbench-pair-port-boundary-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -83,8 +83,9 @@ Current state expected on start:
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
 - Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- Turnover pair writes are command-service gated; pair service is currently read-only compat fallback and unused persist callback wiring should be removed next.
-- The next pending boundary is workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal.
+- Turnover pair port no longer carries unused persist callback wiring; pair service remains read-only compat fallback.
+- Pending invoice, no-OA, ETC and WorkbenchWriteFacade relation dependencies still need focused classification.
+- The next pending boundary is workbench-relations:pending-invoice-pair-service-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -180,25 +181,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:pending-invoice-pair-service-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:turnover-workbench-pair-port-unused-persist-callback-removal:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-workbench-pair-port-boundary-audit.md`.
+For workbench-relations:pending-invoice-pair-service-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-workbench-pair-port-unused-persist-callback-removal.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `docs/modules/turnover-ledger/README.md`, `state-machine.md`, and `tests.md`.
-- Read `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_turnover_ledger_uow_contract.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `TurnoverLedgerWorkbenchPairPort`, `persist_pair_relations`, `_persist_pair_relations`, and caller wiring.
-- Remove the unused `persist_pair_relations` constructor parameter from `TurnoverLedgerWorkbenchPairPort`.
-- Remove the unused `_persist_pair_relations` field.
-- Remove `persist_pair_relations=...` arguments from primary builders and legacy fallback facades where they instantiate the port.
-- Keep `pair_relation_service` read-only compat fallback unchanged.
-- Update static guard to prove `_persist_pair_relations` cannot return inside `TurnoverLedgerWorkbenchPairPort`.
-- Do not remove `pair_relation_service` in this slice.
-- Do not change turnover closure/withdraw/cash-closure business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
+- Read `docs/modules/pending-invoices/README.md`, `state-machine.md`, and `tests.md`.
+- Read `backend/src/fin_ops_platform/services/pending_invoice_service.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant pending-invoice relation tests.
+- Use CodeGraph/text search for `PendingInvoiceQueryService`, `PendingInvoiceApplicationService`, `pair_relation_service`, `relation_facade`, `relation_command_service`, and write/read callers.
+- Audit pending invoice query/application pair service dependencies.
+- Decide whether pair service dependency can be removed, should become read-facade/command-service-only, or must remain `compat-only`.
+- Classify query and application service separately.
+- Do not migrate pending invoice behavior in this audit slice unless a trivial no-code deletion is proven safe and queue is updated.
+- Do not change pending invoice attach/manual invoice business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
-- Produce an implementation analysis/accounting file.
+- Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted turnover/guard tests, docs verification and diff checks.
+- Run targeted docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

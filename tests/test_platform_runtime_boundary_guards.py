@@ -1060,7 +1060,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for forbidden in (
             "replace_with_confirmed_relation",
             "cancel_relation(case_id)",
-            "_persist_pair_relations(",
+            "_persist_pair_relations",
         ):
             if forbidden in port_source:
                 violations.append(f"TurnoverLedgerWorkbenchPairPort keeps direct pair write fallback {forbidden}")
