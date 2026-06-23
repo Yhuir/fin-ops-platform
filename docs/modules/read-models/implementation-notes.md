@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail freshness / operation barrier boundary
+
+- 目标：执行 `read-models:bank-detail-refresh-freshness-operation-barrier`，让 BankDetails 写后刷新和强制刷新响应显式返回 `read_model_scope_keys` 与 `freshness_targets`。
+- 影响范围：`BankDetailsApplicationService` 分类写操作、自动标签规则重应用响应、`OperationFreshnessBarrierService` bank_detail scope 回归测试、modular IO planning state。
+- 关键决策：当有具体月份 scope 时，BankDetails operation barrier target 必须使用 `bank_detail:<YYYY-MM>`，不把 fan-out-only `bank_detail:all` 当作 freshness proof；refresh 入队仍通过 `ReadModelRefreshGateway` 和 scope policy registry。
+- 文档影响：同步本实施记录和 modular IO analysis/state；read model/runtime worker 状态机语义不变。
+- 测试覆盖：新增 `BankDetailSqlRepositoryTests.test_category_mutation_response_returns_bank_detail_operation_barrier_targets`、`OperationFreshnessBarrierServiceTests.test_bank_detail_target_uses_exact_month_scope_for_operation_barrier`，并更新 `BankAutoTagRulesApiTests.test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier -v`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ；未证明真实 worker drain 的 operation-to-fresh SLO；BankDetails 分类写入前端暂未消费后端返回的 `freshness_targets`。
+- 后续事项：推进 `read-models:bank-detail-legacy-contamination-removal`，删除或隔离剩余 `server.py` bank_detail legacy helper。
+
 ## 2026-06-24 - Bank detail repository port/query boundary
 
 - 目标：执行 `read-models:bank-detail-repository-port-extraction`，为银行明细 read model 查询侧建立窄 repository port，并把 `server.py` 旧 SQL helper 收敛到 `BankDetailsApplicationService`。

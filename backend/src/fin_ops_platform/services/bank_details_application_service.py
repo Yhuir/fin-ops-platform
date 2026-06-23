@@ -134,7 +134,7 @@ class BankDetailsApplicationService:
 
     def update_auto_tag_rules(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         priority_scope_keys = self._refresh_scope_keys_from_auto_tag_rules_payload(payload)
-        return self._app_settings_service.update_bank_auto_tag_rules(
+        result = self._app_settings_service.update_bank_auto_tag_rules(
             payload,
             actor_id=actor_id,
             after_bank_auto_tag_rules_saved=lambda event: self.finalize_auto_tag_rules_update(
@@ -144,13 +144,21 @@ class BankDetailsApplicationService:
                 }
             ),
         )
+        return {
+            **result,
+            **self._bank_detail_refresh_contract_payload(priority_scope_keys),
+        }
 
     def replace_auto_tag_rules_from_file_source(self, source: object, *, actor_id: str) -> dict[str, Any]:
-        return self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
+        result = self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
             source,
             actor_id=actor_id,
             after_bank_auto_tag_rules_saved=self.finalize_auto_tag_rules_update,
         )
+        return {
+            **result,
+            **self._bank_detail_refresh_contract_payload([]),
+        }
 
     def reapply_auto_tag_rules(self, *, actor_id: str, can_save: bool) -> dict[str, Any]:
         scope_keys = self._available_month_scope_keys_provider()
@@ -176,6 +184,7 @@ class BankDetailsApplicationService:
         )
         payload["read_model_status"] = "refreshing"
         payload["read_model_scope_keys"] = list(scope_keys)
+        payload["freshness_targets"] = self._bank_detail_freshness_targets(scope_keys)
         payload["refresh_enqueued"] = True
         payload["refresh_reason"] = "bank_auto_tag_rules_reapply_requested"
         payload["enqueued_jobs"] = ["bank_detail.read_model.refresh"]
@@ -216,7 +225,11 @@ class BankDetailsApplicationService:
                 "candidate_category_codes": candidate_codes,
             },
         )
-        return {**result, "affected_months": affected_months}
+        return {
+            **result,
+            "affected_months": affected_months,
+            **self._bank_detail_refresh_contract_payload(affected_months),
+        }
 
     def revoke_category_confirmation(self, transaction_id: str, *, actor_id: str) -> dict[str, Any]:
         result = self._bank_transaction_category_service.revoke_auto_category_confirmation(
@@ -230,7 +243,11 @@ class BankDetailsApplicationService:
             action="bank_detail_category_confirmation_revoked",
             metadata={},
         )
-        return {**result, "affected_months": affected_months}
+        return {
+            **result,
+            "affected_months": affected_months,
+            **self._bank_detail_refresh_contract_payload(affected_months),
+        }
 
     def assign_manual_category(self, transaction_id: str, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         selection = manual_assignment_selection(payload)
@@ -274,7 +291,11 @@ class BankDetailsApplicationService:
                 "assignment_source": "manual",
             },
         )
-        return {**result, "affected_months": affected_months}
+        return {
+            **result,
+            "affected_months": affected_months,
+            **self._bank_detail_refresh_contract_payload(affected_months),
+        }
 
     def clear_manual_category(self, transaction_id: str, *, actor_id: str) -> dict[str, Any]:
         result = self._bank_transaction_category_service.clear_manual_category(
@@ -288,7 +309,11 @@ class BankDetailsApplicationService:
             action="bank_detail_category_manual_assignment_cleared",
             metadata={"assignment_source": "manual"},
         )
-        return {**result, "affected_months": affected_months}
+        return {
+            **result,
+            "affected_months": affected_months,
+            **self._bank_detail_refresh_contract_payload(affected_months),
+        }
 
     def export_transactions(
         self,
@@ -728,6 +753,34 @@ class BankDetailsApplicationService:
             for scope_key in self._scope_keys_for_range(date_from=date_from or None, date_to=date_to or None)
             if scope_key and scope_key != "all"
         ]
+
+    def _bank_detail_refresh_contract_payload(self, scope_keys: list[str]) -> dict[str, object]:
+        target_scope_keys = self._bank_detail_operation_scope_keys(scope_keys)
+        return {
+            "read_model_scope_keys": target_scope_keys,
+            "freshness_targets": self._bank_detail_freshness_targets(target_scope_keys),
+        }
+
+    def _bank_detail_freshness_targets(self, scope_keys: list[str]) -> list[dict[str, str]]:
+        return [
+            {"read_model_key": "bank_detail", "scope_key": scope_key}
+            for scope_key in self._bank_detail_operation_scope_keys(scope_keys)
+        ]
+
+    def _bank_detail_operation_scope_keys(self, scope_keys: list[str]) -> list[str]:
+        normalized = [
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        ]
+        concrete = [scope_key for scope_key in normalized if scope_key != "all"]
+        if not concrete:
+            concrete = [
+                str(scope_key).strip()
+                for scope_key in list(self._available_month_scope_keys_provider() or [])
+                if str(scope_key).strip() and str(scope_key).strip() != "all"
+            ]
+        return list(dict.fromkeys(concrete or normalized or ["all"]))
 
     def _scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
         summary_loader = getattr(self._bank_detail_sql_read_repository, "bank_detail_scope_summary", None)

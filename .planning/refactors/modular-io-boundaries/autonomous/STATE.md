@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-repository-port-extraction`
+Current state: `autonomous-continue-after-bank-detail-refresh-freshness-operation-barrier`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-repository-port-extraction`; next execution must start with `read-models:bank-detail-refresh-freshness-operation-barrier`.
+Completed `read-models:bank-detail-refresh-freshness-operation-barrier`; next execution must start with `read-models:bank-detail-legacy-contamination-removal`.
 
 ## Closed Or Deferred Slices
 
@@ -54,12 +54,13 @@ Completed `read-models:bank-detail-repository-port-extraction`; next execution m
 - `planning:completion-semantics-and-queue-reclassification` -> `planning-closed`
 - `read-models:pilot-gap-audit-and-contract-selection` -> `analysis-closed`
 - `read-models:bank-detail-repository-port-extraction` -> `implementation-closed`
+- `read-models:bank-detail-refresh-freshness-operation-barrier` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
-- `bank_detail` repository port/query boundary is implemented, but freshness/barrier and legacy removal are still open.
+- `bank_detail` repository port/query boundary and freshness/barrier response contract are implemented, but legacy removal and pilot verification are still open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work must start before Go admission: repository port extraction, freshness/force-refresh/operation-barrier implementation, legacy contamination removal, and verification/template revision.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -74,8 +75,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-repository-port-extraction`
+`read-models:bank-detail-refresh-freshness-operation-barrier`
 
 ## Next Prompt
 
-`read-models:bank-detail-refresh-freshness-operation-barrier`
+`read-models:bank-detail-legacy-contamination-removal`

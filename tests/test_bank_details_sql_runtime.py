@@ -1125,6 +1125,57 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
+    def test_category_mutation_response_returns_bank_detail_operation_barrier_targets(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(
+                get_bank_auto_tag_rules_payload=lambda **_kwargs: {
+                    "version": 1,
+                    "active_rules": [{"code": "salary"}],
+                }
+            ),
+            bank_transaction_category_service=SimpleNamespace(
+                assign_manual_category=lambda **kwargs: {"ok": True, "transaction_id": kwargs["transaction_id"]},
+                snapshot=lambda: {},
+            ),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: ["2026-04"],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+            suggestion_provider=lambda _transaction_id: {"category_resolution_status": "unmatched"},
+        )
+
+        result = service.assign_manual_category(
+            "txn-apr",
+            {"category_code": "salary"},
+            actor_id="TESTFULL001",
+        )
+
+        self.assertEqual(result["affected_months"], ["2026-04"])
+        self.assertEqual(result["read_model_scope_keys"], ["2026-04"])
+        self.assertEqual(result["freshness_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
+        self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertNotIn(("bank_detail", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+
     def test_category_mutation_callback_suppresses_fallback_enqueue_audit_and_invalidate(self) -> None:
         class Queue:
             def __init__(self) -> None:

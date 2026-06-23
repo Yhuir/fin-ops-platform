@@ -1,19 +1,28 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `bank_detail` repository port/query boundary slice.
+Continue the autonomous modular IO refactor after the `bank_detail` freshness/force-refresh/operation-barrier slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:bank-detail-repository-port-extraction`
+- Last completed boundary: `read-models:bank-detail-refresh-freshness-operation-barrier`
 - Last status: `implementation-closed`
 - Queue semantics are corrected: prior guard/analysis slices are slice-complete only and do not mean module implementation closure.
 - First read model implementation pilot: `bank_detail`.
+- Implemented for `bank_detail` so far:
+  - repository port/query boundary
+  - write/force-refresh response `read_model_scope_keys`
+  - operation barrier `freshness_targets`
+  - exact month barrier target tests
+- Still open for `bank_detail`:
+  - legacy contamination removal/quarantine
+  - pilot verification/template revision
+  - production worker/readiness evidence or explicit defer status
 - Go hot-path candidates are blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
 
 ## Next Boundary
 
-`read-models:bank-detail-refresh-freshness-operation-barrier`
+`read-models:bank-detail-legacy-contamination-removal`
 
 ## Required First Steps On Resume
 
@@ -34,44 +43,44 @@ Continue the autonomous modular IO refactor after the `bank_detail` repository p
    - Read `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
    - If these files disagree on current state, next boundary, status labels, module closure meaning or completion metric source, stop normal implementation and create another `planning:state-reconciliation-*` slice first.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/planning-state-reconciliation.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-repository-port-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-freshness-operation-barrier.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/state-machine.md`
    - `docs/modules/read-models/tests.md`
    - `docs/modules/runtime-workers/README.md`
    - `docs/modules/runtime-workers/state-machine.md`
-5. Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`.
-6. Use CodeGraph first to locate current `bank_detail` query/refresh/repository owners, callers, callees, routes and tests.
-7. Implement the `bank_detail` freshness, force-refresh and operation-barrier boundary without changing response shape.
-8. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
+5. Use CodeGraph first to locate current `bank_detail` legacy helpers, callers, callees, routes and tests.
+6. Implement only a narrow `bank_detail` legacy contamination removal/quarantine slice.
+7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Selection Rules
 
 - The pilot is already selected: `bank_detail`.
-- The repository port/query boundary is implemented, but module closure remains open.
+- Repository port/query and freshness/barrier response contracts are implemented, but module closure remains open.
 - Do not choose a Go boundary.
 - Do not implement Go/Fiber/Go Worker in this boundary.
-- Do not claim a module is closed because a manifest guard or static guard exists.
+- Do not claim a module is closed because a manifest guard, static guard, repository port, or freshness/barrier response exists.
 - Treat `closed` module implementation status as unavailable unless code, tests, docs, legacy isolation/removal, freshness proof, operation barrier, force refresh and production evidence/defer status are all accounted for.
-- If implementation exposes a larger scope than the selected boundary, stop normal implementation and create a narrower planning or guard slice instead of broad refactoring.
+- If legacy removal exposes a broader scope than one safe slice, split the boundary and execute the first smaller removal/quarantine slice.
 
 ## Expected Output
 
-- Implementation file changes for `bank_detail` freshness/force-refresh/operation-barrier boundary only.
-- Tests proving write/query paths produce exact affected month scopes, stale/refreshing/fresh behavior remains correct, force refresh goes through gateway/scope policy, and operation barrier targets match the affected scopes.
-- Regression evidence proving the repository port/query boundary from the previous slice remains intact.
-- Updated state/journal/next prompt.
+- Implementation changes removing or quarantining selected `bank_detail` legacy helper/path only.
+- Tests proving new BankDetails query/write/refresh paths do not call removed/quarantined legacy internals.
+- Regression evidence preserving:
+  - repository port/query boundary
+  - force refresh gateway/scope policy usage
+  - exact month operation barrier targets
+  - API response shape
+- Updated analysis/state/journal/next prompt.
 - Docs verification and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one narrow verified `bank_detail` freshness/barrier implementation slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one narrow verified `bank_detail` legacy contamination removal/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
 
 ## Reporting Rule
 

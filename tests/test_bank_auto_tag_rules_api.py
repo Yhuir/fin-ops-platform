@@ -152,6 +152,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._bank_detail_available_month_scope_keys = lambda: ["2026-03", "2026-04"]
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
@@ -161,11 +162,25 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["version"], current["version"])
         self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03", "2026-04"])
+        self.assertEqual(
+            payload["freshness_targets"],
+            [
+                {"read_model_key": "bank_detail", "scope_key": "2026-03"},
+                {"read_model_key": "bank_detail", "scope_key": "2026-04"},
+            ],
+        )
         self.assertEqual(payload["enqueued_jobs"], ["bank_detail.read_model.refresh"])
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_reapply_requested"), queue.enqueued)
+        self.assertEqual(
+            queue.enqueued,
+            [
+                ("bank_detail", "2026-03", "bank_auto_tag_rules_reapply_requested"),
+                ("bank_detail", "2026-04", "bank_auto_tag_rules_reapply_requested"),
+            ],
+        )
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["action"], "bank_auto_tag_rules_reapply_requested")
-        self.assertEqual(audit["metadata"]["scope_keys"], ["all"])
+        self.assertEqual(audit["metadata"]["scope_keys"], ["2026-03", "2026-04"])
         self.assertEqual(audit["metadata"]["version"], current["version"])
 
     def test_reapply_endpoint_fails_when_bank_detail_refresh_queue_is_unavailable(self) -> None:
