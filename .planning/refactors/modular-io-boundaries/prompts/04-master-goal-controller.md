@@ -77,11 +77,11 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be read-models:bank-detail-pilot-verification-and-template-revision.
-- Last status is expected to be analysis-closed.
+- Last completed boundary is expected to be read-models:bank-detail-server-helper-quarantine.
+- Last status is expected to be implementation-closed.
 - First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be read-models:bank-detail-server-helper-quarantine.
-- The bank_detail pilot is not module-closed. Remaining server.py scope/cache/refresh/callback helper paths must be classified, migrated, removed or quarantined before broader rollout or Go admission.
+- Next executable boundary is expected to be read-models:bank-detail-category-side-effect-port-extraction.
+- The bank_detail pilot is not module-closed. Category mutation side-effect callback wiring and production evidence/defer status must be closed before broader rollout or Go admission.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
@@ -105,9 +105,9 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:bank-detail-server-helper-quarantine unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-category-side-effect-port-extraction unless a planning-state inconsistency is found first.
 
-For read-models:bank-detail-server-helper-quarantine:
+For read-models:bank-detail-category-side-effect-port-extraction:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
@@ -120,6 +120,7 @@ For read-models:bank-detail-server-helper-quarantine:
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-freshness-operation-barrier.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-legacy-contamination-removal.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-pilot-verification-and-template-revision.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-server-helper-quarantine.md
   - docs/modules/read-models/README.md
   - docs/modules/read-models/state-machine.md
   - docs/modules/read-models/tests.md
@@ -128,14 +129,14 @@ For read-models:bank-detail-server-helper-quarantine:
   - docs/modules/bank-details/tests.md
   - docs/modules/runtime-workers/README.md
   - docs/modules/runtime-workers/state-machine.md
-- Use CodeGraph first for structural lookup of bank_detail remaining helpers, callers, callees, traces and impact.
+- Use CodeGraph first for structural lookup of bank_detail category side-effect callbacks, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
 - Keep the implementation boundary narrow:
-  - Classify every remaining server.py bank_detail scope/cache/refresh/callback helper by owner, caller list, allowed behavior, forbidden writes, deletion condition and test evidence.
-  - Remove or migrate only the smallest helper whose call graph and tests prove it is safe.
-  - Register retained paths as compat-only, gateway-backed wrapper, dependency-factory-only or blocked-by-human-production-gate.
+  - Extract or quarantine `Application._after_bank_category_confirmation_mutation(...)` behind an explicit side-effect port/collaborator.
+  - Classify `Application._latest_bank_detail_auto_category_suggestion(...)` callback ownership, or split it into a separate later boundary if extraction is too broad.
+  - Preserve category write audit, bank detail refresh, turnover ledger refresh, workbench invalidation and affected month semantics.
   - Preserve API response shape for accounts, transactions and export.
-  - Do not add broad new implementation unless classification exposes a concrete small missing boundary and the queue is split first.
+  - Do not add broad new implementation unless side-effect extraction exposes a concrete small missing boundary and the queue is split first.
   - Keep regression coverage for repository port/query boundary, force refresh gateway/scope-policy usage and exact month operation barrier targets.
   - Do not split all of postgres_repositories/read_models.py.
   - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.

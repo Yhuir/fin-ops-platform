@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-pilot-verification`
+Current state: `autonomous-continue-after-bank-detail-server-helper-quarantine`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-pilot-verification-and-template-revision` as a verification/accounting slice; next execution must start with `read-models:bank-detail-server-helper-quarantine`.
+Completed `read-models:bank-detail-server-helper-quarantine`; next execution must start with `read-models:bank-detail-category-side-effect-port-extraction`.
 
 ## Closed Or Deferred Slices
 
@@ -57,14 +57,15 @@ Completed `read-models:bank-detail-pilot-verification-and-template-revision` as 
 - `read-models:bank-detail-refresh-freshness-operation-barrier` -> `implementation-closed`
 - `read-models:bank-detail-legacy-contamination-removal` -> `implementation-closed`
 - `read-models:bank-detail-pilot-verification-and-template-revision` -> `analysis-closed`
+- `read-models:bank-detail-server-helper-quarantine` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
-- `bank_detail` repository port/query boundary, freshness/barrier response contract and first legacy SQL helper removal are implemented; pilot verification found the module is not closed because remaining `server.py` bank detail helper/callback dependencies still need owner/caller/deletion-condition classification, migration or compat-only quarantine.
+- `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal and unused `server.py` read/cache helper quarantine are implemented; the module is not closed because category side-effect callback wiring still needs extraction/quarantine and production evidence/defer status is still open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual `bank_detail` pilot work must continue before Go admission: helper/callback quarantine, environment evidence/defer status and any remaining explicitly classified compat-only legacy paths.
+- Actual `bank_detail` pilot work must continue before Go admission: category side-effect port extraction/quarantine, environment evidence/defer status and any remaining explicitly classified compat-only legacy paths.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -77,8 +78,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-pilot-verification-and-template-revision`
+`read-models:bank-detail-server-helper-quarantine`
 
 ## Next Prompt
 
-`read-models:bank-detail-server-helper-quarantine`
+`read-models:bank-detail-category-side-effect-port-extraction`

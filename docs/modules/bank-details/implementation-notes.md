@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail server read/cache helper quarantine
+
+- 目标：执行 `read-models:bank-detail-server-helper-quarantine`，删除 `server.py` 中已无调用者的银行明细 scope/freshness/cache/payload helper，并用静态 guard 固定 `BankDetailsApplicationService` 为 read/cache owner。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`tests/test_platform_runtime_boundary_guards.py`、银行明细测试矩阵和 modular IO planning state；不改变银行明细 HTTP API、前端、业务规则、read model schema 或 worker。
+- 关键决策：`server.py` 只保留有真实调用者的 gateway-backed refresh wrapper、category mutation callback、suggestion callback、service factory、derived lifecycle executor 和 available-month scope helper；已无调用者的 read/cache helper 删除且不得回归。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：新增 `PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary`，证明 removed helper 不在 `server.py`、对应 owner 存在于 `BankDetailsApplicationService`、refresh wrapper 继续走 `ReadModelRefreshGateway` 且不直接 SQL 写 job queue。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-server-helper-quarantine.md`。
+- 未测风险：真实 PostgreSQL/Redis/RabbitMQ 和 worker drain 未在本地执行；category mutation side-effect callback 仍在 `Application`，进入下一边界继续抽取或隔离。
+
 ## 2026-06-24 - Bank detail pilot verification / server helper quarantine queued
 
 - 目标：核对银行明细 read model 试点是否已经满足模块化 IO 闭环，并把下一步收敛到剩余 `server.py` helper/callback 隔离。

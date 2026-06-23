@@ -531,6 +531,76 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
+        service_tree = _parse(SERVICES_ROOT / "bank_details_application_service.py")
+        violations: list[str] = []
+
+        removed_application_helpers = {
+            "_bank_detail_scope_keys_for_range",
+            "_bank_detail_scope_summary",
+            "_with_bank_detail_auto_tag_rule_freshness",
+            "_bank_detail_accounts_refreshing_payload",
+            "_bank_detail_transactions_refreshing_payload",
+            "_with_bank_detail_tag_dictionary",
+            "_enqueue_bank_detail_read_model_refreshes_unless_refreshing",
+            "_bank_detail_redis_cache_key",
+            "_get_bank_detail_cached_payload",
+            "_set_bank_detail_cached_payload",
+        }
+        for helper_name in sorted(removed_application_helpers):
+            if _function_source(server_tree, server_source, helper_name):
+                violations.append(f"server.py still owns removed bank detail read/cache helper {helper_name}")
+
+        required_service_helpers = {
+            "_scope_keys_for_range",
+            "_scope_summary",
+            "_with_auto_tag_rule_freshness",
+            "_accounts_refreshing_payload",
+            "_transactions_refreshing_payload",
+            "_with_tag_dictionary",
+            "_enqueue_read_model_refreshes_unless_refreshing",
+            "_redis_cache_key",
+            "_get_cached_payload",
+            "_set_cached_payload",
+        }
+        for helper_name in sorted(required_service_helpers):
+            if not _function_source(service_tree, service_source, helper_name):
+                violations.append(f"BankDetailsApplicationService is missing bank detail read/cache owner {helper_name}")
+
+        enqueue_source = _function_source(server_tree, server_source, "_enqueue_bank_detail_read_model_refreshes")
+        if not enqueue_source:
+            violations.append("server.py is missing the classified bank detail gateway-backed refresh wrapper")
+        else:
+            for snippet in (
+                "refresh_gateway = self._read_model_refresh_gateway()",
+                'refresh_gateway.enqueue_many("bank_detail"',
+            ):
+                if snippet not in enqueue_source:
+                    violations.append(f"bank detail refresh wrapper no longer uses gateway boundary: {snippet}")
+            direct_job_writes = _sql_write_table_references(enqueue_source)
+            if direct_job_writes:
+                violations.append(f"bank detail refresh wrapper writes job queue tables directly: {direct_job_writes}")
+
+        factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
+        for removed_helper_name in sorted(removed_application_helpers):
+            if removed_helper_name in factory_source:
+                violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
+        for retained_callback in (
+            "_latest_bank_detail_auto_category_suggestion",
+            "_after_bank_category_confirmation_mutation",
+            "_bank_detail_available_month_scope_keys",
+            "_enqueue_bank_account_balance_read_model_refresh",
+            "_enqueue_turnover_ledger_read_model_refreshes",
+        ):
+            if retained_callback not in factory_source:
+                violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",

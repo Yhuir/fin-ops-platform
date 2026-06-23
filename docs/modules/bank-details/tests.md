@@ -90,6 +90,7 @@ Spec-first Browser e2e 审计入口：
 | 2026-06-21 | 页面无日期筛选时使用 `bank_detail:all` 作为查询 freshness proof，但 worker 只把 `all` fan-out 到月份 shard，导致月份数据已 fresh 时页面仍长期显示“银行明细正在刷新”。 | `tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_scope_keys_for_unbounded_bank_detail_reads_use_month_shards` | covered |
 | 2026-06-23 | 自动标签规则或分类写后刷新逻辑回流到 `server.py`，绕过 `BankDetailsApplicationService` / `AppSettingsService` / lifecycle 边界，或旧 settings 入口重新污染 `bank_transaction_tags`。 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary` | covered |
 | 2026-06-24 | `Application._get_bank_detail_*_from_sql_read_model` 旧私有 helper 重新出现，导致测试或后续代码绕过 route/application public boundary 读取银行明细 SQL read model。 | `tests/test_bank_auto_tag_rules_api.py::BankAutoTagRulesApiTests::test_bank_detail_legacy_sql_helpers_are_removed_from_application_boundary` | covered |
+| 2026-06-24 | `server.py` 重新拥有银行明细 scope/freshness/cache/payload read helper，绕开 `BankDetailsApplicationService` 的 read model owner，或 refresh wrapper 直接写 queue 表。 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary` | covered |
 
 ## 关键 smoke flows
 

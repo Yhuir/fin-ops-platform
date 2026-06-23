@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail server read/cache helper quarantine
+
+- 目标：执行 `read-models:bank-detail-server-helper-quarantine`，移除 `server.py` 中已无调用者的银行明细 read/cache helper，并新增架构 guard 防止旧 read model helper 回归。
+- 影响范围：`server.py` dead helper removal、`BankDetailsApplicationService` read/cache owner guard、bank-details/read-models 文档和 modular IO state；不改 read model schema、worker、queue schema 或 API response shape。
+- 关键决策：bank detail scope summary、auto-tag freshness、refreshing payload、tag dictionary、Redis cache key/get/set 等 helper 的 owner 是 `BankDetailsApplicationService`。`Application._enqueue_bank_detail_read_model_refreshes(...)` 暂时保留为 gateway-backed wrapper，下一步继续处理 category side-effect callback。
+- 文档影响：新增 analysis，更新 read-models/bank-details 实施记录和测试矩阵；共享 read model 状态机定义不变。
+- 测试覆盖：新增 `PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary`，覆盖 removed helper 不回归、service owner 存在和 refresh wrapper 不直接 SQL 写 job queue。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-server-helper-quarantine.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 worker drain 和 enqueue-to-fresh SLO 仍是 production evidence deferred。
+
 ## 2026-06-24 - Bank detail pilot verification / queue correction
 
 - 目标：执行 `read-models:bank-detail-pilot-verification-and-template-revision`，核对银行明细 read model 试点是否满足模块闭环条件，并修正自动推进 Queue 的下一步。

@@ -13017,62 +13017,6 @@ class Application:
             },
         )
 
-    def _bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
-        repository = getattr(self, "_bank_detail_sql_read_repository", None)
-        scope_key_loader = getattr(repository, "bank_detail_scope_keys_for_range", None)
-        if callable(scope_key_loader):
-            return list(scope_key_loader(date_from=date_from, date_to=date_to) or ["all"])
-        months: set[str] = set()
-        for value in (date_from, date_to):
-            month = str(value or "")[:7]
-            if SEARCH_MONTH_RE.match(month):
-                months.add(month)
-        return sorted(months) or ["all"]
-
-    def _bank_detail_scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
-        repository = getattr(self, "_bank_detail_sql_read_repository", None)
-        summary_loader = getattr(repository, "bank_detail_scope_summary", None)
-        if callable(summary_loader):
-            summary = summary_loader(scope_keys=scope_keys)
-            if isinstance(summary, dict):
-                return self._with_bank_detail_auto_tag_rule_freshness(summary)
-        return {
-            "read_model_status": "missing",
-            "read_model_scope_keys": scope_keys,
-            "read_model_generated_at": None,
-            "read_model_scope_signatures": {},
-        }
-
-    def _with_bank_detail_auto_tag_rule_freshness(self, scope_summary: dict[str, object]) -> dict[str, object]:
-        if str(scope_summary.get("read_model_status") or "") != "fresh":
-            return scope_summary
-        expected_version = self._current_bank_auto_tag_rules_version()
-        signatures = (
-            scope_summary.get("read_model_scope_signatures")
-            if isinstance(scope_summary.get("read_model_scope_signatures"), dict)
-            else {}
-        )
-        stale_scope_keys: list[str] = []
-        for scope_key, signature in signatures.items():
-            if not isinstance(signature, dict):
-                stale_scope_keys.append(str(scope_key))
-                continue
-            source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
-            actual_version = self._int_or_none(source_versions.get("bank_auto_tag_rules_version"))
-            if actual_version != expected_version:
-                stale_scope_keys.append(str(scope_key))
-        if not stale_scope_keys:
-            return scope_summary
-        result = dict(scope_summary)
-        result["read_model_status"] = "stale"
-        result["read_model_stale_reasons"] = [
-            *list(result.get("read_model_stale_reasons") or []),
-            "bank_auto_tag_rules_version_mismatch",
-        ]
-        result["bank_auto_tag_rules_version"] = expected_version
-        result["bank_auto_tag_rules_stale_scope_keys"] = stale_scope_keys
-        return result
-
     def _current_bank_auto_tag_rules_version(self) -> int:
         try:
             payload = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=False)
@@ -13104,82 +13048,6 @@ class Application:
             return int(value)
         except (TypeError, ValueError):
             return None
-
-    def _bank_detail_accounts_refreshing_payload(
-        self,
-        *,
-        scope_keys: list[str],
-        date_from: str | None,
-        date_to: str | None,
-        scope_summary: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        summary = dict(scope_summary or {})
-        return {
-            "accounts": [],
-            "total_balance": None,
-            "balance_account_count": 0,
-            "missing_balance_account_count": 0,
-            "read_model_status": "refreshing",
-            **(
-                {"balance_read_model_status": summary.get("balance_read_model_status")}
-                if summary.get("balance_read_model_status") is not None
-                else {}
-            ),
-            **(
-                {"read_model_error": summary.get("read_model_error")}
-                if summary.get("read_model_error") is not None
-                else {}
-            ),
-            "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
-            "read_model_generated_at": summary.get("read_model_generated_at"),
-            "date_from": date_from,
-            "date_to": date_to,
-            "cache_status": "bypass",
-        }
-
-    def _bank_detail_transactions_refreshing_payload(
-        self,
-        *,
-        scope_keys: list[str],
-        account_key: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        page: int,
-        page_size: int,
-        scope_summary: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        summary = dict(scope_summary or {})
-        return self._with_bank_detail_tag_dictionary(
-            {
-                "account_key": account_key,
-                "date_from": date_from,
-                "date_to": date_to,
-                "rows": [],
-                "category_counts": {"uncategorized": 0},
-                "pagination": {"page": page, "page_size": page_size, "total": 0},
-                "read_model_status": "refreshing",
-                "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
-                "read_model_generated_at": summary.get("read_model_generated_at"),
-                "cache_status": "bypass",
-            }
-        )
-
-    def _with_bank_detail_tag_dictionary(self, payload: dict[str, object]) -> dict[str, object]:
-        tag_loader = getattr(self._bank_details_service, "_bank_transaction_tags_payload", None)
-        if callable(tag_loader):
-            payload.setdefault("bank_transaction_tags", tag_loader())
-        return payload
-
-    def _enqueue_bank_detail_read_model_refreshes_unless_refreshing(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str,
-        scope_summary: dict[str, object],
-    ) -> bool:
-        if str(scope_summary.get("read_model_status") or "").strip() == "refreshing":
-            return False
-        return self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=reason)
 
     def _enqueue_bank_detail_read_model_refreshes(
         self,
@@ -13234,37 +13102,6 @@ class Application:
                 metadata=metadata,
             )
         )
-
-    def _bank_detail_redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
-        signature = {
-            "kind": kind,
-            "query": query,
-            "scope_signatures": scope_summary.get("read_model_scope_signatures") or {},
-            "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
-        }
-        digest = hashlib.sha256(json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-        return f"bank_detail:{kind}:{digest}"
-
-    def _get_bank_detail_cached_payload(self, cache_key: str) -> dict[str, object] | None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        get_cached = getattr(redis_helper, "get_json", None)
-        if not callable(get_cached):
-            return None
-        try:
-            cached = get_cached(cache_key)
-            return dict(cached) if isinstance(cached, dict) else None
-        except Exception:
-            return None
-
-    def _set_bank_detail_cached_payload(self, cache_key: str, payload: dict[str, object]) -> None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        set_cached = getattr(redis_helper, "set_json", None)
-        if not callable(set_cached):
-            return
-        try:
-            set_cached(cache_key, payload, ttl_seconds=30)
-        except Exception:
-            return
 
     def _delete_bank_detail_redis_cache(self, scope_key: str) -> None:
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
