@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-batch-accounting-repair-compat-removal`
+Current state: `autonomous-continue-after-batch-accounting-production-evidence-defer`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `batch-accounting:repair-compat-quarantine` by removing the unused app-level `_repair_batch_accounting_relation_case_ids` wrapper; next execution must start with `batch-accounting:module-closure-audit-and-production-evidence-defer` unless a planning-state inconsistency is found first.
+Completed `batch-accounting:module-closure-audit-and-production-evidence-defer` by recording local batch-accounting IO closure evidence and deferring real PostgreSQL/worker/App Status/history/high-row production evidence; next execution must start with `read-models:bank-detail-module-closure-audit-and-production-evidence-defer` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -64,13 +64,14 @@ Completed `batch-accounting:repair-compat-quarantine` by removing the unused app
 - `batch-accounting:legacy-route-implementation` -> `implementation-closed`
 - `batch-accounting:submit-withdraw-route-side-effect-port` -> `implementation-closed`
 - `batch-accounting:repair-compat-quarantine` -> `implementation-closed`
+- `batch-accounting:module-closure-audit-and-production-evidence-defer` -> `production-evidence-deferred`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine and category side-effect port extraction are implemented; the module is not closed because production DB/worker evidence remains unavailable and classified support wrappers/callbacks have not been globally extracted.
-- `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; the module is not closed until module closure audit confirms only production evidence/defer gaps remain.
+- `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -85,8 +86,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`batch-accounting:repair-compat-quarantine`
+`batch-accounting:module-closure-audit-and-production-evidence-defer`
 
 ## Next Prompt
 
-`batch-accounting:module-closure-audit-and-production-evidence-defer`
+`read-models:bank-detail-module-closure-audit-and-production-evidence-defer`

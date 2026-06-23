@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-06-24 - 模块闭环审计与生产证据 defer
+
+- 目标：对照模块化 IO 完成定义审计 batch-accounting 当前状态，判断是否可以进入 full closed。
+- 影响范围：`.planning/refactors/modular-io-boundaries/analysis/batch-accounting-module-closure-audit-and-production-evidence-defer.md`、autonomous queue/state/journal/next prompt；不改 runtime。
+- 关键决策：本地 IO/route/service/legacy/read-model freshness/operation barrier/test/docs 证据已足够支撑本地实现闭环，但缺少真实 PostgreSQL、worker drain、App Status 收敛、生产历史 relation/case-id collision 和真实大年份数据证据。因此不标 full closed，记录 `production-evidence-deferred`，且不依赖本地 `PGSQL_URL` 或 staging 数据库。
+- 文档影响：本实施记录和 autonomous 状态更新；模块状态机定义不变。
+- 测试覆盖：无 runtime 改动；本 slice 只跑 docs/diff 校验。前序切片已跑 API/service/static/app check。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实生产 worker/read model drain、历史数据 dry-run、高行数浏览器性能仍需未来只读生产验证或人工批准的受控写入 runbook。
+- 后续事项：回到 read model pilot 闭环，推进 `read-models:bank-detail-module-closure-audit-and-production-evidence-defer`，GoHotPath 仍不得启动。
+
 ## 2026-06-24 - App-level repair helper 删除
 
 - 目标：删除没有运行时调用者的 `Application._repair_batch_accounting_relation_case_ids(...)`，避免 `server.py` 保留一个可写 pair relation persist、derived lifecycle event 和 Workbench read model persist 的旧兼容入口。
