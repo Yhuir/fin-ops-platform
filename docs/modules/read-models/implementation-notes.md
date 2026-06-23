@@ -630,6 +630,14 @@
 - 最小 dry-run：选取 turnover `suggested` relation `turnover_rel_05cac958eb8c7c74`，生成 `/tmp/finops-write-e2e-scenarios-20260620-minimal-turnover.json`；`write_operation_e2e_smoke --scenario ... --base-url https://www.yn-sourcing.com --api-prefix /fin-ops-api --json` 返回 `status=dry_run`、`scenario_count=1`、`auth_configured=false`、`approval_configured=false`。
 - 关键决策：下一步如果要 apply，必须由用户明确批准具体 scenario `turnover-withdraw-turnover_rel_05cac958eb8c7c74`、提供 approval ticket，并重新提供可用 auth token；否则继续停留在 dry-run，不做 production mutation。
 
+## 2026-06-24 - pending invoice selected as next modular IO read model pilot
+
+- 目标：在 `bank_detail` 和 `workbench_relation` 本地实现支持完成当前 accounting 后，选择下一个非 Go read model 模块化 IO pilot。
+- 决策：选择 `pending_invoice`，下一条边界为 `read-models:pending-invoice-repository-port-extraction`。
+- 理由：`pending_invoice` 同时消费 `bank_detail_source_versions` 和 `workbench_relation_source_versions`，且有 `expense|income:<filter>[:YYYY-MM]` 特殊 scope；它是用户可见度高、最容易暴露“关系已更新但待找发票仍显示旧 fresh 行”的页面。
+- 第一步范围：只抽取窄 `PendingInvoiceReadModelRepositoryPort`，覆盖 rows、filter options、source summary、bank detail/workbench relation source versions、projection save/mark。暂不改变业务状态、API shape、UI、worker runtime 或 Go/Fiber/Go Worker。
+- 生产证据：本轮为 analysis-only，不需要生产验证；真实 PostgreSQL/worker/App Status/high-row/browser 证据继续按后续 implementation/verification slice 记录或递延。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

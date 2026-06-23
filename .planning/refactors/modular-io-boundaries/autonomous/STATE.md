@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-final-local-implementation-closure-and-production-evidence-defer`
+Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-workbench-relation`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:final-local-implementation-closure-and-production-evidence-defer`. Local `workbench_relation` implementation support surfaces are accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable. Go hot-path admission remains blocked, and the next executable boundary is non-Go pilot selection.
+Completed `read-models:next-pilot-selection-after-workbench-relation`. `pending_invoice` is selected as the next non-Go read model implementation pilot because it consumes both `bank_detail` and `workbench_relation` source versions, has special scope semantics, and is a high-visibility stale-read risk. The next executable boundary is `read-models:pending-invoice-repository-port-extraction`.
 
 ## Closed Or Deferred Slices
 
@@ -131,6 +131,7 @@ Completed `workbench-relations:final-local-implementation-closure-and-production
 - `workbench-relations:local-implementation-closure-and-production-evidence-defer` -> `analysis-closed`
 - `workbench-relations:etc-repair-link-migration-persist-callback-closure-audit` -> `analysis-closed`
 - `workbench-relations:final-local-implementation-closure-and-production-evidence-defer` -> `production-evidence-deferred`
+- `read-models:next-pilot-selection-after-workbench-relation` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -141,7 +142,7 @@ Completed `workbench-relations:final-local-implementation-closure-and-production
 - `workbench_relation` local implementation support is accounted for through final closure/defer accounting. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, turnover local pair snapshot port extraction, settings data reset pair snapshot port extraction, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence, app health / route builder pair-service injection, settings data reset pair-service dependency, first local closure/defer accounting and ETC repair/link/migration callback accounting are analysis-closed. The module is still not globally closed because production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
-- The next executable boundary is `read-models:next-pilot-selection-after-workbench-relation`, which must choose another non-Go modular IO/read model pilot before any Go admission decision.
+- `pending_invoice` is selected as the next non-Go read model implementation pilot. The first boundary is `read-models:pending-invoice-repository-port-extraction`, focused on a narrow repository port for rows, filter options, source versions and projection save/mark behavior without changing runtime semantics.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -155,8 +156,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:final-local-implementation-closure-and-production-evidence-defer`
+`read-models:next-pilot-selection-after-workbench-relation`
 
 ## Next Prompt
 
-`read-models:next-pilot-selection-after-workbench-relation`
+`read-models:pending-invoice-repository-port-extraction`

@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:final-local-implementation-closure-and-production-evidence-defer.
-- Last status: production-evidence-deferred.
+- Last completed boundary: read-models:next-pilot-selection-after-workbench-relation.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -105,7 +105,8 @@ Current state expected on start:
 - ETC repair/link/migration callbacks are classified as explicit post-command persist boundaries.
 - Final local closure/defer accounting classified remaining local workbench relation references as explicit ports/adapters/repositories/runtime snapshot support/tools/tests.
 - Real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
-- The next pending boundary is read-models:next-pilot-selection-after-workbench-relation.
+- `pending_invoice` is selected as the next non-Go read model implementation pilot because it consumes both `bank_detail` and `workbench_relation` source versions and has special `expense|income:<filter>[:YYYY-MM]` scope semantics.
+- The next pending boundary is read-models:pending-invoice-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -201,22 +202,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-workbench-relation unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:pending-invoice-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-workbench-relation:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-final-local-implementation-closure-and-production-evidence-defer.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
-- Read `docs/modules/read-models/README.md` and relevant candidate module docs.
-- Read `04-IMPLEMENTATION-ROADMAP.md` and `11-GO-HOT-PATH-CARVE-OUT.md`.
-- Select the next non-Go modular IO/read model pilot based on current manifest, roadmap, implementation-gap evidence and cross-page freshness risk.
-- If the selected candidate is too broad, split the queue and execute the first smaller audit/implementation boundary.
+For read-models:pending-invoice-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-and-oa-pending-payment-contract.md`.
+- Read `docs/modules/read-models/README.md`, `docs/modules/pending-invoices/README.md`, `tests.md`, and `implementation-notes.md`.
+- Read `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`, `search_pending_sql_projection.py`, `read_model_manifest.py`, and relevant tests.
+- Add a narrow pending invoice read-model repository port for rows, filter options, source versions and projection save/mark behavior.
+- Preserve current pending invoice scope semantics, payload shape, stale reasons, export row limit and source-version behavior.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
-- Produce an analysis/accounting file.
+- Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks.
+- Run targeted tests, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

@@ -284,6 +284,14 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_api.py -q`。
 - 未测风险：未连接真实生产 Postgres 验证 23053.31 原始数据行，但 freshness 契约已覆盖同类 stale 机制；真实 worker drain 仍按运维 smoke 验证。
 
+## 2026-06-24 - modular IO next pilot selection
+
+- 目标：作为 `bank_detail` 和 `workbench_relation` 之后的下一条 read model 模块化 IO pilot。
+- 决策：先执行 `read-models:pending-invoice-repository-port-extraction`，不直接改业务规则或页面。
+- 理由：待找发票 read model 同时依赖银行明细和关联台关系 source versions；已有 freshness gate 曾修复 relation 更新后 pending invoice 伪 fresh 的 bug，适合继续用窄 port 强化 IO 边界。
+- 第一条实现边界：新增/使用窄 `PendingInvoiceReadModelRepositoryPort`，只暴露 pending invoice rows、filter options、source summary、bank detail/workbench relation source versions、save/mark 等 read-model repository 方法，并用测试证明不会暴露其它 read model 方法。
+- 非目标：不改 attach/manual/income status command 行为，不改 API response shape，不改 UI，不实现 Go/Fiber/Go Worker，不依赖 staging DB 或本地 `PGSQL_URL`。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。
