@@ -252,6 +252,24 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
+## 2026-06-24 - exception restore helper audit
+
+目标：审计剩余 app-owned exception restore helper，判断是否可删除、抽离或保留为 compat-only。
+
+结论：
+
+- `_restore_workbench_exception_write_snapshots(...)`、`_restore_workbench_exception_pair_snapshots(...)`、`_restore_workbench_exception_override_snapshots(...)` 和两个 inline restore block 不可删除，它们保护 exception/personal-advance/override 写入失败后的内存状态恢复。
+- 下一条实现边界应为 `workbench-relations:exception-rollback-restore-service-extraction`。
+- 建议新增 `WorkbenchExceptionRollbackRestoreService`，统一提供 exception+pair+candidate+override、exception+pair、exception+override 三种 restore 方法。
+- 该 service 应复用 app 的 pair relation replacement callback，避免 rollback 后 pair persist service cache 指向旧对象。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

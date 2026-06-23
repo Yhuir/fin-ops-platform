@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:pair-relation-rollback-restore-service-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:exception-restore-helper-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -81,7 +81,8 @@ Current state expected on start:
 - WorkbenchRelationCommandRepositoryAdapter now owns command repository snapshot merge/apply behavior.
 - WorkbenchPairRelationPersistService now owns non-transactional pair relation persist/schedule/background/timing behavior.
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
-- The next pending boundary is workbench-relations:exception-restore-helper-audit.
+- Remaining exception/pair/candidate/override rollback helpers are required recovery paths and are selected for explicit service extraction.
+- The next pending boundary is workbench-relations:exception-rollback-restore-service-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -177,16 +178,17 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:exception-restore-helper-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:exception-rollback-restore-service-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:exception-restore-helper-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-pair-relation-rollback-restore-service-extraction.md`.
+For workbench-relations:exception-rollback-restore-service-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-exception-restore-helper-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph for `_restore_workbench_exception_pair_snapshots`, `_restore_workbench_exception_write_snapshots`, `_apply_workbench_exception_application`, personal advance rollback paths, and callers/impact.
-- Audit remaining app-owned exception restore helpers before implementation.
-- Classify each remaining helper as removable, extractable, compat-only, or blocked.
-- Decide whether the next implementation should extract a shared exception rollback service, reuse the pair relation rollback service narrowly, or leave some helpers as dependency-assembly wrappers.
-- Do not migrate exception restore behavior in this audit slice unless the queue is explicitly split/advanced after analysis.
+- Use CodeGraph for `_restore_workbench_exception_pair_snapshots`, `_restore_workbench_exception_write_snapshots`, `_restore_workbench_exception_override_snapshots`, `_apply_workbench_exception_application`, personal advance rollback paths, and callers/impact.
+- Extract exception/pair/candidate/override rollback restore behavior into an explicit service.
+- Preserve exception case, pair relation, candidate match and override snapshot restoration semantics.
+- Preserve best-effort `state_store.save_workbench_exception_cases(...)` behavior for exception/override rollback.
+- Reuse the centralized pair relation replacement callback so cached pair relation persist service state remains consistent.
+- Do not migrate unrelated batch-accounting restore behavior.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

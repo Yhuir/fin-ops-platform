@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relation-pair-relation-rollback-restore-service-extraction`
+Current state: `autonomous-continue-after-workbench-relation-exception-restore-helper-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:pair-relation-rollback-restore-service-extraction`. `workbench_relation` remains implementation-gap-open. Pair relation snapshot rollback restore now lives in `WorkbenchPairRelationRollbackRestoreService`; the app wrapper is compat-only, and pair relation service replacement clears cached persist service state. The next boundary is an audit of remaining exception restore helpers.
+Completed `workbench-relations:exception-restore-helper-audit`. `workbench_relation` remains implementation-gap-open. The audit found remaining exception/pair/candidate/override restore helpers are required rollback recovery paths and selected `workbench-relations:exception-rollback-restore-service-extraction` as the next narrow implementation boundary.
 
 ## Closed Or Deferred Slices
 
@@ -83,6 +83,7 @@ Completed `workbench-relations:pair-relation-rollback-restore-service-extraction
 - `workbench-relations:pair-relation-persist-service-extraction` -> `implementation-closed`
 - `workbench-relations:restore-pair-relation-snapshot-helper-audit` -> `analysis-closed`
 - `workbench-relations:pair-relation-rollback-restore-service-extraction` -> `implementation-closed`
+- `workbench-relations:exception-restore-helper-audit` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -90,7 +91,7 @@ Completed `workbench-relations:pair-relation-rollback-restore-service-extraction
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction and pair relation rollback restore service extraction are implemented. Exception restore helper cleanup and broader relation write lifecycle cleanup remain open.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction and pair relation rollback restore service extraction are implemented. Exception rollback restore service extraction and broader relation write lifecycle cleanup remain open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -105,8 +106,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:pair-relation-rollback-restore-service-extraction`
+`workbench-relations:exception-restore-helper-audit`
 
 ## Next Prompt
 
-`workbench-relations:exception-restore-helper-audit`
+`workbench-relations:exception-rollback-restore-service-extraction`
