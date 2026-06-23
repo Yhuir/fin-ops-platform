@@ -645,7 +645,7 @@ class Application:
     def _build_bank_transaction_tag_read_facade(self) -> object | None:
         if not self._requires_sql_read_model_runtime():
             return None
-        repository = getattr(self._state_store, "read_model_repository", None)
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
         required_methods = (
             "get_bank_detail_tagged_rows_by_transaction_ids",
             "list_bank_detail_tagged_rows_by_month",
@@ -672,7 +672,7 @@ class Application:
             return facade
         if not self._requires_sql_read_model_runtime():
             return None
-        repository = getattr(self._state_store, "read_model_repository", None)
+        repository = getattr(self, "_workbench_relation_sql_read_repository", None)
         required_methods = (
             "get_workbench_relation_rows_by_ids",
             "list_workbench_relation_rows",
@@ -759,6 +759,7 @@ class Application:
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
         self._bank_detail_sql_read_repository = getattr(self._state_store, "bank_detail_sql_read_repository", None)
+        self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
         self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
         self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
         self._oa_pending_payment_sql_read_repository = getattr(self._state_store, "oa_pending_payment_sql_read_repository", None)

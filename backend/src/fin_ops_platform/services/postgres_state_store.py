@@ -32,6 +32,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
+from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
 APP_SETTINGS_KEY = "app_settings"
@@ -134,6 +135,7 @@ class PostgresStateStore:
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
+        self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
@@ -756,6 +758,10 @@ class PostgresStateStore:
     @property
     def bank_detail_sql_read_repository(self) -> BankDetailReadModelRepositoryPort:
         return self._bank_detail_sql_read_repository
+
+    @property
+    def workbench_relation_sql_read_repository(self) -> WorkbenchRelationReadModelRepositoryPort:
+        return self._workbench_relation_sql_read_repository
 
     @property
     def input_invoice_usage_sql_read_repository(self) -> PostgresReadModelRepository:

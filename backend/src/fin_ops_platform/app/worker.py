@@ -90,6 +90,7 @@ from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLed
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
     WorkbenchRelationReadModelRefreshService,
@@ -302,7 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.enable_workbench_relation_read_model_refresh:
         projection_builder = WorkbenchRelationSqlProjectionBuilder(
             connection=connection,
-            read_model_repository=read_model_repository,
+            read_model_repository=WorkbenchRelationReadModelRepositoryPort(read_model_repository),
         )
         refresh_service = WorkbenchRelationReadModelRefreshService(
             projection_builder=projection_builder,

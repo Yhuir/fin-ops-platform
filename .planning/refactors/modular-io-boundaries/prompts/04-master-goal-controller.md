@@ -69,13 +69,14 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-bank-detail.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:workbench-relation-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation is selected as the next read model implementation pilot.
-- The next pending boundary is read-models:workbench-relation-repository-port-extraction.
+- WorkbenchRelationReadModelRepositoryPort is now wired into app/worker/projection builder relation read-model paths.
+- The next pending boundary is read-models:workbench-relation-derived-lifecycle-executor-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -171,17 +172,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:workbench-relation-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:workbench-relation-derived-lifecycle-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:workbench-relation-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
+For read-models:workbench-relation-derived-lifecycle-executor-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-workbench-relation-repository-port-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph for `WorkbenchRelationReadFacade`, `WorkbenchRelationSqlProjectionBuilder`, `WorkbenchRelationReadModelRefreshService`, and `PostgresReadModelRepository` workbench relation methods.
-- Add or identify a narrow `WorkbenchRelationReadModelRepositoryPort`.
-- Expose only relation read-model methods needed by the facade/projection builder.
-- Wire app/facade/projection builder through the port where broad repository access is currently passed.
-- Add tests proving unrelated read model repository methods are not exposed through the port.
-- Preserve candidate/linked/unlinked semantics, source-version behavior, freshness statuses, stale/missing enqueue behavior, payload shapes and refresh behavior.
+- Use CodeGraph for `Application._derived_lifecycle_workbench_relation_read_model_executor`, `_enqueue_generic_read_model_refreshes`, and `BankDetailDerivedLifecycleExecutor`.
+- Extract app-level workbench relation derived lifecycle enqueue behavior into an explicit service/port.
+- Preserve explicit scope keys winning over fallback.
+- Preserve fallback `["all"]`.
+- Preserve gateway-backed enqueue behavior, reason/metadata forwarding and payload shape.
+- Keep `server.py` as dependency wiring / executor registry only.
+- Add focused tests for explicit scope, fallback, metadata/reason forwarding and payload shape.
 - Do not migrate canonical relation write lifecycle in this slice.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.

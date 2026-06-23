@@ -121,10 +121,10 @@ Read every refactor planning file before implementation:
 Current resume priority:
 - First run planning-state reconciliation preflight across `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `modular-io-boundaries/README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
 - If any of those files disagree on source hierarchy, current state, completed boundary, next boundary, status labels, or completion metric source, finish a `planning:state-reconciliation-*` slice first.
-- Current completed boundary in STATE.md is expected to be `read-models:next-pilot-selection-after-bank-detail`.
-- Current next queued boundary is expected to be `read-models:workbench-relation-repository-port-extraction`.
+- Current completed boundary in STATE.md is expected to be `read-models:workbench-relation-repository-port-extraction`.
+- Current next queued boundary is expected to be `read-models:workbench-relation-derived-lifecycle-executor-port-extraction`.
 - `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure; production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `workbench_relation` is selected as the next read model implementation pilot; the first implementation boundary is repository port extraction, not relation write lifecycle migration.
+- `workbench_relation` is selected as the next read model implementation pilot; repository port extraction is complete, but relation write lifecycle migration and derived lifecycle executor extraction remain open.
 - After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md, unless a planning-state inconsistency requires another reconciliation slice.
 - Do not select GoHotPath while any earlier read model or modular IO implementation boundary remains `pending`, `implementation-pending`, or `implementation-gap-open`.
 

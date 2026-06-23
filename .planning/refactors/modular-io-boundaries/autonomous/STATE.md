@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-next-read-model-pilot-selection`
+Current state: `autonomous-continue-after-workbench-relation-repository-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:next-pilot-selection-after-bank-detail`. `workbench_relation` is selected as the next read model implementation pilot because it is the shared relation distribution read model for pending invoices, OA pending payments, invoice usage/collection, bank detail relation tags, no-OA, turnover, batch accounting and cost/tax/search source-version checks. Next execution must start with `read-models:workbench-relation-repository-port-extraction` unless a planning-state inconsistency is found first.
+Completed `read-models:workbench-relation-repository-port-extraction`. `workbench_relation` now has a narrow read-model repository port wired into app/worker/projection builder relation read-model paths. Next execution must start with `read-models:workbench-relation-derived-lifecycle-executor-port-extraction` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -73,6 +73,7 @@ Completed `read-models:next-pilot-selection-after-bank-detail`. `workbench_relat
 - `read-models:bank-detail-service-factory-collaborator-closure-audit` -> `production-evidence-deferred`
 - `planning:semantic-queue-state-and-master-goal-refresh` -> `planning-closed`
 - `read-models:next-pilot-selection-after-bank-detail` -> `analysis-closed`
+- `read-models:workbench-relation-repository-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -80,7 +81,7 @@ Completed `read-models:next-pilot-selection-after-bank-detail`. `workbench_relat
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. The first queued implementation boundary is repository port extraction for the read facade/projection builder; relation write lifecycle migration remains out of scope until the read-model port contract is stable.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction for the read facade/projection builder is implemented; relation write lifecycle migration remains out of scope. The next local implementation gap is extracting the app-level derived lifecycle refresh enqueue helper into an explicit service/port.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -95,8 +96,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:next-pilot-selection-after-bank-detail`
+`read-models:workbench-relation-repository-port-extraction`
 
 ## Next Prompt
 
-`read-models:workbench-relation-repository-port-extraction`
+`read-models:workbench-relation-derived-lifecycle-executor-port-extraction`

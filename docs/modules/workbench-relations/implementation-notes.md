@@ -18,6 +18,33 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - read model repository port 抽离
+
+目标：在不迁移 relation 写生命周期的前提下，先把 `workbench_relation` read model 的 facade/projection builder 依赖从 broad `PostgresReadModelRepository` 收窄到显式 port。
+
+变更：
+
+- 新增 `WorkbenchRelationReadModelRepositoryPort`。
+- `PostgresStateStore` 暴露 `workbench_relation_sql_read_repository`。
+- `Application._workbench_relation_read_facade(...)` 改为使用该窄 port。
+- `worker.py` 和 `WorkbenchRelationSqlProjectionBuilder` 的 relation projection 写入路径改为通过该 port 注入。
+- `READ_MODEL_MANIFEST["workbench_relation"].repository_owner` 更新为 `WorkbenchRelationReadModelRepositoryPort`。
+
+决策：
+
+- port 只暴露 relation distribution read/write projection 方法，不暴露 pending invoice、OA pending、bank detail、cost/tax 等其它 read model 方法。
+- 本轮不迁移 `app.workbench_pair_relations` canonical write lifecycle，不改变 `linked` / `candidate` / `unlinked` 语义，不改变 refresh enqueue 和 source-version 行为。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_read_facade -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_sql_projection -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

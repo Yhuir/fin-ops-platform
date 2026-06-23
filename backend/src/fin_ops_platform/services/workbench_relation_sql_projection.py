@@ -9,6 +9,7 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.postgres_repositories.common import month_start, text, text_list
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL, OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -22,11 +23,11 @@ class WorkbenchRelationSqlProjectionBuilder:
         self,
         *,
         connection: Any,
-        read_model_repository: PostgresReadModelRepository | None = None,
+        read_model_repository: Any | None = None,
         tenant_id: str = "default",
     ) -> None:
         self._connection = connection
-        self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._read_model_repository = read_model_repository or WorkbenchRelationReadModelRepositoryPort(PostgresReadModelRepository(connection))
         self._tenant_id = text(tenant_id) or "default"
 
     def list_workbench_relation_scope_shards(self, scope_key: str) -> list[str]:

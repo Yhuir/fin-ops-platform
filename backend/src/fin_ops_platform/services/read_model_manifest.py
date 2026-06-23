@@ -70,7 +70,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "workbench_relation_source_versions",
         ),
         query_owner="WorkbenchRelationReadFacade",
-        repository_owner="PostgresReadModelRepository.workbench_relation",
+        repository_owner="WorkbenchRelationReadModelRepositoryPort",
         permission_owner="downstream_page_api_session",
         test_owner="tests/test_workbench_relation_read_facade.py",
     ),

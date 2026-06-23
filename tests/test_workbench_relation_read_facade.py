@@ -8,6 +8,7 @@ from fin_ops_platform.services.workbench_relation_distribution_mapper import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
 class QueueRecorder:
@@ -66,6 +67,105 @@ class FakeRelationRepository:
             {"group_ids": list(group_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
         )
         return self.payload
+
+
+class UnderlyingWorkbenchRelationRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def get_workbench_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "get_workbench_relation_rows_by_ids",
+                {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])},
+            )
+        )
+        return {"read_model_status": "fresh", "rows": [{"row_id": "txn-1"}]}
+
+    def list_workbench_relation_rows(
+        self,
+        *,
+        month: str,
+        row_types: list[str] | None = None,
+        relation_status: str | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "list_workbench_relation_rows",
+                {
+                    "month": month,
+                    "row_types": list(row_types or []),
+                    "relation_status": relation_status or "",
+                    "tenant_id": tenant_id,
+                },
+            )
+        )
+        return {"read_model_status": "fresh", "rows": [{"row_id": "txn-2"}]}
+
+    def get_workbench_relation_groups_by_ids(
+        self,
+        group_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "get_workbench_relation_groups_by_ids",
+                {"group_ids": list(group_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])},
+            )
+        )
+        return {"read_model_status": "fresh", "groups": [{"group_id": "case-1"}]}
+
+    def workbench_relation_source_versions(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
+        self.calls.append(("workbench_relation_source_versions", {"scope_key": scope_key, "tenant_id": tenant_id}))
+        return {"workbench_relation_schema_version": "test"}
+
+    def save_workbench_relation_distribution(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, object]],
+        groups: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        self.calls.append(
+            (
+                "save_workbench_relation_distribution",
+                {
+                    "scope_key": scope_key,
+                    "rows": list(rows),
+                    "groups": list(groups),
+                    "source_versions": dict(source_versions or {}),
+                    "tenant_id": tenant_id,
+                },
+            )
+        )
+
+    def mark_workbench_relation_scope_empty(
+        self,
+        *,
+        scope_key: str,
+        source_versions: dict[str, object] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        self.calls.append(
+            (
+                "mark_workbench_relation_scope_empty",
+                {"scope_key": scope_key, "source_versions": dict(source_versions or {}), "tenant_id": tenant_id},
+            )
+        )
+
+    def list_pending_invoice_rows(self) -> dict[str, object]:
+        raise AssertionError("workbench_relation port must not expose pending invoice reads")
 
 
 class PartialFreshRelationConnection:
@@ -177,6 +277,69 @@ class RelationGroupPayloadConnection:
         if "from job.read_model_dirty_scopes" in normalized:
             return None
         return None
+
+
+class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        underlying = UnderlyingWorkbenchRelationRepository()
+        port = WorkbenchRelationReadModelRepositoryPort(underlying)
+
+        self.assertEqual(
+            port.get_workbench_relation_rows_by_ids(
+                ["txn-1"],
+                tenant_id="tenant",
+                scope_keys_hint=["2026-01"],
+            )["rows"][0]["row_id"],
+            "txn-1",
+        )
+        self.assertEqual(
+            port.list_workbench_relation_rows(
+                month="2026-01",
+                row_types=["bank_transaction"],
+                relation_status="linked",
+                tenant_id="tenant",
+            )["rows"][0]["row_id"],
+            "txn-2",
+        )
+        self.assertEqual(
+            port.get_workbench_relation_groups_by_ids(
+                ["case-1"],
+                tenant_id="tenant",
+                scope_keys_hint=["2026-01"],
+            )["groups"][0]["group_id"],
+            "case-1",
+        )
+        self.assertEqual(
+            port.workbench_relation_source_versions(scope_key="2026-01", tenant_id="tenant")[
+                "workbench_relation_schema_version"
+            ],
+            "test",
+        )
+        port.save_workbench_relation_distribution(
+            scope_key="2026-01",
+            rows=[{"row_id": "txn-1"}],
+            groups=[{"group_id": "case-1"}],
+            source_versions={"schema": "v1"},
+            tenant_id="tenant",
+        )
+        port.mark_workbench_relation_scope_empty(
+            scope_key="2026-02",
+            source_versions={"schema": "v2"},
+            tenant_id="tenant",
+        )
+
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "get_workbench_relation_rows_by_ids",
+                "list_workbench_relation_rows",
+                "get_workbench_relation_groups_by_ids",
+                "workbench_relation_source_versions",
+                "save_workbench_relation_distribution",
+                "mark_workbench_relation_scope_empty",
+            ],
+        )
 
 
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
