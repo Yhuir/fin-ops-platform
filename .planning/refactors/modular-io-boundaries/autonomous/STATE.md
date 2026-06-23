@@ -8,9 +8,11 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-planning-state-reconciliation`
+Current state: `autonomous-continue-after-completion-semantics-reclassification`
 
-Go hot-path state: `candidate-gated-not-started`
+Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
+
+Queue semantics state: `slice-status-corrected`
 
 ## Environment Assumptions
 
@@ -29,26 +31,34 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `planning:state-reconciliation-and-roadmap-alignment`; next execution should start with Workbench Go hot-path compute admission review.
+Completed `planning:completion-semantics-and-queue-reclassification`; next execution must start with `read-models:pilot-gap-audit-and-contract-selection`.
 
-## Completed Modules
+## Closed Or Deferred Slices
 
 - `bank-details:auto-tag-category-boundary` -> `production-evidence-deferred`
-- `read-models:manifest-and-boundary-inventory` -> `closed-autonomous`
-- `read-models:query-gateway-contract-and-status-parity` -> `closed-autonomous`
-- `read-models:refresh-gateway-force-refresh-and-operation-barrier` -> `closed-autonomous`
-- `read-models:repository-port-and-sql-owner-split-plan` -> `closed-autonomous`
-- `read-models:workbench-active-generation-contract` -> `closed-autonomous`
-- `read-models:bank-detail-and-bank-account-balance-contract` -> `closed-autonomous`
-- `read-models:pending-invoice-and-oa-pending-payment-contract` -> `closed-autonomous`
-- `read-models:invoice-lifecycle-and-usage-contract` -> `closed-autonomous`
-- `read-models:cost-tax-ledger-summary-contract` -> `closed-autonomous`
-- `read-models:search-and-no-oa-bank-batch-contract` -> `closed-autonomous`
-- `read-models:legacy-read-path-removal-guards` -> `closed-autonomous`
-- `reconciliation-workbench:amount-check-query-contract` -> `closed-autonomous`
-- `batch-accounting:legacy-route-contract` -> `closed-autonomous`
-- `server-py:route-owner-inventory` -> `closed-autonomous`
-- `planning:state-reconciliation-and-roadmap-alignment` -> `closed-autonomous`
+- `read-models:manifest-and-boundary-inventory` -> `analysis-closed`
+- `read-models:query-gateway-contract-and-status-parity` -> `contract-guard-closed`
+- `read-models:refresh-gateway-force-refresh-and-operation-barrier` -> `contract-guard-closed`
+- `read-models:repository-port-and-sql-owner-split-plan` -> `contract-guard-closed`
+- `read-models:workbench-active-generation-contract` -> `contract-guard-closed`
+- `read-models:bank-detail-and-bank-account-balance-contract` -> `contract-guard-closed`
+- `read-models:pending-invoice-and-oa-pending-payment-contract` -> `contract-guard-closed`
+- `read-models:invoice-lifecycle-and-usage-contract` -> `contract-guard-closed`
+- `read-models:cost-tax-ledger-summary-contract` -> `contract-guard-closed`
+- `read-models:search-and-no-oa-bank-batch-contract` -> `contract-guard-closed`
+- `read-models:legacy-read-path-removal-guards` -> `static-guard-closed`
+- `reconciliation-workbench:amount-check-query-contract` -> `regression-guard-closed`
+- `batch-accounting:legacy-route-contract` -> `route-guard-closed`
+- `server-py:route-owner-inventory` -> `inventory-guard-closed`
+- `planning:state-reconciliation-and-roadmap-alignment` -> `planning-closed`
+- `planning:completion-semantics-and-queue-reclassification` -> `planning-closed`
+
+## Open Implementation Closure Work
+
+- Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
+- Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
+- Actual read model pilot work must start before Go admission: repository port extraction, freshness/force-refresh/operation-barrier implementation, legacy contamination removal, and verification/template revision.
+- Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
 
@@ -56,12 +66,12 @@ Completed `planning:state-reconciliation-and-roadmap-alignment`; next execution 
 
 ## Go Candidate Status
 
-No Go candidate has passed admission.
+No Go candidate has passed admission. No Go candidate should be selected next while read model implementation-pending boundaries remain.
 
 ## Last Prompt
 
-`planning:state-reconciliation-and-roadmap-alignment`
+`planning:completion-semantics-and-queue-reclassification`
 
 ## Next Prompt
 
-`go-hot-path:workbench-compute-admission`
+`read-models:pilot-gap-audit-and-contract-selection`

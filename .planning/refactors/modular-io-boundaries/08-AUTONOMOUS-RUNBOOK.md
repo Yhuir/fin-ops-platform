@@ -19,6 +19,8 @@ The autonomous loop must optimize for safe forward progress:
 - Do not introduce Go for modules outside `11-GO-HOT-PATH-CARVE-OUT.md`.
 - Treat `.planning/ROADMAP.md`, `04-IMPLEMENTATION-ROADMAP.md`, and `autonomous/MODULE-QUEUE.md` as separate progress sources; never collapse them into a single unqualified completion percentage.
 - If roadmap/status/prompt files disagree, run a planning-state reconciliation slice before implementation.
+- Treat queue status as slice status, not module closure. Analysis/guard/inventory/regression slices can be closed while implementation closure remains open.
+- Do not select Go hot-path candidates while implementation-pending or implementation-gap-open boundaries remain ahead of them.
 - Commit and push only passing, reviewable slices.
 - Do not require staging DB or local `PGSQL_URL`.
 - `finops-prod-root` is available for privileged read-only checks.
@@ -54,7 +56,7 @@ The agent must read these files before starting:
 ```text
 Preflight
   -> Planning-state reconciliation check
-  -> Select next module boundary
+  -> Select next executable boundary
   -> Audit current module IO
   -> Fill or update module contract
   -> Add/update tests
@@ -86,11 +88,23 @@ node --version || true
 
 If the main repository is dirty or `dev` cannot be aligned safely, stop. That is a hard safety gate.
 
-## Module Selection
+## Boundary Selection
 
-Pick the first module in `autonomous/MODULE-QUEUE.md` whose status is `pending` or `deferred-retry`.
+Pick the first boundary in `autonomous/MODULE-QUEUE.md` whose status is `pending` or `deferred-retry`.
 
 Default order is the table order in `autonomous/MODULE-QUEUE.md`. Do not use a hard-coded historical list.
+
+Skip `blocked-by-prerequisite` items. In particular, Go hot-path candidates stay blocked until all admission prerequisites in `11-GO-HOT-PATH-CARVE-OUT.md` are satisfied and no earlier implementation-pending modular IO boundary remains.
+
+Do not treat these statuses as module implementation closure:
+
+- `analysis-closed`
+- `contract-guard-closed`
+- `static-guard-closed`
+- `regression-guard-closed`
+- `route-guard-closed`
+- `inventory-guard-closed`
+- `planning-closed`
 
 Skipped modules must be marked in `autonomous/STATE.md` with a reason.
 
@@ -208,10 +222,11 @@ Push to the configured Dev branch only.
 
 After a successful commit/push:
 
-- Mark module boundary `closed-autonomous` or `production-evidence-deferred`.
+- Mark the boundary with the most specific slice status, for example `analysis-closed`, `contract-guard-closed`, `static-guard-closed`, `regression-guard-closed`, `inventory-guard-closed`, `planning-closed`, `production-evidence-deferred`, `go-candidate-deferred`, or `needs-human-production-gate`.
+- Update the separate `Module Closure` value in `MODULE-QUEUE.md`; do not claim `closed` unless the module completion definition in `00-REQUIREMENTS.md` and `03-REFACTOR-STATE-MACHINE.md` is met.
 - Append a journal entry.
 - Generate next prompt into `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`.
-- Continue to the next module.
+- Continue to the next boundary.
 
 ## No-Staging Policy
 

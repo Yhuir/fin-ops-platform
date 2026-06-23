@@ -19,8 +19,13 @@
 - Root page-analysis roadmap progress: 来自 `.planning/ROADMAP.md`。
 - Modular IO phase roadmap progress: 来自 `04-IMPLEMENTATION-ROADMAP.md`。
 - Modular IO autonomous queue progress: 来自 `autonomous/MODULE-QUEUE.md`。
+- Module implementation closure progress: 来自 `autonomous/MODULE-QUEUE.md` 的 `Module Closure` 和 `04-IMPLEMENTATION-ROADMAP.md` 的 Phase 1-7 完成标准。
 
 禁止用一个未标注来源的百分比代表“整个重构计划”。
+
+`autonomous/MODULE-QUEUE.md` 的 `Status` 只表示一个窄 slice 是否关闭，不表示模块实现闭环。analysis/guard/inventory/regression/planning slice 完成后，模块仍可能是 `implementation-gap-open`。
+
+部分历史 `analysis/*.md` 文件仍保留当时的 `closed-autonomous` 原始记录；当前执行时不得以这些历史标签判断模块完成度，必须以 `autonomous/MODULE-QUEUE.md`、`autonomous/STATE.md` 和本目录状态机为准。
 
 ## 核心判断
 
@@ -62,6 +67,7 @@
 | `prompts/01-module-io-audit.md` | 单模块 IO 审计提示词模板。 |
 | `prompts/02-refactor-phase-planning.md` | 单模块重构 phase 规划提示词模板。 |
 | `prompts/03-autonomous-start.md` | 可直接喂给 Codex 的无人值守启动 prompt。 |
+| `prompts/04-master-goal-controller.md` | 修正 queue 语义后的主控 Goal Prompt：按状态机自动推进，不把 guard-only slice 当成模块完成，不在 read model 试点实现前跳到 GoHotPath。 |
 
 ## 工作规则
 

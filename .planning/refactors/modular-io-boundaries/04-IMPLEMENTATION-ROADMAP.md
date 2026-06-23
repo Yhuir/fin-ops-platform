@@ -15,6 +15,10 @@
 
 如果这些文件的状态互相矛盾，先执行 planning state reconciliation slice，再继续模块实现。
 
+`autonomous/MODULE-QUEUE.md` 的 `Status` 只表示单个 slice 的完成状态；它不能替代本文件 Phase 1-7 的完成标准。已关闭的 analysis/guard/inventory/regression slice 仍可能对应 `implementation-gap-open`。
+
+Go Hot Path Overlay 必须排在相关模块 IO 合同、legacy isolation、freshness proof、测试和性能证据之后；当 Phase 1-3 的试点实现仍未完成时，Go admission 只能保持 blocked/deferred，不能成为主线下一步。
+
 ## Phase 0: 架构合同与重构骨架
 
 目标：
@@ -263,8 +267,9 @@
 
 完成标准：
 
-- [x] 至少首个模块边界完成 `closed-autonomous` 或 `production-evidence-deferred`。
+- [x] 至少首个边界完成为具体 slice 状态或 `production-evidence-deferred`。
 - [x] 至少一次 commit/push 到 `origin/dev`。
 - [x] `autonomous/STATE.md`、`JOURNAL.md`、`MODULE-QUEUE.md` 更新。
 - [x] `autonomous/NEXT-PROMPT.md` 生成下一轮 prompt。
-- [x] 每个完成模块记录 legacy 退役/隔离结果和 read model 强制刷新/freshness 结果。
+- [x] 已关闭 slice 记录 legacy 退役/隔离状态和 read model 强制刷新/freshness 结果是否真实完成、guard-only、analysis-only 或 deferred。
+- [x] Queue 完成语义已纠偏：analysis/guard/inventory/regression slice 不再声明模块实现闭环，Go candidates 在实现前置条件完成前为 `blocked-by-prerequisite`。

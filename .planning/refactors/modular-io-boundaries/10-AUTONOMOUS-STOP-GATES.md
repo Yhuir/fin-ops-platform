@@ -64,7 +64,7 @@ Do not stop for these. Record the condition and continue to the next independent
 Soft-gated modules should be marked:
 
 ```text
-deferred-production-evidence
+production-evidence-deferred
 deferred-module-failure
 deferred-scope-too-large
 deferred-unrelated-dirty-context
@@ -105,13 +105,33 @@ Missing production evidence must not block autonomous progress. It blocks only c
 
 ## Completion Labels
 
-Use these labels in `autonomous/STATE.md`:
+Use these labels in `autonomous/STATE.md` and `autonomous/MODULE-QUEUE.md`.
+
+These labels describe slice outcome. They do not automatically mean module implementation closure.
 
 | Label | Meaning |
 | --- | --- |
-| `closed-autonomous` | Local/fake/stub/tests/docs complete; no required production evidence. |
-| `production-evidence-deferred` | Code/docs/tests complete; real production DB/worker proof unavailable and recorded. |
+| `analysis-closed` | Analysis/inventory slice complete; no behavior or implementation migration is implied. |
+| `contract-guard-closed` | Contract/manifest/static guard slice complete; no behavior or implementation migration is implied. |
+| `static-guard-closed` | Static guard slice complete; it prevents new regressions but does not prove old paths are removed. |
+| `regression-guard-closed` | Regression test/guard slice complete; no broader module closure is implied. |
+| `route-guard-closed` | Route guard slice complete; route implementation may still need migration. |
+| `inventory-guard-closed` | Inventory guard slice complete; ownership is registered but not necessarily migrated. |
+| `planning-closed` | Planning/state/prompt slice complete; no runtime behavior is implied. |
+| `production-evidence-deferred` | Code/docs/tests or local guard slice complete; real production DB/worker proof unavailable and recorded. |
 | `needs-human-production-gate` | Production write, root secret, or privileged action required. |
 | `deferred-module-failure` | Module-specific failure preserved; run continued elsewhere. |
 | `go-candidate-deferred` | Go/Fiber/Go Worker candidate failed admission gates; no Go implementation started. |
+| `blocked-by-prerequisite` | Boundary is intentionally parked until earlier IO/legacy/freshness/test/performance prerequisites close. |
 | `blocked-hard-stop` | Run stopped due to hard gate. |
+
+Use `Module Closure` separately in `MODULE-QUEUE.md`:
+
+| Value | Meaning |
+| --- | --- |
+| `implementation-pending` | Implementation work is explicitly queued. |
+| `implementation-gap-open` | Prior slice exposed or guarded a boundary, but implementation closure remains open. |
+| `not-module-closed` | Work is partial or deferred and cannot claim module closure. |
+| `not-applicable` | Planning/queue/status slice, not a product module. |
+| `go-admission-not-started` | Go candidate has not entered admission. |
+| `closed` | Full module completion definition is met. Use only when code, tests, docs, legacy isolation/removal, freshness proof, operation barrier, force refresh, and production evidence/defer status are accounted for. |

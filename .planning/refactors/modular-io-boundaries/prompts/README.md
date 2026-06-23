@@ -16,4 +16,5 @@
 | --- | --- |
 | `01-module-io-audit.md` | 对一个模块做 IO 合同审计，不改代码。 |
 | `02-refactor-phase-planning.md` | 基于已完成 IO 合同，为一个模块生成实现 phase 计划。 |
-| `03-autonomous-start.md` | 完整 GSD 自动推进 goal prompt：启动或续跑无人值守重构，在主 repo 直接使用 `dev` 分支，按模块队列循环执行直到闭环或硬停止。 |
+| `03-autonomous-start.md` | 旧版完整 GSD 自动推进 goal prompt；保留作历史入口，但执行前必须遵守 `MODULE-QUEUE.md` 的新 slice/module closure 语义。 |
+| `04-master-goal-controller.md` | 当前推荐主控 Goal Prompt：修正 queue 语义后，自动执行 planning preflight -> read model 试点 gap audit -> 实现边界 -> 状态更新 -> 下一个 prompt，不会在实现前置条件未闭合时跳到 GoHotPath。 |

@@ -21,6 +21,10 @@
 
 后续执行和汇报必须同时识别这些来源。若三者状态不一致，先执行 `planning:state-reconciliation-and-roadmap-alignment` 类型的文档状态同步 slice，再继续代码或模块边界实现。
 
+`autonomous/MODULE-QUEUE.md` 中的 `Status` 是 slice 状态，不是模块完成状态。`analysis-closed`、`contract-guard-closed`、`static-guard-closed`、`regression-guard-closed`、`route-guard-closed`、`inventory-guard-closed` 和 `planning-closed` 只能证明一个窄边界的分析、合同、guard、回归或状态同步已完成；它们不能替代本文件的“模块完成定义”。
+
+Go hot-path admission 不是主线下一步的默认选择。只要模块实现仍有 `implementation-pending` 或 `implementation-gap-open`，自动流程必须优先推进 IO 合同落地、read model freshness/force refresh/operation barrier、legacy 删除或隔离、测试和验证，而不能因为 guard slice 已关闭就跳到 Go/Fiber/Go Worker。
+
 ## 背景
 
 当前仓库已经有模块化基础：

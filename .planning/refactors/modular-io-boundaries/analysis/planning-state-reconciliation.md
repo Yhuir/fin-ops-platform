@@ -5,6 +5,8 @@
 **状态:** `closed-autonomous`
 **范围:** 同步 `.planning/ROADMAP.md`、`.planning/refactors/` 与 `modular-io-boundaries/autonomous` 的事实源关系、状态口径和自动推进 prompt；不改业务代码、不改 runtime 行为、不改 API/read model/worker/前端。
 
+**2026-06-24 说明:** 本文件中的 queue 统计是当时的历史快照。当前执行状态、slice status 与 module closure 语义以 `analysis/completion-semantics-and-queue-reclassification.md`、`autonomous/MODULE-QUEUE.md`、`autonomous/STATE.md` 和 `autonomous/NEXT-PROMPT.md` 为准。
+
 ## 触发原因
 
 用户指出当前自动推进口径没有按根目录 `.planning/ROADMAP.md` 执行。复核后确认之前的完成度汇报只基于 `modular-io-boundaries/autonomous/MODULE-QUEUE.md`，不能代表整个 `.planning/ROADMAP.md`。
