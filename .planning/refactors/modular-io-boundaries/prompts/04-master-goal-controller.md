@@ -69,12 +69,12 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:etc-repair-link-migration-persist-callback-closure-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:final-local-implementation-closure-and-production-evidence-defer.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
-- workbench_relation is selected as the next read model implementation pilot.
+- workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed.
 - WorkbenchRelationReadModelRepositoryPort is now wired into app/worker/projection builder relation read-model paths.
 - WorkbenchRelationDerivedLifecycleExecutor now owns derived lifecycle refresh enqueue payload behavior.
 - Transaction pair relation persist now uses `PostgresWorkbenchRelationRepository`.
@@ -103,7 +103,9 @@ Current state expected on start:
 - Broad app `_persist_state(...)` no longer serializes Workbench relation snapshot facts.
 - Turnover primary builders and `TurnoverLedgerLocalClosureConnection` now depend on explicit `TurnoverLedgerLocalPairSnapshotPort` instead of broad pair service injection.
 - ETC repair/link/migration callbacks are classified as explicit post-command persist boundaries.
-- The next pending boundary is workbench-relations:final-local-implementation-closure-and-production-evidence-defer.
+- Final local closure/defer accounting classified remaining local workbench relation references as explicit ports/adapters/repositories/runtime snapshot support/tools/tests.
+- Real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
+- The next pending boundary is read-models:next-pilot-selection-after-workbench-relation.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -199,19 +201,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:final-local-implementation-closure-and-production-evidence-defer unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-workbench-relation unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:final-local-implementation-closure-and-production-evidence-defer:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-etc-repair-link-migration-persist-callback-closure-audit.md`.
-- Read the latest workbench relation closure/accounting analysis files.
-- Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
+For read-models:next-pilot-selection-after-workbench-relation:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-final-local-implementation-closure-and-production-evidence-defer.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
+- Read `docs/modules/read-models/README.md` and relevant candidate module docs.
 - Read `04-IMPLEMENTATION-ROADMAP.md` and `11-GO-HOT-PATH-CARVE-OUT.md`.
-- Inspect remaining direct relation references in app, services, tools and tests.
-- Determine whether all local `workbench_relation` implementation gaps are closed or explicitly classified.
-- If local gaps remain, insert the next narrow implementation/audit boundary before Go.
-- If only unavailable real PostgreSQL/worker/App Status/high-row/browser evidence remains, mark the module slice as `production-evidence-deferred`, not `closed`.
+- Select the next non-Go modular IO/read model pilot based on current manifest, roadmap, implementation-gap evidence and cross-page freshness risk.
+- If the selected candidate is too broad, split the queue and execute the first smaller audit/implementation boundary.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
-- Do not declare `workbench_relation` module closed.
+- Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

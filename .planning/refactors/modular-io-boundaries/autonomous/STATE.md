@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-etc-repair-link-migration-persist-callback-closure-audit`
+Current state: `autonomous-continue-after-workbench-relations-final-local-implementation-closure-and-production-evidence-defer`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:etc-repair-link-migration-persist-callback-closure-audit`. `workbench_relation` remains implementation-gap-open until final closure/defer accounting runs. ETC repair/link/migration `persist_pair_relations` callbacks are classified as explicit post-command persist boundaries, and direct pair fallback remains removed/guarded.
+Completed `workbench-relations:final-local-implementation-closure-and-production-evidence-defer`. Local `workbench_relation` implementation support surfaces are accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable. Go hot-path admission remains blocked, and the next executable boundary is non-Go pilot selection.
 
 ## Closed Or Deferred Slices
 
@@ -130,6 +130,7 @@ Completed `workbench-relations:etc-repair-link-migration-persist-callback-closur
 - `workbench-relations:settings-data-reset-pair-snapshot-port-extraction` -> `implementation-closed`
 - `workbench-relations:local-implementation-closure-and-production-evidence-defer` -> `analysis-closed`
 - `workbench-relations:etc-repair-link-migration-persist-callback-closure-audit` -> `analysis-closed`
+- `workbench-relations:final-local-implementation-closure-and-production-evidence-defer` -> `production-evidence-deferred`
 
 ## Open Implementation Closure Work
 
@@ -137,14 +138,16 @@ Completed `workbench-relations:etc-repair-link-migration-persist-callback-closur
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, turnover local pair snapshot port extraction, settings data reset pair snapshot port extraction, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence, app health / route builder pair-service injection, settings data reset pair-service dependency, first local closure/defer accounting and ETC repair/link/migration callback accounting are analysis-closed. Final local closure/defer accounting remains open before any Go admission decision.
+- `workbench_relation` local implementation support is accounted for through final closure/defer accounting. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, turnover local pair snapshot port extraction, settings data reset pair snapshot port extraction, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence, app health / route builder pair-service injection, settings data reset pair-service dependency, first local closure/defer accounting and ETC repair/link/migration callback accounting are analysis-closed. The module is still not globally closed because production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
+- The next executable boundary is `read-models:next-pilot-selection-after-workbench-relation`, which must choose another non-Go modular IO/read model pilot before any Go admission decision.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
 
 - `bank-details:auto-tag-category-boundary`: real production PostgreSQL/worker dirty/outbox/readiness evidence unavailable without staging/local `PGSQL_URL`; no production write performed.
+- `workbench-relations:final-local-implementation-closure-and-production-evidence-defer`: local implementation support is accounted for, but real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable.
 
 ## Go Candidate Status
 
@@ -152,8 +155,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:etc-repair-link-migration-persist-callback-closure-audit`
+`workbench-relations:final-local-implementation-closure-and-production-evidence-defer`
 
 ## Next Prompt
 
-`workbench-relations:final-local-implementation-closure-and-production-evidence-defer`
+`read-models:next-pilot-selection-after-workbench-relation`

@@ -3566,3 +3566,18 @@ git diff --check
 - `persist_pair_relations` callback 当前分类为显式 post-command persist boundary，用于 command 成功后持久化 changed case ids；不是 relation write owner。
 
 下一条边界：`workbench-relations:final-local-implementation-closure-and-production-evidence-defer`。
+
+## 2026-06-24 - final local implementation closure and production evidence defer
+
+目标：在 ETC callback 已分类后，重新判断 `workbench_relation` 本地实现支持是否还存在未分类 implementation gap。
+
+结论：
+
+- 本地 `workbench_relation` 实现支持 surfaces 已完成当前 accounting。
+- 剩余 direct relation 引用被分类为显式 ports/adapters/repositories/runtime snapshot support/tools/tests，而不是未分类 page/service fallback。
+- `WorkbenchWriteFacade`、no-OA、turnover、settings reset、persist、rollback、transaction persist、command repository adapter、server read/precondition helper 和 ETC callback 等 surfaces 均已有对应实现 slice、analysis slice 或 guard evidence。
+- 真实 PostgreSQL relation/history、worker dirty/outbox/readiness、App Status、高行数性能和生产类 Browser smoke 证据仍不可用，因此只能记录为 `production-evidence-deferred`。
+- 这不是 full module closure；`workbench_relation` 不能标记为 `closed`。
+- Go/Fiber/Go Worker admission 仍 blocked，因为没有性能 baseline、shadow run、Python-vs-Go equivalence 或 rollback gate。
+
+下一条边界：`read-models:next-pilot-selection-after-workbench-relation`。
