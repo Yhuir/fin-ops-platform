@@ -18,6 +18,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_status_matches_filter,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text
@@ -36,12 +37,17 @@ class SearchPendingSqlProjectionBuilder:
         self,
         *,
         connection: Any,
-        read_model_repository: PostgresReadModelRepository | None = None,
+        read_model_repository: Any | None = None,
+        pending_invoice_read_model_repository: Any | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
         workbench_relation_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._pending_invoice_read_model_repository = (
+            pending_invoice_read_model_repository
+            or PendingInvoiceReadModelRepositoryPort(self._read_model_repository)
+        )
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
         self._workbench_relation_read_facade = workbench_relation_read_facade
         self._pending_invoice_bank_tag_source_versions: dict[str, object] = {}
@@ -84,7 +90,7 @@ class SearchPendingSqlProjectionBuilder:
             raise ValueError("pending invoice SQL projection scope_key must include a month shard YYYY-MM.")
         rows = self._pending_invoice_rows(direction=normalized_direction, filter_name=normalized_filter, month=month)
         source_versions = self._pending_invoice_source_versions()
-        self._read_model_repository.save_pending_invoice_rows(
+        self._pending_invoice_read_model_repository.save_pending_invoice_rows(
             scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
             source_versions=source_versions,
@@ -97,7 +103,7 @@ class SearchPendingSqlProjectionBuilder:
             raise ValueError("pending invoice direction must be expense or income.")
         if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
             raise ValueError("pending invoice filter must be all or a supported filter group.")
-        mark_scope = getattr(self._read_model_repository, "mark_pending_invoice_scope", None)
+        mark_scope = getattr(self._pending_invoice_read_model_repository, "mark_pending_invoice_scope", None)
         if not callable(mark_scope):
             return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": 0}
         normalized_scope_key = str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}"

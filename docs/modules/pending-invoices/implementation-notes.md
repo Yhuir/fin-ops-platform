@@ -292,6 +292,17 @@
 - 第一条实现边界：新增/使用窄 `PendingInvoiceReadModelRepositoryPort`，只暴露 pending invoice rows、filter options、source summary、bank detail/workbench relation source versions、save/mark 等 read-model repository 方法，并用测试证明不会暴露其它 read model 方法。
 - 非目标：不改 attach/manual/income status command 行为，不改 API response shape，不改 UI，不实现 Go/Fiber/Go Worker，不依赖 staging DB 或本地 `PGSQL_URL`。
 
+## 2026-06-24 - pending invoice repository port extraction
+
+- 目标：完成待找发票 read model 第一条模块化 IO 实现边界，把运行时 rows/filter-options/source-version 读取和 projection save/mark 约束到 `PendingInvoiceReadModelRepositoryPort`。
+- 影响范围：`backend/src/fin_ops_platform/services/pending_invoice_read_model_repository.py`、`postgres_state_store.py`、`search_pending_sql_projection.py`、`app/worker.py` 和 `tests/test_search_pending_sql_runtime.py`。
+- 关键决策：待找发票 read model port 只允许待找发票需要的 IO 方法；`SearchPendingSqlProjectionBuilder` 保留独立 search repository 处理 search index，避免把 search 行为错误塞进 pending invoice port。
+- 文档影响：同步更新 modular IO autonomous state、queue、next prompt、master goal prompt 和 read-models/pending-invoices implementation notes；业务产品口径、API contract 和 UI 没有变化。
+- 测试覆盖：新增 `PendingInvoiceReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；回归 pending invoice rows/source-version freshness 和 search index SQL runtime。
+- 验证命令：`python3 -m py_compile` 覆盖相关后端文件；`PYTHONPATH=backend/src python3 -m unittest ... -v` 覆盖 port、pending invoice SQL runtime 和 search index；`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：未执行真实 PostgreSQL 大数据量、真实 worker drain、App Status 或浏览器 smoke；后续 freshness/barrier audit 继续拆分这些证据或记录生产 evidence defer。
+- 后续事项：审计并必要时补强 pending invoice force-refresh、freshness status、special scope `expense|income:<filter>[:YYYY-MM]` 和 operation barrier。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。

@@ -6,6 +6,7 @@ from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
 from fin_ops_platform.services.pending_invoice_service import (
@@ -30,6 +31,37 @@ class QueueRecorder:
         self.completed.append((tenant_id, scope_type, scope_key))
 
 
+class UnderlyingPendingInvoiceReadModelRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_pending_invoice_rows", dict(kwargs)))
+        return {"rows": [{"id": "pending-1"}], "read_model_status": "fresh"}
+
+    def list_pending_invoice_filter_options(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_pending_invoice_filter_options", dict(kwargs)))
+        return {"options": [{"field": "status_code", "value": "paid_pending_invoice"}]}
+
+    def pending_invoice_source_summary(self, **kwargs: object) -> dict[str, int]:
+        self.calls.append(("pending_invoice_source_summary", dict(kwargs)))
+        return {"bank_transaction_rows": 1}
+
+    def pending_invoice_bank_detail_source_versions(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("pending_invoice_bank_detail_source_versions", dict(kwargs)))
+        return {"bank_detail_schema_version": 2}
+
+    def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("pending_invoice_workbench_relation_source_versions", dict(kwargs)))
+        return {"workbench_relation_schema_version": "v1"}
+
+    def save_pending_invoice_rows(self, **kwargs: object) -> None:
+        self.calls.append(("save_pending_invoice_rows", dict(kwargs)))
+
+    def mark_pending_invoice_scope(self, **kwargs: object) -> None:
+        self.calls.append(("mark_pending_invoice_scope", dict(kwargs)))
+
+
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
     return {
         "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
@@ -40,6 +72,92 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         "bank_detail_source_versions": {},
     }
+
+
+class PendingInvoiceReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        underlying = UnderlyingPendingInvoiceReadModelRepository()
+        port = PendingInvoiceReadModelRepositoryPort(underlying)
+
+        self.assertEqual(
+            port.list_pending_invoice_rows(
+                direction="expense",
+                filter="all",
+                date_from=None,
+                date_to=None,
+                keyword=None,
+                filters=None,
+                page=1,
+                page_size=50,
+            )["rows"][0]["id"],
+            "pending-1",
+        )
+        self.assertEqual(
+            port.list_pending_invoice_filter_options(
+                direction="expense",
+                filter="all",
+                date_from=None,
+                date_to=None,
+                keyword=None,
+                filters=None,
+            )["options"][0]["value"],
+            "paid_pending_invoice",
+        )
+        self.assertEqual(
+            port.pending_invoice_source_summary(direction="expense", date_from=None, date_to=None)[
+                "bank_transaction_rows"
+            ],
+            1,
+        )
+        self.assertEqual(
+            port.pending_invoice_bank_detail_source_versions(
+                direction="expense",
+                filter="all",
+                date_from=None,
+                date_to=None,
+                keyword=None,
+                filters=None,
+            )["bank_detail_schema_version"],
+            2,
+        )
+        self.assertEqual(
+            port.pending_invoice_workbench_relation_source_versions(
+                direction="expense",
+                filter="all",
+                date_from=None,
+                date_to=None,
+                keyword=None,
+                filters=None,
+            )["workbench_relation_schema_version"],
+            "v1",
+        )
+        port.save_pending_invoice_rows(
+            scope_key="expense:all:2026-05",
+            rows=[{"id": "pending-1"}],
+            source_versions={"schema": "v1"},
+        )
+        port.mark_pending_invoice_scope(
+            scope_key="expense:all:2026-06",
+            row_count=0,
+            source_versions={"schema": "v2"},
+        )
+
+        self.assertFalse(hasattr(port, "search_index"))
+        self.assertFalse(hasattr(port, "save_search_index_rows"))
+        self.assertFalse(hasattr(port, "list_bank_detail_transactions"))
+        self.assertFalse(hasattr(port, "list_workbench_relation_rows"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "list_pending_invoice_rows",
+                "list_pending_invoice_filter_options",
+                "pending_invoice_source_summary",
+                "pending_invoice_bank_detail_source_versions",
+                "pending_invoice_workbench_relation_source_versions",
+                "save_pending_invoice_rows",
+                "mark_pending_invoice_scope",
+            ],
+        )
 
 
 class SearchPendingConnection:

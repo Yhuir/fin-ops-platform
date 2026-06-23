@@ -83,6 +83,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 )
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
+from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
@@ -331,6 +332,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         projection_builder = SearchPendingSqlProjectionBuilder(
             connection=connection,
             read_model_repository=read_model_repository,
+            pending_invoice_read_model_repository=(
+                PendingInvoiceReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
             workbench_relation_read_facade=workbench_relation_read_facade,
         )

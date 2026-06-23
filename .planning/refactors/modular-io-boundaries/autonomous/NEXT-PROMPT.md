@@ -1,20 +1,21 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-workbench-relation` slice.
+Continue the autonomous modular IO refactor after the `read-models:pending-invoice-repository-port-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:next-pilot-selection-after-workbench-relation`
-- Last status: `analysis-closed`
+- Last completed boundary: `read-models:pending-invoice-repository-port-extraction`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `pending_invoice` is selected as the next non-Go read model implementation pilot.
-- `pending_invoice` depends on both `bank_detail` and `workbench_relation` source versions and has special `expense|income:<filter>[:YYYY-MM]` scope semantics.
+- `pending_invoice` is the active non-Go read model implementation pilot.
+- `PendingInvoiceReadModelRepositoryPort` now narrows rows, filter-options, source-version and projection save/mark repository access.
+- Search index behavior remains on the search repository; pending invoice projection save/mark uses the pending invoice port.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:pending-invoice-repository-port-extraction`
+`read-models:pending-invoice-refresh-freshness-operation-barrier-audit`
 
 ## Required First Steps On Resume
 
@@ -22,16 +23,16 @@ Continue the autonomous modular IO refactor after the `read-models:next-pilot-se
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-repository-port-extraction.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-and-oa-pending-payment-contract.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/pending-invoices/README.md`
    - `docs/modules/pending-invoices/tests.md`
    - `docs/modules/pending-invoices/implementation-notes.md`
    - `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`
+   - `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`
    - `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
-   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
+   - `backend/src/fin_ops_platform/services/read_model_scope_policy.py`
    - `tests/test_search_pending_sql_runtime.py`
 5. Produce/update an analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
 6. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
@@ -40,31 +41,21 @@ Continue the autonomous modular IO refactor after the `read-models:next-pilot-se
 
 Target:
 
-- Add a narrow `PendingInvoiceReadModelRepositoryPort` or equivalent narrow port.
-- Expose only pending invoice read-model methods needed by the read service, source-version provider and projection builder:
-  - `list_pending_invoice_rows`
-  - `list_pending_invoice_filter_options`
-  - `pending_invoice_source_summary`
-  - `pending_invoice_bank_detail_source_versions`
-  - `pending_invoice_workbench_relation_source_versions`
-  - `save_pending_invoice_rows`
-  - `mark_pending_invoice_scope`
-- Decide whether `list_pending_invoice_scope_shards` belongs in the same port or a projection-only sub-port based on current call sites.
-- Wire `PendingInvoiceReadModelService`, `PendingInvoiceSourceVersionsProvider` and `SearchPendingSqlProjectionBuilder` through the port where the app/worker currently passes the broad read model repository.
-- Add tests proving unrelated read model repository methods are not exposed through the port.
-- Preserve current payload shape, `read_model_status`, stale reasons, filter options, export row limit, source version behavior and scope semantics.
+- Audit pending invoice freshness, force-refresh, special scope and operation barrier behavior after repository port extraction.
+- Confirm `expense|income:<filter>[:YYYY-MM]` scope handling still rejects bare `all` and preserves page-first-screen force refresh semantics.
+- Classify whether remaining gaps are local implementation gaps, compat-only paths, or production evidence gaps.
+- If a local gap remains, insert the next narrow implementation boundary before Go.
 
 Forbidden:
 
-- Do not change pending invoice business rules, status meanings, relation write behavior, API response shape or UI behavior.
+- Do not change pending invoice business rules, status meanings, relation write behavior, API response shape or UI behavior unless the audit proves a narrow bug and tests cover it.
 - Do not implement Go/Fiber/Go Worker.
 - Do not mark any module globally closed.
 - Do not rely on staging DB or local `PGSQL_URL`.
 
 ## Expected Output
 
-- One verified `read-models:pending-invoice-repository-port-extraction` implementation slice.
-- Updated tests for the narrow port and affected service/projection behavior.
+- One verified audit/accounting slice.
 - Updated queue/state/journal/next prompt.
 - Targeted verification, docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
@@ -72,4 +63,4 @@ Forbidden:
 
 ## Stop Condition
 
-Complete one verified pending invoice repository port extraction slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one verified pending invoice freshness/barrier audit slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

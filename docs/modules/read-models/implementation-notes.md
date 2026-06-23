@@ -638,6 +638,17 @@
 - 第一步范围：只抽取窄 `PendingInvoiceReadModelRepositoryPort`，覆盖 rows、filter options、source summary、bank detail/workbench relation source versions、projection save/mark。暂不改变业务状态、API shape、UI、worker runtime 或 Go/Fiber/Go Worker。
 - 生产证据：本轮为 analysis-only，不需要生产验证；真实 PostgreSQL/worker/App Status/high-row/browser 证据继续按后续 implementation/verification slice 记录或递延。
 
+## 2026-06-24 - pending invoice read model repository port extraction
+
+- 目标：落实 `read-models:pending-invoice-repository-port-extraction`，让待找发票 read model 的查询和投影保存只依赖待找发票窄 repository port，不继续把完整 `PostgresReadModelRepository` 暴露给待找发票读路径。
+- 影响范围：`PendingInvoiceReadModelRepositoryPort`、`PostgresStateStore.pending_invoice_sql_read_repository`、`SearchPendingSqlProjectionBuilder`、runtime worker projection builder wiring 和 `tests/test_search_pending_sql_runtime.py`。
+- 关键决策：`PendingInvoiceReadModelRepositoryPort` 只暴露 pending invoice rows、filter options、source summary、bank detail/workbench relation source versions、projection save/mark。Search index 行为继续使用 search repository，不混入 pending invoice port。
+- 非目标：不改 pending invoice 业务状态、筛选语义、API shape、UI、worker scope fan-out、Go/Fiber 或 Go Worker。
+- 测试覆盖：新增 port contract 测试，证明 port 不暴露 search、bank detail、workbench relation 等无关 read model 方法；保留 pending invoice rows/source-version freshness 与 search index SQL runtime 回归。
+- 验证命令：`python3 -m py_compile ...`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.PendingInvoiceReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_pending_invoice_repository_reads_rows_page_and_summary tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_pending_invoice_api_workbench_relation_source_version_stale_enqueues_refresh tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_reads_sql_index -v`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：本轮不连接真实 PostgreSQL，不验证 EXPLAIN、高行数分页、真实 worker drain 或 App Status；这些证据继续由后续 freshness/barrier audit 与生产 evidence/defer slice 处理。
+- 后续事项：下一条边界审计 pending invoice freshness、force-refresh、特殊 scope 和 operation barrier，确认 read model 不会在关系或银行明细更新后伪装 fresh。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。
