@@ -192,18 +192,17 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:rollback-closure-accounting-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:whole-state-persistence-closure-accounting-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:rollback-closure-accounting-audit:
+For workbench-relations:whole-state-persistence-closure-accounting-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-rollback-closure-accounting-audit.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-transaction-persist-closure-accounting-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-pair-relation-rollback-restore-service-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-exception-rollback-restore-service-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_pair_relation_rollback_restore_service.py`, `backend/src/fin_ops_platform/services/workbench_exception_rollback_restore_service.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_restore_workbench_pair_relation_snapshot`, `_restore_workbench_exception_pair_snapshots`, `WorkbenchPairRelationRollbackRestoreService`, `WorkbenchExceptionRollbackRestoreService`, `restore_pair_relation_snapshot`, and rollback restore tests.
-- Audit pair relation and exception rollback restore surfaces.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/state_store.py`, `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`, `backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_persist_state`, `workbench_pair_relations`, `save_workbench_pair_relations`, `load_workbench_pair_relations`, `WorkbenchPairRelationService.from_snapshot`, and state store relation tests.
+- Audit whole-state persistence, bootstrap and compatibility snapshot paths.
 - Classify each as implemented, compat-only, next implementation boundary, production-evidence-deferred, or blocked-by-human-gate.
-- Decide whether rollback restore is locally accounted for or whether a narrow implementation slice is still required.
+- Decide whether remaining full-state paths are acceptable compatibility surfaces, need quarantine, or need a narrow implementation slice before local closure/defer.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.

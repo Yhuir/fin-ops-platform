@@ -3367,3 +3367,31 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:rollback-closure-accounting-audit`。
+
+## 2026-06-24 - rollback closure accounting audit
+
+目标：审计 Workbench relation rollback restore surfaces，判断是否还有必须先实现的 rollback 边界。
+
+结论：
+
+- `_restore_workbench_pair_relation_snapshot(...)` 已是 `WorkbenchPairRelationRollbackRestoreService.restore(...)` 的 compat delegate。
+- `WorkbenchPairRelationRollbackRestoreService` 已拥有 pair relation snapshot rehydrate、pair relation service replacement、exception application service reconfigure 和 best-effort state-store save。
+- `_restore_workbench_exception_write_snapshots(...)`、`_restore_workbench_exception_pair_snapshots(...)`、`_restore_workbench_exception_override_snapshots(...)` 已是 `WorkbenchExceptionRollbackRestoreService` 的 compat delegates。
+- `WorkbenchExceptionRollbackRestoreService` 已拥有 exception / pair relation / candidate match / override snapshot restore。
+- `_restore_batch_accounting_pair_relation_snapshot(...)` 已使用 `WorkbenchPairRelationRollbackRestoreService`，并保持 `state_store=None` 的 in-memory rollback-only 行为。
+- 该 slice 只关闭 rollback surface accounting，不关闭 `workbench_relation` 模块。
+
+仍未闭环：
+
+- whole-state persistence snapshot / bootstrap compatibility accounting。
+- app health / route builder pair-service injection accounting。
+- 真实 PostgreSQL/worker/生产只读证据仍按生产证据 defer 处理，不阻塞本地重构推进。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:whole-state-persistence-closure-accounting-audit`。
