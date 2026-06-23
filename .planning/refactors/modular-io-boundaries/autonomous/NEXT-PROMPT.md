@@ -1,21 +1,23 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `server-py:legacy-handler-extraction-implementation` slice.
+Continue the autonomous modular IO refactor after the `batch-accounting:legacy-route-implementation` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `server-py:legacy-handler-extraction-implementation`
+- Last completed boundary: `batch-accounting:legacy-route-implementation`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- The completed server-py slice removed definition-only ETC business-batch legacy handlers from `server.py` and guarded the active `/api/etc/business-batches*` wrappers so list/create/detail/import/OA/manual-status continue delegating to `EtcBusinessBatchApiRoutes`.
+- The completed batch-accounting slice extracted read-only `GET /api/batch-accounting` query normalization and list error mapping into `BatchAccountingApiRoutes`; `BatchAccountingService.build_payload(..., use_sql_read_model=True)` remains the read contract owner.
+- Submit/withdraw mutation route mapping and write-after side-effect boundaries still remain in `server.py`.
 - Broader `server.py` shared-boundary cleanup remains `implementation-gap-open`.
+- Broader `batch-accounting` module closure remains `implementation-gap-open`.
 - `bank_detail` remains the first read model implementation pilot and is still not module-closed.
 - Go hot-path candidates remain blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
 
 ## Next Boundary
 
-`batch-accounting:legacy-route-implementation`
+`batch-accounting:submit-withdraw-route-side-effect-port`
 
 ## Required First Steps On Resume
 
@@ -39,29 +41,30 @@ Continue the autonomous modular IO refactor after the `server-py:legacy-handler-
    - If these files disagree on current state, next boundary, status labels, module closure meaning or completion metric source, stop normal implementation and create another `planning:state-reconciliation-*` slice first.
 4. Read:
    - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-batch-legacy-handler-removal.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-get-route-owner-extraction.md`
    - `docs/app-architecture/runtime-and-ownership.md`
    - `docs/modules/README.md`
    - `docs/modules/batch-accounting/README.md`
    - `docs/modules/batch-accounting/state-machine.md`
    - `docs/modules/batch-accounting/tests.md`
-5. Use CodeGraph first to inspect the selected batch-accounting route handler, service owner, callers, callees and impact.
-6. Execute only one narrow batch-accounting route/service implementation boundary. Do not implement Go/Fiber/Go Worker.
+5. Use CodeGraph first to inspect the selected batch-accounting submit/withdraw route handlers, service owner, callers, callees and impact.
+6. Execute only one narrow batch-accounting mutation route/service implementation boundary. Do not implement Go/Fiber/Go Worker.
 7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Convert one batch-accounting route/legacy boundary from guard-only to actual service/repository/read-model contract implementation.
-- Prefer the smallest route with a clear owner and existing tests.
+- Convert one batch-accounting submit/withdraw route side-effect boundary from `server.py` inline mapping into an explicit route owner or side-effect port.
+- Prefer the smallest mutation route with clear existing tests.
 - Keep `server.py` thin: HTTP parsing, session/auth resolution, dependency wiring and response mapping only.
 
 Allowed outcomes:
 
-- Move a narrow legacy route body into an existing route/service boundary.
+- Move a narrow mutation route body into an existing route/service boundary.
 - Or quarantine a legacy batch-accounting handler with owner/caller/forbidden-write/deletion-condition tests if extraction is too broad.
 - Preserve API response shape, permissions, audit and read model behavior.
+- Keep write-after lifecycle/read model refresh/barrier behavior behind existing service/command boundaries.
 
 Forbidden:
 
@@ -74,14 +77,14 @@ Forbidden:
 ## Expected Output
 
 - An analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- One small implementation or static quarantine guard for the selected batch-accounting boundary.
+- One small implementation or static quarantine guard for the selected batch-accounting mutation boundary.
 - Updated module docs/state/journal/next prompt.
 - Targeted API/service/read model/permission tests, docs verification, app check and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one verified batch-accounting route implementation/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
+Complete one verified batch-accounting mutation route implementation/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
 
 ## Reporting Rule
 

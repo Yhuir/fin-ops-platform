@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-06-24 - GET route owner 抽取
+
+- 目标：把 `GET /api/batch-accounting` 的 query normalization 和 list error mapping 从 `server.py` inline route body 抽到 `BatchAccountingApiRoutes`，让 `server.py` 只保留 route wrapper、依赖 wiring 和 JSON response mapping。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_batch_accounting.py`、`server.py` 的 GET wrapper、`tests/test_platform_runtime_boundary_guards.py` 的 route owner inventory 和 batch-accounting route boundary guard。
+- 关键决策：本 slice 只关闭 GET read-only route owner 抽取；`BatchAccountingService.build_payload(..., use_sql_read_model=True)` 仍是 read contract owner；submit/withdraw mutation handler、repair compat path、read model freshness 语义、权限、API response shape 和前端行为不变。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-get-route-owner-extraction.md`；本实施记录说明 batch-accounting 模块仍未整体关闭。
+- 测试覆盖：静态 guard 覆盖 `routes_batch_accounting.py` 注册与 delegation；API 回归覆盖 SQL read model loader、GET 不执行 legacy repair、显式分页和 stale/missing read model status。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_uses_sql_read_model_loader_when_available tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_does_not_run_legacy_relation_repair tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_explicit_pagination_protects_first_screen_slo tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_exposes_relation_read_model_missing_status -v`。
+- 未测风险：本 slice 不连接生产 PostgreSQL、不 drain worker、不验证真实大年份性能；因为没有改变 SQL/queue/worker/read model 发布语义，生产验证不是完成条件。
+- 后续事项：继续推进 `batch-accounting:submit-withdraw-route-side-effect-port`，把 mutation HTTP DTO/error mapping 与写后 lifecycle/read model barrier 从 `server.py` 收敛到明确边界。
+
 ## 2026-06-23 - Route handler 边界守卫
 
 - 目标：防止 `/api/batch-accounting*` route 重新绕过 `BatchAccountingService`，在 GET 列表路径执行 legacy repair/write/read model schedule，或在 submit/withdraw route 里直接调用 relation write internals。

@@ -374,6 +374,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "BankDetailsApiRoutes",
                 "server_markers": ("def _bank_details_routes", "_bank_details_routes()."),
             },
+            "routes_batch_accounting.py": {
+                "module": "fin_ops_platform.app.routes_batch_accounting",
+                "class": "BatchAccountingApiRoutes",
+                "server_markers": ("def _batch_accounting_routes", "_batch_accounting_routes()."),
+            },
             "routes_cost_statistics.py": {
                 "module": "fin_ops_platform.app.routes_cost_statistics",
                 "class": "CostStatisticsApiRoutes",
@@ -932,10 +937,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         list_source = _function_source(tree, source, "_handle_api_batch_accounting")
         submit_source = _function_source(tree, source, "_handle_api_batch_accounting_submit")
         withdraw_source = _function_source(tree, source, "_handle_api_batch_accounting_withdraw")
+        routes_path = APP_ROOT / "routes_batch_accounting.py"
+        routes_source = routes_path.read_text(encoding="utf-8")
+        routes_tree = _parse(routes_path)
+        route_list_source = _function_source(routes_tree, routes_source, "list_payload")
 
         violations: list[str] = []
-        if "_batch_accounting_service(use_sql_read_model=True).build_payload" not in list_source:
-            violations.append("GET /api/batch-accounting no longer delegates reads to BatchAccountingService with SQL read model")
+        if "_batch_accounting_routes().list_payload" not in list_source:
+            violations.append("GET /api/batch-accounting no longer delegates reads to BatchAccountingApiRoutes")
+        if "_service_factory(use_sql_read_model=True).build_payload" not in route_list_source:
+            violations.append("BatchAccountingApiRoutes no longer delegates reads to BatchAccountingService with SQL read model")
         for forbidden in (
             "_repair_batch_accounting_relation_case_ids",
             "repair_legacy_case_id_collisions",
@@ -951,6 +962,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in list_source:
                 violations.append(f"GET /api/batch-accounting bypasses read-only route boundary via {forbidden}")
+            if forbidden in route_list_source:
+                violations.append(f"BatchAccountingApiRoutes list bypasses read-only route boundary via {forbidden}")
 
         mutation_handlers = (
             ("submit", submit_source, "_batch_accounting_service().submit"),

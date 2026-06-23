@@ -46,6 +46,7 @@ from fin_ops_platform.app.bank_detail_category_api import (
     manual_assignment_selection,
 )
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
+from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
@@ -13052,34 +13053,17 @@ class Application:
             relation_command_service=self._workbench_relation_command_service(),
         )
 
+    def _batch_accounting_routes(self) -> BatchAccountingApiRoutes:
+        routes = getattr(self, "_batch_accounting_api_routes", None)
+        if isinstance(routes, BatchAccountingApiRoutes):
+            return routes
+        routes = BatchAccountingApiRoutes(lambda **kwargs: self._batch_accounting_service(**kwargs))
+        self._batch_accounting_api_routes = routes
+        return routes
+
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
-        year = query.get("year", [""])[0]
-        bank_year = query.get("bank_year", [year])[0]
-        oa_year = query.get("oa_year", [year])[0]
-        bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
-
-        def query_value(*names: str) -> str | None:
-            for name in names:
-                if name in query:
-                    return (query.get(name) or [None])[0]
-            return None
-
-        try:
-            payload = self._batch_accounting_service(use_sql_read_model=True).build_payload(
-                year=year,
-                bank_year=bank_year,
-                oa_year=oa_year,
-                bucket=bucket,
-                page=query_value("page"),
-                page_size=query_value("page_size", "pageSize"),
-                bank_page=query_value("bank_page", "bankPage"),
-                bank_page_size=query_value("bank_page_size", "bankPageSize"),
-                oa_page=query_value("oa_page", "oaPage"),
-                oa_page_size=query_value("oa_page_size", "oaPageSize"),
-            )
-        except BatchAccountingError as exc:
-            return self._batch_accounting_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        status_code, payload = self._batch_accounting_routes().list_payload(query)
+        return self._json_response(status_code, payload)
 
     def _repair_batch_accounting_relation_case_ids(self) -> dict[str, object]:
         repair_result = self._batch_accounting_service().repair_legacy_case_id_collisions()
