@@ -3553,3 +3553,16 @@ git diff --check
 - Go hot-path 仍保持 blocked，不应成为下一步。
 
 下一条边界：`workbench-relations:etc-repair-link-migration-persist-callback-closure-audit`。
+
+## 2026-06-24 - ETC repair/link/migration persist callback closure audit
+
+目标：审计 ETC repair/link/migration 服务中的 `persist_pair_relations` callback。
+
+结论：
+
+- `HistoricalEtcRepairService`、`HistoricalEtcBusinessBatchMigrationService`、`ExistingEtcBatchLinkService` 已要求 `WorkbenchRelationCommandService` 写 relation 或更新 metadata。
+- 现有 static guard 禁止这些服务重新引入 `pair_relation_service` / `_pair_relation_service` direct fallback。
+- 现有测试覆盖缺少 command service 时 fail fast，不允许先写 ETC 本地状态或 broad pair service fallback。
+- `persist_pair_relations` callback 当前分类为显式 post-command persist boundary，用于 command 成功后持久化 changed case ids；不是 relation write owner。
+
+下一条边界：`workbench-relations:final-local-implementation-closure-and-production-evidence-defer`。
