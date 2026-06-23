@@ -297,6 +297,24 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
+## 2026-06-24 - post-restore local implementation closure audit
+
+目标：在 persist/rollback restore 相关抽离完成后，重新审计 `workbench_relation` 是否可本地 closure、是否只能 production-evidence-deferred，或是否仍有本地 implementation gap。
+
+结论：
+
+- 不能标记 local closure，也不能进入 Go admission。
+- 仍有 app-owned relation callback/helper 需要继续分类，尤其是 batch-accounting route-local `pair_relation_snapshot` / `restore_pair_relation_snapshot` wiring。
+- 下一条最小边界应为 `workbench-relations:batch-accounting-pair-restore-helper-audit`。
+- Turnover legacy fallback、No-OA、Pending Invoice、Historical ETC repair 等仍需要后续独立分类，不应在本 audit 中一次性扩散。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

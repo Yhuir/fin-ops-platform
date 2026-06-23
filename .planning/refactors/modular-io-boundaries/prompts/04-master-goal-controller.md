@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:exception-rollback-restore-service-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:post-restore-local-implementation-closure-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -82,7 +82,8 @@ Current state expected on start:
 - WorkbenchPairRelationPersistService now owns non-transactional pair relation persist/schedule/background/timing behavior.
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
-- The next pending boundary is workbench-relations:post-restore-local-implementation-closure-audit.
+- Local closure audit still found implementation gaps; Go hot-path candidates remain blocked.
+- The next pending boundary is workbench-relations:batch-accounting-pair-restore-helper-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -178,15 +179,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:post-restore-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:batch-accounting-pair-restore-helper-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:post-restore-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-exception-rollback-restore-service-extraction.md`.
+For workbench-relations:batch-accounting-pair-restore-helper-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-restore-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph and text search to re-audit remaining app-owned workbench relation helpers, restore helpers, callback wiring and relation lifecycle gaps.
-- Decide whether local support slices can enter production-evidence-deferred, whether another narrow cleanup is required, or whether Go admission must remain blocked by local gaps.
-- Do not claim full module closure without production PostgreSQL/worker/App Status/high-row/browser evidence or explicit defer status.
-- Do not run Go admission while local implementation gaps remain.
+- Read `backend/src/fin_ops_platform/app/routes_batch_accounting.py`.
+- Use CodeGraph/text search for `_restore_batch_accounting_pair_relation_snapshot`, `BatchAccountingApiRoutes`, pair relation snapshot/restore wiring and callers/impact.
+- Audit BatchAccountingApiRoutes pair relation snapshot/restore wiring.
+- Decide whether `_restore_batch_accounting_pair_relation_snapshot(...)` should delegate to `WorkbenchPairRelationRollbackRestoreService`, be removed, or be classified as route-local compat-only.
+- Do not migrate batch-accounting restore behavior in this audit slice unless the queue is explicitly split/advanced after analysis.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
