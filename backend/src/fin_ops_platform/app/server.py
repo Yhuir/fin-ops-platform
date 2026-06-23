@@ -407,6 +407,7 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_groups_page_cache import (
     build_workbench_groups_redis_cache_key_from_version,
     normalize_workbench_group_detail_level,
@@ -971,7 +972,12 @@ class Application:
         self._workbench_special_pair_rule_service = WorkbenchSpecialPairRuleService()
         self._workbench_matching_orchestrator = WorkbenchMatchingOrchestrator(
             row_provider=self._workbench_matching_rows_for_scope,
-            pair_relation_service=self._workbench_pair_relation_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(
+                self._workbench_relation_command_service(
+                    repository=getattr(self, "_state_store", None),
+                    require_fresh_relations=False,
+                )
+            ),
             candidate_match_service=self._workbench_candidate_match_service,
             read_model_service=self._workbench_read_model_service,
             rules=self._workbench_matching_rules,

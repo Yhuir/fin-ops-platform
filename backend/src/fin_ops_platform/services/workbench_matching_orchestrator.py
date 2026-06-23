@@ -8,9 +8,11 @@ from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
-from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchReconciliationEngine
+from fin_ops_platform.services.workbench_reconciliation_engine import (
+    WorkbenchMatchingRelationReadPort,
+    WorkbenchReconciliationEngine,
+)
 from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_special_reconciliation_adapter import WorkbenchSpecialReconciliationAdapter
@@ -44,7 +46,7 @@ class WorkbenchMatchingOrchestrator:
         self,
         *,
         row_provider: WorkbenchMonthlyRowProvider | Callable[[str], dict[str, Any]],
-        pair_relation_service: WorkbenchPairRelationService,
+        relation_read_port: WorkbenchMatchingRelationReadPort,
         candidate_match_service: WorkbenchCandidateMatchService,
         read_model_service: WorkbenchReadModelService,
         rules: WorkbenchMatchingRules,
@@ -58,7 +60,7 @@ class WorkbenchMatchingOrchestrator:
         logger: logging.Logger | None = None,
     ) -> None:
         self._row_provider = row_provider
-        self._pair_relation_service = pair_relation_service
+        self._relation_read_port = relation_read_port
         self._candidate_match_service = candidate_match_service
         self._read_model_service = read_model_service
         self._rules = rules
@@ -194,7 +196,7 @@ class WorkbenchMatchingOrchestrator:
         month_rows = self._rows_for_scope_window(scope_month)
         engine = self._reconciliation_engine or WorkbenchReconciliationEngine(
             decision_store=self._decision_store,
-            pair_relation_service=self._pair_relation_service,
+            relation_read_port=self._relation_read_port,
             special_adapter=WorkbenchSpecialReconciliationAdapter(
                 special_rule_service=self._special_rule_service,
             ),
@@ -445,15 +447,9 @@ class WorkbenchMatchingOrchestrator:
         )
 
     def _active_pair_relation_row_ids(self, scope_month: str) -> set[str]:
-        list_active_relations = getattr(self._pair_relation_service, "list_active_relations", None)
-        if not callable(list_active_relations):
-            raise ValueError("pair_relation_service must provide list_active_relations().")
-
         window_months = set(expand_scope_month_window(scope_month))
         held_row_ids: set[str] = set()
-        for relation in list_active_relations():
-            if not isinstance(relation, dict):
-                raise ValueError("pair_relation_service returned a non-dict active relation.")
+        for relation in self._relation_read_port.list_active_relations():
             if str(relation.get("status") or ACTIVE_RELATION_STATUS) != ACTIVE_RELATION_STATUS:
                 continue
             month_scope = self._relation_month_scope(relation)

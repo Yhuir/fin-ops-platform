@@ -1142,6 +1142,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_matching_uses_relation_read_port_not_pair_service(self) -> None:
+        checks = {
+            "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py": (
+                "WorkbenchMatchingOrchestrator",
+                "WorkbenchMatchingRelationReadPort",
+            ),
+            "backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py": (
+                "WorkbenchReconciliationEngine",
+                "WorkbenchMatchingRelationReadPort",
+            ),
+        }
+        violations: list[str] = []
+        for rel_path, (class_name, required_port) in checks.items():
+            path = REPO_ROOT / rel_path
+            source = path.read_text(encoding="utf-8")
+            tree = _parse(path)
+            class_source = _class_source(tree, source, class_name)
+            if required_port not in source:
+                violations.append(f"{rel_path} does not expose/use {required_port}")
+            for forbidden in (
+                "WorkbenchPairRelationService",
+                "pair_relation_service:",
+                "pair_relation_service=",
+                "self._pair_relation_service",
+                "_pair_relation_service.",
+            ):
+                if forbidden in class_source:
+                    violations.append(f"{class_name} keeps broad pair relation dependency {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")

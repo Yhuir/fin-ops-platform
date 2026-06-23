@@ -2977,3 +2977,35 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:workbench-matching-relation-read-port-extraction`。
+
+## 2026-06-24 - Workbench matching relation read port extraction
+
+目标：移除 Workbench matching/orchestrator 对 broad `WorkbenchPairRelationService` 的构造和保存依赖，把 matching 所需 canonical active relation reads 收敛到显式 read port。
+
+变更：
+
+- 新增 `WorkbenchMatchingRelationReadPort`，统一适配 `list_active_relations()` 和 `active_relations_for_row_ids(...)`。
+- `WorkbenchMatchingOrchestrator` 改为接收 `relation_read_port`，不再接收或保存 `pair_relation_service`。
+- `WorkbenchReconciliationEngine` 改为接收 `relation_read_port`，不再接收或保存 `pair_relation_service`。
+- `Application` 使用现有 `WorkbenchRelationCommandService` 构造 matching read port，保持 canonical active relation read 语义。
+- 保留非 dict active relation 的 fail-fast 校验，避免静默吞掉坏数据。
+- 新增静态 guard，防止 matching/orchestrator class 重新接受或保存 broad pair service。
+
+未闭环：
+
+- `workbench_relation` 模块仍是 `implementation-gap-open`。
+- `server.py` 仍存在多处直接 `_workbench_pair_relation_service` read helper/call site，需要下一条边界先审计分类。
+- Go/Fiber/Go Worker 仍不得启动。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py backend/src/fin_ops_platform/app/server.py tests/test_workbench_matching_orchestrator.py tests/test_workbench_reconciliation_engine.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_reconciliation_engine -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_matching_uses_relation_read_port_not_pair_service -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-relation-read-helper-boundary-audit`。

@@ -6,7 +6,10 @@ from decimal import Decimal
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
-from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchReconciliationEngine
+from fin_ops_platform.services.workbench_reconciliation_engine import (
+    WorkbenchMatchingRelationReadPort,
+    WorkbenchReconciliationEngine,
+)
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_CONSUMED,
     DECISION_STATUS_EXPIRED,
@@ -34,7 +37,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
         ).run_scope(
             "2026-05",
             oa_rows=[oa_row("oa-held"), oa_row("oa-free")],
@@ -61,7 +64,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
         ).run_scope(
             "2026-02",
             oa_rows=[oa_row("oa-loan-interest", month="2026-02", amount="9600.00")],
@@ -92,7 +95,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
             relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-05",
@@ -127,7 +130,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
             relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-01",
@@ -187,7 +190,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
             relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-05",
@@ -218,7 +221,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
             relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-05",
@@ -248,7 +251,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=pair_service,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
             relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-05",
@@ -270,7 +273,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
             special_adapter=StaticSpecialAdapter([special_decision]),
         ).run_scope(
             "2026-05",
@@ -289,7 +292,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         store = WorkbenchReconciliationDecisionStore()
         engine = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         )
 
         engine.run_scope(
@@ -308,7 +311,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         store = WorkbenchReconciliationDecisionStore()
         engine = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         )
 
         engine.run_scope(
@@ -329,7 +332,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-05",
             oa_rows=[oa_row("oa-new")],
@@ -349,7 +352,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-05",
             oa_rows=[oa_row("oa-1")],
@@ -368,7 +371,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-05",
             oa_rows=[oa_row("oa-1")],
@@ -390,7 +393,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-02",
             oa_rows=[],
@@ -434,7 +437,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-02",
             oa_rows=[],
@@ -477,7 +480,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-02",
             oa_rows=[],
@@ -514,7 +517,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
-            pair_relation_service=WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(WorkbenchPairRelationService()),
         ).run_scope(
             "2026-02",
             oa_rows=[],

@@ -4,6 +4,7 @@ import unittest
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_matching_orchestrator import (
     WORKBENCH_EXCEPTION_RULES_VERSION,
+    WorkbenchMatchingRelationReadPort,
     WorkbenchMatchingOrchestrator,
 )
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
@@ -454,7 +455,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
     ) -> WorkbenchMatchingOrchestrator:
         return WorkbenchMatchingOrchestrator(
             row_provider=row_provider,
-            pair_relation_service=pair_relation_service or WorkbenchPairRelationService(),
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service or WorkbenchPairRelationService()),
             candidate_match_service=candidate_service or WorkbenchCandidateMatchService(),
             read_model_service=read_model_service or WorkbenchReadModelService(),
             decision_store=decision_store,

@@ -8,7 +8,6 @@ from typing import Any
 
 from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_OPEN,
@@ -32,18 +31,43 @@ AUTO_COMPLETION_ACTOR = "system:workbench-relation-auto-completion"
 AUTO_COMPLETION_HISTORY_OPERATION = "auto_complete_three_way_relation"
 
 
+class WorkbenchMatchingRelationReadPort:
+    def __init__(self, relation_reader: Any) -> None:
+        self._relation_reader = relation_reader
+
+    def list_active_relations(self) -> list[dict[str, Any]]:
+        list_active_relations = getattr(self._relation_reader, "list_active_relations", None)
+        if not callable(list_active_relations):
+            raise ValueError("relation_reader must provide list_active_relations().")
+        relations = list(list_active_relations() or [])
+        for relation in relations:
+            if not isinstance(relation, dict):
+                raise ValueError("relation_reader returned a non-dict active relation.")
+        return [dict(relation) for relation in relations]
+
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        active_relations_for_row_ids = getattr(self._relation_reader, "active_relations_for_row_ids", None)
+        if not callable(active_relations_for_row_ids):
+            raise ValueError("relation_reader must provide active_relations_for_row_ids(...).")
+        relations = list(active_relations_for_row_ids(list(row_ids or [])) or [])
+        for relation in relations:
+            if not isinstance(relation, dict):
+                raise ValueError("relation_reader returned a non-dict active relation.")
+        return [dict(relation) for relation in relations]
+
+
 class WorkbenchReconciliationEngine:
     def __init__(
         self,
         *,
         decision_store: WorkbenchReconciliationDecisionStore,
-        pair_relation_service: WorkbenchPairRelationService,
+        relation_read_port: WorkbenchMatchingRelationReadPort,
         free_engine: WorkbenchFreeMatchingEngine | None = None,
         special_adapter: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._decision_store = decision_store
-        self._pair_relation_service = pair_relation_service
+        self._relation_read_port = relation_read_port
         self._free_engine = free_engine or WorkbenchFreeMatchingEngine()
         self._special_adapter = special_adapter or WorkbenchSpecialReconciliationAdapter()
         self._relation_command_service = relation_command_service
@@ -133,15 +157,10 @@ class WorkbenchReconciliationEngine:
         )
 
     def _active_pair_relation_row_ids(self, scope_month: str) -> tuple[set[str], set[str]]:
-        list_active_relations = getattr(self._pair_relation_service, "list_active_relations", None)
-        if not callable(list_active_relations):
-            raise ValueError("pair_relation_service must provide list_active_relations().")
         window_months = set(expand_scope_month_window(scope_month))
         held: set[str] = set()
         extendable_relation_rows: set[str] = set()
-        for relation in list_active_relations():
-            if not isinstance(relation, dict):
-                raise ValueError("pair_relation_service returned a non-dict active relation.")
+        for relation in self._relation_read_port.list_active_relations():
             if str(relation.get("status") or ACTIVE_RELATION_STATUS) != ACTIVE_RELATION_STATUS:
                 continue
             month_scope = self._relation_month_scope(relation)
@@ -184,7 +203,7 @@ class WorkbenchReconciliationEngine:
             decision_row_ids = set(row_ids)
             if any(row_id not in rows_by_id for row_id in row_ids):
                 continue
-            active_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+            active_relations = self._relation_read_port.active_relations_for_row_ids(row_ids)
             if len(active_relations) != 1:
                 continue
             relation = active_relations[0]
