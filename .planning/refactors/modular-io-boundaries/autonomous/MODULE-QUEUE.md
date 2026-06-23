@@ -12,7 +12,7 @@
 | 5 | `read-models:repository-port-and-sql-owner-split-plan` | closed-autonomous | Added manifest repository port contract owner map and guard tests; no SQL split yet. |
 | 6 | `read-models:workbench-active-generation-contract` | closed-autonomous | Added manifest guard preserving Workbench active generation special-case contract. |
 | 7 | `read-models:bank-detail-and-bank-account-balance-contract` | closed-autonomous | Added manifest guard keeping bank detail and bank account balance scope/repository/test contracts separate. |
-| 8 | `read-models:pending-invoice-and-oa-pending-payment-contract` | pending | Pending invoice list/detail/drawer and OA pending payment relation/read model contract. |
+| 8 | `read-models:pending-invoice-and-oa-pending-payment-contract` | closed-autonomous | Added manifest guard preserving pending invoice page-first-screen scope and OA pending payment fan-out contracts. |
 | 9 | `read-models:invoice-lifecycle-and-usage-contract` | pending | Invoice lifecycle, input usage and output collection scoped incremental contracts. |
 | 10 | `read-models:cost-tax-ledger-summary-contract` | pending | Cost statistics, tax offset and turnover ledger partitioned scoped rollup contracts. |
 | 11 | `read-models:search-and-no-oa-bank-batch-contract` | pending | Search and no-OA bank batch read-side freshness/status contracts. |

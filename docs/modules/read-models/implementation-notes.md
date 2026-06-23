@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Pending invoice 与 OA 待付款 read model 合同守卫
+
+- 目标：执行 `read-models:pending-invoice-and-oa-pending-payment-contract`，锁定待找发票和 OA 待付款两个页面 read model 的 scope、force refresh、repository port 和 owner 合同。
+- 影响范围：`tests/test_read_model_manifest.py`、read-models/pending-invoices/oa-pending-payments 模块文档和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：`pending_invoice` 继续拒绝裸 `all`，强制使用 page-first-screen force refresh；`oa_pending_payment:all` 继续只作为 fan-out command，默认查询 freshness proof 来自实际 rows/month scopes 与 dirty/outbox 状态。两者 repository port contract 必须保持不相交。
+- 文档影响：同步 read-models 测试矩阵、pending-invoices/OA-pending-payments 状态机变更记录和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v`。
+- 未测风险：本轮不连接真实 PostgreSQL/OA/RabbitMQ，不执行 OA sync、导入或 worker drain；真实生产 worker/SLO 仍由后续 infra-smoke 或发布窗口验证。
+- 后续事项：推进 `read-models:invoice-lifecycle-and-usage-contract`。
+
 ## 2026-06-23 - Bank detail 与账户余额 read model 合同守卫
 
 - 目标：执行 `read-models:bank-detail-and-bank-account-balance-contract`，锁定银行明细和账户余额两个高频 read model 的 scope、repository port、test owner 和 all-scope 语义，防止后续模块化时把余额事实源和 bank detail rows 混用。

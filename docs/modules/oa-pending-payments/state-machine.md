@@ -135,6 +135,7 @@ Worker 流程：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 补 `pending_invoice` / `oa_pending_payment` manifest 合同守卫 | 不改变状态机；锁定 OA 待付款 `all` fan-out command、标准 force refresh、与待找发票 repository port 隔离，防止默认 all 查询或 detail lookup 回退旧 live path | `tests.test_read_model_manifest.ReadModelManifestTests.test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts` |
 | 2026-06-17 | 补 OA pending read model stale event guard 和 all scope rows source-version 聚合 | 防止旧 worker/event 覆盖新 v3 投影，防止历史空 scope 污染默认 `all` 视图 freshness | `tests.test_invoice_usage_collection_sql_runtime`、HTTP smoke、Playwright 页面 smoke |
 | 2026-06-17 | 新增 `completed/in_progress` OA 流程视图和进行中 OA 确认写回 | OA workflow status 投影、`view_mode` rows/filter-options、`confirm-paid` command、OA MySQL `t_payment_simple` 写回、前端三列表格与确认按钮 | `tests.test_oa_payment_status_service`、`tests.test_mongo_oa_adapter`、`tests.test_oa_pending_payment_service`、`tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-22 | OA 待付款改为自动匹配和自动写回 | 页面进入后调用自动匹配/写回命令；in-progress OA 复用关联台 OA-bank 精确金额/精确合计规则匹配未配对支出流水；completed/in-progress 已有 active 支出流水 relation 时自动写回 `t_payment_simple.pay_status=1`；移除前端人工 confirm-paid 按钮，保留支出流水关联抽屉作为人工兜底 | `tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`、`web/e2e/oa-pending-payments-bank-link-flow.spec.ts` |

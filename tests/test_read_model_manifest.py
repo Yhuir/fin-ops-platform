@@ -201,6 +201,45 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(required_balance_ports, set(balance.repository_port_contract))
         self.assertFalse(set(bank_detail.repository_port_contract).intersection(balance.repository_port_contract))
 
+    def test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts(self) -> None:
+        pending_invoice = READ_MODEL_MANIFEST["pending_invoice"]
+        oa_payment = READ_MODEL_MANIFEST["oa_pending_payment"]
+        required_pending_ports = {
+            "list_pending_invoice_rows",
+            "list_pending_invoice_filter_options",
+            "save_pending_invoice_rows",
+            "mark_pending_invoice_scope",
+            "pending_invoice_source_summary",
+            "pending_invoice_bank_detail_source_versions",
+            "pending_invoice_workbench_relation_source_versions",
+        }
+        required_oa_ports = {
+            "list_oa_pending_payment_rows",
+            "save_oa_pending_payment_rows",
+            "mark_oa_pending_payment_scope",
+            "prune_oa_pending_payment_scope_shards",
+            "get_oa_pending_payment_row_by_row_id",
+            "get_oa_pending_payment_row_by_oa_id",
+            "get_oa_pending_payment_row_by_bank_transaction_id",
+            "get_oa_pending_payment_row_by_invoice_id",
+        }
+
+        self.assertEqual(pending_invoice.scope_type, "pending_invoice")
+        self.assertEqual(oa_payment.scope_type, "oa_pending_payment")
+        self.assertEqual(pending_invoice.query_status_contract, "self_managed_freshness")
+        self.assertEqual(oa_payment.query_status_contract, "self_managed_freshness")
+        self.assertEqual(pending_invoice.all_scope_semantics, "forbidden_bare_all")
+        self.assertEqual(oa_payment.all_scope_semantics, "fan_out_command")
+        self.assertEqual(pending_invoice.force_refresh_contract, "gateway_force_refresh_with_page_first_screen_scope")
+        self.assertEqual(oa_payment.force_refresh_contract, "gateway_force_refresh")
+        self.assertEqual(pending_invoice.query_owner, "PendingInvoiceReadModelService")
+        self.assertEqual(oa_payment.query_owner, "OaPendingPaymentReadModelService")
+        self.assertEqual(pending_invoice.permission_owner, "pending_invoices_api_session")
+        self.assertEqual(oa_payment.permission_owner, "oa_pending_payment_api_session")
+        self.assertLessEqual(required_pending_ports, set(pending_invoice.repository_port_contract))
+        self.assertLessEqual(required_oa_ports, set(oa_payment.repository_port_contract))
+        self.assertFalse(set(pending_invoice.repository_port_contract).intersection(oa_payment.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()

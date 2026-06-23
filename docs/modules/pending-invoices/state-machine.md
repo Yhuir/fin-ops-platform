@@ -112,6 +112,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-23 | 补 `pending_invoice` / `oa_pending_payment` manifest 合同守卫 | 不改变状态机；锁定待找发票拒绝裸 `all`、page-first-screen force refresh、与 OA 待付款 repository port 隔离，防止旧 scope 或旧 read path 污染页面 freshness | `tests.test_read_model_manifest.ReadModelManifestTests.test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts` |
 | 2026-06-23 | 待找发票 rows 补齐 `bank_transactions` 分区，多 OA/多流水/多发票按 `workbench_relation` 聚合为一行并用 `+N` 展开对应类型明细 | PendingInvoiceQueryService、SearchPendingSqlProjectionBuilder、PendingInvoicesTable、PendingInvoiceRelationDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
 | 2026-06-17 | 选择已有进项发票候选表改为后端事实驱动的“流水关联”chip，并允许已有 OA+发票关系并入同一 attach active case；关联台撤回恢复上一状态 | PendingInvoiceQueryService candidates、PendingInvoiceApplicationService attach existing、PendingInvoiceInvoicePickerDrawer、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
 | 2026-06-15 | `requires_invoice` 父筛选改为最终状态桶，解除对 `filter_group` 的可见性依赖 | Pending invoice status helper、service fallback、SQL read repository、SQL projection、API/product/module docs | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py` |
