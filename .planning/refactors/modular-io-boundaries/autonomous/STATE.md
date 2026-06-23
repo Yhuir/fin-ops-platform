@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-no-oa-application-pair-snapshot-port-extraction`
+Current state: `autonomous-continue-after-workbench-relations-no-oa-domain-repair-read-port-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:no-oa-application-pair-snapshot-port-extraction`. `workbench_relation` remains implementation-gap-open. No-OA application-level snapshot/version/persist/rollback pair service usage now goes through `NoOaPairRelationSnapshotPort`; normal writes remain command-service gated and active reads remain facade-backed. No-OA domain repair/read pair service usage still remains in `NoOaBankBatchService`. The next boundary is `workbench-relations:no-oa-domain-repair-read-port-audit`.
+Completed `workbench-relations:no-oa-domain-repair-read-port-audit`. `workbench_relation` remains implementation-gap-open. No-OA application-level snapshot/version/persist/rollback pair service usage goes through `NoOaPairRelationSnapshotPort`; normal writes remain command-service gated and active reads remain facade-backed. The remaining no-OA domain repair/read pair service usage in `NoOaBankBatchService` is classified and selected for explicit read/repair port extraction next. The next boundary is `workbench-relations:no-oa-domain-repair-read-port-extraction`.
 
 ## Closed Or Deferred Slices
 
@@ -95,6 +95,7 @@ Completed `workbench-relations:no-oa-application-pair-snapshot-port-extraction`.
 - `workbench-relations:pending-invoice-unused-pair-service-removal` -> `implementation-closed`
 - `workbench-relations:no-oa-pair-service-boundary-audit` -> `analysis-closed`
 - `workbench-relations:no-oa-application-pair-snapshot-port-extraction` -> `implementation-closed`
+- `workbench-relations:no-oa-domain-repair-read-port-audit` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -102,7 +103,7 @@ Completed `workbench-relations:no-oa-application-pair-snapshot-port-extraction`.
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal and no-OA application pair snapshot port extraction are implemented. No-OA domain repair/read pair service usage remains open. ETC and WorkbenchWriteFacade relation dependencies still remain for later classification before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal and no-OA application pair snapshot port extraction are implemented. No-OA domain repair/read pair service usage has been audited and remains open for port extraction. ETC and WorkbenchWriteFacade relation dependencies still remain for later classification before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -117,8 +118,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:no-oa-application-pair-snapshot-port-extraction`
+`workbench-relations:no-oa-domain-repair-read-port-audit`
 
 ## Next Prompt
 
-`workbench-relations:no-oa-domain-repair-read-port-audit`
+`workbench-relations:no-oa-domain-repair-read-port-extraction`

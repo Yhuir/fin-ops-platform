@@ -88,6 +88,27 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 
 下一条边界：`workbench-relations:no-oa-domain-repair-read-port-audit`。
 
+## 2026-06-24 - no-OA domain repair/read port audit
+
+目标：审计 `NoOaBankBatchService` 中剩余的 `_pair_relation_service` 读依赖，决定下一条最小实现边界。
+
+结论：
+
+- `NoOaBankBatchApplicationService` 的 snapshot/version/persist/rollback 旧依赖已通过 `NoOaPairRelationSnapshotPort` 隔离。
+- `NoOaBankBatchService` 仍需要 relation read 语义，不能直接删除。
+- `_repair_submitted_no_oa_relation_consistency(...)` 需要读取 active relation by case id 和 active relations for row ids，用于判断 submitted batch relation 是否已匹配、是否被非 no-OA relation 阻挡、以及哪些旧 no-OA relation 应通过 command service 取消。
+- `_has_active_no_oa_relation(...)` 需要读取 active relation by case id，用于把 relation-backed stale batch 对外投影为 submitted 并允许撤回。
+- `_build_batches_for_month_scope(...)` 会把同一个 relation 依赖传给 scoped child service。
+- 写路径已经通过 `_confirm_no_oa_relation(...)` / `_cancel_no_oa_relation(...)` 委托 `WorkbenchRelationCommandService`，现有 guard 禁止 direct pair write fallback。
+- 下一条边界应为 `workbench-relations:no-oa-domain-repair-read-port-extraction`：抽一个 no-OA relation read/repair port，替换 domain service 对 broad pair service 的直接保存和调用。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
