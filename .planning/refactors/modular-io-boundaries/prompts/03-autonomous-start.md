@@ -121,8 +121,9 @@ Read every refactor planning file before implementation:
 Current resume priority:
 - First run planning-state reconciliation preflight across `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `modular-io-boundaries/README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
 - If any of those files disagree on source hierarchy, current state, completed boundary, next boundary, status labels, or completion metric source, finish a `planning:state-reconciliation-*` slice first.
-- Current completed boundary in STATE.md is expected to be `planning:completion-semantics-and-queue-reclassification`.
-- Current next queued boundary is expected to be `read-models:pilot-gap-audit-and-contract-selection`.
+- Current completed boundary in STATE.md is expected to be `planning:semantic-queue-state-and-master-goal-refresh`.
+- Current next queued boundary is expected to be `read-models:next-pilot-selection-after-bank-detail`.
+- `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure; production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md, unless a planning-state inconsistency requires another reconciliation slice.
 - Do not select GoHotPath while any earlier read model or modular IO implementation boundary remains `pending`, `implementation-pending`, or `implementation-gap-open`.
 

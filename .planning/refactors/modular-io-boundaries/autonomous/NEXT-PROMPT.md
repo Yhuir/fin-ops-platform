@@ -1,14 +1,14 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:bank-detail-service-factory-collaborator-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `planning:semantic-queue-state-and-master-goal-refresh` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:bank-detail-service-factory-collaborator-closure-audit`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `planning:semantic-queue-state-and-master-goal-refresh`
+- Last status: `planning-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `bank_detail` local implementation closure evidence is recorded.
+- `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure.
 - `bank_detail` full module closure is not claimed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - The remaining `Application._bank_details_application_service(...)` code has been audited as acceptable dependency assembly/wiring.
 - Go hot-path candidates remain blocked by prerequisites.
