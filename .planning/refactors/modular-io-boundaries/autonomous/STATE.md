@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-batch-accounting-pair-restore-service-delegation`
+Current state: `autonomous-continue-after-workbench-relations-post-batch-restore-local-implementation-closure-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:batch-accounting-pair-restore-service-delegation`. `workbench_relation` remains implementation-gap-open. The batch-accounting restore callback now delegates to `WorkbenchPairRelationRollbackRestoreService` in in-memory mode and no longer owns direct `WorkbenchPairRelationService.from_snapshot(...)` restore behavior. The next boundary is `workbench-relations:post-batch-restore-local-implementation-closure-audit`.
+Completed `workbench-relations:post-batch-restore-local-implementation-closure-audit`. `workbench_relation` remains implementation-gap-open. The audit found turnover, pending invoice, no-OA, ETC and WorkbenchWriteFacade relation dependencies still need focused classification before local closure or production-evidence defer. The next boundary is `workbench-relations:turnover-workbench-pair-port-boundary-audit`.
 
 ## Closed Or Deferred Slices
 
@@ -88,6 +88,7 @@ Completed `workbench-relations:batch-accounting-pair-restore-service-delegation`
 - `workbench-relations:post-restore-local-implementation-closure-audit` -> `analysis-closed`
 - `workbench-relations:batch-accounting-pair-restore-helper-audit` -> `analysis-closed`
 - `workbench-relations:batch-accounting-pair-restore-service-delegation` -> `implementation-closed`
+- `workbench-relations:post-batch-restore-local-implementation-closure-audit` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -95,7 +96,7 @@ Completed `workbench-relations:batch-accounting-pair-restore-service-delegation`
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction and batch-accounting restore service delegation are implemented. Local closure audit still needs to re-assess remaining gaps before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction and batch-accounting restore service delegation are implemented. Post-batch local closure audit still found open implementation gaps in turnover, pending invoice, no-OA, ETC and WorkbenchWriteFacade relation dependencies; turnover pair port boundary audit is next before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -110,8 +111,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:batch-accounting-pair-restore-service-delegation`
+`workbench-relations:post-batch-restore-local-implementation-closure-audit`
 
 ## Next Prompt
 
-`workbench-relations:post-batch-restore-local-implementation-closure-audit`
+`workbench-relations:turnover-workbench-pair-port-boundary-audit`

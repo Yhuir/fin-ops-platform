@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:batch-accounting-pair-restore-service-delegation.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:post-batch-restore-local-implementation-closure-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -83,8 +83,8 @@ Current state expected on start:
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
 - Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- Local closure needs to be re-audited after batch-accounting restore delegation; Go hot-path candidates remain blocked.
-- The next pending boundary is workbench-relations:post-batch-restore-local-implementation-closure-audit.
+- Post-batch local closure audit still found turnover, pending invoice, no-OA, ETC and WorkbenchWriteFacade relation dependencies requiring focused classification; Go hot-path candidates remain blocked.
+- The next pending boundary is workbench-relations:turnover-workbench-pair-port-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -180,20 +180,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:post-batch-restore-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:turnover-workbench-pair-port-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:post-batch-restore-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-batch-accounting-pair-restore-service-delegation.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-restore-local-implementation-closure-audit.md`.
+For workbench-relations:turnover-workbench-pair-port-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-batch-restore-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read relevant downstream module docs for any remaining relation callback candidates identified by the audit.
-- Use CodeGraph/text search for remaining app-owned relation callbacks/helpers and direct `pair_relation_service` wiring in `server.py`, route owners and downstream services.
-- Re-audit remaining local `workbench_relation` gaps after batch-accounting restore delegation.
-- Decide whether the next boundary should be another narrow implementation slice, a production-evidence-defer accounting slice, or a blocked/deferred item.
-- Do not claim module closure unless every local implementation requirement and documented closure criterion is proven.
-- Do not start Go/Fiber/Go Worker admission unless no earlier modular IO/read model implementation-pending or implementation-gap-open boundary remains.
-- Do not implement code changes in this audit slice unless a trivial no-code deletion is proven safe.
-- Do not change business rules, API payloads, write semantics, dirty scope semantics, read model refresh semantics or production state.
+- Read `docs/modules/turnover-ledger/README.md`, `state-machine.md`, and `tests.md`.
+- Read `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant turnover/workbench relation tests.
+- Use CodeGraph/text search for `TurnoverLedgerWorkbenchPairPort`, turnover primary/fallback builders, `pair_relation_service`, `persist_pair_relations`, and relation command service factory callers/impact.
+- Audit `TurnoverLedgerWorkbenchPairPort` and turnover primary/fallback wiring.
+- Decide whether the pair service dependency can be removed, should become command-service-only, or must remain `compat-only`.
+- Classify primary write facade builders and legacy fallback facades separately.
+- Do not migrate turnover behavior in this audit slice unless a trivial no-code deletion is proven safe and queue is updated.
+- Do not change turnover closure/withdraw business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

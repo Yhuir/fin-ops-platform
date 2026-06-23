@@ -358,6 +358,24 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.Batch
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_pair_relation_restore_uses_explicit_service_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_pair_relation_restore_uses_explicit_service_boundary -v
 ```
 
+## 2026-06-24 - post batch restore local implementation closure audit
+
+目标：在 batch-accounting restore delegation 完成后，重新审计 `workbench_relation` 是否可本地 closure、是否只能 production-evidence-deferred，或是否仍有本地 implementation gap。
+
+结论：
+
+- 不能标记 local closure，也不能进入 Go admission。
+- `TurnoverLedgerWorkbenchPairPort` 和 turnover primary/legacy fallback builders 仍接收 `pair_relation_service`、`persist_pair_relations(_in_transaction)` 和 command service factory。当前写入看起来已优先走 command service，但 pair service / persist callback 是否可移除或必须 compat-only 仍未独立证明。
+- Pending invoice、No-OA、ETC 和 WorkbenchWriteFacade 仍有 relation dependency 需要后续分类；一次性处理会扩大范围。
+- 下一条最小边界应为 `workbench-relations:turnover-workbench-pair-port-boundary-audit`。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
