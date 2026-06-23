@@ -115,17 +115,18 @@ Full module closure requires:
 - Environment evidence or explicit defer status.
 
 Current corrected state expected on start:
-- Latest known dev commit when this prompt was generated: c212f73e refactor(batch-accounting): extract get route owner.
-- Last completed boundary: batch-accounting:legacy-route-implementation.
+- Latest known dev commit when this prompt was generated: de5f918c refactor(bank-details): extract month scope provider.
+- Last completed boundary: read-models:bank-detail-available-month-scope-provider-extraction.
 - Last status: implementation-closed.
-- Last completed slice extracted read-only GET /api/batch-accounting query normalization and list error mapping into BatchAccountingApiRoutes.
-- batch-accounting is not module-closed.
-- batch-accounting Module Closure remains implementation-gap-open.
-- server.py shared-boundary cleanup remains implementation-gap-open.
-- First read model implementation pilot remains bank_detail.
+- Last completed slice removed Application._bank_detail_available_month_scope_keys(...), added BankDetailAvailableMonthScopeProvider, preserved import transaction date-field month extraction and all fallback, and updated state/queue/docs.
+- bank_detail remains the first read model implementation pilot.
 - bank_detail is not module-closed.
 - bank_detail Module Closure remains implementation-gap-open.
-- The next executable implementation boundary is batch-accounting:submit-withdraw-route-side-effect-port.
+- Completed local bank_detail pilot work includes repository port extraction, freshness/operation-barrier response contracts, legacy SQL helper removal, server read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction and available-month scope provider extraction.
+- Remaining local bank_detail implementation gaps include Application._derived_lifecycle_bank_detail_executor(...) and broad Application._bank_details_application_service(...) retained collaborator injection.
+- batch-accounting local IO closure evidence is recorded, but full module closure still has production evidence deferred.
+- server.py shared-boundary cleanup remains implementation-gap-open.
+- The next executable implementation boundary is read-models:bank-detail-derived-lifecycle-executor-port-extraction.
 - Go hot-path candidates remain blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue was legitimately updated after prerequisite evidence closed.
 
@@ -137,25 +138,28 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with batch-accounting:submit-withdraw-route-side-effect-port unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-derived-lifecycle-executor-port-extraction unless a planning-state inconsistency is found first.
 
-For batch-accounting:submit-withdraw-route-side-effect-port:
+For read-models:bank-detail-derived-lifecycle-executor-port-extraction:
 - Read:
-  - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
-  - .planning/refactors/modular-io-boundaries/analysis/queue-semantics-and-master-goal-prompt-revision.md
-  - .planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md
-  - .planning/refactors/modular-io-boundaries/analysis/batch-accounting-get-route-owner-extraction.md
-  - docs/app-architecture/runtime-and-ownership.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-module-closure-audit-and-production-evidence-defer.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-suggestion-provider-port-extraction.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-producer-port-extraction.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-available-month-scope-provider-extraction.md
   - docs/modules/README.md
-  - docs/modules/batch-accounting/README.md
-  - docs/modules/batch-accounting/state-machine.md
-  - docs/modules/batch-accounting/tests.md
-  - docs/modules/batch-accounting/implementation-notes.md
-- Use CodeGraph first for structural lookup of _handle_api_batch_accounting_submit, _handle_api_batch_accounting_withdraw, BatchAccountingService.submit, BatchAccountingService.withdraw, callers, callees, traces and impact.
+  - docs/modules/bank-details/README.md
+  - docs/modules/bank-details/state-machine.md
+  - docs/modules/bank-details/tests.md
+  - docs/modules/bank-details/implementation-notes.md
+  - docs/app-architecture/runtime-and-ownership.md
+- Use CodeGraph first for structural lookup of Application._derived_lifecycle_bank_detail_executor(...), its registration in the derived lifecycle executor map, BankDetailReadModelRefreshProducer, BankDetailAvailableMonthScopeProvider, callers, callees and impact.
 - Use rg for literal text, route paths, docs references and test names.
-- Select the smallest mutation route boundary with a clear owner and existing tests.
-- Prefer moving submit/withdraw HTTP DTO parsing and BatchAccountingError mapping into BatchAccountingApiRoutes, while preserving BatchAccountingService as the mutation contract owner.
-- If extracting both submit and withdraw is too broad, split MODULE-QUEUE.md into smaller pending slices and execute the first one.
+- Select the smallest derived lifecycle executor boundary with a clear owner and existing tests.
+- Prefer moving bank_detail domain-plan all/month fan-out and enqueue-result payload construction into an explicit service/port while preserving Application as dependency registration only.
+- Preserve explicit month scopes winning over all-scope expansion; all-scope must expand through BankDetailAvailableMonthScopeProvider; default fallback remains ["all"].
+- Enqueue must continue through BankDetailReadModelRefreshProducer.
+- Preserve the existing deleted-counts, invalidated_scopes and enqueued_jobs payload shape.
+- If extracting the full executor is too broad, split MODULE-QUEUE.md into smaller pending slices and execute the first one.
 - Preserve API response shape, permissions, audit, read model freshness and frontend behavior.
 - Keep server.py limited to HTTP parsing, session/auth resolution, dependency wiring and response mapping.
 - Do not do broad line-count splitting.
