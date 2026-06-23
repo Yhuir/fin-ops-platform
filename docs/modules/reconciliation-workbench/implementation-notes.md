@@ -593,6 +593,17 @@
 - 验证命令：见 `workbench-relations` Phase 7H 记录。
 - 未测风险：其他 exception application relation mode 族仍待单独迁移，不能与个人暂借款混为同一切片。
 
+## 2026-06-23 - 进销项发票方向修复生产权限闭环
+
+- 目标：完成 `2026-06-23-invoice-direction-normalization-v1` 发布后的生产闭环，确保截图中的 5200、4900、400 三栏样例以及同类二栏/三栏自动配对项实际进入 paired。
+- 真实原因：代码规则已在生产 release `main-6e8ed50d-20260623093156` 生效，但 Workbench matching worker 重建 scope 时以 `fin_ops_app_runtime` 读取 `app.etc_batch_invoice_links` 被 PostgreSQL 拒绝；`0074_etc_batch_invoice_links.sql` 建表后未给当前统一 runtime 角色授权，导致 12 个 matching scope 全部 failed。
+- 处理结果：生产库用 migrator 身份补齐 `app.etc_batch_invoice_links` 对 `fin_ops_app_runtime` 的 `select, insert, update, delete` 权限，并重新排队权限失败的 12 个 `workbench_matching_dirty_scopes`；12 个 scope 最终全部 completed。新增 `0075_etc_batch_invoice_links_runtime_grants.sql` 固化该权限，避免新环境或后续迁移重放继续漏授权。
+- 生产验证：`oa-pay-1982 + txn_imported_1258 + inv_imported_0208`、`oa-pay-2065 + txn_imported_1415 + inv_imported_0086`、`oa-pay-2079 + txn_imported_1456 + inv_imported_0070` 均生成 `paired / oa_bank_invoice_exact_amount / 2026-06-23-invoice-direction-normalization-v1`；旧 `multiple_three_way_candidates` 决策已 expired。
+- 全局验证：生产新规则版本下 paired 覆盖 `bank_invoice`、`oa_bank`、`oa_bank_invoice`、`oa_invoice`；`job.workbench_matching_dirty_scopes` 状态为 `completed=12`，无 dirty/retry/processing/failed；生产 API、dispatcher、`workbench-matching`、`workbench-relation`、`workbench` worker 均 active。
+- 测试覆盖：`tests/test_postgres_migrations.py` 增加 migration 列表和 runtime grant contract，防止 `app.etc_batch_invoice_links` 后续缺少 `fin_ops_app_runtime` 权限。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationSqlTests -v`；生产 SQL 权限验证、matching scope 重排轮询、目标 row decision 查询和 `sudo -n /usr/local/sbin/finops-deploy-control status`。
+- 未测风险：未重新执行完整 `scripts/deploy-oa.sh` 发布包含 `0075` 的新 release；当前生产库已直接授权并完成重建，`0075` 将在下一次标准部署时作为幂等迁移记录进入 schema migration 链。
+
 ## 2026-06-23 - 多 OA active relation 后端行级归属证据闭环
 
 - 目标：把三栏配对区域多 OA 大组内的同源同排能力从前端 fallback 提升为后端事实源，避免 active relation 只有大组 `row_ids` 而缺少 bank/invoice 对应 OA 的 row-level evidence。
