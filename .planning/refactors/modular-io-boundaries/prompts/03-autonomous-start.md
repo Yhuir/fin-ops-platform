@@ -118,10 +118,10 @@ Read every refactor planning file before implementation:
 Current resume priority:
 - First run planning-state reconciliation preflight across `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `modular-io-boundaries/README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
 - If any of those files disagree on source hierarchy, current state, completed boundary, next boundary, status labels, or completion metric source, finish a `planning:state-reconciliation-*` slice first.
-- Current completed boundary in STATE.md is expected to be `read-models:workbench-relation-derived-lifecycle-executor-port-extraction`.
-- Current next queued boundary is expected to be `read-models:workbench-relation-local-implementation-closure-audit`.
+- Current completed boundary in STATE.md is expected to be `read-models:workbench-relation-local-implementation-closure-audit`.
+- Current next queued boundary is expected to be `workbench-relations:transaction-persist-repository-owner-split`.
 - `bank_detail` current local implementation support slices are complete through the collaborator audit, but this is not full module closure; production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `workbench_relation` is selected as the next read model implementation pilot; repository port extraction and derived lifecycle executor extraction are complete, but relation write lifecycle migration and local implementation closure audit remain open.
+- `workbench_relation` is selected as the next read model implementation pilot; repository port extraction, derived lifecycle executor extraction, and local implementation closure audit are complete, but transaction persist repository owner split and broader relation write lifecycle migration remain open.
 - After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md, unless a planning-state inconsistency requires another reconciliation slice.
 - Do not select GoHotPath while any earlier read model or modular IO implementation boundary remains `pending`, `implementation-pending`, or `implementation-gap-open`.
 

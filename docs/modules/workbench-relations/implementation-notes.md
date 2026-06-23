@@ -72,6 +72,24 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
+## 2026-06-24 - local implementation closure audit
+
+目标：在 repository port 和 derived lifecycle executor 两个 support slice 后，审计 `workbench_relation` 是否可本地闭环，并选择下一条最小实现边界。
+
+结论：
+
+- `workbench_relation` 不能标记 full module closed，也不能进入 Go admission。
+- `server.py` 仍保留 relation snapshot/persist helper、command repository adapter 和 `WorkbenchWriteFacade` relation callback wiring。
+- 最小下一刀是 `workbench-relations:transaction-persist-repository-owner-split`：把 `_persist_workbench_pair_relations_in_transaction(...)` 从 broad `PostgresWorkbenchRepository.save_workbench_pair_relations(...)` 改为已有的 `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)`。
+- 之后再审计 app-level command repository snapshot/apply helper、pair relation persist/schedule/background helper 和更大的 relation lifecycle 迁移。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
