@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-refresh-freshness-operation-barrier`
+Current state: `autonomous-continue-after-bank-detail-legacy-contamination-removal`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-refresh-freshness-operation-barrier`; next execution must start with `read-models:bank-detail-legacy-contamination-removal`.
+Completed `read-models:bank-detail-legacy-contamination-removal`; next execution must start with `read-models:bank-detail-pilot-verification-and-template-revision`.
 
 ## Closed Or Deferred Slices
 
@@ -55,14 +55,15 @@ Completed `read-models:bank-detail-refresh-freshness-operation-barrier`; next ex
 - `read-models:pilot-gap-audit-and-contract-selection` -> `analysis-closed`
 - `read-models:bank-detail-repository-port-extraction` -> `implementation-closed`
 - `read-models:bank-detail-refresh-freshness-operation-barrier` -> `implementation-closed`
+- `read-models:bank-detail-legacy-contamination-removal` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
-- `bank_detail` repository port/query boundary and freshness/barrier response contract are implemented, but legacy removal and pilot verification are still open.
+- `bank_detail` repository port/query boundary, freshness/barrier response contract and first legacy SQL helper removal are implemented, but pilot verification/template revision and production evidence/defer status are still open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual `bank_detail` pilot work must start before Go admission: repository port extraction, freshness/force-refresh/operation-barrier implementation, legacy contamination removal, and verification/template revision.
+- Actual `bank_detail` pilot work must continue before Go admission: pilot verification/template revision, environment evidence/defer status and any remaining explicitly classified compat-only legacy paths.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -75,8 +76,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-refresh-freshness-operation-barrier`
+`read-models:bank-detail-legacy-contamination-removal`
 
 ## Next Prompt
 
-`read-models:bank-detail-legacy-contamination-removal`
+`read-models:bank-detail-pilot-verification-and-template-revision`

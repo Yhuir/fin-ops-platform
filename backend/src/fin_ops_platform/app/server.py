@@ -13017,39 +13017,6 @@ class Application:
             },
         )
 
-    def _get_bank_detail_accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
-        return self._bank_details_application_service()._accounts_from_sql_read_model(  # noqa: SLF001
-            date_from=date_from,
-            date_to=date_to,
-        )
-
-    def _get_bank_detail_transactions_from_sql_read_model(
-        self,
-        *,
-        account_key: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        keyword: str | None,
-        category_code: str | None,
-        category_primary_label: str | None,
-        category_sub_label: str | None,
-        category_third_label: str | None = None,
-        page: int,
-        page_size: int,
-    ) -> dict[str, object] | None:
-        return self._bank_details_application_service()._transactions_from_sql_read_model(  # noqa: SLF001
-            account_key=account_key,
-            date_from=date_from,
-            date_to=date_to,
-            keyword=keyword,
-            category_code=category_code,
-            category_primary_label=category_primary_label,
-            category_sub_label=category_sub_label,
-            category_third_label=category_third_label,
-            page=page,
-            page_size=page_size,
-        )
-
     def _bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
         repository = getattr(self, "_bank_detail_sql_read_repository", None)
         scope_key_loader = getattr(repository, "bank_detail_scope_keys_for_range", None)

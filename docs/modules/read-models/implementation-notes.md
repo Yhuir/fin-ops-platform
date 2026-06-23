@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail legacy SQL helper removal
+
+- 目标：执行 `read-models:bank-detail-legacy-contamination-removal` 的第一步，删除 `server.py` 上已无生产调用者的 bank detail SQL read compat helper。
+- 影响范围：`Application._get_bank_detail_accounts_from_sql_read_model(...)`、`Application._get_bank_detail_transactions_from_sql_read_model(...)`、bank auto tag/read model API 回归测试和 modular IO planning state。
+- 关键决策：银行明细读路径只保留 `BankDetailsApiRoutes -> BankDetailsApplicationService` 公共边界；测试不再直接调用 `Application` 私有 SQL helper，并新增 guard 断言旧 helper 不存在。
+- 文档影响：同步本实施记录、read model 测试矩阵、bank-details 实施记录和 modular IO analysis/state；read model/runtime worker 状态机语义不变。
+- 测试覆盖：更新 `tests/test_bank_auto_tag_rules_api.py`，`test_bank_detail_legacy_sql_helpers_are_removed_from_application_boundary` 证明旧 helper 已从 `Application` 边界移除，相关 freshness 测试改走 route/application public boundary。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/server.py tests/test_bank_auto_tag_rules_api.py`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ；`server.py` 仍有 scope/cache/refresh 类 bank detail 兼容 helper，后续 pilot verification 需决定继续拆分或登记 compat-only。
+
 ## 2026-06-24 - Bank detail freshness / operation barrier boundary
 
 - 目标：执行 `read-models:bank-detail-refresh-freshness-operation-barrier`，让 BankDetails 写后刷新和强制刷新响应显式返回 `read_model_scope_keys` 与 `freshness_targets`。

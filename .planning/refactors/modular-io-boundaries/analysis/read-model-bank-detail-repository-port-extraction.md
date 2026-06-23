@@ -5,6 +5,8 @@
 **状态:** `implementation-closed`
 **范围:** 为 `bank_detail` read model 查询侧建立窄 repository port，并把 `server.py` 旧 SQL read helper 收敛为委托 `BankDetailsApplicationService` 的 query boundary；不拆全量 `postgres_repositories/read_models.py`，不改 API response shape，不启动 Go/Fiber/Go Worker。
 
+**后续状态更新:** `read-models:bank-detail-legacy-contamination-removal` 已在 2026-06-24 删除本文件中提到的 `server.py` 两个 compat-only SQL helper。本文保留为当时 slice 记录，不再代表当前代码状态。
+
 ## 目标
 
 本 slice 只关闭第一步实现边界：
@@ -62,7 +64,7 @@
 
 ## Legacy Classification
 
-- `server.py` 的 `_get_bank_detail_accounts_from_sql_read_model(...)` 与 `_get_bank_detail_transactions_from_sql_read_model(...)` 仍保留为 `compat-only` helper，因为现有测试和少量旧调用点仍直接调用它们。
+- `server.py` 的 `_get_bank_detail_accounts_from_sql_read_model(...)` 与 `_get_bank_detail_transactions_from_sql_read_model(...)` 在本 slice 时仍保留为 `compat-only` helper，因为当时现有测试和少量旧调用点仍直接调用它们；该状态已被后续 `read-models:bank-detail-legacy-contamination-removal` supersede，当前代码已删除这两个 helper。
 - 这两个 compat helper 已被降级为 application service delegate，不能直接读 `_bank_detail_sql_read_repository`，也不能直接访问共享 `PostgresReadModelRepository`。
 - `server.py` 中剩余 `_bank_detail_scope_keys_for_range(...)`、`_bank_detail_scope_summary(...)`、cache payload helper 等旧辅助函数尚未删除；它们进入下一步 `read-models:bank-detail-legacy-contamination-removal` 的候选范围，当前 slice 不做大范围删除。
 

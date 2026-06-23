@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail legacy SQL helper removal
+
+- 目标：删除 `server.py` 上已无生产调用者的银行明细 SQL read compat helper，防止后续读路径绕过 `BankDetailsApiRoutes -> BankDetailsApplicationService`。
+- 影响范围：`Application._get_bank_detail_accounts_from_sql_read_model(...)`、`Application._get_bank_detail_transactions_from_sql_read_model(...)`、`tests/test_bank_auto_tag_rules_api.py`；不改变银行明细 HTTP API、页面、read model schema、worker 或分类业务规则。
+- 关键决策：freshness/stale/refreshing 回归测试改走 route/application public boundary，并显式开启 SQL read model runtime；新增 guard 断言 `Application` 不再暴露旧 helper。
+- 文档影响：同步 bank-details/read-models 实施记录和测试矩阵；长期业务口径和状态机不变。
+- 测试覆盖：`BankAutoTagRulesApiTests.test_bank_detail_legacy_sql_helpers_are_removed_from_application_boundary`，以及同文件中 refreshing/stale/rule-version freshness 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`。
+- 未测风险：真实 PostgreSQL/worker drain 未在本地执行；`server.py` 仍有 scope/cache/refresh 类银行明细兼容 helper，需要后续 pilot verification 决定继续删除或登记为 compat-only。
+
 ## 2026-06-23 - 自动标签与分类写边界 guard
 
 - 目标：收紧银行明细自动标签规则、候选确认、人工补分类和清除分类的 IO 边界，防止旧 `server.py` 写后刷新 helper 或旧 settings 路径重新污染新链路。

@@ -110,6 +110,47 @@ class _BankDetailStatusRepository:
 
 
 class BankAutoTagRulesApiTests(unittest.TestCase):
+    def _bank_detail_transactions_payload(
+        self,
+        app,
+        *,
+        account_key: str | None = None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+        category_code: str | None = None,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
+        category_third_label: str | None = None,
+        page: str | None = "1",
+        page_size: str | None = "100",
+    ) -> dict[str, object]:
+        status, payload = app._bank_details_routes().transactions(
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+            page=page,
+            page_size=page_size,
+        )
+        self.assertIn(int(status), {200, 202})
+        return payload
+
+    def _bank_detail_accounts_payload(
+        self,
+        app,
+        *,
+        date_from: str | None,
+        date_to: str | None,
+    ) -> dict[str, object]:
+        status, payload = app._bank_details_routes().accounts(date_from=date_from, date_to=date_to)
+        self.assertIn(int(status), {200, 202})
+        return payload
+
     def test_get_returns_system_active_archived_fields_and_permissions(self) -> None:
         app = build_application()
 
@@ -1055,8 +1096,10 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         repository = _BankDetailStatusRepository(status="refreshing")
         app._bank_detail_sql_read_repository = repository
+        app._requires_sql_read_model_runtime = lambda: True
 
-        transactions = app._get_bank_detail_transactions_from_sql_read_model(
+        transactions = self._bank_detail_transactions_payload(
+            app,
             account_key=None,
             date_from="2026-01-01",
             date_to="2026-12-31",
@@ -1064,10 +1107,11 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             category_code=None,
             category_primary_label=None,
             category_sub_label=None,
-            page=1,
-            page_size=100,
+            page="1",
+            page_size="100",
         )
-        accounts = app._get_bank_detail_accounts_from_sql_read_model(
+        accounts = self._bank_detail_accounts_payload(
+            app,
             date_from="2026-01-01",
             date_to="2026-12-31",
         )
@@ -1080,16 +1124,16 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(repository.account_reads, 1)
         self.assertEqual(queue.enqueued, [])
 
-    def test_bank_detail_legacy_sql_helpers_delegate_to_application_service_boundary(self) -> None:
+    def test_bank_detail_legacy_sql_helpers_are_removed_from_application_boundary(self) -> None:
         class DelegatingService:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, dict[str, object]]] = []
 
-            def _accounts_from_sql_read_model(self, **kwargs: object) -> dict[str, object]:
+            def accounts_payload(self, **kwargs: object) -> dict[str, object]:
                 self.calls.append(("accounts", dict(kwargs)))
                 return {"accounts": [{"account_key": "delegated"}], "read_model_status": "fresh"}
 
-            def _transactions_from_sql_read_model(self, **kwargs: object) -> dict[str, object]:
+            def transactions_payload(self, **kwargs: object) -> dict[str, object]:
                 self.calls.append(("transactions", dict(kwargs)))
                 return {"rows": [{"id": "delegated-txn"}], "read_model_status": "fresh"}
 
@@ -1108,8 +1152,11 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._bank_details_application_service = lambda: service
         app._bank_detail_sql_read_repository = PoisonRepository()
 
-        accounts = app._get_bank_detail_accounts_from_sql_read_model(date_from="2026-05-01", date_to="2026-05-31")
-        transactions = app._get_bank_detail_transactions_from_sql_read_model(
+        self.assertFalse(hasattr(app, "_get_bank_detail_accounts_from_sql_read_model"))
+        self.assertFalse(hasattr(app, "_get_bank_detail_transactions_from_sql_read_model"))
+        accounts = self._bank_detail_accounts_payload(app, date_from="2026-05-01", date_to="2026-05-31")
+        transactions = self._bank_detail_transactions_payload(
+            app,
             account_key=None,
             date_from="2026-05-01",
             date_to="2026-05-31",
@@ -1117,8 +1164,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             category_code=None,
             category_primary_label=None,
             category_sub_label=None,
-            page=1,
-            page_size=100,
+            category_third_label=None,
+            page="1",
+            page_size="100",
         )
 
         self.assertEqual(accounts["accounts"][0]["account_key"], "delegated")
@@ -1151,8 +1199,10 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         repository = _BankDetailStatusRepository(status="stale")
         app._bank_detail_sql_read_repository = repository
+        app._requires_sql_read_model_runtime = lambda: True
 
-        payload = app._get_bank_detail_transactions_from_sql_read_model(
+        payload = self._bank_detail_transactions_payload(
+            app,
             account_key=None,
             date_from="2026-01-01",
             date_to="2026-12-31",
@@ -1160,8 +1210,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             category_code=None,
             category_primary_label=None,
             category_sub_label=None,
-            page=1,
-            page_size=100,
+            page="1",
+            page_size="100",
         )
 
         self.assertEqual(payload["read_model_status"], "stale")
@@ -1178,8 +1228,10 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             bank_auto_tag_rules_version=None,
         )
         app._bank_detail_sql_read_repository = repository
+        app._requires_sql_read_model_runtime = lambda: True
 
-        payload = app._get_bank_detail_transactions_from_sql_read_model(
+        payload = self._bank_detail_transactions_payload(
+            app,
             account_key=None,
             date_from="2026-01-01",
             date_to="2026-12-31",
@@ -1187,8 +1239,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             category_code=None,
             category_primary_label=None,
             category_sub_label=None,
-            page=1,
-            page_size=100,
+            page="1",
+            page_size="100",
         )
 
         self.assertEqual(payload["read_model_status"], "stale")
@@ -1227,8 +1279,10 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 bank_auto_tag_rules_version=int(saved["version"]),
             )
             reader_app._bank_detail_sql_read_repository = repository
+            reader_app._requires_sql_read_model_runtime = lambda: True
 
-            payload = reader_app._get_bank_detail_transactions_from_sql_read_model(
+            payload = self._bank_detail_transactions_payload(
+                reader_app,
                 account_key=None,
                 date_from="2026-01-01",
                 date_to="2026-12-31",
@@ -1236,8 +1290,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 category_code=None,
                 category_primary_label=None,
                 category_sub_label=None,
-                page=1,
-                page_size=100,
+                page="1",
+                page_size="100",
             )
 
         self.assertEqual(payload["read_model_status"], "fresh")

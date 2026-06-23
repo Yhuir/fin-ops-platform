@@ -77,10 +77,10 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be read-models:bank-detail-refresh-freshness-operation-barrier.
+- Last completed boundary is expected to be read-models:bank-detail-legacy-contamination-removal.
 - Last status is expected to be implementation-closed.
 - First read model implementation pilot is expected to be bank_detail.
-- Next executable boundary is expected to be read-models:bank-detail-legacy-contamination-removal.
+- Next executable boundary is expected to be read-models:bank-detail-pilot-verification-and-template-revision.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
@@ -104,9 +104,9 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:bank-detail-legacy-contamination-removal unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-pilot-verification-and-template-revision unless a planning-state inconsistency is found first.
 
-For read-models:bank-detail-legacy-contamination-removal:
+For read-models:bank-detail-pilot-verification-and-template-revision:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
@@ -117,17 +117,18 @@ For read-models:bank-detail-legacy-contamination-removal:
   - .planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-repository-port-extraction.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-refresh-freshness-operation-barrier.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-legacy-contamination-removal.md
   - docs/modules/read-models/README.md
   - docs/modules/read-models/state-machine.md
   - docs/modules/read-models/tests.md
   - docs/modules/runtime-workers/README.md
   - docs/modules/runtime-workers/state-machine.md
-- Use CodeGraph first for structural lookup of bank_detail symbols, callers, callees, traces and impact.
+- Use CodeGraph first for structural lookup of bank_detail remaining helpers, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
 - Keep the implementation boundary narrow:
-  - Remove or quarantine selected bank_detail legacy helper/path only.
+  - Verify the bank_detail pilot implementation evidence and revise templates/runbook only if evidence shows a reusable gap.
   - Preserve API response shape for accounts, transactions and export.
-  - Add tests proving new BankDetails query/write/refresh paths do not call removed/quarantined legacy internals.
+  - Do not add broad new implementation unless verification exposes a concrete small missing boundary and the queue is split first.
   - Keep regression coverage for repository port/query boundary, force refresh gateway/scope-policy usage and exact month operation barrier targets.
   - Do not split all of postgres_repositories/read_models.py.
   - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.
