@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail available-month scope provider extraction
+
+- 目标：执行 `read-models:bank-detail-available-month-scope-provider-extraction`，把银行明细可用月份 scope 计算从 `Application` 抽到显式 provider。
+- 影响范围：`BankDetailAvailableMonthScopeProvider`、`server.py` App Status/stale smoke、BankDetailsApplicationService 注入、derived lifecycle bank detail all-scope fan-out、银行明细 read model/guard 测试和 modular IO planning state；不改变 API response shape、权限、审计、operation barrier、read model freshness、worker 或前端。
+- 关键决策：`Application._bank_detail_available_month_scope_keys(...)` 删除；provider 保留从 import transactions 的 `txn_date`、`trade_time`、`pay_receive_time`、`business_date`、`transaction_at` 提取 `YYYY-MM` 的语义，并在无月份或 loader 失败时返回 `["all"]`。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：新增 available-month scope provider 单测，扩展静态 guard 防止旧 app-level helper 回归，并复跑 bank detail refresh all-scope fan-out 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-available-month-scope-provider-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status 和生产历史数据未在本地验证；derived lifecycle executor 仍是后续本地实现缺口。
+
 ## 2026-06-24 - Bank detail refresh producer port extraction
 
 - 目标：执行 `read-models:bank-detail-refresh-producer-port-extraction`，把银行明细 read model refresh enqueue 和 Redis wakeup 从 `Application` app-level wrapper 抽到显式 services-layer producer。

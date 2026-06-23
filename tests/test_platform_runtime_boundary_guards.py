@@ -557,6 +557,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_get_bank_detail_cached_payload",
             "_set_bank_detail_cached_payload",
             "_delete_bank_detail_redis_cache",
+            "_bank_detail_available_month_scope_keys",
         }
         for helper_name in sorted(removed_application_helpers):
             if _function_source(server_tree, server_source, helper_name):
@@ -596,13 +597,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
         if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
             violations.append("server.py still owns removed bank detail suggestion provider callback")
+        if _function_source(server_tree, server_source, "_bank_detail_available_month_scope_keys"):
+            violations.append("server.py still owns removed bank detail available-month scope helper")
         for removed_helper_name in sorted(removed_application_helpers):
             if removed_helper_name in factory_source:
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
         for retained_callback in (
             "_bank_detail_auto_category_suggestion_provider",
             "_bank_detail_read_model_refresh_producer",
-            "_bank_detail_available_month_scope_keys",
+            "_bank_detail_available_month_scope_provider",
             "_enqueue_bank_account_balance_read_model_refresh",
             "_enqueue_turnover_ledger_read_model_refreshes",
         ):
@@ -610,6 +613,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")
         if "BankDetailAutoCategorySuggestionProvider(" not in factory_source:
             violations.append("BankDetailsApplicationService factory does not build the explicit bank detail suggestion provider")
+        if "BankDetailAvailableMonthScopeProvider(" not in server_source:
+            violations.append("server.py does not build the explicit bank detail available-month scope provider")
         removed_side_effect_callback = "_after_bank_category_confirmation_mutation"
         if _function_source(server_tree, server_source, removed_side_effect_callback):
             violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")

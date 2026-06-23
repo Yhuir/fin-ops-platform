@@ -77,6 +77,7 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_detail_available_month_scope_provider import BankDetailAvailableMonthScopeProvider
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_detail_read_model_refresh_producer import BankDetailReadModelRefreshProducer
@@ -1462,7 +1463,7 @@ class Application:
             return []
         scope_keys = [
             str(scope_key).strip()
-            for scope_key in list(self._bank_detail_available_month_scope_keys() or [])
+            for scope_key in list(self._bank_detail_available_month_scope_provider().scope_keys() or [])
             if SEARCH_MONTH_RE.match(str(scope_key).strip())
         ]
         if not scope_keys:
@@ -12950,7 +12951,7 @@ class Application:
                 "clear_cache",
                 lambda: None,
             ),
-            available_month_scope_keys_provider=getattr(self, "_bank_detail_available_month_scope_keys", lambda: ["all"]),
+            available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
             enqueue_bank_account_balance_refresh=getattr(self, "_enqueue_bank_account_balance_read_model_refresh", lambda **_kwargs: False),
             enqueue_turnover_ledger_refresh=getattr(
                 self,
@@ -12968,6 +12969,12 @@ class Application:
         return BankDetailReadModelRefreshProducer(
             refresh_gateway_provider=self._read_model_refresh_gateway,
             redis_helper_provider=lambda: getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
+        )
+
+    def _bank_detail_available_month_scope_provider(self) -> BankDetailAvailableMonthScopeProvider:
+        return BankDetailAvailableMonthScopeProvider(
+            import_service=self._import_service,
+            serialize_value=self._serialize_value,
         )
 
     def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
@@ -19590,7 +19597,7 @@ class Application:
         if months:
             target_scope_keys = months
         elif "all" in scope_keys:
-            target_scope_keys = self._bank_detail_available_month_scope_keys()
+            target_scope_keys = self._bank_detail_available_month_scope_provider().scope_keys()
         else:
             target_scope_keys = ["all"]
         enqueued = self._bank_detail_read_model_refresh_producer().enqueue(
@@ -19632,25 +19639,6 @@ class Application:
         if not refresh_gateway.can_enqueue():
             return False
         return bool(refresh_gateway.enqueue_one("bank_account_balance", "all", reason=reason))
-
-    def _bank_detail_available_month_scope_keys(self) -> list[str]:
-        months: set[str] = set()
-        try:
-            transactions = self._import_service.list_transactions(month="all")
-        except TypeError:
-            transactions = self._import_service.list_transactions()
-        except Exception:
-            transactions = []
-        for transaction in list(transactions or []):
-            payload = self._serialize_value(transaction)
-            if not isinstance(payload, dict):
-                continue
-            for key in ("txn_date", "trade_time", "pay_receive_time", "business_date", "transaction_at"):
-                value = str(payload.get(key) or "").strip()
-                if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
-                    months.add(value[:7])
-                    break
-        return sorted(months) or ["all"]
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         self._search_service.clear_cache()
