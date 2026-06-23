@@ -156,6 +156,23 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 
 - 该阶段不迁移 pair relation persist/schedule/background helper，不关闭 broader relation lifecycle，也不声明生产 PostgreSQL/worker/App Status/high-row/browser evidence。
 
+## 2026-06-24 - pair relation persist/schedule helper audit
+
+目标：审计 `server.py` 中非事务 pair relation persist/schedule/background helper 和 WorkbenchWriteFacade callback wiring。
+
+结论：
+
+- 下一条实现边界应为 `workbench-relations:pair-relation-persist-service-extraction`。
+- 建议新增 `WorkbenchPairRelationPersistService`，接管直接 persist、scheduler coalescing、async env toggle、background persist 和 timing emit。
+- `_restore_workbench_pair_relation_snapshot(...)` 属于 rollback restore 语义，下一刀暂不纳入，避免 scope 过大。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
