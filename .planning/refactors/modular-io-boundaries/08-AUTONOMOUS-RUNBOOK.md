@@ -17,6 +17,8 @@ The autonomous loop must optimize for safe forward progress:
 - Treat read model force refresh and freshness proof as production-grade contracts, not UI-level patches.
 - Treat Go / Go Fiber / Go Worker as candidate-gated hot-path carve-out only.
 - Do not introduce Go for modules outside `11-GO-HOT-PATH-CARVE-OUT.md`.
+- Treat `.planning/ROADMAP.md`, `04-IMPLEMENTATION-ROADMAP.md`, and `autonomous/MODULE-QUEUE.md` as separate progress sources; never collapse them into a single unqualified completion percentage.
+- If roadmap/status/prompt files disagree, run a planning-state reconciliation slice before implementation.
 - Commit and push only passing, reviewable slices.
 - Do not require staging DB or local `PGSQL_URL`.
 - `finops-prod-root` is available for privileged read-only checks.
@@ -30,6 +32,8 @@ The agent must read these files before starting:
 - `AGENTS.md`
 - `README.md`
 - `ARCHITECTURE.md`
+- `.planning/ROADMAP.md`
+- `.planning/refactors/README.md`
 - `docs/app-architecture/README.md`
 - `docs/app-architecture/runtime-and-ownership.md`
 - `docs/modules/README.md`
@@ -37,6 +41,7 @@ The agent must read these files before starting:
 - `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`
 - `.planning/refactors/modular-io-boundaries/02-MODULE-IO-CONTRACT-TEMPLATE.md`
 - `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`
+- `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
 - `.planning/refactors/modular-io-boundaries/05-IMPACT-AND-TEST-GATES.md`
 - `.planning/refactors/modular-io-boundaries/09-DEV-BRANCH-WORKFLOW.md`
 - `.planning/refactors/modular-io-boundaries/10-AUTONOMOUS-STOP-GATES.md`
@@ -48,6 +53,7 @@ The agent must read these files before starting:
 
 ```text
 Preflight
+  -> Planning-state reconciliation check
   -> Select next module boundary
   -> Audit current module IO
   -> Fill or update module contract
@@ -69,7 +75,8 @@ Preflight
 3. Switch to `dev`.
 4. Confirm branch is `dev`, not `main`.
 5. Confirm no secret values are present in planned commands.
-6. Run a cheap sanity check:
+6. Read `.planning/ROADMAP.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`; if current state, next boundary, status labels or completion metric sources disagree, select a `planning:state-reconciliation-*` slice before normal implementation.
+7. Run a cheap sanity check:
 
 ```bash
 git status --short
@@ -83,18 +90,7 @@ If the main repository is dirty or `dev` cannot be aligned safely, stop. That is
 
 Pick the first module in `autonomous/MODULE-QUEUE.md` whose status is `pending` or `deferred-retry`.
 
-Default order:
-
-1. `bank-details:auto-tag-category-boundary`
-2. `reconciliation-workbench:amount-check-query-contract`
-3. `pending-invoices:read-side-contract`
-4. `oa-pending-payments:read-side-and-relation-contract`
-5. `batch-accounting:legacy-route-contract`
-6. `read-model-refresh-gateway:force-refresh-and-freshness-registry`
-7. `server-py:route-owner-inventory`
-8. `go-hot-path:workbench-compute-admission`
-9. `go-hot-path:workbench-read-model-builder-admission`
-10. `go-hot-path:import-parser-admission`
+Default order is the table order in `autonomous/MODULE-QUEUE.md`. Do not use a hard-coded historical list.
 
 Skipped modules must be marked in `autonomous/STATE.md` with a reason.
 

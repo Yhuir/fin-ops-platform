@@ -4,6 +4,8 @@
 
 This roadmap preserves a single global codebase map while creating isolated GSD phases for each target page. Phase 0 establishes the cross-page dependency baseline that every page phase must read before implementation planning. Each page phase should capture discussion context, research findings, implementation risks, test strategy, and executable plans inside its own phase directory.
 
+This roadmap is the root page-analysis roadmap. Cross-module modular IO refactor execution lives under `.planning/refactors/modular-io-boundaries/`; that refactor must still read this file as an input, but its autonomous boundary queue and phase roadmap are tracked separately in `autonomous/MODULE-QUEUE.md` and `04-IMPLEMENTATION-ROADMAP.md`.
+
 ## Phases
 
 **Phase Numbering:**

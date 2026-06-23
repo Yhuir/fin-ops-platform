@@ -125,6 +125,8 @@ AnalysisOnly
 - 这是软状态，不阻塞继续处理其它模块。
 - 若无 staging/`PGSQL_URL` 是唯一缺口，记录 `production-evidence-deferred` 后进入 `AutonomousContinue`。
 - 只有需要生产写入、secret 或特权操作时才进入 hard stop。
+- 自动推进开始和每个 slice 提交前必须执行 planning-state reconciliation check：若 `.planning/ROADMAP.md`、`.planning/refactors/README.md`、本目录 `README.md`、`00-REQUIREMENTS.md`、`04-IMPLEMENTATION-ROADMAP.md`、`autonomous/STATE.md`、`MODULE-QUEUE.md`、`JOURNAL.md`、`NEXT-PROMPT.md` 的状态口径互相矛盾，先完成 `planning:state-reconciliation-and-roadmap-alignment` 文档状态同步 slice，再继续代码或模块实现。
+- 完成度报告必须标注来源，至少区分 root page-analysis roadmap、modular IO phase roadmap 和 modular IO autonomous queue；禁止用一个未标注来源的百分比代表“整个重构计划”。
 - 每个自动推进 slice 在进入 commit 前必须经过状态机更新闸门：先判断是否改变全局 workflow state/transition/guard 或模块状态定义；若改变，必须同步本文件或对应 `docs/modules/<module>/state-machine.md`；若未改变，必须在 analysis 文件中记录 reviewed files、definition unchanged 原因和只更新 progress/accounting 的证据。
 - `autonomous/NEXT-PROMPT.md` 只是续跑入口，不是完整状态机。任何 closed/deferred/blocked/failed slice 都必须同步更新 `autonomous/STATE.md`、`autonomous/MODULE-QUEUE.md`、`autonomous/JOURNAL.md` 和对应 analysis 文件。
 

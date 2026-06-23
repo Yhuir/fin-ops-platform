@@ -1,7 +1,7 @@
 # 模块化 IO 边界重构工作区
 
 **创建日期:** 2026-06-22
-**状态:** Analysis only
+**状态:** Autonomous execution in progress; not global closure
 **范围:** 全局模块化 IO 重构规划、状态跟踪、审计模板和后续执行提示词模板
 
 ## 定位
@@ -9,6 +9,18 @@
 本目录用于规划一次横跨后端、前端、read model、worker、权限、审计、测试和文档治理的模块化 IO 边界重构。它不是当前生产事实源，也不替代 `AGENTS.md`、`ARCHITECTURE.md`、`docs/app-architecture/`、`docs/modules/`、`docs/dev/` 或 `docs/operations/`。
 
 当前事实仍以代码和长期文档为准。本目录只保存本次重构的 GSD 分析、需求、状态机、路线图、审计清单和可复用 prompt 模板。
+
+## 与根 Roadmap 的关系
+
+`.planning/ROADMAP.md` 是页面分析与页面级 phase roadmap；本目录是跨模块 IO 边界重构 roadmap。两者都必须读取，但不能互相替代。
+
+后续任何完成度报告必须分开列出：
+
+- Root page-analysis roadmap progress: 来自 `.planning/ROADMAP.md`。
+- Modular IO phase roadmap progress: 来自 `04-IMPLEMENTATION-ROADMAP.md`。
+- Modular IO autonomous queue progress: 来自 `autonomous/MODULE-QUEUE.md`。
+
+禁止用一个未标注来源的百分比代表“整个重构计划”。
 
 ## 核心判断
 

@@ -2,7 +2,7 @@
 
 **创建日期:** 2026-06-22
 **需求状态:** Locked for planning
-**实现状态:** 未开始实现
+**实现状态:** Autonomous execution in progress; not global closure
 **适用范围:** `backend/`、`web/`、`tests/`、`docs/modules/`、`docs/app-architecture/`、`docs/dev/`、`docs/operations/`
 
 ## 目标
@@ -10,6 +10,16 @@
 把当前“改完一个功能另一个功能出 bug”的高耦合风险，收敛为可验证、可回归、可分阶段迁移的模块化 IO 边界治理体系。
 
 本重构的核心目标不是把文件拆小，而是把业务边界、数据流、状态、事件、read model、权限和测试合同拆清楚。只有当模块的外部合同稳定、内部实现可替换、跨模块影响可预测，并且有回归测试保护时，才算完成。
+
+## 状态口径
+
+本需求文档约束模块化 IO 边界重构，不替代根 `.planning/ROADMAP.md`。
+
+- 根 `.planning/ROADMAP.md` 记录页面分析与页面级 phase roadmap。
+- 本目录 `04-IMPLEMENTATION-ROADMAP.md` 记录模块化 IO phase roadmap。
+- `autonomous/MODULE-QUEUE.md` 记录无人值守执行的窄边界队列。
+
+后续执行和汇报必须同时识别这些来源。若三者状态不一致，先执行 `planning:state-reconciliation-and-roadmap-alignment` 类型的文档状态同步 slice，再继续代码或模块边界实现。
 
 ## 背景
 

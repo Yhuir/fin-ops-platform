@@ -10,11 +10,21 @@ You are Codex working in /Users/yu/Desktop/fin-ops-platform.
 Goal:
 Autonomously continue the modular IO boundary refactor until the refactor plan reaches closure. Use GSD discipline end to end: review and full analysis first, then implementation, then review, verification, state update, commit/push to dev, next prompt generation, and immediate continuation to the next safe boundary. I may be away. Do not wait for me unless a hard stop gate is hit.
 
+Planning source rule:
+This refactor has multiple planning sources. Read and report them separately; never collapse them into one unqualified percentage.
+- `.planning/ROADMAP.md` is the root page-analysis roadmap.
+- `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md` is the modular IO phase roadmap.
+- `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md` is the executable autonomous boundary queue.
+- `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md` are execution accounting for the autonomous queue.
+- If these files disagree on status, next boundary, completion criteria, or metric source, create and complete a `planning:state-reconciliation-*` slice before doing code or module implementation.
+
 Non-negotiable state-machine rule:
 State-machine updates are part of the implementation contract, not optional bookkeeping. Every autonomous slice must update or explicitly audit all relevant state-machine artifacts before it can be considered complete. A slice that changes code/tests/docs but does not update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, and the applicable global/module state-machine definition or "definition unchanged" analysis is incomplete and must not be committed.
 
 Definition of "closure":
 - Every boundary in .planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md is either closed with verified code/docs/tests, production-evidence-deferred with explicit evidence gap, go-candidate-deferred with admission evidence, or needs-human-production-gate for a true hard gate.
+- `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md` has no unchecked completion criterion that is required for modular IO closure, or each remaining unchecked criterion has an explicit deferred/block status and next action.
+- `.planning/ROADMAP.md` page-analysis phases have been accounted for as root roadmap input. If page-analysis phases remain `Not started`, do not claim root roadmap closure; either generate the next page-analysis planning prompt or explicitly state that modular IO closure is separate from root page-analysis closure.
 - .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md, autonomous/STATE.md, autonomous/MODULE-QUEUE.md, autonomous/JOURNAL.md, and autonomous/NEXT-PROMPT.md reflect the same current state, completed boundary, next boundary, transition reason, evidence, and stop/defer gate.
 - State-machine accounting is mandatory for every slice. A slice is not complete until its analysis file records the intended transition, autonomous/STATE.md records the actual transition, MODULE-QUEUE.md records the boundary status, JOURNAL.md records evidence, NEXT-PROMPT.md points at the next executable boundary, and the global/module state-machine files are either updated or explicitly marked not applicable with a reason.
 - No completed slice leaves known broken behavior.
@@ -71,6 +81,8 @@ Read repository guidance:
 - AGENTS.md
 - README.md
 - ARCHITECTURE.md
+- .planning/ROADMAP.md
+- .planning/refactors/README.md
 - docs/index.md
 - docs/app-architecture/README.md
 - docs/app-architecture/runtime-and-ownership.md
@@ -105,14 +117,22 @@ Read every refactor planning file before implementation:
    - autonomous/NEXT-PROMPT.md
 
 Current resume priority:
-- If the interrupted read-model manifest/query parity files are dirty, finish that slice first.
-- Current completed boundary in STATE.md is expected to be read-models:manifest-and-boundary-inventory.
-- Current next queued boundary is expected to be read-models:query-gateway-contract-and-status-parity.
-- Do not restart bank-details:auto-tag-category-boundary unless MODULE-QUEUE.md or STATE.md marks it pending again.
-- After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md.
+- First run planning-state reconciliation preflight across `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `modular-io-boundaries/README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `autonomous/STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
+- If any of those files disagree on source hierarchy, current state, completed boundary, next boundary, status labels, or completion metric source, finish a `planning:state-reconciliation-*` slice first.
+- Current completed boundary in STATE.md is expected to be `planning:state-reconciliation-and-roadmap-alignment`.
+- Current next queued boundary is expected to be `go-hot-path:workbench-compute-admission`.
+- After finishing the current slice, select the first pending or deferred-retry boundary in MODULE-QUEUE.md, unless a planning-state inconsistency requires another reconciliation slice.
 
 GSD autonomous loop:
 Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary that can be safely advanced.
+
+0. Planning-state reconciliation preflight
+   - Read `.planning/ROADMAP.md` and record root page-analysis roadmap progress separately.
+   - Read `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md` and record modular IO phase roadmap progress separately.
+   - Read `autonomous/MODULE-QUEUE.md` and record autonomous boundary queue progress separately.
+   - Confirm `README.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `STATE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md` agree on whether the run is planning-only, in-progress, deferred, blocked, or closed.
+   - If they disagree, the selected boundary must be `planning:state-reconciliation-*`; update the relevant docs/state/prompt files, verify docs, commit/push, then continue.
+   - Do not report a single unqualified "whole refactor" percentage.
 
 State-machine updates are a first-class step in this loop. Do not treat them as a final note or as part of prompt generation only:
 - Before implementation, read the global and module state-machine files and record the intended transition in the boundary analysis.

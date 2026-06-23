@@ -20,10 +20,11 @@
 | 13 | `reconciliation-workbench:amount-check-query-contract` | closed-autonomous | Added amount-check input priority guard proving explicit `reconciliation_amount` wins over legacy `detail_fields.明细金额合计` fallback; no runtime behavior change. |
 | 14 | `batch-accounting:legacy-route-contract` | closed-autonomous | Added route handler static guard preventing GET repair/write/read-model scheduling and submit/withdraw direct relation write bypasses; no runtime behavior change. |
 | 15 | `server-py:route-owner-inventory` | closed-autonomous | Added static inventory guard proving every existing `routes_*.py` owner is registered/imported/delegated from `server.py`; no runtime behavior change. |
-| 16 | `go-hot-path:workbench-compute-admission` | pending | Admission review only for `workbench:matching-grouping-check`; no Go implementation until gates pass. |
-| 17 | `go-hot-path:workbench-read-model-builder-admission` | pending | Admission review only for active generation / scoped incremental Go Worker candidate after read model contracts are stable. |
-| 18 | `go-hot-path:import-parser-admission` | pending | Admission review only for parse/normalize/preview Go Processor candidate. |
-| 19 | `go-hot-path:cost-summary-rollup-admission` | pending | Admission review only for summary/rollup candidate after cost read model contract is stable. |
+| 16 | `planning:state-reconciliation-and-roadmap-alignment` | closed-autonomous | Reconciled root page-analysis roadmap, modular IO phase roadmap, autonomous queue, state-machine rules and autonomous prompt completion metrics; no runtime behavior change. |
+| 17 | `go-hot-path:workbench-compute-admission` | pending | Admission review only for `workbench:matching-grouping-check`; no Go implementation until gates pass. |
+| 18 | `go-hot-path:workbench-read-model-builder-admission` | pending | Admission review only for active generation / scoped incremental Go Worker candidate after read model contracts are stable. |
+| 19 | `go-hot-path:import-parser-admission` | pending | Admission review only for parse/normalize/preview Go Processor candidate. |
+| 20 | `go-hot-path:cost-summary-rollup-admission` | pending | Admission review only for summary/rollup candidate after cost read model contract is stable. |
 
 ## Status Values
 

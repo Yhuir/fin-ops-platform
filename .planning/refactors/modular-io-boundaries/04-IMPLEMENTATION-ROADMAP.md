@@ -1,7 +1,19 @@
 # 模块化 IO 重构路线图
 
-**状态:** 规划阶段
+**状态:** Autonomous execution in progress; roadmap state reconciled on 2026-06-23
 **原则:** 先试点，后推广；先合同，后实现；先测试，后迁移。
+
+## 进度口径
+
+本文件记录模块化 IO 重构 phase roadmap。它不是根 `.planning/ROADMAP.md` 的页面分析 phase 表，也不是 `autonomous/MODULE-QUEUE.md` 的窄边界执行队列。
+
+后续汇报必须分开列出：
+
+- `.planning/ROADMAP.md`: 页面分析 roadmap 进度。
+- 本文件: 模块化 IO phase roadmap 进度。
+- `autonomous/MODULE-QUEUE.md`: 自动推进边界队列进度。
+
+如果这些文件的状态互相矛盾，先执行 planning state reconciliation slice，再继续模块实现。
 
 ## Phase 0: 架构合同与重构骨架
 
@@ -14,19 +26,19 @@
 
 完成标准：
 
-- [ ] `00-REQUIREMENTS.md` 完成。
-- [ ] `01-CURRENT-STATE-AUDIT.md` 完成。
-- [ ] `02-MODULE-IO-CONTRACT-TEMPLATE.md` 完成。
-- [ ] `03-REFACTOR-STATE-MACHINE.md` 完成。
-- [ ] `04-IMPLEMENTATION-ROADMAP.md` 完成。
-- [ ] `05-IMPACT-AND-TEST-GATES.md` 完成。
-- [ ] `06-PILOT-SELECTION.md` 完成。
-- [ ] prompt 模板完成。
-- [ ] `08-AUTONOMOUS-RUNBOOK.md` 完成。
-- [ ] `09-DEV-BRANCH-WORKFLOW.md` 完成。
-- [ ] `10-AUTONOMOUS-STOP-GATES.md` 完成。
-- [ ] `11-GO-HOT-PATH-CARVE-OUT.md` 完成。
-- [ ] `autonomous/STATE.md` 和 `autonomous/MODULE-QUEUE.md` 初始化完成。
+- [x] `00-REQUIREMENTS.md` 完成。
+- [x] `01-CURRENT-STATE-AUDIT.md` 完成。
+- [x] `02-MODULE-IO-CONTRACT-TEMPLATE.md` 完成。
+- [x] `03-REFACTOR-STATE-MACHINE.md` 完成。
+- [x] `04-IMPLEMENTATION-ROADMAP.md` 完成。
+- [x] `05-IMPACT-AND-TEST-GATES.md` 完成。
+- [x] `06-PILOT-SELECTION.md` 完成。
+- [x] prompt 模板完成。
+- [x] `08-AUTONOMOUS-RUNBOOK.md` 完成。
+- [x] `09-DEV-BRANCH-WORKFLOW.md` 完成。
+- [x] `10-AUTONOMOUS-STOP-GATES.md` 完成。
+- [x] `11-GO-HOT-PATH-CARVE-OUT.md` 完成。
+- [x] `autonomous/STATE.md` 和 `autonomous/MODULE-QUEUE.md` 初始化完成。
 
 不做：
 
@@ -251,8 +263,8 @@
 
 完成标准：
 
-- [ ] 至少首个模块边界完成 `closed-autonomous` 或 `production-evidence-deferred`。
-- [ ] 至少一次 commit/push 到 `origin/dev`。
-- [ ] `autonomous/STATE.md`、`JOURNAL.md`、`MODULE-QUEUE.md` 更新。
-- [ ] `autonomous/NEXT-PROMPT.md` 生成下一轮 prompt。
-- [ ] 每个完成模块记录 legacy 退役/隔离结果和 read model 强制刷新/freshness 结果。
+- [x] 至少首个模块边界完成 `closed-autonomous` 或 `production-evidence-deferred`。
+- [x] 至少一次 commit/push 到 `origin/dev`。
+- [x] `autonomous/STATE.md`、`JOURNAL.md`、`MODULE-QUEUE.md` 更新。
+- [x] `autonomous/NEXT-PROMPT.md` 生成下一轮 prompt。
+- [x] 每个完成模块记录 legacy 退役/隔离结果和 read model 强制刷新/freshness 结果。

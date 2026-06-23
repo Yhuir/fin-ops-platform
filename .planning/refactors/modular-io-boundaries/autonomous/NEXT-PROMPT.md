@@ -5,9 +5,9 @@ Continue the autonomous modular IO refactor from the current state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `server-py:route-owner-inventory`
+- Last completed boundary: `planning:state-reconciliation-and-roadmap-alignment`
 - Last status: `closed-autonomous`
-- `server.py` route owner inventory now has a static guard: every existing `routes_*.py` owner must be registered in the manifest test, imported by `server.py`, and have a factory/accessor or attribute delegate marker. This is a no-runtime-change boundary.
+- Planning state has been reconciled: `.planning/ROADMAP.md` is the page-analysis roadmap, `04-IMPLEMENTATION-ROADMAP.md` is the modular IO phase roadmap, and `autonomous/MODULE-QUEUE.md` is the executable boundary queue. Completion percentages must always state which source they use.
 
 ## Next Boundary
 
@@ -17,9 +17,21 @@ Continue the autonomous modular IO refactor from the current state.
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Pull `origin/dev` with `--ff-only`.
-3. Read:
+3. Perform planning-state preflight:
+   - Read `.planning/ROADMAP.md`.
+   - Read `.planning/refactors/README.md`.
+   - Read `.planning/refactors/modular-io-boundaries/README.md`.
+   - Read `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`.
+   - Read `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`.
+   - Read `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`.
+   - Read `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`.
+   - Read `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`.
+   - Read `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
+   - If these files disagree on current state, next boundary, status labels or completion metric source, stop normal implementation and create another `planning:state-reconciliation-*` slice first.
+4. Read:
    - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
    - `.planning/refactors/modular-io-boundaries/05-IMPACT-AND-TEST-GATES.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/planning-state-reconciliation.md`
    - `.planning/refactors/modular-io-boundaries/analysis/server-py-route-owner-inventory.md`
    - `.planning/refactors/modular-io-boundaries/analysis/reconciliation-workbench-amount-check-query-contract.md`
    - `docs/modules/reconciliation-workbench/README.md`
@@ -30,10 +42,10 @@ Continue the autonomous modular IO refactor from the current state.
    - `docs/modules/read-models/state-machine.md`
    - `docs/modules/runtime-workers/README.md`
    - `docs/modules/runtime-workers/state-machine.md`
-4. Use CodeGraph first to locate Workbench matching/grouping/check compute owners, callers, read model builder boundaries, worker entry points, and existing tests.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-admission.md`.
-6. Fill the Go candidate admission table from `05-IMPACT-AND-TEST-GATES.md` and `11-GO-HOT-PATH-CARVE-OUT.md`.
-7. Do not implement Go/Fiber/Go Worker in this boundary. This is admission review only.
+5. Use CodeGraph first to locate Workbench matching/grouping/check compute owners, callers, read model builder boundaries, worker entry points, and existing tests.
+6. Produce `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-admission.md`.
+7. Fill the Go candidate admission table from `05-IMPACT-AND-TEST-GATES.md` and `11-GO-HOT-PATH-CARVE-OUT.md`.
+8. Do not implement Go/Fiber/Go Worker in this boundary. This is admission review only.
 
 ## Admission Decision Rules
 
@@ -46,3 +58,13 @@ Continue the autonomous modular IO refactor from the current state.
 ## Stop Condition
 
 Complete one narrow verified admission slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+
+## Reporting Rule
+
+Any progress report must separately show:
+
+- Root page-analysis roadmap progress from `.planning/ROADMAP.md`.
+- Modular IO phase roadmap progress from `04-IMPLEMENTATION-ROADMAP.md`.
+- Modular IO autonomous queue progress from `autonomous/MODULE-QUEUE.md`.
+
+Do not report a single unqualified percentage for "the whole refactor plan".
