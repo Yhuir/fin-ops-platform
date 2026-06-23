@@ -115,12 +115,17 @@ Full module closure requires:
 - Environment evidence or explicit defer status.
 
 Current corrected state expected on start:
-- Last completed boundary: planning:queue-semantics-and-master-goal-prompt-revision.
-- Last status: planning-closed.
-- First read model implementation pilot: bank_detail.
+- Latest known dev commit when this prompt was generated: c212f73e refactor(batch-accounting): extract get route owner.
+- Last completed boundary: batch-accounting:legacy-route-implementation.
+- Last status: implementation-closed.
+- Last completed slice extracted read-only GET /api/batch-accounting query normalization and list error mapping into BatchAccountingApiRoutes.
+- batch-accounting is not module-closed.
+- batch-accounting Module Closure remains implementation-gap-open.
+- server.py shared-boundary cleanup remains implementation-gap-open.
+- First read model implementation pilot remains bank_detail.
 - bank_detail is not module-closed.
 - bank_detail Module Closure remains implementation-gap-open.
-- The next executable implementation boundary is server-py:legacy-handler-extraction-implementation.
+- The next executable implementation boundary is batch-accounting:submit-withdraw-route-side-effect-port.
 - Go hot-path candidates remain blocked-by-prerequisite.
 - Do not select GoHotPath next unless the queue was legitimately updated after prerequisite evidence closed.
 
@@ -132,21 +137,25 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with server-py:legacy-handler-extraction-implementation unless a planning-state inconsistency is found first.
+Start with batch-accounting:submit-withdraw-route-side-effect-port unless a planning-state inconsistency is found first.
 
-For server-py:legacy-handler-extraction-implementation:
+For batch-accounting:submit-withdraw-route-side-effect-port:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
-  - .planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md
   - .planning/refactors/modular-io-boundaries/analysis/queue-semantics-and-master-goal-prompt-revision.md
-  - .planning/refactors/modular-io-boundaries/analysis/server-py-route-owner-inventory.md
+  - .planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md
+  - .planning/refactors/modular-io-boundaries/analysis/batch-accounting-get-route-owner-extraction.md
   - docs/app-architecture/runtime-and-ownership.md
   - docs/modules/README.md
-  - target module docs for the selected legacy handler before editing
-- Use CodeGraph first for structural lookup of the selected legacy handler, route owner, callers, callees, traces and impact.
-- Use rg for literal text, route paths, env keys, docs references and test names.
-- Select one existing server.py legacy handler area with a clear route/service owner and a small testable surface.
-- Move the handler logic to an existing routes_*.py or service boundary, or quarantine it with owner/caller/deletion-condition/forbidden-write guard if extraction is too broad.
+  - docs/modules/batch-accounting/README.md
+  - docs/modules/batch-accounting/state-machine.md
+  - docs/modules/batch-accounting/tests.md
+  - docs/modules/batch-accounting/implementation-notes.md
+- Use CodeGraph first for structural lookup of _handle_api_batch_accounting_submit, _handle_api_batch_accounting_withdraw, BatchAccountingService.submit, BatchAccountingService.withdraw, callers, callees, traces and impact.
+- Use rg for literal text, route paths, docs references and test names.
+- Select the smallest mutation route boundary with a clear owner and existing tests.
+- Prefer moving submit/withdraw HTTP DTO parsing and BatchAccountingError mapping into BatchAccountingApiRoutes, while preserving BatchAccountingService as the mutation contract owner.
+- If extracting both submit and withdraw is too broad, split MODULE-QUEUE.md into smaller pending slices and execute the first one.
 - Preserve API response shape, permissions, audit, read model freshness and frontend behavior.
 - Keep server.py limited to HTTP parsing, session/auth resolution, dependency wiring and response mapping.
 - Do not do broad line-count splitting.
