@@ -2910,3 +2910,24 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`。
+
+## 2026-06-24 - post-WorkbenchWriteFacade local implementation closure audit
+
+目标：在 `WorkbenchWriteFacade` 不再接收 broad `pair_relation_service` 后，复查 `workbench_relation` 更广的本地剩余缺口，决定下一条最小安全边界。
+
+结论：
+
+- `WorkbenchWriteFacade` 的 broad constructor 依赖已经删除；生产和测试构造都显式注入 read/snapshot port 与 special metadata mutation port。
+- ETC repair/link/migration services 已通过 `WorkbenchRelationCommandService` 执行 relation 命令，现有 guard 禁止 direct pair fallback；ETC 不是本轮最高风险剩余 direct pair surface。
+- `TurnoverLedgerWorkbenchPairPort` 仍接收并保存 `pair_relation_service`，且 withdraw precondition 仍有 pair-service read fallback。
+- turnover writes 已经 command-service gated；下一条边界应只清理 port constructor/read fallback，不改变 turnover 业务规则、dirty scope、read model refresh 或 API shape。
+- `TurnoverLedgerLocalClosureConnection` 使用 pair service 做本地 transaction snapshot/rollback 仍单独保留，后续另行分类。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:turnover-workbench-pair-port-required-command-constructor`。

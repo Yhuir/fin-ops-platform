@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relations-workbench-write-facade-required-port-constructor`
+Current state: `autonomous-continue-after-workbench-relations-post-workbench-write-facade-local-implementation-closure-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:workbench-write-facade-required-port-constructor`. `workbench_relation` remains implementation-gap-open. WorkbenchWriteFacade now requires explicit relation read/snapshot and special metadata mutation ports and no longer accepts broad `pair_relation_service`. The next boundary is `workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`.
+Completed `workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`. `workbench_relation` remains implementation-gap-open. WorkbenchWriteFacade now requires explicit relation read/snapshot and special metadata mutation ports and no longer accepts broad `pair_relation_service`. The audit found ETC repair/link/migration services are already command-boundary guarded; the next narrow boundary is turnover, where `TurnoverLedgerWorkbenchPairPort` still accepts broad `pair_relation_service`.
 
 ## Closed Or Deferred Slices
 
@@ -104,6 +104,7 @@ Completed `workbench-relations:workbench-write-facade-required-port-constructor`
 - `workbench-relations:workbench-write-facade-cash-special-metadata-port-extraction` -> `implementation-closed`
 - `workbench-relations:workbench-write-facade-post-port-local-implementation-closure-audit` -> `analysis-closed`
 - `workbench-relations:workbench-write-facade-required-port-constructor` -> `implementation-closed`
+- `workbench-relations:post-workbench-write-facade-local-implementation-closure-audit` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -111,7 +112,7 @@ Completed `workbench-relations:workbench-write-facade-required-port-constructor`
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction and WorkbenchWriteFacade required-port constructor cleanup are implemented. Re-audit broader workbench_relation local gaps next. ETC still needs later focused classification before any production-evidence defer or Go admission decision.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction and WorkbenchWriteFacade required-port constructor cleanup are implemented. The post-WorkbenchWriteFacade audit found `TurnoverLedgerWorkbenchPairPort` still accepts broad `pair_relation_service`; remove that constructor dependency next. ETC repair/link/migration services are already command-boundary guarded but still need later closure accounting before any production-evidence defer or Go admission decision.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -126,8 +127,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:workbench-write-facade-required-port-constructor`
+`workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`
 
 ## Next Prompt
 
-`workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`
+`workbench-relations:turnover-workbench-pair-port-required-command-constructor`

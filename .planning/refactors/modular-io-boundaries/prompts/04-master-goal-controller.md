@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:workbench-write-facade-required-port-constructor.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:post-workbench-write-facade-local-implementation-closure-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -91,7 +91,8 @@ Current state expected on start:
 - Core confirm/cancel writes are already command-service gated by existing guards.
 - WorkbenchWriteFacade cash special metadata mutation now goes through `WorkbenchWriteRelationSpecialMetadataMutationPort`.
 - WorkbenchWriteFacade no longer stores or accepts broad `pair_relation_service`.
-- The next pending boundary is workbench-relations:post-workbench-write-facade-local-implementation-closure-audit.
+- ETC repair/link/migration services are already command-boundary guarded and are not the next highest-risk local gap.
+- The next pending boundary is workbench-relations:turnover-workbench-pair-port-required-command-constructor.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -187,22 +188,26 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:post-workbench-write-facade-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:turnover-workbench-pair-port-required-command-constructor unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:post-workbench-write-facade-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-write-facade-required-port-constructor.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-write-facade-post-port-local-implementation-closure-audit.md`.
+For workbench-relations:turnover-workbench-pair-port-required-command-constructor:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-workbench-write-facade-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph/text search for remaining `workbench_relation` local gaps, especially ETC relation dependencies and any remaining direct pair service dependencies outside explicit ports.
-- Re-audit broader `workbench_relation` local gaps after WorkbenchWriteFacade no longer accepts broad pair service.
-- Decide the next smallest safe boundary before any production-evidence defer or Go admission.
-- Consider ETC focused classification, command service native metadata commands, remaining turnover compat reads, or other documented gaps based on current evidence.
-- Do not change relation behavior, dirty scope semantics, read model refresh semantics or API response shape in this audit slice.
+- Inspect `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_turnover_ledger_uow_contract.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `TurnoverLedgerWorkbenchPairPort`, `pair_relation_service`, `_pair_relation_service`, turnover builder construction and turnover legacy fallback construction.
+- Remove `pair_relation_service` from `TurnoverLedgerWorkbenchPairPort.__init__`.
+- Make the port rely on explicit command service and relation facade boundaries only.
+- Remove the port's pair-service fallback read path.
+- Update primary builder and legacy fallback facade construction so they no longer pass broad pair service into `TurnoverLedgerWorkbenchPairPort`.
+- Keep builder-level pair service only where still required for local transaction snapshot/rollback via `TurnoverLedgerLocalClosureConnection`.
+- Preserve turnover confirm/withdraw behavior, command-service writes, facade reads, local rollback semantics, dirty scope semantics, read model refresh semantics and API response shape.
+- Do not remove `TurnoverLedgerLocalClosureConnection` pair snapshot rollback behavior in this slice.
+- Do not change ETC behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted docs verification and diff checks.
+- Run targeted turnover pair port/static boundary tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 
