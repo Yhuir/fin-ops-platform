@@ -1231,6 +1231,47 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_pair_relation_persist_uses_explicit_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "workbench_pair_relation_persist_service.py"
+        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
+        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_persist_service")
+        persist_source = _function_source(server_tree, server_source, "_persist_workbench_pair_relations")
+        schedule_source = _function_source(server_tree, server_source, "_schedule_workbench_pair_relation_persist")
+        background_source = _function_source(server_tree, server_source, "_persist_workbench_pair_relations_in_background")
+        violations: list[str] = []
+
+        if "WorkbenchPairRelationPersistService(" not in factory_source:
+            violations.append("server.py does not build explicit pair relation persist service")
+        if ".persist(changed_case_ids=changed_case_ids)" not in persist_source:
+            violations.append("pair relation persist wrapper does not delegate to service.persist")
+        if ".schedule(" not in schedule_source:
+            violations.append("pair relation schedule wrapper does not delegate to service.schedule")
+        if ".persist_in_background(" not in background_source:
+            violations.append("pair relation background wrapper does not delegate to service.persist_in_background")
+        for forbidden in (
+            "save_workbench_pair_relations(",
+            "_pending_workbench_pair_relation_case_ids.update",
+            "Thread(",
+            "_emit_workbench_action_timing(",
+        ):
+            if forbidden in persist_source or forbidden in schedule_source or forbidden in background_source:
+                violations.append(f"server.py pair relation persist wrapper still owns behavior {forbidden}")
+        for snippet in (
+            "class WorkbenchPairRelationPersistService",
+            "def persist(",
+            "def schedule(",
+            "def persist_in_background(",
+            "phase=\"persist_pair_relations\"",
+            "self._thread_factory(",
+        ):
+            if snippet not in service_source:
+                violations.append(f"pair relation persist service missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
         source = path.read_text(encoding="utf-8")

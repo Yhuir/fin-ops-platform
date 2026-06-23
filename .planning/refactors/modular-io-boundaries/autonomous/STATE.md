@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relation-pair-relation-persist-schedule-helper-audit`
+Current state: `autonomous-continue-after-workbench-relation-pair-relation-persist-service-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:pair-relation-persist-schedule-helper-audit`. `workbench_relation` remains implementation-gap-open. The audit selected `workbench-relations:pair-relation-persist-service-extraction` as the next narrow implementation boundary, leaving rollback restore for a later slice.
+Completed `workbench-relations:pair-relation-persist-service-extraction`. `workbench_relation` remains implementation-gap-open. Non-transactional pair relation persist/schedule/background/timing behavior now lives in `WorkbenchPairRelationPersistService`; app wrappers are compat-only delegates. Rollback restore remains app-owned and is selected for the next audit slice.
 
 ## Closed Or Deferred Slices
 
@@ -80,6 +80,7 @@ Completed `workbench-relations:pair-relation-persist-schedule-helper-audit`. `wo
 - `workbench-relations:command-repository-snapshot-adapter-audit` -> `analysis-closed`
 - `workbench-relations:command-repository-snapshot-adapter-extraction` -> `implementation-closed`
 - `workbench-relations:pair-relation-persist-schedule-helper-audit` -> `analysis-closed`
+- `workbench-relations:pair-relation-persist-service-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -87,7 +88,7 @@ Completed `workbench-relations:pair-relation-persist-schedule-helper-audit`. `wo
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split and command repository snapshot adapter extraction are implemented. Pair relation persist service extraction is selected next; rollback restore and broader relation write lifecycle cleanup remain open.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction and non-transactional pair relation persist service extraction are implemented. Rollback restore and broader relation write lifecycle cleanup remain open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -102,8 +103,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:pair-relation-persist-schedule-helper-audit`
+`workbench-relations:pair-relation-persist-service-extraction`
 
 ## Next Prompt
 
-`workbench-relations:pair-relation-persist-service-extraction`
+`workbench-relations:restore-pair-relation-snapshot-helper-audit`

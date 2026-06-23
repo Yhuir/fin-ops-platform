@@ -173,6 +173,36 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - pair relation persist service extraction
+
+目标：把非事务 pair relation persist/schedule/background/timing 行为从 `server.py` 抽到显式 service，避免 app 继续拥有 relation 持久化调度逻辑。
+
+变更：
+
+- 新增 `WorkbenchPairRelationPersistService`。
+- `Application._persist_workbench_pair_relations(...)`、`_schedule_workbench_pair_relation_persist(...)` 和 `_persist_workbench_pair_relations_in_background(...)` 改为兼容 wrapper，只委托 service。
+- `Application._workbench_pair_relation_persist_async_enabled()` 改为委托 service 的 env contract。
+- 保留 search cache clear、state store no-op、changed-case snapshot、pending case coalescing、version stale skip、同步/异步执行和 timing emission 行为。
+- 新增 service 单测和静态 guard，防止 `server.py` 重新拥有 save/coalescing/thread/timing 行为。
+
+决策：
+
+- `_restore_workbench_pair_relation_snapshot(...)` 属于 rollback restore 语义，本 slice 不纳入；下一步先单独审计。
+- 事务内 `_persist_workbench_pair_relations_in_transaction(...)` 不变，继续使用 `PostgresWorkbenchRelationRepository`。
+- `workbench_relation` 仍是 `implementation-gap-open`，不能声明模块闭环或进入 Go admission。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_persist_service -v
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_persist_scheduler.py -q
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_pair_relation_persist_uses_explicit_service_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_background_persist_emits_timing_logs -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

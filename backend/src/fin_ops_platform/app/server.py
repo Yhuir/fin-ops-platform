@@ -426,6 +426,7 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_pair_relation_persist_service import WorkbenchPairRelationPersistService
 from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
@@ -1189,7 +1190,6 @@ class Application:
         self._workbench_read_model_persist_version_lock = Lock()
         self._pending_workbench_read_model_scope_keys: set[str] = set()
         self._workbench_pair_relation_persist_version = 0
-        self._workbench_pair_relation_persist_version_lock = Lock()
         self._pending_workbench_pair_relation_case_ids: set[str] = set()
         self._workbench_api_routes = WorkbenchApiRoutes(
             self._workbench_query_service,
@@ -16204,18 +16204,9 @@ class Application:
         *,
         changed_case_ids: list[str] | None = None,
     ) -> None:
-        self._search_service.clear_cache()
-        if self._state_store is None:
-            return
-        snapshot = (
-            self._workbench_pair_relation_service.snapshot_case_ids(changed_case_ids)
-            if changed_case_ids is not None
-            else self._workbench_pair_relation_service.snapshot()
-        )
-        self._state_store.save_workbench_pair_relations(
-            snapshot,
-            changed_case_ids=changed_case_ids,
-        )
+        service = self._workbench_pair_relation_persist_service()
+        service.persist(changed_case_ids=changed_case_ids)
+        self._sync_workbench_pair_relation_persist_compat_state(service)
 
     def _persist_workbench_pair_relations_in_transaction(
         self,
@@ -16263,44 +16254,17 @@ class Application:
         request_id: str | None = None,
         action_name: str | None = None,
     ) -> None:
-        if self._state_store is None:
-            return
-        normalized_case_ids = [
-            str(case_id)
-            for case_id in list(changed_case_ids or [])
-            if str(case_id).strip()
-        ]
-        if not normalized_case_ids:
-            return
-        with self._workbench_pair_relation_persist_version_lock:
-            self._pending_workbench_pair_relation_case_ids.update(normalized_case_ids)
-            self._workbench_pair_relation_persist_version += 1
-            version = self._workbench_pair_relation_persist_version
-        if not self._workbench_pair_relation_persist_async_enabled():
-            self._persist_workbench_pair_relations_in_background(
-                version=version,
-                case_ids=normalized_case_ids,
-                request_id=request_id,
-                action_name=action_name,
-            )
-            return
-        Thread(
-            target=self._persist_workbench_pair_relations_in_background,
-            kwargs={
-                "version": version,
-                "case_ids": normalized_case_ids,
-                "request_id": request_id,
-                "action_name": action_name,
-            },
-            daemon=True,
-        ).start()
+        service = self._workbench_pair_relation_persist_service()
+        service.schedule(
+            changed_case_ids=changed_case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._sync_workbench_pair_relation_persist_compat_state(service)
 
     @staticmethod
     def _workbench_pair_relation_persist_async_enabled() -> bool:
-        override = os.getenv("FIN_OPS_WORKBENCH_PAIR_RELATION_PERSIST_ASYNC")
-        if override is None:
-            return False
-        return override.strip().lower() not in {"0", "false", "no", "off"}
+        return WorkbenchPairRelationPersistService.async_enabled_from_env()
 
     def _persist_workbench_pair_relations_in_background(
         self,
@@ -16310,30 +16274,42 @@ class Application:
         request_id: str | None = None,
         action_name: str | None = None,
     ) -> None:
-        if self._state_store is None:
-            return
-        with self._workbench_pair_relation_persist_version_lock:
-            if version != self._workbench_pair_relation_persist_version:
-                return
-            pending_case_ids = sorted(self._pending_workbench_pair_relation_case_ids)
-            self._pending_workbench_pair_relation_case_ids.clear()
-        case_ids_to_persist = pending_case_ids or [
-            str(case_id)
-            for case_id in list(case_ids or [])
-            if str(case_id).strip()
-        ]
-        if not case_ids_to_persist:
-            return
-        persist_started_at = monotonic()
-        self._persist_workbench_pair_relations(changed_case_ids=case_ids_to_persist)
-        if request_id is not None and action_name is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="persist_pair_relations",
-                duration_ms=self._duration_ms(persist_started_at),
-                detail=",".join(case_ids_to_persist),
+        service = self._workbench_pair_relation_persist_service()
+        service.force_state(
+            version=getattr(self, "_workbench_pair_relation_persist_version", 0),
+            pending_case_ids=getattr(self, "_pending_workbench_pair_relation_case_ids", set()),
+        )
+        service.persist_in_background(
+            version=version,
+            case_ids=case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._sync_workbench_pair_relation_persist_compat_state(service)
+
+    def _workbench_pair_relation_persist_service(self) -> WorkbenchPairRelationPersistService:
+        service = getattr(self, "_workbench_pair_relation_persist_service_instance", None)
+        if service is None:
+            service = WorkbenchPairRelationPersistService(
+                pair_relation_service=self._workbench_pair_relation_service,
+                state_store=self._state_store,
+                clear_search_cache=lambda: self._search_service.clear_cache(),
+                emit_action_timing=lambda **kwargs: self._emit_workbench_action_timing(**kwargs),
+                duration_ms=self._duration_ms,
+                async_enabled=self._workbench_pair_relation_persist_async_enabled,
+                thread_factory=lambda **kwargs: Thread(**kwargs),
+                initial_version=getattr(self, "_workbench_pair_relation_persist_version", 0),
+                initial_pending_case_ids=getattr(self, "_pending_workbench_pair_relation_case_ids", set()),
             )
+            self._workbench_pair_relation_persist_service_instance = service
+        return service
+
+    def _sync_workbench_pair_relation_persist_compat_state(
+        self,
+        service: WorkbenchPairRelationPersistService,
+    ) -> None:
+        self._workbench_pair_relation_persist_version = service.version
+        self._pending_workbench_pair_relation_case_ids = service.pending_case_ids
 
     def _schedule_workbench_read_model_persist(
         self,
