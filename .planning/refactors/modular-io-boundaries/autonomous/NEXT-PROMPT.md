@@ -1,69 +1,62 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `workbench-relations:settings-data-reset-pair-service-boundary-audit` slice.
+Continue the autonomous modular IO refactor after the `workbench-relations:settings-data-reset-pair-snapshot-port-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `workbench-relations:settings-data-reset-pair-service-boundary-audit`
-- Last status: `analysis-closed`
+- Last completed boundary: `workbench-relations:settings-data-reset-pair-snapshot-port-extraction`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `workbench_relation` remains `implementation-gap-open`.
-- Settings data reset relation clearing/filtering is a legitimate reset boundary, but `SettingsDataResetService` still accepts broad pair service.
+- `workbench_relation` remains `implementation-gap-open` until closure/defer accounting proves otherwise.
+- `SettingsDataResetService` now uses explicit `SettingsDataResetPairSnapshotPort` instead of broad pair service injection.
 - Go hot-path candidates remain blocked by prerequisites.
 
 ## Next Boundary
 
-`workbench-relations:settings-data-reset-pair-snapshot-port-extraction`
+`workbench-relations:local-implementation-closure-and-production-evidence-defer`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
-3. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-settings-data-reset-pair-service-boundary-audit.md`
-   - `docs/modules/settings/README.md`
-   - `docs/modules/settings/state-machine.md`
-   - `docs/modules/settings/tests.md`
+3. Read all `workbench-relations-*` analysis files from the current pilot sequence, especially the latest closure/accounting files.
+4. Read:
    - `docs/modules/workbench-relations/README.md`
    - `docs/modules/workbench-relations/state-machine.md`
    - `docs/modules/workbench-relations/tests.md`
    - `docs/modules/workbench-relations/implementation-notes.md`
-4. Inspect:
-   - `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
-   - `backend/src/fin_ops_platform/app/server.py`
-   - `tests/test_settings_data_reset_service.py`
-   - `tests/test_platform_runtime_boundary_guards.py`
-5. Use CodeGraph/text search for `SettingsDataResetService`, `workbench_pair_relation_service`, `_pair_relations`, `save_workbench_pair_relations`, `RESET_OA_AND_REBUILD_ACTION`, and settings data reset pair relation tests.
-6. Produce an analysis/accounting file under `.planning/refactors/modular-io-boundaries/analysis/`.
-7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
+   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
+   - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
+5. Inspect remaining `_workbench_pair_relation_service` references in `backend/src/fin_ops_platform/app/server.py`, service modules, tools and tests.
+6. Use CodeGraph/text search for remaining direct pair service reads/writes, `pair_relation_service=`, `_workbench_pair_relation_service`, `save_workbench_pair_relations`, `load_workbench_pair_relations`, `replace_pair_relation_service`, `persist_pair_relations`, and closure/defer notes.
+7. Produce an analysis/accounting file under `.planning/refactors/modular-io-boundaries/analysis/`.
+8. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Add an explicit settings data reset pair snapshot/save port.
-- Remove broad `workbench_pair_relation_service` from `SettingsDataResetService` constructor/storage.
-- Preserve bank reset and invoice reset clearing behavior.
-- Preserve OA reset filtering that removes OA-derived relations and keeps pure bank-invoice relations.
-- Preserve deleted counts, protected targets, API response shape, read model cleanup, derived lifecycle fan-out and reset job behavior.
-- Add or update static guard coverage proving `SettingsDataResetService` no longer accepts broad pair service.
+- Decide whether local `workbench_relation` implementation support slices can be marked `production-evidence-deferred` or whether more local implementation slices are required.
+- Classify every remaining broad pair relation service use as legitimate explicit boundary, compat-only, test-only, tool-only, pending implementation gap, or production evidence gap.
+- Confirm old paths cannot write canonical relation facts, dirty scopes, outbox, read model readiness, cache or App Status outside approved boundaries.
+- Confirm Go hot-path admission remains blocked unless the documented prerequisites are actually satisfied.
+- Do not perform production writes, DB writes, queue mutation, worker replay or secret reads.
 
 Forbidden:
 
-- Do not change relation command-service write semantics.
-- Do not change reset action names, response fields, protected targets, job lifecycle or permission behavior.
 - Do not implement Go/Fiber/Go Worker.
-- Do not declare `workbench_relation` module closed.
+- Do not mark `workbench_relation` closed unless every local implementation requirement and environment evidence/defer rule is explicitly satisfied.
+- Do not hide remaining local implementation gaps as production evidence defer.
 
 ## Expected Output
 
-- Narrow implementation slice.
+- Narrow closure/defer analysis slice.
 - Updated queue/state/journal/next prompt.
-- Targeted settings reset pair relation tests, static guard, docs verification and `git diff --check`.
+- Docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
 - Continue to the next pending boundary if safe.
 
 ## Stop Condition
 
-Complete one verified `workbench-relations:settings-data-reset-pair-snapshot-port-extraction` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one verified `workbench-relations:local-implementation-closure-and-production-evidence-defer` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

@@ -317,6 +317,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
     RESET_OA_AND_REBUILD_ACTION,
+    SettingsDataResetPairSnapshotPort,
     SettingsDataResetService,
 )
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
@@ -1194,7 +1195,10 @@ class Application:
                 file_import_service=self._file_import_service,
                 matching_service=self._matching_service,
                 workbench_override_service=self._workbench_override_service,
-                workbench_pair_relation_service=self._workbench_pair_relation_service,
+                workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(
+                    pair_relation_snapshot=self._workbench_pair_relation_service.snapshot,
+                    save_pair_relation_snapshot=self._state_store.save_workbench_pair_relations,
+                ),
                 workbench_read_model_service=self._workbench_read_model_service,
                 workbench_matching_dirty_scope_service=self._workbench_matching_dirty_scope_service,
                 tax_certified_import_service=self._tax_certified_import_service,

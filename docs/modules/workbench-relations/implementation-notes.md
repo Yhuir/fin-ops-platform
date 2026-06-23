@@ -3515,3 +3515,28 @@ git diff --check
 - `reset_oa_and_rebuild` 的现有语义必须保留：删除 OA 派生 relation，保留纯银行-发票 relation，清空 workbench read model 和 candidate matches。
 
 下一条边界：`workbench-relations:settings-data-reset-pair-snapshot-port-extraction`。
+
+## 2026-06-24 - settings data reset pair snapshot port extraction
+
+目标：移除 `SettingsDataResetService` 对 broad Workbench pair service 的直接依赖。
+
+变更：
+
+- 新增 `SettingsDataResetPairSnapshotPort`。
+- `SettingsDataResetService` 改为接收 `workbench_pair_snapshot_port`，不再接收或保存 `workbench_pair_relation_service`。
+- pair relation snapshot 读取和 OA reset 后筛选结果保存统一走显式 port。
+- `Application._initialize_runtime_services(...)` 负责把 `_workbench_pair_relation_service.snapshot` 和 `state_store.save_workbench_pair_relations` 包装为 port。
+- 新增 static guard 防止 settings reset 服务重新接收 broad pair service。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/settings_data_reset_service.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_settings_data_reset_pair_snapshot_uses_explicit_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_bank_transactions_keeps_invoices_and_protects_form_data_db tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_invoices_clears_tax_certified_records tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_oa_and_rebuild_removes_pair_relation_containing_expense_row tests.test_settings_data_reset_service.SettingsDataResetServiceTests.test_reset_oa_and_rebuild_removes_pair_relation_containing_attachment_invoice_row -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:local-implementation-closure-and-production-evidence-defer`。

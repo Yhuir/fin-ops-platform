@@ -1934,6 +1934,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_settings_data_reset_pair_snapshot_uses_explicit_port(self) -> None:
+        service_path = SERVICES_ROOT / "settings_data_reset_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+
+        port_source = _class_source(service_tree, service_source, "SettingsDataResetPairSnapshotPort")
+        service_class_source = _class_source(service_tree, service_source, "SettingsDataResetService")
+        runtime_init_source = _function_source(server_tree, server_source, "_initialize_runtime_services")
+        violations: list[str] = []
+
+        for snippet in (
+            "class SettingsDataResetPairSnapshotPort",
+            "def pair_relations(",
+            "def save_pair_relations(",
+            "def snapshot(",
+            "save_pair_relation_snapshot",
+        ):
+            if snippet not in port_source:
+                violations.append(f"settings data reset pair snapshot port missing {snippet}")
+        for forbidden in (
+            "workbench_pair_relation_service:",
+            "self._workbench_pair_relation_service",
+        ):
+            if forbidden in service_class_source:
+                violations.append(f"SettingsDataResetService still accepts broad pair service {forbidden}")
+        if "workbench_pair_snapshot_port: SettingsDataResetPairSnapshotPort" not in service_class_source:
+            violations.append("SettingsDataResetService does not require explicit pair snapshot port")
+        if "_workbench_pair_snapshot_port.pair_relations()" not in service_class_source:
+            violations.append("SettingsDataResetService does not read pair relations through the port")
+        if "_workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)" not in service_class_source:
+            violations.append("SettingsDataResetService does not save filtered pair relations through the port")
+        if "workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(" not in runtime_init_source:
+            violations.append("Application settings reset wiring does not wrap pair service in explicit port")
+
+        self.assertEqual(violations, [])
+
     def test_bank_details_relation_tags_only_read_relation_distribution_facade(self) -> None:
         path = SERVICES_ROOT / "bank_details_relation_tag_projection_service.py"
         source = path.read_text(encoding="utf-8")

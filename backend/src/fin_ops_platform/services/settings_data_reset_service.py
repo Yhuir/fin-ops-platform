@@ -22,6 +22,33 @@ PROHIBITED_RESET_TARGETS = (
 SettingsDataResetProgressCallback = Callable[[str, str, int, int], None]
 
 
+class SettingsDataResetPairSnapshotPort:
+    def __init__(
+        self,
+        *,
+        pair_relation_snapshot: Callable[[], dict[str, Any]],
+        save_pair_relation_snapshot: Callable[[dict[str, Any]], None],
+    ) -> None:
+        self._pair_relation_snapshot = pair_relation_snapshot
+        self._save_pair_relation_snapshot = save_pair_relation_snapshot
+
+    def pair_relations(self) -> dict[str, Any]:
+        snapshot = self.snapshot()
+        pair_relations = snapshot.get("pair_relations")
+        return pair_relations if isinstance(pair_relations, dict) else {}
+
+    def save_pair_relations(self, pair_relations: dict[str, Any]) -> None:
+        self._save_pair_relation_snapshot(
+            {
+                **self.snapshot(),
+                "pair_relations": dict(pair_relations),
+            }
+        )
+
+    def snapshot(self) -> dict[str, Any]:
+        return dict(self._pair_relation_snapshot() or {})
+
+
 @dataclass(slots=True)
 class SettingsDataResetResult:
     action: str
@@ -45,7 +72,7 @@ class SettingsDataResetService:
         file_import_service: Any,
         matching_service: Any,
         workbench_override_service: Any,
-        workbench_pair_relation_service: Any,
+        workbench_pair_snapshot_port: SettingsDataResetPairSnapshotPort,
         workbench_read_model_service: Any,
         workbench_matching_dirty_scope_service: Any,
         tax_certified_import_service: Any,
@@ -55,7 +82,7 @@ class SettingsDataResetService:
         self._file_import_service = file_import_service
         self._matching_service = matching_service
         self._workbench_override_service = workbench_override_service
-        self._workbench_pair_relation_service = workbench_pair_relation_service
+        self._workbench_pair_snapshot_port = workbench_pair_snapshot_port
         self._workbench_read_model_service = workbench_read_model_service
         self._workbench_matching_dirty_scope_service = workbench_matching_dirty_scope_service
         self._tax_certified_import_service = tax_certified_import_service
@@ -262,12 +289,7 @@ class SettingsDataResetService:
                 "row_overrides": kept_row_overrides,
             }
         )
-        self._state_store.save_workbench_pair_relations(
-            {
-                **self._workbench_pair_relation_service.snapshot(),
-                "pair_relations": kept_pair_relations,
-            }
-        )
+        self._workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)
         self._state_store.save_workbench_read_models({})
         self._state_store.save_workbench_candidate_matches({})
         return SettingsDataResetResult(
@@ -394,9 +416,7 @@ class SettingsDataResetService:
         return row_overrides if isinstance(row_overrides, dict) else {}
 
     def _pair_relations(self) -> dict[str, Any]:
-        snapshot = self._workbench_pair_relation_service.snapshot()
-        pair_relations = snapshot.get("pair_relations")
-        return pair_relations if isinstance(pair_relations, dict) else {}
+        return self._workbench_pair_snapshot_port.pair_relations()
 
     def _read_models(self) -> dict[str, Any]:
         snapshot = self._workbench_read_model_service.snapshot()
