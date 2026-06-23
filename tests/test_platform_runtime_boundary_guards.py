@@ -168,15 +168,15 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
                 "NoOaPairRelationSnapshotPort.restore",
             },
+            "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
+                "NoOaRelationRepairReadPort.active_relation_by_case_id",
+                "NoOaRelationRepairReadPort.active_relations_for_row_ids",
+            },
             "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
                 "BatchAccountingService._submit_unlocked",
                 "BatchAccountingService.repair_legacy_case_id_collisions",
                 "BatchAccountingService.withdraw",
                 "BatchAccountingService._withdraw_unlocked",
-            },
-            "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
-                "NoOaBankBatchService._repair_submitted_no_oa_relation_consistency",
-                "NoOaBankBatchService._has_active_no_oa_relation",
             },
         }
         qualified = f"{class_name}.{function_name}" if class_name and function_name else function_name
@@ -804,6 +804,50 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required not in port_source:
                 violations.append(f"NoOaPairRelationSnapshotPort is missing {required}")
+
+        self.assertEqual(violations, [])
+
+    def test_no_oa_domain_relation_reads_use_repair_read_port(self) -> None:
+        path = SERVICES_ROOT / "no_oa_bank_batch_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        service_source = _class_source(tree, source, "NoOaBankBatchService")
+        port_source = _class_source(tree, source, "NoOaRelationRepairReadPort")
+        repair_source = _function_source(tree, source, "_repair_submitted_no_oa_relation_consistency")
+        stale_projection_source = _function_source(tree, source, "_has_active_no_oa_relation")
+        month_scope_source = _function_source(tree, source, "_build_batches_for_month_scope")
+
+        violations: list[str] = []
+        if "NoOaRelationRepairReadPort" not in source:
+            violations.append("no-OA domain module lacks explicit relation repair read port")
+        if "_relation_read_port" not in service_source:
+            violations.append("NoOaBankBatchService does not store relation read port")
+        for forbidden in (
+            "self._pair_relation_service",
+            "_pair_relation_service.get_active_relation_by_case_id",
+            "_pair_relation_service.active_relations_for_row_ids",
+        ):
+            if forbidden in service_source:
+                violations.append(f"NoOaBankBatchService keeps direct pair relation read dependency {forbidden}")
+        for required in (
+            "active_relation_by_case_id",
+            "active_relations_for_row_ids",
+            "get_active_relation_by_case_id",
+        ):
+            if required not in port_source:
+                violations.append(f"NoOaRelationRepairReadPort is missing {required}")
+        for required in (
+            "_relation_read_port.active_relation_by_case_id",
+            "_relation_read_port.active_relations_for_row_ids",
+            "_confirm_no_oa_relation",
+            "_cancel_no_oa_relation",
+        ):
+            if required not in repair_source:
+                violations.append(f"submitted no-OA repair no longer uses expected boundary {required}")
+        if "_relation_read_port.active_relation_by_case_id" not in stale_projection_source:
+            violations.append("stale/submitted projection does not use relation read port")
+        if "relation_read_port=self._relation_read_port" not in month_scope_source:
+            violations.append("month-scoped no-OA rebuild does not forward relation read port")
 
         self.assertEqual(violations, [])
 

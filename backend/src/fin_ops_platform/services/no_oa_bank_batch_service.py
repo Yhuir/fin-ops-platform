@@ -34,6 +34,22 @@ NO_OA_BANK_BATCH_STATUS_BUCKETS = {
 }
 
 
+class NoOaRelationRepairReadPort:
+    def __init__(self, pair_relation_service: WorkbenchPairRelationService) -> None:
+        self._pair_relation_service = pair_relation_service
+
+    def active_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
+        relation = self._pair_relation_service.get_active_relation_by_case_id(case_id)
+        return deepcopy(relation) if isinstance(relation, dict) else None
+
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        return [
+            deepcopy(relation)
+            for relation in self._pair_relation_service.active_relations_for_row_ids(row_ids)
+            if isinstance(relation, dict)
+        ]
+
+
 class NoOaBankBatchService:
     def __init__(
         self,
@@ -41,6 +57,7 @@ class NoOaBankBatchService:
         batches: dict[str, dict[str, Any]] | None = None,
         audit_log: list[dict[str, Any]] | None = None,
         pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_read_port: NoOaRelationRepairReadPort | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._batches = {
@@ -53,7 +70,9 @@ class NoOaBankBatchService:
             for entry in list(audit_log or [])
             if isinstance(entry, dict)
         ]
-        self._pair_relation_service = pair_relation_service or WorkbenchPairRelationService()
+        self._relation_read_port = relation_read_port or NoOaRelationRepairReadPort(
+            pair_relation_service or WorkbenchPairRelationService()
+        )
         self._relation_command_service = relation_command_service
         self._legacy_migration_service = NoOaLegacyRelationMigrationService(
             relation_command_service=self._relation_command_service,
@@ -76,11 +95,13 @@ class NoOaBankBatchService:
         snapshot: dict[str, Any] | None,
         *,
         pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_read_port: NoOaRelationRepairReadPort | None = None,
         relation_command_service: Any | None = None,
     ) -> "NoOaBankBatchService":
         if not isinstance(snapshot, dict):
             return cls(
                 pair_relation_service=pair_relation_service,
+                relation_read_port=relation_read_port,
                 relation_command_service=relation_command_service,
             )
         batches = snapshot.get("batches")
@@ -89,6 +110,7 @@ class NoOaBankBatchService:
             batches=batches if isinstance(batches, dict) else {},
             audit_log=audit_log if isinstance(audit_log, list) else [],
             pair_relation_service=pair_relation_service,
+            relation_read_port=relation_read_port,
             relation_command_service=relation_command_service,
         )
 
@@ -276,7 +298,7 @@ class NoOaBankBatchService:
         scoped_service = NoOaBankBatchService(
             batches=scoped_batches,
             audit_log=[],
-            pair_relation_service=self._pair_relation_service,
+            relation_read_port=self._relation_read_port,
             relation_command_service=self._relation_command_service,
         )
         scoped_service.build_batches(
@@ -1220,12 +1242,12 @@ class NoOaBankBatchService:
             if not batch_id or not relation_case_id or not row_ids:
                 continue
 
-            active_relation = self._pair_relation_service.get_active_relation_by_case_id(relation_case_id)
+            active_relation = self._relation_read_port.active_relation_by_case_id(relation_case_id)
             if self._active_relation_matches_submitted_no_oa_batch(active_relation, batch):
                 continue
             blocking_relations = [
                 relation
-                for relation in self._pair_relation_service.active_relations_for_row_ids(row_ids)
+                for relation in self._relation_read_port.active_relations_for_row_ids(row_ids)
                 if isinstance(relation, dict)
                 and str(relation.get("case_id") or "").strip() != relation_case_id
                 and not self._is_no_oa_relation(relation)
@@ -1266,7 +1288,7 @@ class NoOaBankBatchService:
                     )
                 )
 
-            for stale_relation in self._pair_relation_service.active_relations_for_row_ids(row_ids):
+            for stale_relation in self._relation_read_port.active_relations_for_row_ids(row_ids):
                 if not self._is_no_oa_relation(stale_relation):
                     continue
                 stale_case_id = str(stale_relation.get("case_id") or "").strip()
@@ -2521,7 +2543,7 @@ class NoOaBankBatchService:
 
     def _has_active_no_oa_relation(self, batch: dict[str, Any]) -> bool:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-        relation = self._pair_relation_service.get_active_relation_by_case_id(relation_case_id)
+        relation = self._relation_read_port.active_relation_by_case_id(relation_case_id)
         if not isinstance(relation, dict):
             return False
         if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:

@@ -109,6 +109,31 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - no-OA domain repair/read port extraction
+
+目标：移除 `NoOaBankBatchService` 对 broad pair relation service 的直接保存和 active relation 读取，把 submitted relation repair、stale-as-submitted projection 和 month-scope child service wiring 收敛到显式 read/repair port。
+
+变更：
+
+- 新增 `NoOaRelationRepairReadPort`，集中适配 `get_active_relation_by_case_id(...)` 和 `active_relations_for_row_ids(...)`。
+- `NoOaBankBatchService` 改为保存 `_relation_read_port`，不再保存 `_pair_relation_service`。
+- `_repair_submitted_no_oa_relation_consistency(...)` 通过 `_relation_read_port` 判断当前 submitted relation、非 no-OA 阻挡关系和 stale no-OA relation。
+- `_has_active_no_oa_relation(...)` 通过 `_relation_read_port` 判断 stale batch 是否应对外投影为 submitted 并允许撤回。
+- `_build_batches_for_month_scope(...)` 向 scoped child service 传递同一个 relation read port。
+- `_confirm_no_oa_relation(...)` 和 `_cancel_no_oa_relation(...)` 保持 command-service-backed 写路径不变。
+- 新增静态 guard，防止 `NoOaBankBatchService` 重新直接保存或调用 `_pair_relation_service`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service.NoOaBankBatchApplicationServiceTests.test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted tests.test_no_oa_bank_batch_api.NoOaBankBatchApiTests.test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_no_oa_domain_relation_reads_use_repair_read_port tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_downstream_relation_read_models_use_workbench_relation_distribution tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+下一条边界：`workbench-relations:post-no-oa-local-implementation-closure-audit`。
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
