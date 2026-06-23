@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:restore-pair-relation-snapshot-helper-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:pair-relation-rollback-restore-service-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -80,8 +80,8 @@ Current state expected on start:
 - Transaction pair relation persist now uses `PostgresWorkbenchRelationRepository`.
 - WorkbenchRelationCommandRepositoryAdapter now owns command repository snapshot merge/apply behavior.
 - WorkbenchPairRelationPersistService now owns non-transactional pair relation persist/schedule/background/timing behavior.
-- `_restore_workbench_pair_relation_snapshot(...)` is required by WorkbenchWriteFacade failure rollback paths and is not removable.
-- The next pending boundary is workbench-relations:pair-relation-rollback-restore-service-extraction.
+- WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
+- The next pending boundary is workbench-relations:exception-restore-helper-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -177,16 +177,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:pair-relation-rollback-restore-service-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:exception-restore-helper-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:pair-relation-rollback-restore-service-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-restore-pair-relation-snapshot-helper-audit.md`.
+For workbench-relations:exception-restore-helper-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-pair-relation-rollback-restore-service-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph for `_restore_workbench_pair_relation_snapshot`, `_workbench_write_facade`, WorkbenchWriteFacade rollback callbacks, and callers/impact.
-- Extract pair relation rollback restore behavior into an explicit service.
-- Preserve pair relation service rehydrate, exception application service reconfigure, state-store best-effort rollback save and error swallowing behavior.
-- Keep `server.py` as dependency assembly/wrapper only if temporary wrappers are required for callbacks.
-- Do not migrate `_restore_workbench_exception_pair_snapshots(...)`, `_restore_workbench_exception_write_snapshots(...)`, or `_restore_batch_accounting_pair_relation_snapshot(...)` unless required by a narrow reusable dependency.
+- Use CodeGraph for `_restore_workbench_exception_pair_snapshots`, `_restore_workbench_exception_write_snapshots`, `_apply_workbench_exception_application`, personal advance rollback paths, and callers/impact.
+- Audit remaining app-owned exception restore helpers before implementation.
+- Classify each remaining helper as removable, extractable, compat-only, or blocked.
+- Decide whether the next implementation should extract a shared exception rollback service, reuse the pair relation rollback service narrowly, or leave some helpers as dependency-assembly wrappers.
+- Do not migrate exception restore behavior in this audit slice unless the queue is explicitly split/advanced after analysis.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

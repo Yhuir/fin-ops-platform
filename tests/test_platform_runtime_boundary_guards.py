@@ -1272,6 +1272,43 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_pair_relation_restore_uses_explicit_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "workbench_pair_relation_rollback_restore_service.py"
+        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
+        wrapper_source = _function_source(server_tree, server_source, "_restore_workbench_pair_relation_snapshot")
+        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_rollback_restore_service")
+        replace_source = _function_source(server_tree, server_source, "_replace_workbench_pair_relation_service")
+        violations: list[str] = []
+
+        if "WorkbenchPairRelationRollbackRestoreService(" not in factory_source:
+            violations.append("server.py does not build explicit pair relation rollback restore service")
+        if ".restore(" not in wrapper_source:
+            violations.append("pair relation rollback wrapper does not delegate to service.restore")
+        for forbidden in (
+            "WorkbenchPairRelationService.from_snapshot",
+            "save_workbench_pair_relations(",
+            "_configure_workbench_exception_application_service()",
+        ):
+            if forbidden in wrapper_source:
+                violations.append(f"server.py pair relation restore wrapper still owns behavior {forbidden}")
+        if 'delattr(self, "_workbench_pair_relation_persist_service_instance")' not in replace_source:
+            violations.append("pair relation service replacement does not clear cached persist service")
+        for snippet in (
+            "class WorkbenchPairRelationRollbackRestoreService",
+            "def restore(",
+            "WorkbenchPairRelationService.from_snapshot(snapshot)",
+            "self._replace_pair_relation_service(restored_service)",
+            "self._configure_exception_application_service()",
+            "save_workbench_pair_relations(",
+        ):
+            if snippet not in service_source:
+                violations.append(f"pair relation rollback restore service missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
         source = path.read_text(encoding="utf-8")

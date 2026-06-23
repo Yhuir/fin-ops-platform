@@ -427,6 +427,9 @@ from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as 
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_pair_relation_persist_service import WorkbenchPairRelationPersistService
+from fin_ops_platform.services.workbench_pair_relation_rollback_restore_service import (
+    WorkbenchPairRelationRollbackRestoreService,
+)
 from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
@@ -3748,7 +3751,7 @@ class Application:
         previous_override_snapshot: dict[str, object],
     ) -> None:
         self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
         self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
         self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
         self._configure_workbench_exception_application_service()
@@ -3760,7 +3763,7 @@ class Application:
         previous_pair_snapshot: dict[str, object],
     ) -> None:
         self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
         self._configure_workbench_exception_application_service()
 
     def _workbench_transaction_amount_for_row_id(self, row_id: str) -> object:
@@ -3786,17 +3789,22 @@ class Application:
         *,
         changed_case_ids: list[str],
     ) -> None:
-        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(snapshot)
-        self._configure_workbench_exception_application_service()
-        if self._state_store is None:
-            return
-        try:
-            self._state_store.save_workbench_pair_relations(
-                snapshot,
-                changed_case_ids=changed_case_ids,
-            )
-        except Exception:
-            pass
+        self._workbench_pair_relation_rollback_restore_service().restore(
+            snapshot,
+            changed_case_ids=changed_case_ids,
+        )
+
+    def _workbench_pair_relation_rollback_restore_service(self) -> WorkbenchPairRelationRollbackRestoreService:
+        return WorkbenchPairRelationRollbackRestoreService(
+            state_store=self._state_store,
+            replace_pair_relation_service=self._replace_workbench_pair_relation_service,
+            configure_exception_application_service=self._configure_workbench_exception_application_service,
+        )
+
+    def _replace_workbench_pair_relation_service(self, service: WorkbenchPairRelationService) -> None:
+        self._workbench_pair_relation_service = service
+        if hasattr(self, "_workbench_pair_relation_persist_service_instance"):
+            delattr(self, "_workbench_pair_relation_persist_service_instance")
 
     def _handle_api_workbench_summary(self, month: str | None) -> Response:
         result = self._workbench_query_facade().summary(month)
@@ -7864,7 +7872,7 @@ class Application:
             self._persist_workbench_candidate_matches_best_effort(operation=action_name)
         except Exception as exc:
             self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+            self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
             self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
             self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
             self._configure_workbench_exception_application_service()
@@ -13002,7 +13010,7 @@ class Application:
         return routes
 
     def _restore_batch_accounting_pair_relation_snapshot(self, snapshot: dict[str, Any]) -> None:
-        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(snapshot)
+        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(snapshot))
         self._configure_workbench_exception_application_service()
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:

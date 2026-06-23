@@ -225,6 +225,33 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - pair relation rollback restore service extraction
+
+目标：把 pair relation rollback restore 从 `server.py` 抽到显式 service，同时保证新增 persist service cache 不会在 rollback 后指向旧 pair relation service。
+
+变更：
+
+- 新增 `WorkbenchPairRelationRollbackRestoreService`。
+- `Application._restore_workbench_pair_relation_snapshot(...)` 改为兼容 wrapper，只委托 service。
+- 新增 `Application._replace_workbench_pair_relation_service(...)`，统一 pair relation service 替换并清理 `_workbench_pair_relation_persist_service_instance`。
+- 相邻 exception/batch-accounting restore helper 在替换 pair relation service 时改用统一 helper，保持原有 rollback 语义但避免缓存污染。
+- 新增 rollback restore service 单测和静态 guard。
+
+决策：
+
+- `_restore_workbench_exception_pair_snapshots(...)` 和 `_restore_workbench_exception_write_snapshots(...)` 仍是独立 app-owned rollback orchestration，下一步先审计，不在本 slice 扩大迁移。
+- `workbench_relation` 仍是 `implementation-gap-open`，不能声明模块闭环或进入 Go admission。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_rollback_restore_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_pair_relation_restore_uses_explicit_service_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。
