@@ -155,6 +155,28 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - WorkbenchWriteFacade pair service boundary audit
+
+目标：枚举并分类 `WorkbenchWriteFacade` 中所有 `_pair_relation_service` call site，决定下一条最小实现边界。
+
+结论：
+
+- `WorkbenchWriteFacade` 仍是当前最大的 broad pair service 持有者。
+- 核心 `confirm_link` / `cancel_link` 写路径已有 command-service gating，现有 guard 禁止它们回退到 direct pair write fallback。
+- 剩余 direct pair service usage 可分为：
+  - read/preflight：`active_relations_for_row_ids(...)`、`get_active_relation_by_row_id(...)`、`preview_withdraw_for_row_ids(...)`。
+  - snapshot/rollback：`snapshot()`。
+  - cash special metadata mutation：`update_special_metadata_for_row_ids(...)`、`clear_special_metadata_for_row_ids(...)`。
+- 一次性迁移整个 facade 范围过大，会同时碰 confirm/cancel/withdraw/exception/cash special/UoW/idempotency/read model scheduling。
+- 下一条边界是 `workbench-relations:workbench-write-facade-relation-read-snapshot-port-extraction`，先抽 read/snapshot port；cash special metadata mutation 后续单独处理。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
