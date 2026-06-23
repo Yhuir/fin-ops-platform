@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-ready-after-queue-semantics-and-master-goal-prompt-revision`
+Current state: `autonomous-continue-after-server-py-etc-business-batch-legacy-handler-removal`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `planning:queue-semantics-and-master-goal-prompt-revision` after `read-models:bank-detail-category-side-effect-port-extraction`; next execution must start with `server-py:legacy-handler-extraction-implementation` unless a planning-state inconsistency is found first.
+Completed `server-py:legacy-handler-extraction-implementation` by removing definition-only ETC business-batch legacy handlers from `server.py`; next execution must start with `batch-accounting:legacy-route-implementation` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -60,6 +60,7 @@ Completed `planning:queue-semantics-and-master-goal-prompt-revision` after `read
 - `read-models:bank-detail-server-helper-quarantine` -> `implementation-closed`
 - `read-models:bank-detail-category-side-effect-port-extraction` -> `implementation-closed`
 - `planning:queue-semantics-and-master-goal-prompt-revision` -> `planning-closed`
+- `server-py:legacy-handler-extraction-implementation` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -67,7 +68,7 @@ Completed `planning:queue-semantics-and-master-goal-prompt-revision` after `read
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine and category side-effect port extraction are implemented; the module is not closed because production DB/worker evidence remains unavailable and classified support wrappers/callbacks have not been globally extracted.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, but the next executable queue boundary is broader `server.py` legacy handler extraction.
+- Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -80,8 +81,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`planning:queue-semantics-and-master-goal-prompt-revision`
+`server-py:legacy-handler-extraction-implementation`
 
 ## Next Prompt
 
-`server-py:legacy-handler-extraction-implementation`
+`batch-accounting:legacy-route-implementation`

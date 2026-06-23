@@ -1,33 +1,21 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the queue semantics and master goal prompt revision slice.
+Continue the autonomous modular IO refactor after the `server-py:legacy-handler-extraction-implementation` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `planning:queue-semantics-and-master-goal-prompt-revision`
-- Last status: `planning-closed`
-- Queue semantics are corrected: slice status is not module closure.
-- First read model implementation pilot: `bank_detail`.
-- Implemented for `bank_detail` so far:
-  - repository port/query boundary
-  - write/force-refresh response `read_model_scope_keys`
-  - operation barrier `freshness_targets`
-  - exact month barrier target tests
-  - removal of unused `server.py` `_get_bank_detail_*_from_sql_read_model` compat helpers
-  - removal of unused `server.py` bank detail scope/freshness/cache/payload helpers
-  - explicit `BankDetailCategoryMutationSideEffectPort` for category write side effects
-  - static guard proving removed `Application._after_bank_category_confirmation_mutation(...)` cannot return
-- Still open for `bank_detail`:
-  - production worker/readiness evidence remains deferred because there is no local `PGSQL_URL` or staging DB
-  - `Application._latest_bank_detail_auto_category_suggestion(...)` is classified as a compat-only read callback, not extracted
-  - shared gateway/scope support wrappers remain classified, not globally extracted
-- `server-py:legacy-handler-extraction-implementation` is the next executable shared-boundary implementation slice. It is not evidence that `bank_detail` is fully module-closed.
+- Last completed boundary: `server-py:legacy-handler-extraction-implementation`
+- Last status: `implementation-closed`
+- Queue semantics remain corrected: slice status is not module closure.
+- The completed server-py slice removed definition-only ETC business-batch legacy handlers from `server.py` and guarded the active `/api/etc/business-batches*` wrappers so list/create/detail/import/OA/manual-status continue delegating to `EtcBusinessBatchApiRoutes`.
+- Broader `server.py` shared-boundary cleanup remains `implementation-gap-open`.
+- `bank_detail` remains the first read model implementation pilot and is still not module-closed.
 - Go hot-path candidates remain blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
 
 ## Next Boundary
 
-`server-py:legacy-handler-extraction-implementation`
+`batch-accounting:legacy-route-implementation`
 
 ## Required First Steps On Resume
 
@@ -50,26 +38,29 @@ Continue the autonomous modular IO refactor after the queue semantics and master
    - Read this file.
    - If these files disagree on current state, next boundary, status labels, module closure meaning or completion metric source, stop normal implementation and create another `planning:state-reconciliation-*` slice first.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-category-side-effect-port-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-batch-legacy-handler-removal.md`
    - `docs/app-architecture/runtime-and-ownership.md`
    - `docs/modules/README.md`
-   - target module docs for the selected `server.py` legacy handler area before editing
-5. Use CodeGraph first to inspect the selected legacy handler, its route owner, callers, callees and impact.
-6. Execute only one narrow server.py handler extraction/quarantine boundary. Do not implement Go/Fiber/Go Worker.
+   - `docs/modules/batch-accounting/README.md`
+   - `docs/modules/batch-accounting/state-machine.md`
+   - `docs/modules/batch-accounting/tests.md`
+5. Use CodeGraph first to inspect the selected batch-accounting route handler, service owner, callers, callees and impact.
+6. Execute only one narrow batch-accounting route/service implementation boundary. Do not implement Go/Fiber/Go Worker.
 7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Select the first high-value legacy handler still owned by `server.py` whose extraction is small enough for one safe slice.
-- Prefer an existing `routes_*.py` / service owner from the route owner inventory.
-- Keep `server.py` thin: HTTP parsing, session/auth resolution, route/service construction and response mapping only.
+- Convert one batch-accounting route/legacy boundary from guard-only to actual service/repository/read-model contract implementation.
+- Prefer the smallest route with a clear owner and existing tests.
+- Keep `server.py` thin: HTTP parsing, session/auth resolution, dependency wiring and response mapping only.
 
 Allowed outcomes:
 
-- Move a narrow legacy handler body into an existing route/service boundary.
-- Or quarantine a legacy handler with owner/caller/forbidden-write/deletion-condition tests if extraction is too broad.
+- Move a narrow legacy route body into an existing route/service boundary.
+- Or quarantine a legacy batch-accounting handler with owner/caller/forbidden-write/deletion-condition tests if extraction is too broad.
 - Preserve API response shape, permissions, audit and read model behavior.
 
 Forbidden:
@@ -83,14 +74,14 @@ Forbidden:
 ## Expected Output
 
 - An analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- One small implementation or static guard for the selected server.py legacy handler boundary.
+- One small implementation or static quarantine guard for the selected batch-accounting boundary.
 - Updated module docs/state/journal/next prompt.
 - Targeted API/service/read model/permission tests, docs verification, app check and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one verified server.py legacy handler extraction/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
+Complete one verified batch-accounting route implementation/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
 
 ## Reporting Rule
 

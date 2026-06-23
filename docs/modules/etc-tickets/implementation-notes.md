@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - ETC business-batches 未调用 legacy handler 删除
+
+- 目标：删除 `server.py` 中已被 `EtcBusinessBatchApiRoutes` 替代且无调用点的 ETC business-batch 私有 handler，防止旧路径重新绕过 route/application service 边界。
+- 影响范围：`server.py` 删除旧 list/create/detail/import/OA/manual-status handler；保留 active `/api/etc/business-batches*` thin wrapper、delete/reset 和 OA draft revoke 待后续独立边界处理。
+- 关键决策：本轮不改变 API shape、业务状态、权限、read model 或 Workbench side effect；只移除无调用旧代码，并用静态 guard 防止旧 handler 和 `server.py` 直接构造 `EtcBusinessBatchActor` 回流。
+- 文档影响：更新本实施记录和 modular IO analysis/state。
+- 测试覆盖：新增 `test_etc_business_batch_routes_do_not_keep_removed_legacy_handlers`，并运行 ETC active business-batches targeted API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-batch-legacy-handler-removal.md`。
+- 未测风险：未迁移 delete/reset 和 OA draft revoke，这两个仍是后续 `server.py` legacy shared-boundary 候选；未做生产验证，因为本轮无生产行为变化。
+- 后续事项：下一轮按队列推进 `batch-accounting:legacy-route-implementation`，ETC delete/reset 与 revoke 可在后续 server.py shared-boundary 批次继续收敛。
+
 ## 2026-06-23 - ETC batch invoice link backfill 闭环
 
 - 目标：补齐 Phase C 历史迁移工具，让已存在的 submitted/manual-submitted ETC 批次能够从 `app.etc_invoices` 与 canonical `app.invoices` dry-run 回填到 `app.etc_batch_invoice_links`。

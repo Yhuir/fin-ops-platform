@@ -750,6 +750,50 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_business_batch_routes_do_not_keep_removed_legacy_handlers(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        removed_handlers = {
+            "_handle_api_etc_business_batches",
+            "_handle_api_etc_business_batch_create",
+            "_route_api_etc_business_batch",
+            "_handle_api_etc_business_import_preview",
+            "_handle_api_etc_business_import_confirm",
+            "_handle_api_etc_business_oa_draft",
+            "_handle_api_etc_business_manual_oa_status",
+        }
+        present = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in removed_handlers
+        ]
+        v2_route = _function_source(tree, source, "_route_api_etc_business_batch_v2")
+        list_route = _function_source(tree, source, "_handle_api_etc_business_batches_route")
+
+        violations: list[str] = []
+        if present:
+            violations.append(f"server.py keeps removed ETC business batch legacy handlers: {sorted(present)}")
+        for required_delegate in (
+            "routes.source_files(",
+            "routes.preview_import(",
+            "routes.confirm_import(",
+            "routes.create_oa_draft(",
+            "routes.manual_oa_status(",
+        ):
+            if required_delegate not in v2_route:
+                violations.append(f"_route_api_etc_business_batch_v2 no longer delegates {required_delegate} to EtcBusinessBatchApiRoutes")
+        for required_delegate in (
+            "_etc_business_routes().list_batches(",
+            "_etc_business_routes().create_batch(",
+        ):
+            if required_delegate not in list_route:
+                violations.append(f"_handle_api_etc_business_batches_route no longer delegates {required_delegate} to EtcBusinessBatchApiRoutes")
+        if "EtcBusinessBatchActor" in source:
+            violations.append("server.py reintroduced direct EtcBusinessBatchActor construction instead of route-owned actor mapping")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
