@@ -13,6 +13,7 @@ Autonomously continue the modular IO boundary refactor until the refactor plan r
 Definition of "closure":
 - Every boundary in .planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md is either closed with verified code/docs/tests, production-evidence-deferred with explicit evidence gap, go-candidate-deferred with admission evidence, or needs-human-production-gate for a true hard gate.
 - .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md, autonomous/STATE.md, autonomous/MODULE-QUEUE.md, autonomous/JOURNAL.md, and autonomous/NEXT-PROMPT.md reflect the same current state, completed boundary, next boundary, transition reason, evidence, and stop/defer gate.
+- State-machine accounting is mandatory for every slice. A slice is not complete until its analysis file records the intended transition, autonomous/STATE.md records the actual transition, MODULE-QUEUE.md records the boundary status, JOURNAL.md records evidence, NEXT-PROMPT.md points at the next executable boundary, and the global/module state-machine files are either updated or explicitly marked not applicable with a reason.
 - No completed slice leaves known broken behavior.
 - Every pushed dev commit is reviewable, reversible, and merge-to-main ready for the completed slice.
 - Old code paths are removed whenever tests/call graph prove they are unused. Retained old paths are quarantined as compat-only with owner, callers, deletion condition, forbidden writes, and tests.
@@ -115,10 +116,21 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - Select exactly one narrow boundary.
    - Read the target module docs under docs/modules/<module>/, including README.md, state-machine.md, tests.md, e2e-spec.md, e2e-coverage.md, and implementation-notes.md when present.
    - Read relevant architecture/dev/operations/product docs.
+   - Read the global refactor workflow state machine at .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md before selecting implementation changes.
+   - Read every relevant module state machine under docs/modules/<module>/state-machine.md before selecting implementation changes.
    - Use CodeGraph first for structural lookup: owners, callers, callees, call path, impact, public/internal surfaces.
    - Use rg for literal text, route paths, test names, env keys, and documentation references.
    - Produce or update an analysis file under .planning/refactors/modular-io-boundaries/analysis/.
    - Fill impact analysis from 05-IMPACT-AND-TEST-GATES.md before editing code.
+   - The analysis file must include a "State machine impact" section before code edits. It must name:
+     - the global workflow state before the slice
+     - the selected boundary status before the slice
+     - the target module state-machine files reviewed
+     - whether global workflow state definitions change
+     - whether module business/UI/read model/worker state definitions change
+     - the success transition
+     - the defer/block transition
+     - the exact files that must be updated at completion
 
 2. Contract and plan
    - Fill or update the module IO contract using 02-MODULE-IO-CONTRACT-TEMPLATE.md.
@@ -258,11 +270,18 @@ Repeat this loop until MODULE-QUEUE.md has no pending/deferred-retry boundary th
    - Confirm old-path removal/quarantine is documented and tested.
    - Confirm shared facts and read model refresh cannot be bypassed.
    - Confirm docs impact is handled.
+   - Confirm state-machine accounting is handled:
+     - analysis/<boundary>.md has the intended and actual state-machine impact.
+     - autonomous/STATE.md, MODULE-QUEUE.md, JOURNAL.md, and NEXT-PROMPT.md agree on current state, boundary status, evidence, and next boundary.
+     - 03-REFACTOR-STATE-MACHINE.md is updated when workflow states/transitions/guards changed, or the analysis explicitly says "global state-machine definition unchanged" with evidence.
+     - Every affected docs/modules/<module>/state-machine.md is updated when module states/transitions changed, or the analysis explicitly says "module state-machine definition unchanged" with evidence.
+   - Do not commit if state-machine accounting is missing, contradictory, or only represented by NEXT-PROMPT.md.
 
 12. State update
    - Updating state is mandatory after every closed, deferred, blocked, or failed boundary. Do not treat NEXT-PROMPT.md alone as the state machine.
    - Update .planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md when the run introduces, renames, or clarifies any workflow state, transition, guard, stop/defer condition, or completion criterion.
    - If the selected boundary changes business state, UI state, read model state, worker state, operation barrier state, force-refresh state, permission state, or legacy-retirement state, update docs/modules/<module>/state-machine.md in the same slice.
+   - If no global or module state-machine definition changes, do not silently skip it; record "definition unchanged" in the analysis file with the reason and reviewed file list.
    - Update the relevant module docs if long-term facts changed.
    - Update .planning/refactors/modular-io-boundaries/analysis/<boundary>.md.
    - Update autonomous/STATE.md.
