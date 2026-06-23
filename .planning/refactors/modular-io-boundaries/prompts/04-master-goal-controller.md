@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:workbench-write-facade-post-port-local-implementation-closure-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:workbench-write-facade-required-port-constructor.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -90,9 +90,8 @@ Current state expected on start:
 - WorkbenchWriteFacade active relation reads, withdraw preview fallback and pair snapshots now go through `WorkbenchWriteRelationReadSnapshotPort`.
 - Core confirm/cancel writes are already command-service gated by existing guards.
 - WorkbenchWriteFacade cash special metadata mutation now goes through `WorkbenchWriteRelationSpecialMetadataMutationPort`.
-- WorkbenchWriteFacade no longer stores broad `_pair_relation_service`.
-- WorkbenchWriteFacade constructor still accepts `pair_relation_service` only for default port construction.
-- The next pending boundary is workbench-relations:workbench-write-facade-required-port-constructor.
+- WorkbenchWriteFacade no longer stores or accepts broad `pair_relation_service`.
+- The next pending boundary is workbench-relations:post-workbench-write-facade-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -188,21 +187,17 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:workbench-write-facade-required-port-constructor unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:post-workbench-write-facade-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:workbench-write-facade-required-port-constructor:
+For workbench-relations:post-workbench-write-facade-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-write-facade-required-port-constructor.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-write-facade-post-port-local-implementation-closure-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-write-facade-cash-special-metadata-port-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_auth_context_idempotency.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `WorkbenchWriteFacade(`, `pair_relation_service=`, `relation_read_snapshot_port=`, `relation_special_metadata_mutation_port=`, and `_pair_relation_service`.
-- Remove `pair_relation_service` from `WorkbenchWriteFacade.__init__`.
-- Require explicit `relation_read_snapshot_port` and `relation_special_metadata_mutation_port`.
-- Keep `WorkbenchWriteRelationReadSnapshotPort` and `WorkbenchWriteRelationSpecialMetadataMutationPort` as the only adapters that hold pair relation service.
-- Update `Application._workbench_write_facade(...)` and `tests/test_workbench_auth_context_idempotency.py::_new_facade(...)`.
-- Strengthen static guard so WorkbenchWriteFacade cannot re-accept `pair_relation_service`.
-- Do not change relation behavior, cash special behavior, dirty scope semantics, read model refresh semantics or API response shape.
-- Do not rewrite the ports into command service native commands in this slice.
+- Use CodeGraph/text search for remaining `workbench_relation` local gaps, especially ETC relation dependencies and any remaining direct pair service dependencies outside explicit ports.
+- Re-audit broader `workbench_relation` local gaps after WorkbenchWriteFacade no longer accepts broad pair service.
+- Decide the next smallest safe boundary before any production-evidence defer or Go admission.
+- Consider ETC focused classification, command service native metadata commands, remaining turnover compat reads, or other documented gaps based on current evidence.
+- Do not change relation behavior, dirty scope semantics, read model refresh semantics or API response shape in this audit slice.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.

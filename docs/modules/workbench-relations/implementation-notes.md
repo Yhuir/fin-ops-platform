@@ -2884,3 +2884,29 @@ git diff --check
 bash scripts/verify.sh docs
 git diff --check
 ```
+
+## 2026-06-24 - WorkbenchWriteFacade required-port constructor
+
+目标：移除 `WorkbenchWriteFacade.__init__` 的 broad `pair_relation_service` 参数，要求调用方显式注入 relation read/snapshot port 和 special metadata mutation port。
+
+变更：
+
+- `WorkbenchWriteFacade.__init__` 不再接收 `pair_relation_service`。
+- `relation_read_snapshot_port` 和 `relation_special_metadata_mutation_port` 变成必填依赖。
+- `Application._workbench_write_facade(...)` 只向 facade 注入两个显式 port，不再把 pair service 传给 facade。
+- `tests/test_workbench_auth_context_idempotency.py::_new_facade(...)` 更新为显式构造两个 port。
+- 静态 guard 已加强，防止 `WorkbenchWriteFacade` 重新接收 broad `pair_relation_service`。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py tests/test_workbench_auth_context_idempotency.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_write_facade_relation_reads_and_cash_special_mutations_use_ports -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:post-workbench-write-facade-local-implementation-closure-audit`。

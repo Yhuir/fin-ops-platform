@@ -3075,7 +3075,6 @@ class Application:
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
         return WorkbenchWriteFacade(
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(
                 self._workbench_pair_relation_service
             ),

@@ -10,7 +10,11 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyInProgress
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
+from fin_ops_platform.services.workbench_write_facade import (
+    WorkbenchWriteFacade,
+    WorkbenchWriteRelationReadSnapshotPort,
+    WorkbenchWriteRelationSpecialMetadataMutationPort,
+)
 
 
 class _RecordingUoW:
@@ -327,7 +331,8 @@ def _new_facade(
 ) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
     return WorkbenchWriteFacade(
-        pair_relation_service=pair_relation_service,
+        relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(pair_relation_service),
+        relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(pair_relation_service),
         exception_service=object(),
         exception_case_service=exception_case_service or object(),
         override_service=object(),

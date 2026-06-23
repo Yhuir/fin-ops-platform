@@ -1187,6 +1187,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("WorkbenchWriteFacade module lacks explicit relation read/snapshot port")
         if "_relation_read_snapshot_port" not in facade_source:
             violations.append("WorkbenchWriteFacade does not store relation read/snapshot port")
+        if "pair_relation_service:" in facade_source or "pair_relation_service=" in factory_source:
+            violations.append("WorkbenchWriteFacade still accepts broad pair_relation_service instead of required ports")
         for forbidden in (
             "_pair_relation_service.active_relations_for_row_ids",
             "_pair_relation_service.get_active_relation_by_row_id",

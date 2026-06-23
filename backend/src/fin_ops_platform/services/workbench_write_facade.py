@@ -186,9 +186,8 @@ class WorkbenchWriteFacade:
     def __init__(
         self,
         *,
-        pair_relation_service: Any,
-        relation_read_snapshot_port: WorkbenchWriteRelationReadSnapshotPort | None = None,
-        relation_special_metadata_mutation_port: WorkbenchWriteRelationSpecialMetadataMutationPort | None = None,
+        relation_read_snapshot_port: WorkbenchWriteRelationReadSnapshotPort,
+        relation_special_metadata_mutation_port: WorkbenchWriteRelationSpecialMetadataMutationPort,
         exception_service: Any,
         exception_case_service: Any,
         override_service: Any,
@@ -237,13 +236,8 @@ class WorkbenchWriteFacade:
         relation_command_service_factory: Callable[..., Any] | None = None,
         reconciliation_decision_store: Any | None = None,
     ) -> None:
-        self._relation_read_snapshot_port = relation_read_snapshot_port or WorkbenchWriteRelationReadSnapshotPort(
-            pair_relation_service
-        )
-        self._relation_special_metadata_mutation_port = (
-            relation_special_metadata_mutation_port
-            or WorkbenchWriteRelationSpecialMetadataMutationPort(pair_relation_service)
-        )
+        self._relation_read_snapshot_port = relation_read_snapshot_port
+        self._relation_special_metadata_mutation_port = relation_special_metadata_mutation_port
         self._exception_service = exception_service
         self._exception_case_service = exception_case_service
         self._override_service = override_service
