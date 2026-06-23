@@ -377,6 +377,9 @@ class BankDetailsService:
                 payloads_by_id.setdefault(transaction_id, payload)
         return list(payloads_by_id.values()) or list(display_payloads)
 
+    def auto_category_input_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        return self._auto_category_input_row(row)
+
     def _auto_category_input_row(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
         direction = self._direction(row)

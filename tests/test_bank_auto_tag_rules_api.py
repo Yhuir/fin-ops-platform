@@ -261,7 +261,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             confirm_calls.append(kwargs)
             return {}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "auto_matched",
             "auto_candidate_category_codes": ["fee"],
             "rule_version": "bank-auto-tag-rules:1",
@@ -293,7 +293,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
 
         for suggestion in (None, {"category_resolution_status": "unmatched"}):
-            app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id, suggestion=suggestion: suggestion
+            app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id, suggestion=suggestion: suggestion
 
             with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
                 response = app._handle_api_bank_detail_category_confirmation(
@@ -316,7 +316,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             confirm_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "needs_confirmation",
             "auto_candidate_category_codes": ["fee", "salary", "fee", ""],
             "rule_version": "bank-auto-tag-rules:3",
@@ -347,7 +347,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             confirm_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "needs_confirmation",
             "auto_candidate_category_codes": ["external_turnover"],
             "rule_version": "bank-auto-tag-rules:7",
@@ -410,7 +410,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             confirm_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "needs_confirmation",
             "auto_candidate_category_codes": ["fee", "salary", "borrow_in_bank_pending_repayment"],
             "rule_version": "bank-auto-tag-rules:3",
@@ -441,7 +441,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             assign_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "unmatched",
         }
         app._bank_transaction_category_service.assign_manual_category = assign_stub
@@ -481,7 +481,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             assign_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "unmatched",
         }
         app._bank_transaction_category_service.assign_manual_category = assign_stub
@@ -509,7 +509,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             assign_calls.append(dict(kwargs))
             return {"ok": True}
 
-        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+        app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
             "category_resolution_status": "needs_confirmation",
             "auto_candidate_category_codes": ["fee", "salary"],
         }

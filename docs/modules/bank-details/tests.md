@@ -28,7 +28,7 @@ Spec-first Browser e2e 审计入口：
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | 银行流水 identity/dedup | P0 | `tests/test_bank_transaction_identity_service.py` | covered | 相同业务字段稳定去重；serial 相同但业务字段不同不能误判。 |
-| 自动标签规则解析和执行 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_service.py` | covered | 关键词、方向、组合条件、regex、priority、外部往来候选、内部往来优先。 |
+| 自动标签规则解析和执行 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_service.py`、`tests/test_bank_detail_auto_category_suggestion_provider.py` | covered | 关键词、方向、组合条件、regex、priority、外部往来候选、内部往来优先；provider 测试固定银行明细 suggestion 输入行 shaping 与 `suggest_for_rows(...)` 调用合同。 |
 | 自动标签规则 API GET/PUT/file replacement/reapply | P0 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_app_settings_service.py`、`tests/test_bank_transaction_category_service.py`、`tests/test_restore_bank_auto_tag_rules_tool.py` | covered | 权限、版本冲突、字段错误、审计、规则重应用、队列不可用 503；`/api/workbench/settings` 不能绕过本入口写 `bank_transaction_tags`；文件恢复必须复用损坏历史 custom code 和 `external_turnover` code；生产恢复工具默认 dry-run，写入必须显式确认并走银行明细 application service。 |
 | 候选确认防伪造 | P0 | `tests/test_bank_auto_tag_rules_api.py` | covered | 非当前候选、非自动规则、单一 auto match、unmatched 行均拒绝。 |
 | 外部往来第三层候选和人工补分类 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-category-flow.spec.ts` | covered | 候选确认和人工补分类均覆盖第三层标签、动作语义和前端选择；Browser 覆盖外部往来三层人工补分类请求体、保存后刷新和清除。 |

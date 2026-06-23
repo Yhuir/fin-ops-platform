@@ -729,7 +729,7 @@ class BankDetailsApplicationService:
         if not isinstance(row, dict):
             row = dict(row or {})
         row["id"] = normalized_transaction_id
-        input_row = self._bank_details_service._auto_category_input_row(row)  # noqa: SLF001
+        input_row = self._bank_details_service.auto_category_input_row(row)
         return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
 
     def _scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:

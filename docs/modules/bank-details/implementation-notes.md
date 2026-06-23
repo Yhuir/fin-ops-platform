@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail suggestion provider port extraction
+
+- 目标：执行 `read-models:bank-detail-suggestion-provider-port-extraction`，把最新自动分类 suggestion callback 从 `Application` 抽到显式 provider。
+- 影响范围：`BankDetailAutoCategorySuggestionProvider`、`BankDetailsService.auto_category_input_row(...)`、`BankDetailsApplicationService` suggestion provider 注入、`server.py` wiring、银行明细 API/guard 测试和 modular IO planning state；不改变分类规则、权限、API response shape、审计、read model freshness、worker 或前端。
+- 关键决策：`Application` 不再定义 `_latest_bank_detail_auto_category_suggestion(...)`；`BankDetailsApplicationService` 仍接收 suggestion provider seam，但默认 provider 由 services 层拥有，并通过 public row-shaping 方法生成 auto-category input。
+- 文档影响：新增 modular IO analysis，更新本实施记录和测试矩阵；银行明细状态机定义不变。
+- 测试覆盖：新增 provider 单测，更新 category confirmation/manual assignment API 测试注入点，并扩展静态 guard 防止旧 app-level callback 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-suggestion-provider-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status 和生产历史数据未在本地验证；refresh/wakeup wrapper、available-month scope helper、derived lifecycle executor 仍是后续本地实现缺口。
+
 ## 2026-06-24 - Bank detail module closure audit
 
 - 目标：执行 `read-models:bank-detail-module-closure-audit-and-production-evidence-defer`，核对银行明细 read model 试点是否能进入模块闭环或只剩生产证据延后。

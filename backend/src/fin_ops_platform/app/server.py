@@ -77,6 +77,7 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
@@ -12665,16 +12666,6 @@ class Application:
         status, result = self._bank_details_routes().clear_category_assignment(transaction_id, session=session)
         return self._json_response(status, result)
 
-    def _latest_bank_detail_auto_category_suggestion(self, transaction_id: str) -> dict[str, object] | None:
-        normalized_transaction_id = str(transaction_id or "").strip()
-        transaction = self._import_service.get_transaction(normalized_transaction_id)
-        row = self._serialize_value(transaction)
-        if not isinstance(row, dict):
-            row = dict(row or {})
-        row["id"] = normalized_transaction_id
-        input_row = self._bank_details_service._auto_category_input_row(row)  # noqa: SLF001
-        return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
-
     def _handle_api_bank_details_transactions_export(
         self,
         query: dict[str, list[str]],
@@ -12941,7 +12932,17 @@ class Application:
         return NoOaBankBatchApiRoutes(self._no_oa_bank_batch_application_service())
 
     def _bank_details_application_service(self) -> BankDetailsApplicationService:
-        suggestion_provider = self.__dict__.get("_latest_bank_detail_auto_category_suggestion")
+        suggestion_provider = self.__dict__.get("_bank_detail_auto_category_suggestion_provider")
+        if suggestion_provider is None:
+            suggestion_provider = BankDetailAutoCategorySuggestionProvider(
+                import_service=self._import_service,
+                bank_details_service=self._bank_details_service,
+                bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
+                serialize_value=self._serialize_value,
+            ).latest
+        elif not callable(suggestion_provider):
+            latest = getattr(suggestion_provider, "latest", None)
+            suggestion_provider = latest if callable(latest) else None
         category_mutation_side_effects = BankDetailCategoryMutationSideEffectPort(
             enqueue_bank_detail_refresh=self._enqueue_bank_detail_read_model_refreshes,
             enqueue_turnover_ledger_refresh=self._enqueue_turnover_ledger_read_model_refreshes,

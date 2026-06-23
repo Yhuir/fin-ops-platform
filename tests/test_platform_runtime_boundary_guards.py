@@ -591,17 +591,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"bank detail refresh wrapper writes job queue tables directly: {direct_job_writes}")
 
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
+        if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
+            violations.append("server.py still owns removed bank detail suggestion provider callback")
         for removed_helper_name in sorted(removed_application_helpers):
             if removed_helper_name in factory_source:
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
         for retained_callback in (
-            "_latest_bank_detail_auto_category_suggestion",
+            "_bank_detail_auto_category_suggestion_provider",
             "_bank_detail_available_month_scope_keys",
             "_enqueue_bank_account_balance_read_model_refresh",
             "_enqueue_turnover_ledger_read_model_refreshes",
         ):
             if retained_callback not in factory_source:
                 violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")
+        if "BankDetailAutoCategorySuggestionProvider(" not in factory_source:
+            violations.append("BankDetailsApplicationService factory does not build the explicit bank detail suggestion provider")
         removed_side_effect_callback = "_after_bank_category_confirmation_mutation"
         if _function_source(server_tree, server_source, removed_side_effect_callback):
             violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")
