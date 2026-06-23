@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:batch-accounting-pair-restore-helper-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:batch-accounting-pair-restore-service-delegation.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -82,8 +82,9 @@ Current state expected on start:
 - WorkbenchPairRelationPersistService now owns non-transactional pair relation persist/schedule/background/timing behavior.
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
-- Local closure audit and batch-accounting pair restore helper audit still found implementation gaps; Go hot-path candidates remain blocked.
-- The next pending boundary is workbench-relations:batch-accounting-pair-restore-service-delegation.
+- Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
+- Local closure needs to be re-audited after batch-accounting restore delegation; Go hot-path candidates remain blocked.
+- The next pending boundary is workbench-relations:post-batch-restore-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -179,24 +180,24 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:batch-accounting-pair-restore-service-delegation unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:post-batch-restore-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:batch-accounting-pair-restore-service-delegation:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-batch-accounting-pair-restore-helper-audit.md`.
+For workbench-relations:post-batch-restore-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-batch-accounting-pair-restore-service-delegation.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-restore-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `docs/modules/batch-accounting/README.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_batch_accounting.py`, `backend/src/fin_ops_platform/services/workbench_pair_relation_rollback_restore_service.py`, `tests/test_batch_accounting_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_restore_batch_accounting_pair_relation_snapshot`, `BatchAccountingApiRoutes`, `WorkbenchPairRelationRollbackRestoreService`, pair relation snapshot/restore wiring and callers/impact.
-- Keep `BatchAccountingApiRoutes` callback wiring intact.
-- Make `Application._restore_batch_accounting_pair_relation_snapshot(...)` delegate to `WorkbenchPairRelationRollbackRestoreService.restore(...)`.
-- Preserve existing batch-accounting behavior: restore in-memory pair relation service and reconfigure exception application service, but do not save rollback snapshot to state store from this route-local callback.
-- Add or extend tests/guards proving the app helper no longer owns direct `WorkbenchPairRelationService.from_snapshot(...)` restore behavior.
-- Do not change batch-accounting submit/withdraw business rules, API payloads, write semantics, dirty scope semantics, read model refresh semantics or production state.
-- Do not add withdraw rollback behavior in this slice.
+- Read relevant downstream module docs for any remaining relation callback candidates identified by the audit.
+- Use CodeGraph/text search for remaining app-owned relation callbacks/helpers and direct `pair_relation_service` wiring in `server.py`, route owners and downstream services.
+- Re-audit remaining local `workbench_relation` gaps after batch-accounting restore delegation.
+- Decide whether the next boundary should be another narrow implementation slice, a production-evidence-defer accounting slice, or a blocked/deferred item.
+- Do not claim module closure unless every local implementation requirement and documented closure criterion is proven.
+- Do not start Go/Fiber/Go Worker admission unless no earlier modular IO/read model implementation-pending or implementation-gap-open boundary remains.
+- Do not implement code changes in this audit slice unless a trivial no-code deletion is proven safe.
+- Do not change business rules, API payloads, write semantics, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
-- Produce an implementation analysis/accounting file.
+- Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests, docs verification and diff checks.
+- Run targeted docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

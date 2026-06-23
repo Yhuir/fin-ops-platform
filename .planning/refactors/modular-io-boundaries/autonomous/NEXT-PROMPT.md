@@ -1,21 +1,20 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `workbench-relations:batch-accounting-pair-restore-helper-audit` slice.
+Continue the autonomous modular IO refactor after the `workbench-relations:batch-accounting-pair-restore-service-delegation` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `workbench-relations:batch-accounting-pair-restore-helper-audit`
-- Last status: `analysis-closed`
+- Last completed boundary: `workbench-relations:batch-accounting-pair-restore-service-delegation`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `workbench_relation` remains `implementation-gap-open`.
-- The audit confirmed `Application._restore_batch_accounting_pair_relation_snapshot(...)` is not removable because `BatchAccountingApiRoutes.submit(...)` depends on it for submit persist-failure rollback.
-- The audit also confirmed the helper should no longer directly call `WorkbenchPairRelationService.from_snapshot(...)`; it should delegate to `WorkbenchPairRelationRollbackRestoreService` in in-memory mode so current no-state-store-save behavior is preserved.
+- Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction and batch-accounting restore service delegation are locally complete.
 - Go hot-path candidates remain blocked by prerequisites.
 
 ## Next Boundary
 
-`workbench-relations:batch-accounting-pair-restore-service-delegation`
+`workbench-relations:post-batch-restore-local-implementation-closure-audit`
 
 ## Required First Steps On Resume
 
@@ -23,55 +22,48 @@ Continue the autonomous modular IO refactor after the `workbench-relations:batch
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Perform planning-state preflight by reading `.planning/ROADMAP.md`, `.planning/refactors/README.md`, the modular IO requirements/state/roadmap/gates/runbook/stop-gates/Go carve-out docs, and all files in `.planning/refactors/modular-io-boundaries/autonomous/`.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-batch-accounting-pair-restore-helper-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-batch-accounting-pair-restore-service-delegation.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-restore-local-implementation-closure-audit.md`
    - `docs/modules/workbench-relations/README.md`
    - `docs/modules/workbench-relations/state-machine.md`
    - `docs/modules/workbench-relations/tests.md`
    - `docs/modules/workbench-relations/implementation-notes.md`
-   - `docs/modules/batch-accounting/README.md`
-   - `docs/modules/batch-accounting/tests.md`
-   - `docs/modules/batch-accounting/implementation-notes.md`
-   - `backend/src/fin_ops_platform/app/server.py`
-   - `backend/src/fin_ops_platform/app/routes_batch_accounting.py`
-   - `backend/src/fin_ops_platform/services/workbench_pair_relation_rollback_restore_service.py`
-   - `tests/test_batch_accounting_api.py`
-   - `tests/test_platform_runtime_boundary_guards.py`
-5. Use CodeGraph/text search for `_restore_batch_accounting_pair_relation_snapshot`, `BatchAccountingApiRoutes`, `WorkbenchPairRelationRollbackRestoreService`, pair relation snapshot/restore wiring and callers/impact.
+   - relevant downstream module docs for any remaining relation callback candidates identified by the audit.
+5. Use CodeGraph/text search for remaining app-owned relation callbacks/helpers and direct `pair_relation_service` wiring in `server.py`, route owners and downstream services.
 6. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Keep `BatchAccountingApiRoutes` callback wiring intact.
-- Make `Application._restore_batch_accounting_pair_relation_snapshot(...)` delegate to `WorkbenchPairRelationRollbackRestoreService.restore(...)`.
-- Preserve existing batch-accounting behavior: restore in-memory pair relation service and reconfigure exception application service, but do not save rollback snapshot to state store from this route-local callback.
-- Add or extend tests/guards proving the app helper no longer owns direct `WorkbenchPairRelationService.from_snapshot(...)` restore behavior.
+- Re-audit remaining local `workbench_relation` gaps after batch-accounting restore delegation.
+- Decide whether the next boundary should be another narrow implementation slice, a production-evidence-defer accounting slice, or a blocked/deferred item.
+- Do not claim module closure unless every local implementation requirement and documented closure criterion is proven.
+- Do not start Go/Fiber/Go Worker admission unless no earlier modular IO/read model implementation-pending or implementation-gap-open boundary remains.
 
-Recommended shape:
+Audit should classify at least:
 
-- Add a small app dependency assembly helper for batch-accounting rollback restore that constructs `WorkbenchPairRelationRollbackRestoreService` with `state_store=None`.
-- Call `.restore(snapshot, changed_case_ids=[])` from `_restore_batch_accounting_pair_relation_snapshot(...)`.
-- Extend `tests/test_platform_runtime_boundary_guards.py` to guard the batch-accounting wrapper and factory.
-- Run the existing submit persist-failure rollback API test if present; add a focused regression only if existing coverage does not prove rollback behavior.
+- WorkbenchWriteFacade relation callback wiring after completed persist/restore service extractions.
+- Turnover primary/legacy fallback relation callbacks.
+- No-OA application/service relation callbacks.
+- Pending invoice relation callbacks.
+- Historical ETC repair/link/migration relation callbacks.
+- Remaining `server.py` relation dependency assembly versus behavior ownership.
 
 Forbidden:
 
-- Do not change batch-accounting submit/withdraw business rules.
-- Do not add withdraw rollback behavior in this slice.
-- Do not change API payloads, write semantics, dirty scope semantics, read model refresh semantics or production state.
-- Do not persist rollback snapshot from this route-local callback unless a separate behavior-changing slice is planned and tested.
+- Do not implement code changes in this audit slice unless a trivial no-code deletion is proven safe.
+- Do not change business rules, API payloads, write semantics, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
 
 ## Expected Output
 
-- Narrow implementation slice.
-- Updated analysis/accounting file for the implementation.
+- Analysis/accounting slice.
 - Updated docs/state/queue/journal/next prompt.
-- Targeted tests, app check if needed, docs verification and `git diff --check`.
+- Targeted docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
 - Continue to the next pending boundary if safe.
 
 ## Stop Condition
 
-Complete one verified `workbench-relations:batch-accounting-pair-restore-service-delegation` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one verified `workbench-relations:post-batch-restore-local-implementation-closure-audit` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

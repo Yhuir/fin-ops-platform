@@ -1309,6 +1309,43 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_batch_accounting_pair_relation_restore_uses_explicit_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        wrapper_source = _function_source(server_tree, server_source, "_restore_batch_accounting_pair_relation_snapshot")
+        factory_source = _function_source(
+            server_tree,
+            server_source,
+            "_batch_accounting_pair_relation_rollback_restore_service",
+        )
+        violations: list[str] = []
+
+        if "_batch_accounting_pair_relation_rollback_restore_service().restore(" not in wrapper_source:
+            violations.append("batch accounting pair relation restore wrapper does not delegate to service.restore")
+        if "changed_case_ids=[]" not in wrapper_source:
+            violations.append("batch accounting rollback restore no longer preserves no changed case id behavior")
+        for forbidden in (
+            "WorkbenchPairRelationService.from_snapshot",
+            "_configure_workbench_exception_application_service()",
+            "save_workbench_pair_relations(",
+        ):
+            if forbidden in wrapper_source:
+                violations.append(f"batch accounting restore wrapper still owns behavior {forbidden}")
+        if "WorkbenchPairRelationRollbackRestoreService(" not in factory_source:
+            violations.append("server.py does not build batch accounting rollback restore service")
+        if "state_store=None" not in factory_source:
+            violations.append("batch accounting rollback restore service must stay in-memory and not persist rollback snapshot")
+        if "replace_pair_relation_service=self._replace_workbench_pair_relation_service" not in factory_source:
+            violations.append("batch accounting rollback restore service does not use shared pair service replacement")
+        if (
+            "configure_exception_application_service=self._configure_workbench_exception_application_service"
+            not in factory_source
+        ):
+            violations.append("batch accounting rollback restore service does not reconfigure exception application service")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_exception_restore_uses_explicit_service_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

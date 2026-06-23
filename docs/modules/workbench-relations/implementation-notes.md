@@ -334,6 +334,30 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - batch accounting pair restore service delegation
+
+目标：把 batch-accounting route-local pair relation rollback restore 从 `server.py` direct restore 行为改为显式 rollback restore service 委托。
+
+变更：
+
+- `_restore_batch_accounting_pair_relation_snapshot(...)` 改为调用 `WorkbenchPairRelationRollbackRestoreService.restore(...)`。
+- 新增 `_batch_accounting_pair_relation_rollback_restore_service(...)` dependency assembly，使用 `state_store=None`，保持当前 batch-accounting rollback 只恢复内存 pair relation service 并重新配置 exception application service，不写 rollback snapshot。
+- 新增静态 guard，防止该 helper 回退到 `WorkbenchPairRelationService.from_snapshot(...)`、直接 reconfigure exception service 或直接保存 pair relation snapshot。
+
+决策：
+
+- 保留 `BatchAccountingApiRoutes` callback wiring 作为 route-local compat-only 边界。
+- 本 slice 不改变 submit/withdraw 业务规则、API shape、dirty scope、read model refresh 或 production state。
+- 本 slice 不给 withdraw 新增 rollback 语义。
+- `workbench_relation` 仍是 `implementation-gap-open`，下一步需要重新做 local implementation closure audit，再决定是否继续抽离 Turnover/No-OA/Pending/ETC 等剩余 relation callback，还是进入 production-evidence defer。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_pair_relation_restore_uses_explicit_service_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_pair_relation_restore_uses_explicit_service_boundary -v
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

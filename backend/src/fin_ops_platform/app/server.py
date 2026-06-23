@@ -13027,8 +13027,17 @@ class Application:
         return routes
 
     def _restore_batch_accounting_pair_relation_snapshot(self, snapshot: dict[str, Any]) -> None:
-        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(snapshot))
-        self._configure_workbench_exception_application_service()
+        self._batch_accounting_pair_relation_rollback_restore_service().restore(
+            snapshot,
+            changed_case_ids=[],
+        )
+
+    def _batch_accounting_pair_relation_rollback_restore_service(self) -> WorkbenchPairRelationRollbackRestoreService:
+        return WorkbenchPairRelationRollbackRestoreService(
+            state_store=None,
+            replace_pair_relation_service=self._replace_workbench_pair_relation_service,
+            configure_exception_application_service=self._configure_workbench_exception_application_service,
+        )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._batch_accounting_routes().list_payload(query)
