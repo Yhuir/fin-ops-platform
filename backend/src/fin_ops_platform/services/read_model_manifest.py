@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class ReadModelManifestEntry:
+    key: str
+    scope_type: str
+    refresh_event_type: str
+    primary_worker_instance: str
+    auxiliary_refresh_worker_instances: tuple[str, ...]
+    query_status_contract: str
+    projection_strategy: str
+    all_scope_semantics: str
+    query_owner: str
+    repository_owner: str
+    permission_owner: str
+    test_owner: str
+
+
+READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
+    "workbench": ReadModelManifestEntry(
+        key="workbench",
+        scope_type="workbench",
+        refresh_event_type="workbench.read_model.refresh",
+        primary_worker_instance="workbench",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="equivalent_active_generation",
+        projection_strategy="active_generation_scoped_publish",
+        all_scope_semantics="active_month_shard_aggregate",
+        query_owner="WorkbenchQueryFacade",
+        repository_owner="PostgresReadModelRepository.workbench",
+        permission_owner="workbench_api_session",
+        test_owner="tests/test_workbench_sql_runtime.py",
+    ),
+    "workbench_relation": ReadModelManifestEntry(
+        key="workbench_relation",
+        scope_type="workbench_relation",
+        refresh_event_type="workbench_relation.read_model.refresh",
+        primary_worker_instance="workbench-relation",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental_distribution",
+        all_scope_semantics="fan_out_command",
+        query_owner="WorkbenchRelationReadFacade",
+        repository_owner="PostgresReadModelRepository.workbench_relation",
+        permission_owner="downstream_page_api_session",
+        test_owner="tests/test_workbench_relation_read_facade.py",
+    ),
+    "bank_detail": ReadModelManifestEntry(
+        key="bank_detail",
+        scope_type="bank_detail",
+        refresh_event_type="bank_detail.read_model.refresh",
+        primary_worker_instance="bank-detail",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="partitioned_scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="BankDetailsApplicationService",
+        repository_owner="PostgresReadModelRepository.bank_detail",
+        permission_owner="bank_details_api_session",
+        test_owner="tests/test_bank_details_sql_runtime.py",
+    ),
+    "bank_account_balance": ReadModelManifestEntry(
+        key="bank_account_balance",
+        scope_type="bank_account_balance",
+        refresh_event_type="bank_account_balance.read_model.refresh",
+        primary_worker_instance="bank-account-balance",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="partitioned_scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="BankDetailsApplicationService",
+        repository_owner="PostgresReadModelRepository.bank_account_balance",
+        permission_owner="bank_details_api_session",
+        test_owner="tests/test_bank_details_sql_runtime.py",
+    ),
+    "pending_invoice": ReadModelManifestEntry(
+        key="pending_invoice",
+        scope_type="pending_invoice",
+        refresh_event_type="pending_invoice.read_model.refresh",
+        primary_worker_instance="pending-invoice",
+        auxiliary_refresh_worker_instances=("search-pending",),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="forbidden_bare_all",
+        query_owner="PendingInvoiceReadModelService",
+        repository_owner="PostgresReadModelRepository.pending_invoice",
+        permission_owner="pending_invoices_api_session",
+        test_owner="tests/test_pending_invoice_service.py",
+    ),
+    "search": ReadModelManifestEntry(
+        key="search",
+        scope_type="search",
+        refresh_event_type="search.read_model.refresh",
+        primary_worker_instance="search",
+        auxiliary_refresh_worker_instances=("search-pending", "search-secondary", "search-tertiary"),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="partitioned_scoped_index",
+        all_scope_semantics="fan_out_command",
+        query_owner="Search read API",
+        repository_owner="PostgresReadModelRepository.search",
+        permission_owner="search_api_session",
+        test_owner="tests/test_search_pending_sql_runtime.py",
+    ),
+    "invoice_lifecycle": ReadModelManifestEntry(
+        key="invoice_lifecycle",
+        scope_type="invoice_lifecycle",
+        refresh_event_type="invoice_lifecycle.read_model.refresh",
+        primary_worker_instance="invoice-lifecycle",
+        auxiliary_refresh_worker_instances=("invoice-lifecycle-secondary",),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="InvoiceLifecycleReadFacade",
+        repository_owner="PostgresReadModelRepository.invoice_lifecycle",
+        permission_owner="invoice_lifecycle_page_api_session",
+        test_owner="tests/test_invoice_lifecycle_read_model_refresh.py",
+    ),
+    "input_invoice_usage": ReadModelManifestEntry(
+        key="input_invoice_usage",
+        scope_type="input_invoice_usage",
+        refresh_event_type="input_invoice_usage.read_model.refresh",
+        primary_worker_instance="invoice-usage-collection",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="InputInvoiceUsageReadModelService",
+        repository_owner="PostgresReadModelRepository.input_invoice_usage",
+        permission_owner="input_invoice_usage_api_session",
+        test_owner="tests/test_input_invoice_usage_api.py",
+    ),
+    "output_invoice_collection": ReadModelManifestEntry(
+        key="output_invoice_collection",
+        scope_type="output_invoice_collection",
+        refresh_event_type="output_invoice_collection.read_model.refresh",
+        primary_worker_instance="invoice-usage-collection",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="OutputInvoiceCollectionService",
+        repository_owner="PostgresReadModelRepository.output_invoice_collection",
+        permission_owner="output_invoice_collection_api_session",
+        test_owner="tests/test_output_invoice_collection_api.py",
+    ),
+    "oa_pending_payment": ReadModelManifestEntry(
+        key="oa_pending_payment",
+        scope_type="oa_pending_payment",
+        refresh_event_type="oa_pending_payment.read_model.refresh",
+        primary_worker_instance="invoice-usage-collection",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="OaPendingPaymentReadModelService",
+        repository_owner="PostgresReadModelRepository.oa_pending_payment",
+        permission_owner="oa_pending_payment_api_session",
+        test_owner="tests/test_oa_pending_payment_api.py",
+    ),
+    "cost_statistics": ReadModelManifestEntry(
+        key="cost_statistics",
+        scope_type="cost_statistics",
+        refresh_event_type="cost_statistics.read_model.refresh",
+        primary_worker_instance="cost-statistics",
+        auxiliary_refresh_worker_instances=("cost-tax",),
+        query_status_contract="read_model_query_gateway",
+        projection_strategy="partitioned_scoped_parent_rollup",
+        all_scope_semantics="queryable_parent_aggregate",
+        query_owner="CostStatisticsQueryService",
+        repository_owner="PostgresReadModelRepository.cost_statistics",
+        permission_owner="cost_statistics_api_session",
+        test_owner="tests/test_cost_statistics_sql_runtime.py",
+    ),
+    "tax_offset": ReadModelManifestEntry(
+        key="tax_offset",
+        scope_type="tax_offset",
+        refresh_event_type="tax_offset.read_model.refresh",
+        primary_worker_instance="tax-offset",
+        auxiliary_refresh_worker_instances=("cost-tax",),
+        query_status_contract="read_model_query_gateway",
+        projection_strategy="partitioned_scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="TaxOffsetQueryService",
+        repository_owner="PostgresReadModelRepository.tax_offset",
+        permission_owner="tax_offset_api_session",
+        test_owner="tests/test_tax_offset_sql_runtime.py",
+    ),
+    "no_oa_bank_batch": ReadModelManifestEntry(
+        key="no_oa_bank_batch",
+        scope_type="no_oa_bank_batch",
+        refresh_event_type="no_oa_bank_batch.read_model.refresh",
+        primary_worker_instance="no-oa-bank-batch",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="self_managed_freshness",
+        projection_strategy="scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="NoOaBankBatchApplicationService",
+        repository_owner="PostgresReadModelRepository.no_oa_bank_batch",
+        permission_owner="no_oa_bank_batch_api_session",
+        test_owner="tests/test_no_oa_bank_batch_application_service.py",
+    ),
+    "turnover_ledger": ReadModelManifestEntry(
+        key="turnover_ledger",
+        scope_type="turnover_ledger",
+        refresh_event_type="turnover_ledger.read_model.refresh",
+        primary_worker_instance="turnover-ledger",
+        auxiliary_refresh_worker_instances=(),
+        query_status_contract="read_model_query_gateway",
+        projection_strategy="partitioned_scoped_incremental",
+        all_scope_semantics="fan_out_command",
+        query_owner="TurnoverLedgerQueryService",
+        repository_owner="PostgresReadModelRepository.turnover_ledger",
+        permission_owner="turnover_ledger_api_session",
+        test_owner="tests/test_turnover_ledger_query_service.py",
+    ),
+}
+
+
+def read_model_manifest_by_scope_type() -> dict[str, ReadModelManifestEntry]:
+    return {entry.scope_type: entry for entry in READ_MODEL_MANIFEST.values()}
+
+
+def read_model_manifest_by_refresh_event_type() -> dict[str, ReadModelManifestEntry]:
+    return {entry.refresh_event_type: entry for entry in READ_MODEL_MANIFEST.values()}

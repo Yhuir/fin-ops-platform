@@ -39,6 +39,9 @@ class ReadModelScopePolicyRegistry:
     def normalize_and_validate(self, scope_type: str, scope_keys: list[str]) -> list[str]:
         return self.policy_for(scope_type).normalize_and_validate(scope_keys)
 
+    def registered_scope_types(self) -> tuple[str, ...]:
+        return tuple(self._policies)
+
 
 def _generic_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     return ReadModelScopePolicy(

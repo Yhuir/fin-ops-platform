@@ -408,6 +408,14 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`。
 - 未测风险：阶段 1 未包含真实生产库清理。
 - 后续事项：已由后续 scope contract 检查/清理入口和架构守卫补齐。
+## 2026-06-23 - Read model manifest parity guard
+
+- 目标：把 14 个 App Status read model 的 key、scope type、refresh event、primary/auxiliary worker、query freshness contract、projection strategy、`all` scope 语义、owner 和 test owner 固化为代码级 manifest，作为后续页面 read model 模块化迁移的共享边界。
+- 改动：新增 `backend/src/fin_ops_platform/services/read_model_manifest.py`；`ReadModelScopePolicyRegistry` 暴露 `registered_scope_types()` 供 parity guard 使用；新增 `tests/test_read_model_manifest.py` 校验 manifest 与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 scope policy registry 一致。
+- 边界：本轮不改变任何 API response shape、read model freshness 判定、refresh enqueue、worker claim、SQL repository 或前端行为；不引入 Go/Fiber/Go Worker；不做生产写入。
+- 测试覆盖：新增 manifest parity 测试覆盖 service-layer/read model/worker registry 合同；既有 `tests/test_read_model_architecture_guards.py` 继续覆盖 `ReadModelQueryGateway.load(...)` expected contract、direct fresh status 分类和 direct source mismatch expected contract。
+- 生产验证：本地无 `PGSQL_URL` 和 staging DB；本轮是静态/单测边界收紧，不需要生产写入。真实 DB/worker drain 不作为本 slice 完成条件。
+
 ## 2026-06-19 - Invoice relation all-scope source version 聚合排除历史空 scope
 
 - 目标：修复 invoice relation 类 read model 默认 all 读取中，历史空月份 scope 的旧 source version 污染当前非空 all 页面 freshness 的问题。本次由生产 `output_invoice_collection` authenticated HTTP gate 暴露。

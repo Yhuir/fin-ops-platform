@@ -1,18 +1,17 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor from the paused state.
+Continue the autonomous modular IO refactor from the current state.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:manifest-and-boundary-inventory`
+- Last completed boundary: `read-models:query-gateway-contract-and-status-parity`
 - Last status: `closed-autonomous`
-- Read model foundation inventory is complete; continue with query/status parity before page-specific slices.
-- Do not continue to another module unless the user asks to resume.
+- A code-level read model manifest now covers the 14 App Status read model keys and is guarded against App Status registry, worker registry, RabbitMQ dispatch, and scope policy drift.
 
 ## Next Boundary
 
-`read-models:query-gateway-contract-and-status-parity`
+`read-models:refresh-gateway-force-refresh-and-operation-barrier`
 
 ## Required First Steps On Resume
 
@@ -25,12 +24,11 @@ Continue the autonomous modular IO refactor from the paused state.
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/architecture/persistence-and-read-models.md`
    - `docs/operations/runtime-worker-governance.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
-4. Use CodeGraph for `ReadModelQueryGateway`, self-managed freshness services, direct `read_model_status=fresh` paths, direct refresh producers, and legacy/live-scan fallbacks.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`.
-6. If implementation starts in that boundary, keep it to manifest/parity guards and query/status contract tests first; do not implement Go/Fiber, Go Worker, production writes, or broad SQL splitting.
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`
+4. Use CodeGraph for `ReadModelRefreshGateway`, `ReadModelScopePolicyRegistry`, `OperationFreshnessBarrierService`, direct refresh producers, transaction dirty/outbox producers, and force-refresh/runbook/API entry points.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md`.
+6. If implementation starts in that boundary, keep it to refresh/barrier contract tests and small registry/manifest wiring first; do not implement Go/Fiber, Go Worker, production writes, or broad SQL splitting.
 
 ## Stop Condition
 
-Complete one narrow verified query/status parity slice, update docs/state, commit and push to `origin/dev`, then continue only if the user has explicitly resumed autonomous execution.
+Complete one narrow verified refresh/force-refresh/operation-barrier slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
