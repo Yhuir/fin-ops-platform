@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail module closure audit
+
+- 目标：执行 `read-models:bank-detail-module-closure-audit-and-production-evidence-defer`，核对银行明细 read model 试点是否能进入模块闭环或只剩生产证据延后。
+- 影响范围：modular IO planning state、银行明细实施记录和下一自动推进边界；不改变银行明细业务规则、API response shape、权限、审计、read model schema、worker 或前端。
+- 关键决策：银行明细不能标记为 `closed`，也不能仅标记为 `production-evidence-deferred`。`server.py` 仍保留 suggestion provider callback、gateway-backed refresh/wakeup wrapper、available-month scope helper、derived lifecycle executor 和 large service factory injection；这些是本地实现缺口，不只是生产证据缺口。
+- 文档影响：新增 modular IO closure audit analysis，并更新 autonomous queue/state/journal/next prompt；银行明细状态机定义不变。
+- 测试覆盖：本轮为分析/状态核对切片，未新增运行时代码测试；后续 suggestion provider port extraction 必须补 service/provider/API/guard 回归。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：真实 PostgreSQL dirty/outbox/readiness、worker drain、App Status、高行数历史数据和生产浏览器 smoke 仍属于生产证据延后；不依赖本地 `PGSQL_URL` 或 staging 数据库推进下一本地实现边界。
+- 后续事项：下一边界为 `read-models:bank-detail-suggestion-provider-port-extraction`，先抽离 `Application._latest_bank_detail_auto_category_suggestion(...)`。
+
 ## 2026-06-24 - Bank detail category side-effect port extraction
 
 - 目标：执行 `read-models:bank-detail-category-side-effect-port-extraction`，删除 `Application._after_bank_category_confirmation_mutation(...)`，将分类写后的银行明细刷新、turnover ledger fan-out、Workbench invalidation 和审计迁移到显式 side-effect port。
