@@ -435,6 +435,9 @@ from fin_ops_platform.services.workbench_exception_rollback_restore_service impo
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_oa_attachment_repair_relation_read_port import (
+    WorkbenchOaAttachmentRepairRelationReadPort,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -3212,6 +3215,11 @@ class Application:
 
     def _workbench_oa_invoice_offset_relation_read_port(self) -> WorkbenchOaInvoiceOffsetRelationReadPort:
         return WorkbenchOaInvoiceOffsetRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
+        )
+
+    def _workbench_oa_attachment_repair_relation_read_port(self) -> WorkbenchOaAttachmentRepairRelationReadPort:
+        return WorkbenchOaAttachmentRepairRelationReadPort(
             self._workbench_relation_command_service(require_fresh_relations=False)
         )
 
@@ -18975,7 +18983,8 @@ class Application:
         changed_scope_keys: set[str] = {"all"}
         timestamp = datetime.now(UTC).isoformat()
         command_service = self._workbench_relation_command_service(require_fresh_relations=False)
-        for relation in self._workbench_pair_relation_service.list_active_relations():
+        relation_read_port = self._workbench_oa_attachment_repair_relation_read_port()
+        for relation in relation_read_port.list_active_relations():
             if self._relation_requires_dedicated_withdraw_action(relation):
                 continue
             row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]

@@ -192,25 +192,25 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-oa-attachment-repair-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:server-confirm-link-context-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-oa-attachment-repair-relation-read-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-oa-invoice-offset-relation-read-port-extraction.md`.
+For workbench-relations:server-confirm-link-context-relation-read-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-oa-attachment-repair-relation-read-port-extraction.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-repair-precondition-relation-read-port-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
 - Inspect `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_repair_active_relations_with_oa_attachment_context`, `list_active_relations`, `replace_existing=True`, and `repair_missing_oa_attachment_context`.
-- Add or reuse an explicit relation read port for OA attachment context repair active relation reads.
-- Move `_repair_active_relations_with_oa_attachment_context(...)` direct `list_active_relations()` call behind that port.
-- Preserve dedicated-withdraw filtering, missing attachment detection, before relation payload, `confirm_relation(..., replace_existing=True)`, changed case ids, changed scope keys, derived lifecycle event metadata and persistence scheduling.
+- Use CodeGraph/text search for `_expand_confirm_link_row_ids_for_existing_context`, `active_relations_for_row_ids`, and `confirm-link`.
+- Add or reuse an explicit relation read port for confirm-link context expansion active relation reads.
+- Move `_expand_confirm_link_row_ids_for_existing_context(...)` direct active relation reads behind that port.
+- Preserve row-id normalization, related context expansion, self-row exclusion, existing relation scope semantics, and confirm-link behavior.
 - Add static guard coverage for this method.
-- Do not change `_expand_confirm_link_row_ids_for_existing_context(...)` or `_auto_pair_conflicts_with_manual_relation(...)`.
+- Do not change `_auto_pair_conflicts_with_manual_relation(...)`.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run focused repair regression/static guard tests, app check, docs verification and diff checks as applicable.
+- Run focused confirm-link/static guard tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

@@ -1429,6 +1429,29 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_oa_attachment_repair_uses_relation_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_repair_active_relations_with_oa_attachment_context")
+        port_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_relation_read_port.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchOaAttachmentRepairRelationReadPort" not in port_source:
+            violations.append("Workbench OA attachment repair relation read port is missing")
+        if "def list_active_relations" not in port_source:
+            violations.append("WorkbenchOaAttachmentRepairRelationReadPort does not expose list_active_relations")
+        if "_workbench_pair_relation_service.list_active_relations" in method_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context still reads broad pair service directly")
+        if "_workbench_oa_attachment_repair_relation_read_port()" not in method_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context does not use OA attachment repair relation read port")
+        if "replace_existing=True" not in method_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context no longer preserves replace-existing repair")
+        if "before_relations=[before_relation]" not in method_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context no longer preserves before relation payload")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
