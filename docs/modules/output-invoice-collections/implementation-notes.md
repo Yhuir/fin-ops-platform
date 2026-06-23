@@ -12,15 +12,15 @@
 - PostgreSQL 写路径必须使用 transaction-bound queue writer 或等价 gateway，把事实写入和 `output_invoice_collection` dirty/outbox 收敛在同一边界。
 - 手动状态、提醒、红蓝票关系和正式收据写入成功后，页面必须先等待当前可见 scope 的 `output_invoice_collection` operation barrier fresh，再刷新 rows；barrier blocked/timeout 时不得提前读取旧投影。
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
-- OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；多项时 UI 使用 `+N`，其中 `N` 为该栏对象总数。多项模式下该栏只显示 `+N` 入口，不重复展示已包含在列表中的 primary 明细。
+- OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
 
 ## 2026-06-23 - 统一关系 OA/流水/发票项 +N 展示
 
-- 目标：让销项发票收款情况页面按统一关系事实源展示 OA、收入流水和销项发票项，多项对象在各自栏以 `+N` 展开全部明细，并避免 primary 明细重复呈现。
+- 目标：让销项发票收款情况页面按统一关系事实源展示 OA、收入流水和销项发票项，多项对象在各自栏以额外项 `+N` 展开全部明细；销项发票多项时主表仍显示发票合计，不能只显示 `+N`。
 - 影响范围：`OutputInvoiceCollectionQueryService`、output SQL projection/read model schema gate、`OutputInvoiceCollectionsTable`、前端 API mapper/type、模块 API contract 和测试矩阵；不改变收款状态人工写入、红蓝票 lifecycle 或正式收据写接口。
 - 关键决策：output query service 注入现有 OA projection，复用 `DistributedInvoiceRelationContext` 批量读取 `workbench_relation` typed rows；rows 新增 `oa` 和 `invoiceRelations` relation summary，`row_relation_details` 支持 `kind=oa|bank|invoice`。`OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION` 提升到 v3，旧 SQL payload 缺 `oa/invoiceRelations` 时返回 refreshing 并入队刷新。
 - 文档影响：同步 `README.md`、`state-machine.md`、`tests.md` 和 `docs/dev/api-contracts.md`；未新增独立产品口径。
-- 测试覆盖：新增 service 测试覆盖多 OA/流水/销项发票 summaries 和详情 kind；新增 SQL runtime 测试覆盖 OA native columns 与 schema stale；新增 Vitest 覆盖三类 `+N` 入口和不重复 primary 展示。
+- 测试覆盖：新增 service 测试覆盖多 OA/流水/销项发票 summaries 和详情 kind；新增 SQL runtime 测试覆盖 OA native columns 与 schema stale；新增 Vitest 覆盖销项发票多项合计、额外项 `+N` 入口和详情 3 张发票 summaries。
 - 验证命令：`python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run`。
 - 未测风险：真实浏览器超宽表格视觉、真实大数据 relation group、worker drain 和跨行 relation group 聚合仍需 staging/专项 smoke。
 

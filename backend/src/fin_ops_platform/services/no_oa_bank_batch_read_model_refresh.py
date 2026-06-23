@@ -63,7 +63,7 @@ class NoOaBankBatchReadModelRefreshService:
             apply_relation_repairs=False,
             scope_key=scope_key,
         )
-        snapshot = self._no_oa_bank_batch_service.snapshot()
+        snapshot = self._no_oa_bank_batch_service.public_snapshot()
         self._state_store.save_no_oa_bank_batches(snapshot)
         self._complete_dirty_scope(event, scope_key=scope_key)
         batches = snapshot.get("batches") if isinstance(snapshot, dict) else {}

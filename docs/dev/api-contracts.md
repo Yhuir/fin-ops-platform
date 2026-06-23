@@ -889,7 +889,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `GET /api/output-invoice-collections/filter-options`：基于同一行集生成筛选项。
 - `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
 - `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
-- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须来自 `workbench_relation` 统一分发事实源；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+N` 展开全部明细，且同一栏不得再单独展示已包含在 `+N` 中的 primary 对象。
+- `GET /api/output-invoice-collections/rows/{row_id}/relation-details?kind=oa|bank|invoice|red_invoice|receipt`：返回当前 row 对应关系摘要。`kind=oa|bank|invoice` 必须来自 `workbench_relation` 统一分发事实源；`summaries` 展示该 relation 下全部 OA、收入流水或销项发票项，`relationCount` 为该类对象总数。前端在 `detailMode=list` 且 `relationCount>1` 时以 `+(relationCount-1)` 展开全部明细；销项发票栏必须同时展示当前行发票主信息和 `invoiceRelations.totalWithTax` 多张发票合计，不能只显示展开入口。
 
 rows 中统一关系字段要求：
 

@@ -270,6 +270,7 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
   const rawStatusBucket = text(batch.status_bucket ?? batch.statusBucket);
   const rawCanWithdraw = Boolean(batch.can_withdraw ?? batch.canWithdraw);
   const lifecycle = normalizeBatchLifecycle(rawStatus, rawStatusBucket, rawCanWithdraw);
+  const legacyDraft = rawStatus === "unsubmitted" && lifecycle.status === "draft" && lifecycle.statusBucket === "unsubmitted";
   const mapped: NoOaBankBatch = {
     batchId: text(batch.batch_id ?? batch.batchId),
     batchType: text(batch.batch_type ?? batch.batchType),
@@ -290,7 +291,7 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     blockedReason: lifecycle.relationBackedStale ? "" : text(batch.blocked_reason ?? batch.blockedReason),
     tagCounts: countMap(batch.tag_counts ?? batch.tagCounts),
     directionCounts: countMap(batch.direction_counts ?? batch.directionCounts),
-    canSubmit: lifecycle.relationBackedStale ? false : Boolean(batch.can_submit ?? batch.canSubmit),
+    canSubmit: lifecycle.relationBackedStale ? false : legacyDraft ? true : Boolean(batch.can_submit ?? batch.canSubmit),
     canWithdraw: lifecycle.relationBackedStale || rawCanWithdraw,
     version: nullableNumberValue(batch.version),
   };
@@ -307,6 +308,10 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     mapped.categoryLabelPath = labelPath;
   }
   return mapped;
+}
+
+function isPublicBatch(batch: NoOaBankBatch) {
+  return batch.status === "draft" || batch.status === "submitted" || batch.status === "withdrawn";
 }
 
 function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary {
@@ -457,7 +462,7 @@ export async function fetchNoOaBankBatches({
   );
   return {
     summary: mapSummary(payload.summary),
-    batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch) : [],
+    batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch).filter(isPublicBatch) : [],
     pagination: mapPagination(payload.pagination),
     readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
     readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),

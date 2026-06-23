@@ -127,31 +127,35 @@ class NoOaBankBatchApplicationService:
                 }
             if summary_read_model_batches is not None and read_model_batches is not None:
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
+                summary_public_batches = self._public_batches(summary_read_model_batches)
+                read_model_public_batches = self._public_batches(read_model_batches)
                 if stale_reasons:
                     refresh_reason = "api_no_oa_source_versions_stale"
                     refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
                     return {
-                        "summary": self.summary(summary_read_model_batches),
-                        "batches": self.resolve_labels(self._page_items(read_model_batches, pagination)),
-                        **self._pagination_payload(read_model_batches, pagination),
+                        "summary": self.summary(summary_public_batches),
+                        "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
+                        **self._pagination_payload(read_model_public_batches, pagination),
                         "read_model_status": "stale",
                         "read_model_stale_reasons": stale_reasons,
                         "refresh_enqueued": refresh_enqueued,
                         "refresh_reason": refresh_reason,
                     }
                 return {
-                    "summary": self.summary(summary_read_model_batches),
-                    "batches": self.resolve_labels(self._page_items(read_model_batches, pagination)),
-                    **self._pagination_payload(read_model_batches, pagination),
+                    "summary": self.summary(summary_public_batches),
+                    "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
+                    **self._pagination_payload(read_model_public_batches, pagination),
                     "read_model_status": "fresh",
                 }
         summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
         read_batches = self._no_oa_bank_batch_service.list_batches(filters)
         if summary_batches or read_batches:
+            summary_public_batches = self._public_batches(summary_batches)
+            read_public_batches = self._public_batches(read_batches)
             return {
-                "summary": self.summary(summary_batches),
-                "batches": self.resolve_labels(self._page_items(read_batches, pagination)),
-                **self._pagination_payload(read_batches, pagination),
+                "summary": self.summary(summary_public_batches),
+                "batches": self.resolve_labels(self._page_items(read_public_batches, pagination)),
+                **self._pagination_payload(read_public_batches, pagination),
                 "read_model_status": "fresh",
             }
         refresh_reason = "api_no_oa_read_model_unavailable"
@@ -181,23 +185,31 @@ class NoOaBankBatchApplicationService:
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
         batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+        public_batch = self._public_batch(batch)
+        if public_batch is None:
+            raise KeyError("no_oa_bank_batch_not_found")
         row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
         bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
         relation_rows_by_id = self._workbench_relation_rows_by_id(row_ids)
+        detail_rows = self._apply_submitted_row_tag_snapshot(
+            public_batch,
+            self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
+        )
         return {
-            "batch": self.resolve_labels([batch])[0],
+            "batch": self.resolve_labels([public_batch])[0],
             "rows": self._apply_relation_status_to_detail_rows(
-                self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
+                detail_rows,
                 relation_rows_by_id,
             ),
             "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
             "direction_counts": batch.get("direction_counts") if isinstance(batch.get("direction_counts"), dict) else {},
-            "categories_by_transaction_id": {
-                row_id: categories_by_transaction_id.get(row_id, {})
-                for row_id in row_ids
-            },
+            "categories_by_transaction_id": self._detail_categories_by_transaction_id(
+                row_ids,
+                categories_by_transaction_id,
+                public_batch,
+            ),
             "workbench_relation_source_versions": self._workbench_relation_source_versions(),
         }
 
@@ -628,12 +640,13 @@ class NoOaBankBatchApplicationService:
         return [str(code) for code in list(payload.get("selected_tag_codes") or []) if str(code).strip()]
 
     def summary(self, batches: list[dict[str, object]]) -> dict[str, object]:
+        public_batches = self._public_batches(batches)
         counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
         selected_or_existing_codes = [
             *self.selected_tag_codes(),
             *[
                 str(batch.get("batch_type") or "").strip()
-                for batch in batches
+                for batch in public_batches
                 if isinstance(batch, dict) and str(batch.get("batch_type") or "").strip()
             ],
         ]
@@ -664,8 +677,7 @@ class NoOaBankBatchApplicationService:
                 "total_amount": Decimal("0.00"),
             }
         total_amount = Decimal("0.00")
-        for batch in batches:
-            presented_batch = self._presentation_batch(batch if isinstance(batch, dict) else {})
+        for presented_batch in public_batches:
             status = str(presented_batch.get("status") or "").strip()
             if status in counts:
                 counts[status] += 1
@@ -686,7 +698,7 @@ class NoOaBankBatchApplicationService:
             category["total_amount"] = f"{category['total_amount']:.2f}"
             categories.append(category)
         return {
-            "total": len(batches),
+            "total": len(public_batches),
             **counts,
             "draft_count": counts["draft"],
             "submitted_count": counts["submitted"],
@@ -696,6 +708,19 @@ class NoOaBankBatchApplicationService:
             "total_amount": f"{total_amount:.2f}",
             "categories": categories,
         }
+
+    @classmethod
+    def _public_batches(cls, batches: list[dict[str, object]] | object) -> list[dict[str, object]]:
+        if not isinstance(batches, list):
+            return []
+        public_batches: list[dict[str, object]] = []
+        for batch in batches:
+            if not isinstance(batch, dict):
+                continue
+            public_batch = cls._public_batch(batch)
+            if public_batch is not None:
+                public_batches.append(public_batch)
+        return public_batches
 
     def resolve_labels(self, batches: list[dict[str, object]]) -> list[dict[str, object]]:
         resolved: list[dict[str, object]] = []
@@ -722,6 +747,14 @@ class NoOaBankBatchApplicationService:
             resolved.append(next_batch)
         return resolved
 
+    @classmethod
+    def _public_batch(cls, batch: dict[str, object]) -> dict[str, object] | None:
+        next_batch = cls._presentation_batch(batch)
+        status = str(next_batch.get("status") or "").strip()
+        if status not in {"draft", "submitted", "withdrawn"}:
+            return None
+        return next_batch
+
     @staticmethod
     def _presentation_batch(batch: dict[str, object]) -> dict[str, object]:
         next_batch = dict(batch)
@@ -729,6 +762,13 @@ class NoOaBankBatchApplicationService:
         status_bucket = str(next_batch.get("status_bucket") or next_batch.get("statusBucket") or "").strip()
         raw_can_withdraw = next_batch.get("can_withdraw", next_batch.get("canWithdraw"))
         can_withdraw = raw_can_withdraw is True or str(raw_can_withdraw).strip().lower() == "true"
+        if status == "unsubmitted" and status_bucket == "unsubmitted":
+            next_batch["status"] = "draft"
+            next_batch["status_bucket"] = "unsubmitted"
+            next_batch["can_submit"] = True
+            next_batch["can_withdraw"] = False
+            next_batch["blocked_reason"] = ""
+            return next_batch
         if status == "stale" and (status_bucket == "submitted" or can_withdraw):
             next_batch["relation_backed_status"] = "stale"
             next_batch["status"] = "submitted"
@@ -950,7 +990,7 @@ class NoOaBankBatchApplicationService:
                     pair_relation_snapshot=self._pair_relation_service.snapshot_case_ids(changed_case_ids)
                     if changed_case_ids
                     else self._pair_relation_service.snapshot(),
-                    no_oa_bank_batch_snapshot=self._no_oa_bank_batch_service.snapshot(),
+                    no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
                     workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                     changed_case_ids=changed_case_ids,
                     changed_scope_keys=changed_scope_keys,
@@ -961,13 +1001,22 @@ class NoOaBankBatchApplicationService:
                         self._pair_relation_service.snapshot_case_ids(changed_case_ids),
                         changed_case_ids=changed_case_ids,
                     )
-                self._state_store.save_no_oa_bank_batches(self._no_oa_bank_batch_service.snapshot())
+                self._state_store.save_no_oa_bank_batches(self._no_oa_public_snapshot())
                 self._state_store.save_workbench_read_models(
                     self._workbench_read_model_service.snapshot(),
                     changed_scope_keys=changed_scope_keys,
                 )
         except Exception as exc:
             raise NoOaBankBatchPersistenceError(str(exc)) from exc
+
+    def _no_oa_public_snapshot(self) -> dict[str, object]:
+        public_snapshot = getattr(self._no_oa_bank_batch_service, "public_snapshot", None)
+        if callable(public_snapshot):
+            return public_snapshot()
+        snapshot = getattr(self._no_oa_bank_batch_service, "snapshot", None)
+        if callable(snapshot):
+            return snapshot()
+        return {"batches": {}}
 
     def _mutation_result(self, batch: dict[str, object], *, status: str, persist: bool) -> dict[str, object]:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
@@ -1211,6 +1260,83 @@ class NoOaBankBatchApplicationService:
             row.setdefault("category_source", "")
             rows.append(row)
         return rows
+
+    @classmethod
+    def _apply_submitted_row_tag_snapshot(
+        cls,
+        batch: dict[str, object],
+        rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        if not cls._uses_frozen_row_tags(batch):
+            return rows
+        snapshot = batch.get("row_tag_snapshot")
+        if not isinstance(snapshot, dict):
+            return rows
+        result: list[dict[str, object]] = []
+        for row in rows:
+            row_id = str(row.get("id") or row.get("transaction_id") or "").strip()
+            frozen = snapshot.get(row_id)
+            if isinstance(frozen, dict):
+                result.append(cls._apply_row_tag_payload(row, frozen))
+            else:
+                result.append(row)
+        return result
+
+    @classmethod
+    def _detail_categories_by_transaction_id(
+        cls,
+        row_ids: list[str],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+        batch: dict[str, object],
+    ) -> dict[str, dict[str, object]]:
+        result = {
+            row_id: dict(categories_by_transaction_id.get(row_id, {}))
+            for row_id in row_ids
+        }
+        if not cls._uses_frozen_row_tags(batch):
+            return result
+        snapshot = batch.get("row_tag_snapshot")
+        if not isinstance(snapshot, dict):
+            return result
+        for row_id in row_ids:
+            frozen = snapshot.get(row_id)
+            if isinstance(frozen, dict):
+                result[row_id] = cls._category_from_row_tag_payload(frozen)
+        return result
+
+    @staticmethod
+    def _uses_frozen_row_tags(batch: dict[str, object]) -> bool:
+        return str(batch.get("status") or "").strip() in {"submitted", "withdrawn"}
+
+    @classmethod
+    def _apply_row_tag_payload(
+        cls,
+        row: dict[str, object],
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        next_row = dict(row)
+        category = cls._category_from_row_tag_payload(payload)
+        next_row["category_code"] = category.get("category_code", "")
+        next_row["category_label"] = category.get("category_label", "")
+        next_row["category_primary_label"] = category.get("category_primary_label", "")
+        next_row["category_sub_label"] = category.get("category_sub_label", "")
+        next_row["category_label_path"] = list(category.get("category_label_path") or [])
+        next_row["category_source"] = category.get("category_source", "")
+        return next_row
+
+    @staticmethod
+    def _category_from_row_tag_payload(payload: dict[str, object]) -> dict[str, object]:
+        label_path = payload.get("category_label_path")
+        return {
+            "transaction_id": str(payload.get("transaction_id") or ""),
+            "category_code": str(payload.get("category_code") or ""),
+            "category_label": str(payload.get("category_label") or ""),
+            "category_primary_label": str(payload.get("category_primary_label") or ""),
+            "category_sub_label": str(payload.get("category_sub_label") or ""),
+            "category_label_path": [str(item) for item in list(label_path or []) if str(item).strip()] if isinstance(label_path, list) else [],
+            "category_source": str(payload.get("category_source") or ""),
+            "source": str(payload.get("category_source") or ""),
+        }
 
     @staticmethod
     def _serialize_value(value: object) -> object:

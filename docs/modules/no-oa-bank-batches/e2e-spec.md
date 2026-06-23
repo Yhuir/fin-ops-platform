@@ -20,6 +20,7 @@
 | `NO-OA-E2E-001` | 页面 ready、fresh list 和 bucket summary | P0 | 进入 `/no-oa-bank-batches` 后页面显示免 OA 标题、未提交/已提交/历史 bucket、分类 summary 和银行流水表；首屏请求必须有界，不把 missing/stale read model 伪装成最终空结果。 |
 | `NO-OA-E2E-002` | 标签准入保存 freshness closure | P0 | 用户在标签管理中修改 selected tag codes 后，页面必须 `PUT /api/no-oa-bank-batches/tag-selection`，带 `expected_version` 和 `selected_tag_codes`，等待 `no_oa_bank_batch:all` operation barrier fresh，再重读列表并显示成功反馈。 |
 | `NO-OA-E2E-003` | selected-row submit freshness closure | P0 | 用户选择同账户、同月份、同分类的未提交流水后提交；请求体只包含当前选择的 `transaction_ids`，成功后等待 no-OA barrier fresh，再显示已提交结果，不允许重复提交或半写。 |
+| `NO-OA-E2E-003A` | 普通可提交类型的右侧 checkbox | P0 | `fee/salary/holiday_bonus/bonus/tax_payment/treasury_tax_collection/social_security` 等普通 draft 批次必须在右侧流水表显示行级 checkbox；checkbox 可勾选、可取消；`internal_transfer` draft 走整批提交按钮；`submitted/withdrawn` 不走未提交入口；`conflict/stale/superseded` 不得出现在主列表。 |
 | `NO-OA-E2E-004` | 成本统计 downstream fan-out | P0 | no-OA 提交后进入成本统计，成本统计必须通过自己的 fresh read model 展示免 OA 成本项目、费用类型、金额和银行流水证据。 |
 | `NO-OA-E2E-005` | withdraw 和 history 只读 | P0 | 已提交 bucket 可撤回；撤回 dialog 必须要求原因并提交 `expected_version`；撤回成功后历史 bucket 展示已撤回批次，且不再显示提交/撤回写入口。 |
 | `NO-OA-E2E-006` | 权限 gate | P0 | `read_export_only` 用户可查看 no-OA 页面和标签范围，但不能看到/触发提交、撤回或保存标签准入；权限矩阵不得产生 durable mutation API。 |

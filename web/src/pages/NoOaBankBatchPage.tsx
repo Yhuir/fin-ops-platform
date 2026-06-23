@@ -77,8 +77,6 @@ const STATUS_META: Record<NoOaBankBatchStatus | "unsubmitted", BatchStatusMeta> 
   unsubmitted: { label: "待提交", color: "warning" },
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
-  conflict: { label: "冲突", color: "error" },
-  stale: { label: "待提交", color: "warning" },
 };
 
 function currentMonth() {
@@ -176,6 +174,10 @@ function bankTagLabel(row: { bankName?: string; accountLast4?: string; accountKe
 
 function directionTagLabel(row: { direction?: string; directionLabel?: string }) {
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
+}
+
+function batchBlockingReason(_batch: NoOaBankBatch) {
+  return "";
 }
 
 function BatchStatusTag({ status }: { status: string }) {
@@ -933,7 +935,7 @@ export default function NoOaBankBatchPage() {
     return Array.from(groups.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
   }, [tagSelection.activeTags]);
 
-  const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
+  const unsubmittedCount = payload.summary.draftCount;
   const resetListScope = useCallback(() => {
     clearSelection();
     manualLabelSelectionRef.current = false;
@@ -1113,9 +1115,7 @@ export default function NoOaBankBatchPage() {
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
-              const blockingReason = batch.status === "conflict"
-                ? (batch.blockedReason || batch.conflictReason)
-                : "";
+              const blockingReason = batchBlockingReason(batch);
               return (
                 <section
                   className={cx(
@@ -1192,7 +1192,7 @@ export default function NoOaBankBatchPage() {
                       <div
                         className={cx(
                           "no-oa-bank-batches-notice",
-                          batch.status === "conflict" ? "no-oa-bank-batches-notice--error" : "no-oa-bank-batches-notice--warning",
+                          "no-oa-bank-batches-notice--warning",
                         )}
                         role="alert"
                       >

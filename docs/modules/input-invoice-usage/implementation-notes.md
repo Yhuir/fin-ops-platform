@@ -15,6 +15,7 @@
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
 - 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
+- 月份 shard 构建时，当前 workbench relation scope 的 unlinked/empty row 不能阻止按发票 row id 定向补查跨月 linked group；补查用于展示 OA/银行流水/发票摘要，但 read model 的 `workbench_relation_source_versions` 仍按当前 shard scope 保存。
 - 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，页面必须先等待当前 scope 的 `input_invoice_usage` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只提示后台同步未完成，不能提前读旧投影。
 - `以发票反提 OA` 的草稿提交确认弹窗可以由用户取消；取消、父页面重渲染和 preview reload 都不能清空当前草稿 batch，状态为 `oa_draft_created` 的 batch 必须出现在 `暂存` 页签。暂存列表不展示 OA 草稿链接，只展示两项处理动作。
 - OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA candidate 也不是可创建候选，展示 `候选oa` chip、禁用勾选。drawer 支持 `全部/已经关联oa/候选oa/未关联oa` 表头筛选。
@@ -36,6 +37,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-23 - 跨月配对 relation 显示修复
+
+- 目标：修复 75,799 元进项发票在 Workbench 已与 OA/银行流水配对，但进项发票使用情况 OA、流水、发票配对列为空的问题。
+- 影响范围：`DistributedInvoiceRelationContext` 的 relation 预加载策略；`InvoiceUsageCollectionSqlProjectionBuilder` 保存 relation source versions 的 scope 选择；进项使用服务和 SQL projection 测试；模块状态机和测试矩阵。
+- 关键决策：保持“不是全量拉取全部 relation”的边界；先读当前月份 relation scope，再对当前请求发票 row id 中 empty/unlinked 的部分做一次定向 fallback。fallback 只用于补齐该发票相关 linked group，不能替代 read model freshness gate。
+- 文档影响：更新 `state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增 service 回归测试覆盖当月 unlinked row 不遮蔽跨月 linked group；新增 SQL projection 回归测试覆盖跨月 fallback 后当前 shard source versions 不被 fallback scope 覆盖。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_service.InputInvoiceUsageQueryServiceTests.test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback -v`。
+- 未测风险：尚未在真实生产数据上重建 `input_invoice_usage:2026-05` 后截图复核 75,799 行；本地验证使用 synthetic relation distribution。
+- 后续事项：发布后刷新对应 scope，并只读检查 `/api/input-invoice-usage/rows?keyword=良固阀门集团` 中 75,799 行是否带 OA/流水 summaries。
 
 ## 2026-06-22 - 写后等待 input_invoice_usage operation barrier
 

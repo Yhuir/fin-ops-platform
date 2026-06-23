@@ -13,12 +13,88 @@
 - no-OA read model 支持 `all` 和月份 scope；月份 refresh 只读目标月银行流水，只替换目标月批次，合并保留其它月份 snapshot。
 - Bankdetail/effective category 依赖未 fresh 时属于依赖等待，应保持 no-OA readiness 为 `refreshing` 并由 runtime worker defer/retry，不能记录为 `failed` blocker。
 - Workbench confirm-link 的 internal transfer 特例必须最终写 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`，不得绕过批次写普通 `manual_confirmed`。
-- no-OA legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。
+- no-OA legacy migration、submitted repair 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。银行明细标签变化不得触发 submitted batch 的 category drift cleanup。
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
 - `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 - relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
+- `status=stale,status_bucket=unsubmitted` 表示旧 submitted batch 的源流水或分类漂移后已失去 active no-OA relation，不属于可提交 draft；该状态现在属于内部兼容/诊断状态，不得进入主列表、summary 或分页 total。生产历史行需通过公开 snapshot 或 `repair_no_oa_bank_batch_lifecycle` 清理。
+- submitted/withdrawn 批次的行级标签是提交事实的一部分。提交时必须冻结 `row_tag_snapshot`，并写入 no-OA batch snapshot 与 Workbench relation `special_metadata`；详情接口对 submitted/withdrawn 优先用冻结标签，银行明细后续标签变化只影响 draft 候选。
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
+
+## 2026-06-23 - 提交后批次行级标签冻结
+
+- 目标：已提交免 OA 批次作为业务事实，不随银行明细后续标签调整而改变批次内流水标签；当前标签变化只驱动新的未提交候选。
+- 根因：`NoOaBankBatchApplicationService.detail_payload(...)` 每次打开详情都会重新读取当前 effective category，再写入 detail rows 和 `categories_by_transaction_id`。这让 submitted batch 的状态和批次标签保持已提交，但明细行标签可能随银行明细当前标签漂移。
+- 架构决策：
+  - `NoOaBankBatchService` 在 draft 生成/提交链路保存 `row_tag_snapshot`，字段随 batch snapshot 持久化。
+  - `relation_command_payload_for_batch(...)` 的 `special_metadata` 携带同一份 `row_tag_snapshot`，relation-backed projection 可从 relation metadata 恢复提交时标签。
+  - submitted/withdrawn detail rows 与 `categories_by_transaction_id` 使用冻结 snapshot；draft detail 继续使用当前银行明细 effective category。
+  - 历史 batch/relation 缺少 `row_tag_snapshot` 时，按 batch type/label 生成保守快照，避免用当前银行标签覆盖历史事实。
+- 测试覆盖：
+  - `tests/test_no_oa_bank_batch_service.py::NoOaBankBatchServiceTests::test_submitted_batch_snapshot_freezes_row_tags`
+  - `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_submit_batch_delegates_relation_write_to_command_service`
+  - `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_submitted_batch_detail_keeps_submitted_row_tags_after_bank_category_changes`
+- 七类测试覆盖：
+  - Business core unit tests：适用，覆盖 batch snapshot 保存提交时行级标签。
+  - Service-layer tests：适用，覆盖 relation metadata 与 detail payload 的冻结标签投影。
+  - API contract tests：适用，detail rows 和 `categories_by_transaction_id` 继续保持原字段 shape，但 submitted/withdrawn 语义改为提交时标签。
+  - Read model/cache/background job tests：本轮未改 refresh gateway/worker contract；冻结字段随 public snapshot/raw payload 持久化。
+  - Frontend component and interaction tests：本轮未改前端渲染字段，前端继续消费 detail row 的同名标签字段。
+  - End-to-end business-flow integration tests：本轮未新增浏览器链路；风险由 service/API 级语义测试覆盖。
+  - Existing feature regression tests：适用，现有 no-OA service/application tests 继续覆盖 public lifecycle、relation-backed stale、submit/withdraw。
+- 未测风险：生产历史提交批次若完全没有 `row_tag_snapshot`，只能按 batch type/label 做保守回填，无法还原当时更细的标签路径。
+
+## 2026-06-23 - 公开状态收敛与生产数据修复入口
+
+- 目标：按产品目标把免 OA 批量处理公开生命周期收敛为 `draft/submitted/withdrawn`，保证未提交区域出现的批次都能提交；旧 `conflict/stale/superseded` 不再污染主列表、summary、pagination 或持久化 read model。
+- 根因：后端 service 会生成内部 `conflict/stale/superseded` 兼容状态，旧 application/API/前端又把 `conflict/stale` 算入未提交 summary。结果是用户看到“未提交”数量和批次，但这些批次不可提交、没有 checkbox。
+- 影响范围：`NoOaBankBatchService.public_snapshot()`、`NoOaBankBatchApplicationService` 公开投影和持久化、`NoOaBankBatchReadModelRefreshService` worker 保存、前端 API mapper/types/page、生产 repair CLI、no-OA module docs/tests/e2e docs。
+- 架构决策：
+  - 公开 API/list/detail/summary/pagination 只返回 `draft/submitted/withdrawn`；`read_model_status=stale` 保留为读模型新鲜度状态，不是批次业务状态。
+  - `status=unsubmitted,status_bucket=unsubmitted` 在后端公开投影、前端 mapper 和 repair 中归一为 `draft`，并设置为可提交，保护历史 read model。
+  - relation-backed stale 通过 active no-OA relation 或 submitted bucket/canWithdraw 投影为 `submitted`；无 active relation 的 stale、internal transfer conflict、superseded 从公开 snapshot 清理。
+  - 持久化入口改存 `public_snapshot()`，下一次 mutation/worker refresh 会原子删除 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 中不在公开 snapshot 的旧异常行。
+  - 新增 `fin_ops_platform.tools.repair_no_oa_bank_batch_lifecycle`：默认 dry-run 输出 removed/normalized batch IDs 和状态计数；加 `--apply` 才写库，且通过 `PostgresStateStore.save_no_oa_bank_batches` 执行。
+- 测试覆盖：
+  - `tests/test_no_oa_bank_batch_service.py` 覆盖 public snapshot 清理 conflict/stale，并保留 relation-backed stale 为 submitted。
+  - `tests/test_no_oa_bank_batch_lifecycle_repair.py` 覆盖生产修复纯函数：删除 unsubmitted exception、stale active -> submitted、legacy unsubmitted -> draft。
+  - `tests/test_no_oa_bank_batch_application_service.py` 覆盖 SQL read model exception rows 不进入公开 payload/summary/detail。
+  - `web/src/test/NoOaBankBatchApi.test.ts` 覆盖非公开 exception batch 被过滤、legacy unsubmitted canSubmit 归一。
+  - `web/src/test/NoOaBankBatchPage.test.tsx` 覆盖 exception batch 不进入主列表，普通/内部往来 draft 仍可提交。
+  - `web/e2e/no-oa-bank-batches-flow.spec.ts` 继续覆盖七个普通 draft 类型 checkbox、submit-selection、barrier、withdraw 和 history。
+- 七类测试覆盖：
+  - Business core unit tests：适用，覆盖 public snapshot 与内部状态过滤。
+  - Service-layer tests：适用，覆盖 application projection、持久化 public snapshot fallback、生产 repair pure function。
+  - API contract tests：适用，覆盖公开 list/detail/summary 不泄漏 exception 状态；HTTP shape 保持兼容旧 count 字段但值不再污染未提交。
+  - Read model/cache/background job tests：适用，worker refresh 保存 public snapshot，不再把 exception rows 写回主 read model。
+  - Frontend component and interaction tests：适用，页面未提交区域只展示可提交状态。
+  - End-to-end business-flow integration tests：适用，Playwright 验证所有普通 draft 类型 checkbox 和主写链路。
+  - Existing feature regression tests：适用，保护 relation-backed stale submitted 投影、legacy unsubmitted 兼容、internal_transfer batch submit、read model stale freshness polling。
+- 未测风险：本地没有直接连接生产库执行 repair dry-run；上线前应先运行 dry-run 保存报告，再确认 `removed_batch_ids/normalized_batch_ids` 后执行 `--apply` 并触发 no-OA read model refresh。
+
+## 2026-06-23 - unsubmitted stale 明示复核原因与全普通类型 checkbox E2E（已被后续公开状态收敛取代）
+
+- 目标：复查“右侧栏没有 checkbox”的截图复现。后续产品口径已收敛为公开生命周期只保留 `draft/submitted/withdrawn`，因此本节关于“明示复核”的 UI 方案不再作为当前实现依据；当前依据见上方“公开状态收敛与生产数据修复入口”。
+- 根因：页面只对 `conflict` 显示 `blocked_reason`，对 `status=stale,status_bucket=unsubmitted` 静默处理；同时 `STATUS_META.stale` 仍显示“待提交”。后续架构修复改为不让 `stale/conflict/superseded` 进入主列表、summary 或 pagination。
+- 影响范围：`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、本模块 E2E spec/coverage 和测试矩阵。
+- 架构决策：
+  - 旧方案曾计划把 `stale` 徽标从“待提交”改为“需复核”；该方案已被 public snapshot/repair 方案取代。
+  - 页面只渲染公开状态；普通 draft/legacy draft 才显示行级 checkbox。
+  - Playwright deterministic mock 新增 `ordinaryDraftMatrix` 场景，覆盖 `fee/salary/holiday_bonus/bonus/tax_payment/treasury_tax_collection/social_security` 七个普通类型逐个显示 checkbox、可勾选、可取消。
+- 测试覆盖：
+  - 当前回归改为 `web/src/test/NoOaBankBatchPage.test.tsx::filters unsubmitted stale batches out of the main list`，覆盖 `多账户8106` 类似截图的 stale 无 checkbox根因不会再进入主列表。
+  - `web/e2e/no-oa-bank-batches-flow.spec.ts::shows selectable checkboxes for every ordinary draft no-OA batch type` 在真实 Chromium 覆盖七个普通可提交类型的 checkbox。
+  - 完整 `web/e2e/no-oa-bank-batches-flow.spec.ts` 继续覆盖首屏失败恢复、stale polling、标签保存、submit-selection、成本统计 fan-out、撤回和历史只读。
+- 七类测试覆盖：
+  - Business core unit tests：不适用，本轮不改后端 stale 生成、关系清理或提交校验。
+  - Service-layer tests：不适用，本轮不改 service/repository/audit/worker。
+  - API contract tests：不适用，本轮不改 HTTP response shape；只修前端呈现和 e2e mock。
+  - Read model/cache/background job tests：不适用，本轮不改 read model freshness 或 worker。
+  - Frontend component and interaction tests：适用，新增 stale 阻断原因组件测试。
+  - End-to-end business-flow integration tests：适用，新增真实 Chromium 全普通类型 checkbox 测试，并重跑 no-OA browser 主链路。
+  - Existing feature regression tests：适用，防止 `stale` 再显示为“待提交”且无解释，防止普通类型 checkbox 只覆盖手续费一个 happy path。
+- 未测风险：未连接真实生产 2026-01 数据直接读取 payload；如果生产中还有其它未知阻断状态，需要按真实 response 继续扩展 policy/mapper 和展示文案。
 
 ## 2026-06-23 - 旧 unsubmitted 状态归一与右侧选择列 policy 化
 
@@ -303,7 +379,7 @@
 
 ## 2026-06-12 - Legacy relation repair 写入口收敛
 
-- 目标：把 no-OA legacy relation migration、submitted relation repair、category drift cleanup 和 submitted single-side consolidation 从 direct pair service mutation 收敛到 `WorkbenchRelationCommandService`。
+- 目标：把 no-OA legacy relation migration、submitted relation repair、旧 category drift cleanup 和 submitted single-side consolidation 从 direct pair service mutation 收敛到 `WorkbenchRelationCommandService`。注意：2026-06-23 后当前语义已改为银行明细标签变化不得改 submitted batch，旧 category drift cleanup 不再作为当前 submitted 写路径。
 - 决策：
   - `NoOaLegacyRelationMigrationService` 通过 command service cancel legacy relation，再 confirm `relation_mode=no_oa_bank_batch`；缺 command service 时抛 `no_oa_relation_command_unavailable`。
   - `NoOaBankBatchService` 的 legacy/repair/consolidation 路径通过 `_confirm_no_oa_relation(...)` / `_cancel_no_oa_relation(...)` 委托 command service，不再调用 `_pair_relation_service.create_active_relation/cancel_relation/record_history`。
@@ -315,8 +391,7 @@
   - `test_legacy_salary_relation_migrates_to_submitted_no_oa_batch_idempotently`
   - `test_existing_submitted_single_row_salary_batches_consolidate_by_month_and_account`
   - `test_consolidated_submitted_salary_batch_repairs_stale_single_row_relations`
-  - `test_submitted_single_side_batch_prunes_rows_that_no_longer_match_category`
-  - `test_submitted_batch_that_becomes_stale_clears_active_relation`
+  - 历史旧测：`test_submitted_single_side_batch_prunes_rows_that_no_longer_match_category`、`test_submitted_batch_that_becomes_stale_clears_active_relation` 已被当前 `test_submitted_single_side_batch_keeps_rows_when_category_changes`、`test_submitted_batch_stays_submitted_after_category_change` 取代。
   - `test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback`
 - 验证：
 
@@ -326,13 +401,13 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py 
 ```
 
 - 七类测试覆盖：
-  - Business core unit tests：适用并覆盖 legacy migration、submitted repair、category drift、single-side consolidation、active row occupation 和同 row set case reuse。
+  - Business core unit tests：适用并覆盖 legacy migration、submitted repair、旧 category drift 收敛边界、single-side consolidation、active row occupation 和同 row set case reuse。
   - Service-layer tests：适用并覆盖 no-OA service 到 relation command service 的委托、缺 command fail-fast 和 read model worker 不隐式 repair。
   - API contract tests：本阶段未改 HTTP response shape；通过 no-OA API 回归保护旧 contract。
   - Read model/cache/background job tests：适用并继续覆盖 worker refresh 不写 relation。
   - Frontend component and interaction tests：本阶段未改前端，未新增。
   - End-to-end business-flow integration tests：适用并通过 no-OA workbench integration 回归保护 no-OA/Workbench 同一 relation fact。
-  - Existing feature regression tests：适用并保留 legacy salary/internal transfer、stale/category drift、snapshot round-trip 和 API 回归。
+  - Existing feature regression tests：适用并保留 legacy salary/internal transfer、submitted 标签变化不改历史事实、snapshot round-trip 和 API 回归。
 - 剩余风险：
   - 真实 PostgreSQL 历史数据的全量回放和 repair dry-run 仍需 staging/生产前 smoke。
   - relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 锁或唯一占用约束。

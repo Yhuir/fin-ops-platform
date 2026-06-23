@@ -99,6 +99,33 @@ class NoOaBankBatchService:
             "audit_log": deepcopy(self._audit_log),
         }
 
+    def public_snapshot(self) -> dict[str, Any]:
+        public_batches: dict[str, dict[str, Any]] = {}
+        for batch in self.list_batches():
+            status = str(batch.get("status") or "").strip()
+            status_bucket = str(batch.get("status_bucket") or "").strip()
+            if status == "unsubmitted" and status_bucket == "unsubmitted":
+                batch = {
+                    **deepcopy(batch),
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "can_submit": True,
+                    "can_withdraw": False,
+                    "blocked_reason": "",
+                }
+                status = "draft"
+            if status not in {"draft", "submitted", "withdrawn"}:
+                continue
+            batch_id = str(batch.get("batch_id") or "").strip()
+            if not batch_id:
+                continue
+            public_batches[batch_id] = deepcopy(batch)
+        return {
+            "schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
+            "batches": public_batches,
+            "audit_log": deepcopy(self._audit_log),
+        }
+
     def build_batches(
         self,
         bank_rows: list[dict[str, Any]],
@@ -352,6 +379,7 @@ class NoOaBankBatchService:
             rows=sorted_rows,
             row_ids=sorted_row_ids,
             total_amount=sum((self._amount(row) or ZERO for row in sorted_rows), ZERO),
+            categories=categories,
             source_versions=dict(source_versions or {}),
             evidence=evidence,
         )
@@ -1172,103 +1200,8 @@ class NoOaBankBatchService:
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
     ) -> None:
-        rows_by_id = {self._row_id(row): row for row in rows if self._row_id(row)}
-        for batch_id, batch in list(self._batches.items()):
-            batch_type = str(batch.get("batch_type") or "").strip()
-            if str(batch.get("status") or "") != "submitted" or batch_type not in SINGLE_SIDE_BATCH_TYPES:
-                continue
-            original_row_ids = [
-                str(row_id).strip()
-                for row_id in list(batch.get("row_ids") or [])
-                if str(row_id).strip()
-            ]
-            if not original_row_ids:
-                continue
-            current_rows = [
-                rows_by_id[row_id]
-                for row_id in original_row_ids
-                if row_id in rows_by_id and self._category_code(rows_by_id[row_id], categories) == batch_type
-            ]
-            current_row_ids = [self._row_id(row) for row in current_rows]
-            if current_row_ids == original_row_ids:
-                continue
-
-            pruned_row_ids = [row_id for row_id in original_row_ids if row_id not in set(current_row_ids)]
-            repaired_at = self._timestamp()
-            relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-            changed_case_ids: list[str] = []
-            if current_row_ids:
-                updated_batch = deepcopy(batch)
-                total_amount = sum((self._amount(row) or ZERO for row in current_rows), ZERO)
-                updated_batch.update(
-                    {
-                        "row_ids": current_row_ids,
-                        "row_count": len(current_row_ids),
-                        "total_amount": self._format_amount(total_amount),
-                        "tag_counts": {batch_type: len(current_row_ids)},
-                        "direction_counts": self._direction_counts(current_rows),
-                        "version": int(updated_batch.get("version") or 1) + 1,
-                        "updated_at": repaired_at,
-                    }
-                )
-                evidence = deepcopy(updated_batch.get("evidence") if isinstance(updated_batch.get("evidence"), dict) else {})
-                evidence["category_drift_pruned_row_ids"] = sorted(
-                    {
-                        *[str(row_id) for row_id in list(evidence.get("category_drift_pruned_row_ids") or []) if str(row_id)],
-                        *pruned_row_ids,
-                    }
-                )
-                evidence["category_drift_pruned_at"] = repaired_at
-                updated_batch["evidence"] = evidence
-                self._batches[batch_id] = self._normalize_batch(updated_batch)
-                relation, relation_changed_case_ids = self._confirm_no_oa_relation(
-                    case_id=relation_case_id,
-                    row_ids=current_row_ids,
-                    month_scope=str(updated_batch.get("scope_month") or "all"),
-                    occurred_at=repaired_at,
-                    note="按当前流水分类剔除免OA批次明细",
-                    special_metadata=self._no_oa_relation_metadata(updated_batch),
-                    evidence=deepcopy(evidence),
-                    display_tags=self._display_tags(batch_type),
-                    history_operation_type="prune_submitted_no_oa_batch_rows",
-                )
-                changed_case_ids.extend(relation_changed_case_ids or [str(relation.get("case_id") or relation_case_id)])
-                self._append_audit(
-                    operation="prune_submitted_no_oa_batch_rows",
-                    batch_id=batch_id,
-                    actor=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
-                    note=",".join(pruned_row_ids),
-                    status="submitted",
-                    relation_case_id=relation_case_id,
-                )
-                self._merge_legacy_migration_result(
-                    changed_case_ids=changed_case_ids,
-                    affected_months=self._batch_affected_months(updated_batch),
-                    migrated_batch_ids=[batch_id],
-                )
-                continue
-
-            changed_case_ids.extend(
-                self._cancel_no_oa_relation(
-                    relation_case_id,
-                    occurred_at=repaired_at,
-                    reason="源流水分类变化，清理已提交免OA批次关系。",
-                    history_operation_type="clear_submitted_no_oa_batch_relation_after_category_drift",
-                )
-            )
-            self._append_audit(
-                operation="clear_submitted_no_oa_batch_relation_after_category_drift",
-                batch_id=batch_id,
-                actor=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
-                note=",".join(pruned_row_ids),
-                status="stale",
-                relation_case_id=relation_case_id,
-            )
-            self._merge_legacy_migration_result(
-                changed_case_ids=changed_case_ids,
-                affected_months=self._batch_affected_months(batch),
-                migrated_batch_ids=[batch_id],
-            )
+        _ = (rows, categories)
+        return
 
     def _repair_submitted_no_oa_relation_consistency(
         self,
@@ -1546,11 +1479,16 @@ class NoOaBankBatchService:
                 total_amount = self._legacy_relation_total_amount(batch_type, resolved_rows)
             first_row = resolved_rows[0] if resolved_rows else {}
             evidence = deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {})
+            existing_batch = self._batches.get(batch_id)
+            row_tag_snapshot_source = relation_metadata.get("row_tag_snapshot")
+            if not isinstance(row_tag_snapshot_source, dict) and isinstance(existing_batch, dict):
+                row_tag_snapshot_source = existing_batch.get("row_tag_snapshot")
+            batch_label = str(relation_metadata.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type))
             batch = {
                 "batch_id": batch_id,
                 "batch_key": str(evidence.get("batch_key") or f"relation:{case_id}"),
                 "batch_type": batch_type,
-                "batch_label": str(relation_metadata.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type)),
+                "batch_label": batch_label,
                 "scope_month": scope_month,
                 "account_key": self._account_key(first_row) if batch_type != "internal_transfer" else "",
                 "bank_name": self._bank_name(first_row),
@@ -1561,6 +1499,12 @@ class NoOaBankBatchService:
                 "total_amount": self._format_amount(total_amount),
                 "tag_counts": {batch_type: len(row_ids)},
                 "direction_counts": self._direction_counts(resolved_rows),
+                "row_tag_snapshot": self._normalize_row_tag_snapshot(
+                    row_tag_snapshot_source,
+                    row_ids=row_ids,
+                    batch_type=batch_type,
+                    batch_label=batch_label,
+                ),
                 "relation_case_id": case_id or batch_id,
                 "source_versions": deepcopy(source_versions),
                 "evidence": {
@@ -1949,6 +1893,117 @@ class NoOaBankBatchService:
             ),
         }
 
+    @classmethod
+    def _row_tag_snapshot(
+        cls,
+        *,
+        row_ids: list[str],
+        rows: list[dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+        batch_type: str,
+        batch_label: str,
+    ) -> dict[str, dict[str, Any]]:
+        rows_by_id = {cls._row_id(row): row for row in list(rows or []) if cls._row_id(row)}
+        snapshot: dict[str, dict[str, Any]] = {}
+        for row_id in [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]:
+            row = rows_by_id.get(row_id, {})
+            category = categories.get(row_id) if isinstance(categories, dict) else None
+            snapshot[row_id] = cls._row_tag_payload(
+                row_id=row_id,
+                row=row if isinstance(row, dict) else {},
+                category=category if isinstance(category, dict) else {},
+                fallback_code=batch_type,
+                fallback_label=batch_label,
+            )
+        return snapshot
+
+    @classmethod
+    def _normalize_row_tag_snapshot(
+        cls,
+        value: Any,
+        *,
+        row_ids: list[str],
+        batch_type: str,
+        batch_label: str,
+    ) -> dict[str, dict[str, Any]]:
+        incoming = value if isinstance(value, dict) else {}
+        snapshot: dict[str, dict[str, Any]] = {}
+        for row_id in [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]:
+            row_snapshot = incoming.get(row_id)
+            snapshot[row_id] = cls._row_tag_payload(
+                row_id=row_id,
+                row={},
+                category=row_snapshot if isinstance(row_snapshot, dict) else {},
+                fallback_code=batch_type,
+                fallback_label=batch_label,
+            )
+        return snapshot
+
+    @classmethod
+    def _row_tag_payload(
+        cls,
+        *,
+        row_id: str,
+        row: dict[str, Any],
+        category: dict[str, Any],
+        fallback_code: str,
+        fallback_label: str,
+    ) -> dict[str, Any]:
+        category_code = str(
+            category.get("category_code")
+            or category.get("effective_category_code")
+            or row.get("category_code")
+            or row.get("effective_category_code")
+            or fallback_code
+            or ""
+        ).strip()
+        category_label = str(
+            category.get("category_label")
+            or category.get("effective_category_label")
+            or row.get("category_label")
+            or row.get("effective_category_label")
+            or fallback_label
+            or category_code
+        ).strip()
+        primary_label = str(
+            category.get("category_primary_label")
+            or category.get("effective_category_primary_label")
+            or row.get("category_primary_label")
+            or row.get("effective_category_primary_label")
+            or ""
+        ).strip()
+        sub_label = str(
+            category.get("category_sub_label")
+            or category.get("effective_category_sub_label")
+            or row.get("category_sub_label")
+            or row.get("effective_category_sub_label")
+            or ""
+        ).strip()
+        label_path = cls._string_list(
+            category.get("category_label_path")
+            or category.get("effective_category_label_path")
+            or row.get("category_label_path")
+            or row.get("effective_category_label_path")
+            or []
+        )
+        if not label_path:
+            label_path = [label for label in [primary_label, sub_label] if label]
+        if not label_path and category_label:
+            label_path = [category_label]
+        return {
+            "transaction_id": row_id,
+            "category_code": category_code,
+            "category_label": category_label,
+            "category_primary_label": primary_label,
+            "category_sub_label": sub_label,
+            "category_label_path": label_path,
+            "category_source": str(category.get("category_source") or category.get("source") or row.get("category_source") or row.get("source") or "").strip(),
+        }
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        return [str(item).strip() for item in list(value or []) if str(item).strip()] if isinstance(value, list) else []
+
     def _no_oa_relation_metadata(self, batch: dict[str, Any]) -> dict[str, Any]:
         batch_type = str(batch.get("batch_type") or "")
         evidence = batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}
@@ -1960,6 +2015,12 @@ class NoOaBankBatchService:
             "batch_label": str(batch.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(batch_type, "")),
             "row_count": int(batch.get("row_count") or 0),
             "total_amount": self._format_amount(self._decimal(batch.get("total_amount")) or ZERO),
+            "row_tag_snapshot": self._normalize_row_tag_snapshot(
+                batch.get("row_tag_snapshot"),
+                row_ids=[str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id)],
+                batch_type=batch_type,
+                batch_label=str(batch.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(batch_type, "")),
+            ),
             "cost_policy": "exclude_all" if batch_type == "internal_transfer" else "normal",
             "withdrawable": True,
             "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
@@ -2028,6 +2089,7 @@ class NoOaBankBatchService:
                 rows=sorted_rows,
                 row_ids=row_ids,
                 total_amount=sum((self._amount(row) or ZERO for row in sorted_rows), ZERO),
+                categories=categories,
                 source_versions=source_versions,
                 evidence=evidence,
             )
@@ -2072,6 +2134,7 @@ class NoOaBankBatchService:
                     rows=sorted_rows,
                     row_ids=row_ids,
                     total_amount=Decimal(amount_text),
+                    categories=categories,
                     source_versions=source_versions,
                     conflict_code="missing_internal_transfer_counterpart",
                     conflict_reason="内部往来收入或支出单边缺失。",
@@ -2086,6 +2149,7 @@ class NoOaBankBatchService:
                     rows=sorted_rows,
                     row_ids=row_ids,
                     total_amount=Decimal(amount_text),
+                    categories=categories,
                     source_versions=source_versions,
                     conflict_code="multiple_internal_transfer_matches",
                     conflict_reason="内部往来存在多解，不能自动形成可提交批次。",
@@ -2101,6 +2165,7 @@ class NoOaBankBatchService:
                     rows=sorted_rows,
                     row_ids=row_ids,
                     total_amount=Decimal(amount_text),
+                    categories=categories,
                     source_versions=source_versions,
                     conflict_code="multiple_internal_transfer_matches",
                     conflict_reason="内部往来存在多解，不能自动形成可提交批次。",
@@ -2132,6 +2197,7 @@ class NoOaBankBatchService:
                     rows=pair_rows,
                     row_ids=pair_row_ids,
                     total_amount=Decimal(amount_text),
+                    categories=categories,
                     source_versions=source_versions,
                     evidence=evidence,
                 )
@@ -2194,6 +2260,7 @@ class NoOaBankBatchService:
         rows: list[dict[str, Any]],
         row_ids: list[str],
         total_amount: Decimal,
+        categories: dict[str, dict[str, Any]],
         source_versions: dict[str, Any],
         evidence: dict[str, Any],
     ) -> dict[str, Any]:
@@ -2217,6 +2284,13 @@ class NoOaBankBatchService:
                 "total_amount": self._format_amount(total_amount),
                 "tag_counts": {batch_type: len(row_ids)},
                 "direction_counts": self._direction_counts(rows),
+                "row_tag_snapshot": self._row_tag_snapshot(
+                    row_ids=row_ids,
+                    rows=rows,
+                    categories=categories,
+                    batch_type=batch_type,
+                    batch_label=self._batch_label(batch_type),
+                ),
                 "relation_case_id": str(existing.get("relation_case_id") or batch_id),
                 "source_versions": deepcopy(source_versions),
                 "evidence": deepcopy(evidence),
@@ -2241,6 +2315,7 @@ class NoOaBankBatchService:
         rows: list[dict[str, Any]],
         row_ids: list[str],
         total_amount: Decimal,
+        categories: dict[str, dict[str, Any]],
         source_versions: dict[str, Any],
         conflict_code: str,
         conflict_reason: str,
@@ -2254,6 +2329,7 @@ class NoOaBankBatchService:
             rows=rows,
             row_ids=row_ids,
             total_amount=total_amount,
+            categories=categories,
             source_versions=source_versions,
             evidence={
                 "rule_code": "internal_transfer_pair",
@@ -2276,10 +2352,8 @@ class NoOaBankBatchService:
         categories: dict[str, dict[str, Any]],
     ) -> bool:
         rows_by_id = {self._row_id(row): row for row in rows if self._row_id(row)}
-        expected_type = str(batch.get("batch_type") or "")
         for row_id in list(batch.get("row_ids") or []):
-            row = rows_by_id.get(str(row_id))
-            if row is None or self._category_code(row, categories) != expected_type:
+            if rows_by_id.get(str(row_id)) is None:
                 return False
         return True
 
@@ -2398,6 +2472,12 @@ class NoOaBankBatchService:
             }
             if isinstance(direction_counts, dict)
             else {"income": 0, "expense": normalized["row_count"]}
+        )
+        normalized["row_tag_snapshot"] = NoOaBankBatchService._normalize_row_tag_snapshot(
+            normalized.get("row_tag_snapshot"),
+            row_ids=normalized["row_ids"],
+            batch_type=normalized["batch_type"],
+            batch_label=normalized["batch_label"],
         )
         normalized["relation_case_id"] = str(normalized.get("relation_case_id") or normalized["batch_id"])
         normalized["source_versions"] = deepcopy(normalized.get("source_versions") if isinstance(normalized.get("source_versions"), dict) else {})

@@ -102,8 +102,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
         )
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_input_invoice_usage_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -126,8 +127,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             sort_direction="desc",
         )
         source_versions = output_invoice_collection_source_versions()
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_output_invoice_collection_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -164,8 +166,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             )
         )
         source_versions = oa_pending_payment_source_versions()
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_oa_pending_payment_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -230,6 +233,14 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             source_adapter=self._oa_source_adapter,
             payment_status_repository=self._payment_status_repository,
         )
+
+    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+        source_versions_loader = getattr(self._read_repository, "workbench_relation_source_versions", None)
+        if callable(source_versions_loader):
+            source_versions = source_versions_loader(scope_key=scope_key)
+            if isinstance(source_versions, dict) and source_versions:
+                return dict(source_versions)
+        return dict(self._workbench_relation_read_facade.last_source_versions)
 
     def _import_service(self) -> ImportNormalizationService:
         return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)

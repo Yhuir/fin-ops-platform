@@ -371,25 +371,26 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     }
     if (url.pathname.startsWith("/api/output-invoice-collections/rows/") && url.pathname.endsWith("/relation-details")) {
       const kind = url.searchParams.get("kind") ?? "bank";
+      const invoiceSummaries = [
+        { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", totalWithTax: "300.00" },
+        { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", totalWithTax: "100.00" },
+        { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", totalWithTax: "200.00" },
+      ];
       return jsonResponse({
         rowId: url.pathname.split("/")[4],
         invoiceId: "out-001",
         kind,
         detailAvailable: true,
-        relationCount: 2,
+        relationCount: kind === "invoice" ? 3 : 2,
         hasMultiple: true,
         sourceAvailable: true,
-        summaries: [
+        summaries: kind === "invoice" ? invoiceSummaries : [
           kind === "oa"
             ? { oaId: "oa-output-a", applicantName: "OA申请人甲", amount: "100.00" }
-            : kind === "invoice"
-              ? { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", totalWithTax: "100.00" }
-              : { bankTransactionId: "bank-output-a", counterpartyName: "多流水客户", amount: "100.00" },
+            : { bankTransactionId: "bank-output-a", counterpartyName: "多流水客户", amount: "100.00" },
           kind === "oa"
             ? { oaId: "oa-output-b", applicantName: "OA申请人乙", amount: "200.00" }
-            : kind === "invoice"
-              ? { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", totalWithTax: "200.00" }
-              : { bankTransactionId: "bank-output-b", counterpartyName: "多流水客户", amount: "200.00" },
+            : { bankTransactionId: "bank-output-b", counterpartyName: "多流水客户", amount: "200.00" },
         ],
         relations: [{ caseId: "case-output-multi", rowIds: ["oa-output-a", "bank-output-a", "out-related-a"] }],
       });
@@ -844,7 +845,7 @@ describe("Output invoice collections page", () => {
     });
   }, 30000);
 
-  test("shows +N entry points for multi OA, bank, and output invoice relations without duplicating primary items", async () => {
+  test("shows invoice aggregate with +N entry point for multi output invoice relations", async () => {
     const user = userEvent.setup();
     const multiRowsPayload = {
       ...rowsPayload,
@@ -894,14 +895,17 @@ describe("Output invoice collections page", () => {
             ],
           },
           invoiceRelations: {
-            primaryInvoiceId: "out-related-a",
-            invoiceNo: "XSFP-MULTI-A",
+            primaryInvoiceId: "out-primary",
+            invoiceNo: "MULTI-PRIMARY",
+            digitalInvoiceNo: "XSFP-MULTI-PRIMARY",
             buyerName: "多发票客户",
-            totalWithTax: "300.00",
-            relationCount: 2,
+            totalWithTax: "600.00",
+            taxableItemName: "多发票服务",
+            relationCount: 3,
             hasMultiple: true,
             detailMode: "list",
             summaries: [
+              { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", buyerName: "多发票客户", totalWithTax: "300.00" },
               { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", buyerName: "多发票客户", totalWithTax: "100.00" },
               { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", buyerName: "多发票客户", totalWithTax: "200.00" },
             ],
@@ -916,10 +920,13 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     await within(page).findByRole("table", { name: "销项发票收款情况表" });
-    expect(within(page).getByRole("button", { name: "查看关联发票 2 张" })).toHaveTextContent("+2");
-    expect(within(page).getByRole("button", { name: "查看关联OA 2 条" })).toHaveTextContent("+2");
-    expect(within(page).getByRole("button", { name: "查看关联流水 2 条" })).toHaveTextContent("+2");
-    expect(within(page).queryByText("XSFP-MULTI-PRIMARY")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "查看关联发票 3 张" })).toHaveTextContent("+2");
+    expect(within(page).getByRole("button", { name: "查看关联OA 2 条" })).toHaveTextContent("+1");
+    expect(within(page).getByRole("button", { name: "查看关联流水 2 条" })).toHaveTextContent("+1");
+    expect(within(page).getByText("XSFP-MULTI-PRIMARY")).toBeInTheDocument();
+    expect(within(page).getByText("600.00")).toBeInTheDocument();
+    expect(within(page).getByText("3 张合计")).toBeInTheDocument();
+    expect(within(page).getByText("多发票客户")).toBeInTheDocument();
     expect(within(page).queryByText("OA申请人甲")).not.toBeInTheDocument();
     expect(within(page).queryByText("多流水摘要甲")).not.toBeInTheDocument();
 
@@ -931,8 +938,11 @@ describe("Output invoice collections page", () => {
     expect(await screen.findByText("流水关联明细")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看关联发票 2 张" }));
+    await user.click(within(page).getByRole("button", { name: "查看关联发票 3 张" }));
     expect(await screen.findByText("发票关联明细")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/XSFP-MULTI-PRIMARY/).length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByText(/XSFP-MULTI-A/)).toBeInTheDocument();
+    expect(screen.getByText(/XSFP-MULTI-B/)).toBeInTheDocument();
 
     const relationRequests = fetchMock.mock.calls
       .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))

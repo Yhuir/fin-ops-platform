@@ -128,7 +128,7 @@ def no_oa_bank_row(
 
 
 def no_oa_categories(rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-    labels = {"fee": "手续费", "internal_transfer": "内部往来款"}
+    labels = {"fee": "手续费", "salary": "工资", "internal_transfer": "内部往来款"}
     return {
         str(row["id"]): {
             "transaction_id": row["id"],
@@ -220,7 +220,40 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["special_metadata"]["source"], "no_oa_bank_batch")
         self.assertEqual(call["special_metadata"]["source_batch_id"], batch["batch_id"])
+        self.assertEqual(call["special_metadata"]["row_tag_snapshot"]["fee-1"]["category_code"], "fee")
+        self.assertEqual(call["special_metadata"]["row_tag_snapshot"]["fee-1"]["category_label"], "手续费")
         self.assertEqual(call["display_tags"], ["免OA", "手续费"])
+
+    def test_submitted_batch_detail_keeps_submitted_row_tags_after_bank_category_changes(self) -> None:
+        initial_rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]
+        service, no_oa_service, _relation_command = self._application_service(
+            rows=initial_rows,
+            selected_tag_codes=["fee", "salary"],
+        )
+        service.refresh_batches()
+        batch = no_oa_service.list_batches({"bucket": "unsubmitted"})[0]
+        submitted = service.submit_batch(
+            str(batch["batch_id"]),
+            actor="finance-user",
+            expected_version=int(batch["version"]),
+            note="确认",
+        )
+
+        changed_rows = [no_oa_bank_row("fee-1", category_code="salary", debit_amount="3.00")]
+        service_after_change, _no_oa_after_change, _relation_command_after_change = self._application_service(
+            rows=changed_rows,
+            selected_tag_codes=["fee", "salary"],
+            no_oa_snapshot=no_oa_service.snapshot(),
+        )
+
+        detail = service_after_change.detail_payload(str(submitted["batch"]["batch_id"]))
+
+        self.assertEqual(detail["batch"]["status"], "submitted")
+        self.assertEqual(detail["batch"]["batch_type"], "fee")
+        self.assertEqual(detail["rows"][0]["category_code"], "fee")
+        self.assertEqual(detail["rows"][0]["category_label"], "手续费")
+        self.assertEqual(detail["categories_by_transaction_id"]["fee-1"]["category_code"], "fee")
+        self.assertEqual(detail["categories_by_transaction_id"]["fee-1"]["category_label"], "手续费")
 
     def test_list_batches_explicit_pagination_protects_first_screen_slo(self) -> None:
         rows = [
@@ -299,6 +332,147 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch["blocked_reason"], "")
         self.assertEqual(batch["can_submit"], False)
         self.assertEqual(batch["can_withdraw"], True)
+
+    def test_sql_read_model_exception_batches_are_not_public_payload(self) -> None:
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.rows: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
+                rows = list(self.rows)
+                bucket = str(filters.get("bucket") or "").strip()
+                if bucket and bucket != "all":
+                    rows = [row for row in rows if str(row.get("status_bucket") or "") == bucket]
+                return deepcopy(rows)
+
+        repository = ReadRepository()
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee", "salary", "internal_transfer"],
+            workbench_sql_read_repository=repository,
+        )
+        source_versions = service.no_oa_bank_batch_source_versions()
+        repository.rows = [
+            {
+                "batch_id": "batch-draft-fee",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "scope_month": "2026-03",
+                "account_key": "CCB:8106",
+                "status": "draft",
+                "status_bucket": "unsubmitted",
+                "row_count": 1,
+                "total_amount": "1.00",
+                "can_submit": True,
+                "can_withdraw": False,
+                "version": 1,
+                "source_versions": source_versions,
+            },
+            {
+                "batch_id": "batch-conflict-transfer",
+                "batch_type": "internal_transfer",
+                "batch_label": "内部往来款",
+                "scope_month": "2026-03",
+                "account_key": "multi",
+                "status": "conflict",
+                "status_bucket": "unsubmitted",
+                "row_count": 1,
+                "total_amount": "1.00",
+                "conflict_reason": "内部往来存在多解，不能自动形成可提交批次。",
+                "can_submit": False,
+                "can_withdraw": False,
+                "version": 1,
+                "source_versions": source_versions,
+            },
+            {
+                "batch_id": "batch-stale-fee",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "scope_month": "2026-03",
+                "account_key": "CCB:8106",
+                "status": "stale",
+                "status_bucket": "unsubmitted",
+                "row_count": 1,
+                "total_amount": "1.00",
+                "blocked_reason": "源流水或分类已变化，需要复核后处理。",
+                "can_submit": False,
+                "can_withdraw": False,
+                "version": 2,
+                "source_versions": source_versions,
+            },
+            {
+                "batch_id": "batch-submitted-salary",
+                "batch_type": "salary",
+                "batch_label": "工资",
+                "scope_month": "2026-03",
+                "account_key": "ICBC:6386",
+                "status": "submitted",
+                "status_bucket": "submitted",
+                "row_count": 1,
+                "total_amount": "2.00",
+                "can_submit": False,
+                "can_withdraw": True,
+                "version": 3,
+                "source_versions": source_versions,
+            },
+            {
+                "batch_id": "batch-withdrawn-fee",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "scope_month": "2026-03",
+                "account_key": "CCB:8106",
+                "status": "withdrawn",
+                "status_bucket": "withdrawn",
+                "row_count": 1,
+                "total_amount": "3.00",
+                "can_submit": False,
+                "can_withdraw": False,
+                "version": 4,
+                "source_versions": source_versions,
+            },
+        ]
+
+        payload = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual([batch["batch_id"] for batch in payload["batches"]], ["batch-draft-fee"])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 200, "pageSize": 200, "total": 1})
+        self.assertEqual(payload["summary"]["total"], 3)
+        self.assertEqual(payload["summary"]["draft_count"], 1)
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual(payload["summary"]["withdrawn_count"], 1)
+        self.assertEqual(payload["summary"]["conflict_count"], 0)
+        self.assertEqual(payload["summary"]["stale_count"], 0)
+
+    def test_detail_payload_hides_non_public_exception_batches(self) -> None:
+        rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="1.00")]
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=rows,
+            selected_tag_codes=["fee"],
+            no_oa_snapshot={
+                "batches": {
+                    "batch-stale-fee": {
+                        "batch_id": "batch-stale-fee",
+                        "batch_type": "fee",
+                        "batch_label": "手续费",
+                        "scope_month": "2026-03",
+                        "account_key": "CCB:8106",
+                        "bank_name": "CCB",
+                        "account_last4": "8106",
+                        "status": "stale",
+                        "status_bucket": "unsubmitted",
+                        "row_ids": ["fee-1"],
+                        "row_count": 1,
+                        "total_amount": "1.00",
+                        "version": 2,
+                    }
+                },
+                "audit_log": [],
+            },
+        )
+
+        with self.assertRaisesRegex(KeyError, "no_oa_bank_batch_not_found"):
+            service.detail_payload("batch-stale-fee")
 
     def test_withdraw_batch_delegates_relation_cancel_to_command_service(self) -> None:
         rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]

@@ -41,6 +41,7 @@ class DistributedInvoiceRelationContext:
         self._bank_transactions_by_id: dict[str, BankTransaction] | None = None
         self._distributed_relations_by_row_id: dict[str, list[dict[str, Any]]] = {}
         self._distributed_loaded_all_for_month = False
+        self._distributed_row_lookup_attempted: set[str] = set()
         self._oa_records_by_id: dict[str, OAApplicationRecord] = {}
         self._oa_loaded_all = False
 
@@ -155,14 +156,18 @@ class DistributedInvoiceRelationContext:
             self._assert_fresh_distribution(result)
             self._merge_distributed_result(result)
             self._distributed_loaded_all_for_month = True
-            return
         missing_ids = [
             row_id
             for row_id in normalized_ids
-            if row_id not in self._distributed_relations_by_row_id
+            if (
+                row_id not in self._distributed_relations_by_row_id
+                or not self._distributed_relations_by_row_id.get(row_id)
+            )
+            and row_id not in self._distributed_row_lookup_attempted
         ]
         if not missing_ids:
             return
+        self._distributed_row_lookup_attempted.update(missing_ids)
         result = self._relation_facade.get_by_row_ids(
             missing_ids,
             require_fresh=self._require_fresh_relations,

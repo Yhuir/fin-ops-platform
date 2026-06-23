@@ -149,6 +149,80 @@ class FreshStaticWorkbenchRelationFacade:
         }
 
 
+class CrossMonthVersionWorkbenchRelationFacade:
+    def __init__(self, *, invoice_id: str, bank_id: str, oa_id: str) -> None:
+        self.invoice_id = invoice_id
+        self.bank_id = bank_id
+        self.oa_id = oa_id
+        self._last_source_versions: dict[str, object] = {}
+
+    @property
+    def last_source_versions(self) -> dict[str, object]:
+        return dict(self._last_source_versions)
+
+    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        self._last_source_versions = {"source_version": f"workbench_relation:{month}"}
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": self.invoice_id,
+                    "row_type": "input_invoice",
+                    "relation_status": "unlinked",
+                    "group_ids": [],
+                }
+            ],
+            "groups": [],
+            "source_versions": dict(self._last_source_versions),
+            "read_model_scope_keys": [str(month)],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        self._last_source_versions = {"source_version": "workbench_relation:2026-04"}
+        if self.invoice_id not in {str(row_id) for row_id in list(row_ids or [])}:
+            return {
+                "status": "fresh",
+                "rows": [],
+                "groups": [],
+                "source_versions": dict(self._last_source_versions),
+                "read_model_scope_keys": ["2026-04"],
+                "refresh_enqueued": False,
+                "stale_reasons": [],
+            }
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": self.invoice_id,
+                    "row_type": "input_invoice",
+                    "relation_status": "linked",
+                    "group_ids": ["case-cross-month-version"],
+                }
+            ],
+            "groups": [
+                {
+                    "group_id": "case-cross-month-version",
+                    "scope_month": "2026-04",
+                    "relation_status": "linked",
+                    "payload": {
+                        "case_id": "case-cross-month-version",
+                        "row_ids": [self.oa_id, self.bank_id, self.invoice_id],
+                        "row_types": ["oa", "bank", "invoice"],
+                        "relation_mode": "manual_confirmed",
+                        "relation_status": "linked",
+                        "amount_check": {"matched": True},
+                    },
+                }
+            ],
+            "source_versions": dict(self._last_source_versions),
+            "read_model_scope_keys": ["2026-04"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class InvoiceReadModelConnection:
     def __init__(
         self,
@@ -441,6 +515,7 @@ class RecordingInvoiceRelationReadRepository:
         self.pruned_input: list[str] | None = None
         self.pruned_output: list[str] | None = None
         self.pruned_oa: list[str] | None = None
+        self.workbench_relation_versions_by_scope: dict[str, dict[str, object]] = {}
 
     def save_input_invoice_usage_rows(
         self,
@@ -504,6 +579,10 @@ class RecordingInvoiceRelationReadRepository:
 
     def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
         self.pruned_oa = list(current_scope_keys)
+
+    def workbench_relation_source_versions(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
+        _ = tenant_id
+        return dict(self.workbench_relation_versions_by_scope.get(str(scope_key), {}))
 
 
 class WriteRecordingConnection:
@@ -1487,6 +1566,42 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(input_result["row_count"], 1)
         self.assertEqual(output_result["row_count"], 1)
         self.assertEqual(oa_result["row_count"], 0)
+
+    def test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        read_repository.workbench_relation_versions_by_scope = {
+            "2026-05": {"source_version": "workbench_relation:2026-05"}
+        }
+        invoice = self._invoice("input-invoice-cross-month", InvoiceType.INPUT, total="75799.00")
+        bank = self._bank("bank-cross-month", "75799.00")
+        relation_facade = CrossMonthVersionWorkbenchRelationFacade(
+            invoice_id=invoice.id,
+            bank_id=bank.id,
+            oa_id="oa-cross-month",
+        )
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+        builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
+        builder._workbench_repository = EmptyWorkbenchRepository()
+        builder._read_repository = read_repository
+        builder._oa_projection_repository = StaticOAProjectionRepository([
+            self._oa("oa-cross-month", "杨丽萍", "75799.00")
+        ])
+
+        result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
+
+        expected_source_versions = {
+            **input_invoice_usage_source_versions(),
+            "workbench_relation_source_versions": {"source_version": "workbench_relation:2026-05"},
+        }
+        self.assertEqual(result["source_versions"], expected_source_versions)
+        self.assertIsNotNone(read_repository.saved_input)
+        self.assertEqual(read_repository.saved_input["source_versions"], expected_source_versions)
+        row = read_repository.saved_input["rows"][0]
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
 
     def test_projection_builder_persists_grouped_oa_pending_payment_relation_as_one_row(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

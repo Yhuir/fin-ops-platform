@@ -161,17 +161,18 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         buyer = self._counterparty("buyer", "统一事实源客户")
         invoice_a = self._invoice("out-unified-a", "9101", buyer, total_with_tax="100.00")
         invoice_b = self._invoice("out-unified-b", "9102", buyer, total_with_tax="200.00")
+        invoice_c = self._invoice("out-unified-c", "9103", buyer, total_with_tax="300.00")
         bank_a = self._bank("bank-unified-a", "100.00", TransactionDirection.INFLOW)
-        bank_b = self._bank("bank-unified-b", "200.00", TransactionDirection.INFLOW)
+        bank_b = self._bank("bank-unified-b", "500.00", TransactionDirection.INFLOW)
         oa_projection = FakeOAProjection([
             self._oa_record("oa-unified-a", applicant="申请人甲", amount="100.00"),
-            self._oa_record("oa-unified-b", applicant="申请人乙", amount="200.00"),
+            self._oa_record("oa-unified-b", applicant="申请人乙", amount="500.00"),
         ])
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
             case_id="case-unified-output",
-            row_ids=[invoice_a.id, invoice_b.id, bank_a.id, bank_b.id, "oa-unified-a", "oa-unified-b"],
-            row_types=["invoice", "invoice", "bank", "bank", "oa", "oa"],
+            row_ids=[invoice_a.id, invoice_b.id, invoice_c.id, bank_a.id, bank_b.id, "oa-unified-a", "oa-unified-b"],
+            row_types=["invoice", "invoice", "invoice", "bank", "bank", "oa", "oa"],
             relation_mode="manual_confirmed",
             created_by="tester",
             amount_check={"matched": True},
@@ -179,12 +180,12 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         relation_facade = FakeWorkbenchRelationFacade.from_pair_service(
             pair_service=pair_service,
             transactions=[bank_a, bank_b],
-            invoices=[invoice_a, invoice_b],
+            invoices=[invoice_a, invoice_b, invoice_c],
             oa_projection=oa_projection,
         )
         service = OutputInvoiceCollectionQueryService(
             import_service=ImportNormalizationService(
-                existing_invoices=[invoice_a, invoice_b],
+                existing_invoices=[invoice_a, invoice_b, invoice_c],
                 existing_transactions=[bank_a, bank_b],
             ),
             relation_facade=relation_facade,
@@ -196,17 +197,22 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["relationCount"], 2)
         self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], ["oa-unified-a", "oa-unified-b"])
         self.assertEqual(row["bankTransactions"]["relationCount"], 2)
-        self.assertEqual(row["bankTransactions"]["receivedTotal"], "300.00")
-        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+        self.assertEqual(row["bankTransactions"]["receivedTotal"], "600.00")
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 3)
+        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "600.00")
         self.assertEqual(
             {summary["invoiceId"] for summary in row["invoiceRelations"]["summaries"]},
-            {"out-unified-a", "out-unified-b"},
+            {"out-unified-a", "out-unified-b", "out-unified-c"},
         )
 
         oa_details = service.row_relation_details(row["id"], kind="oa")
         invoice_details = service.row_relation_details(row["id"], kind="invoice")
         self.assertEqual(oa_details["relationCount"], 2)
-        self.assertEqual(invoice_details["relationCount"], 2)
+        self.assertEqual(invoice_details["relationCount"], 3)
+        self.assertEqual(
+            {summary["invoiceId"] for summary in invoice_details["summaries"]},
+            {"out-unified-a", "out-unified-b", "out-unified-c"},
+        )
 
     def test_collection_status_uses_red_refund_priority_before_collected_and_pending_rules(self) -> None:
         buyer = self._counterparty("buyer", "客户")

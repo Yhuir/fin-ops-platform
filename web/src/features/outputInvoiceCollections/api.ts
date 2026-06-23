@@ -305,6 +305,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
   relationCount: number;
   hasMultiple: boolean;
   receivedTotal?: string;
+  totalWithTax?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 } {
@@ -317,6 +318,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
     relationCount: numberValue(camelOrSnake(raw, "relationCount", "relation_count"), primary ? 1 : 0),
     hasMultiple: booleanValue(camelOrSnake(raw, "hasMultiple", "has_multiple")),
     receivedTotal: stringValue(camelOrSnake(raw, "receivedTotal", "received_total")),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     detailMode: detailMode === "list" || detailMode === "single" ? detailMode : primary ? "single" : "none",
     summaries,
   };

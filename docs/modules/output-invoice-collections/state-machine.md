@@ -40,7 +40,7 @@
   - 收款状态、提醒、红蓝票和 receipt mutation 需要 mutation 权限。
   - receipt settings 入口 admin-only。
   - 权限不足时 API 返回 403，前端隐藏或禁用对应入口。
-- relation list：当 OA、收入流水或关联销项发票项为多项时，对应栏只显示 `+N` 入口；点击后打开详情 drawer，按 `kind=oa|bank|invoice` 展示全部 summaries。已包含在 `+N` 中的对象不在同一栏重复展示 primary 明细。
+- relation list：当 OA、收入流水或关联销项发票项为多项时，对应栏显示 `+N` 入口，`N=relationCount-1` 表示额外项数；点击后打开详情 drawer，按 `kind=oa|bank|invoice` 展示全部 summaries。销项发票栏多项时必须保留当前行发票主信息和多张发票价税合计，再显示 `+N`，不得只留下展开入口。
 
 ## Read Model / Worker 状态
 
@@ -62,7 +62,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-23 | 统一关系 OA/流水/发票项 `+N` 展示 | 不新增收款业务状态；新增 relation list UI 状态和 SQL payload schema stale 条件 | `python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run` |
+| 2026-06-23 | 统一关系 OA/流水/发票项 `+N` 展示 | 不新增收款业务状态；新增 relation list UI 状态和 SQL payload schema stale 条件；销项发票多项显示合计和额外项 `+N` | `python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run` |
 | 2026-06-18 | 补充红蓝票 Browser fan-out | 不改变状态机；新增真实 Chromium 覆盖红蓝票关系确认后 rows refresh 和人工依据展示 | `cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts` |
 | 2026-06-17 | 补充 Browser e2e 主流程 | 不改变状态机；新增真实 Chromium 覆盖手动状态/提醒保存、rows refresh、正式收据创建和 history 展示 | `cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts` |
 | 2026-06-11 | 首轮测试闭环文档化 | 明确业务/UI/read model/worker 状态和禁止流转 | `tests/test_output_invoice_collection_*`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`bash scripts/verify.sh docs` |

@@ -138,6 +138,7 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
   relationCount: number;
   hasMultiple: boolean;
   receivedTotal?: string;
+  totalWithTax?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 };

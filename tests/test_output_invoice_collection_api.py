@@ -215,6 +215,43 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual(json.loads(history_response.body)["receipts"], [])
 
+    def test_invoice_relation_details_returns_all_related_output_invoices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoices = [
+                self._invoice("out-relation-a", "3001", "多发票客户", total_with_tax="300.00"),
+                self._invoice("out-relation-b", "3002", "多发票客户", total_with_tax="100.00"),
+                self._invoice("out-relation-c", "3003", "多发票客户", total_with_tax="200.00"),
+            ]
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-output-invoices",
+                row_ids=[invoice.id for invoice in invoices],
+                row_types=["invoice", "invoice", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            self._install_service(app, invoices=invoices, pair_service=pair_service)
+
+            rows_response = app.handle_request("GET", "/api/output-invoice-collections/rows")
+            row = json.loads(rows_response.body)["rows"][0]
+            relation_response = app.handle_request(
+                "GET",
+                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=invoice",
+            )
+
+        payload = json.loads(relation_response.body)
+        self.assertEqual(relation_response.status_code, 200)
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 3)
+        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "600.00")
+        self.assertEqual(payload["kind"], "invoice")
+        self.assertEqual(payload["relationCount"], 3)
+        self.assertEqual(
+            {summary["invoiceId"] for summary in payload["summaries"]},
+            {"out-relation-a", "out-relation-b", "out-relation-c"},
+        )
+
     def test_detail_routes_require_output_collection_read_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

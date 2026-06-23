@@ -1205,6 +1205,17 @@ class OutputInvoiceCollectionQueryService:
                 if row_type == "invoice" and invoice is not None and invoice.id not in seen:
                     seen.add(invoice.id)
                     summaries.append(self._invoice_relation_summary(invoice, primary_invoice, relation))
+        if relations:
+            for invoice in line_items:
+                if invoice.id not in seen:
+                    seen.add(invoice.id)
+                    summaries.append(
+                        self._invoice_relation_summary(
+                            invoice,
+                            primary_invoice,
+                            self._relation_for_row_id(relations, invoice.id),
+                        )
+                    )
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
