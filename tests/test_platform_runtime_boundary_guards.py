@@ -941,6 +941,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         routes_source = routes_path.read_text(encoding="utf-8")
         routes_tree = _parse(routes_path)
         route_list_source = _function_source(routes_tree, routes_source, "list_payload")
+        route_submit_source = _function_source(routes_tree, routes_source, "submit")
+        route_withdraw_source = _function_source(routes_tree, routes_source, "withdraw")
 
         violations: list[str] = []
         if "_batch_accounting_routes().list_payload" not in list_source:
@@ -966,14 +968,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BatchAccountingApiRoutes list bypasses read-only route boundary via {forbidden}")
 
         mutation_handlers = (
-            ("submit", submit_source, "_batch_accounting_service().submit"),
-            ("withdraw", withdraw_source, "_batch_accounting_service().withdraw"),
+            ("submit", submit_source, route_submit_source, "_batch_accounting_routes().submit", "_service_factory().submit"),
+            (
+                "withdraw",
+                withdraw_source,
+                route_withdraw_source,
+                "_batch_accounting_routes().withdraw",
+                "_service_factory().withdraw",
+            ),
         )
-        for name, handler_source, service_call in mutation_handlers:
+        for name, handler_source, route_source, route_call, service_call in mutation_handlers:
             if "_batch_accounting_mutation_session" not in handler_source:
                 violations.append(f"batch accounting {name} route no longer enforces mutation session")
-            if service_call not in handler_source:
-                violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingService")
+            if route_call not in handler_source:
+                violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingApiRoutes")
+            if service_call not in route_source:
+                violations.append(f"BatchAccountingApiRoutes {name} no longer delegates mutation to BatchAccountingService")
             for forbidden in (
                 "repair_legacy_case_id_collisions",
                 "confirm_relation(",
@@ -985,6 +995,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             ):
                 if forbidden in handler_source:
                     violations.append(f"batch accounting {name} route bypasses service boundary via {forbidden}")
+                if forbidden in route_source:
+                    violations.append(f"BatchAccountingApiRoutes {name} bypasses service boundary via {forbidden}")
 
         self.assertEqual(violations, [])
 

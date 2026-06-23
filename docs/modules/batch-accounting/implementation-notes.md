@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-06-24 - Submit/withdraw route side-effect port 抽取
+
+- 目标：把 `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 的 DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 从 `server.py` inline handler 抽到 `BatchAccountingApiRoutes`，让 `server.py` 只保留 mutation session、JSON body 和 response mapping。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_batch_accounting.py`、`server.py` 的 submit/withdraw wrapper、`tests/test_platform_runtime_boundary_guards.py` 的 batch-accounting route owner guard。
+- 关键决策：`BatchAccountingService` 仍是 submit/withdraw 业务状态转换和 canonical command service 写入边界；`BatchAccountingApiRoutes` 只通过显式注入的 callback 调用 pair relation persist、derived lifecycle event、Workbench read model persist、submit rollback snapshot restore，不依赖 `Application` 或直接写 relation internals。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-submit-withdraw-route-side-effect-port.md`；本模块状态机定义不变，只记录 route ownership 变化。
+- 测试覆盖：静态 guard 现在要求 submit/withdraw `server.py` wrapper 委托 `BatchAccountingApiRoutes`，并要求 route owner 委托 `BatchAccountingService` 且不得 direct relation write；API 回归覆盖金额差异错误、合法提交、撤回原因、non-fresh withdraw 和 submit persist failure rollback。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_requires_difference_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_rejects_whitespace_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_creates_batch_accounting_relation_with_current_invoice_rows tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_requires_reason_and_batch_accounting_relation tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_rejects_when_relation_read_model_is_not_fresh -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails -v`。
+- 未测风险：真实 PostgreSQL/worker drain、真实大年份和浏览器 overlay flow 未在本 slice 重跑；本次不改变 API shape、worker contract 或前端代码，生产验证不是完成条件。
+- 后续事项：继续推进 `batch-accounting:repair-compat-quarantine`，把 `_repair_batch_accounting_relation_case_ids` 的 owner、调用者、删除条件和防污染 guard 明确化。
+
 ## 2026-06-24 - GET route owner 抽取
 
 - 目标：把 `GET /api/batch-accounting` 的 query normalization 和 list error mapping 从 `server.py` inline route body 抽到 `BatchAccountingApiRoutes`，让 `server.py` 只保留 route wrapper、依赖 wiring 和 JSON response mapping。

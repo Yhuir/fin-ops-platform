@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-batch-accounting-get-route-owner-extraction`
+Current state: `autonomous-continue-after-batch-accounting-submit-withdraw-route-side-effect-port`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `batch-accounting:legacy-route-implementation` by extracting the read-only `GET /api/batch-accounting` query/error mapping into `BatchAccountingApiRoutes`; next execution must start with `batch-accounting:submit-withdraw-route-side-effect-port` unless a planning-state inconsistency is found first.
+Completed `batch-accounting:submit-withdraw-route-side-effect-port` by extracting submit/withdraw mutation DTO/service/error mapping and write-after side-effect orchestration into `BatchAccountingApiRoutes`; next execution must start with `batch-accounting:repair-compat-quarantine` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -62,13 +62,14 @@ Completed `batch-accounting:legacy-route-implementation` by extracting the read-
 - `planning:queue-semantics-and-master-goal-prompt-revision` -> `planning-closed`
 - `server-py:legacy-handler-extraction-implementation` -> `implementation-closed`
 - `batch-accounting:legacy-route-implementation` -> `implementation-closed`
+- `batch-accounting:submit-withdraw-route-side-effect-port` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine and category side-effect port extraction are implemented; the module is not closed because production DB/worker evidence remains unavailable and classified support wrappers/callbacks have not been globally extracted.
-- `batch-accounting` GET route owner extraction is implemented; the module is not closed because submit/withdraw mutation route side-effect boundaries and broader legacy cleanup remain open.
+- `batch-accounting` GET route owner extraction and submit/withdraw route side-effect port extraction are implemented; the module is not closed because repair compat quarantine and broader legacy cleanup remain open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -83,8 +84,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`batch-accounting:legacy-route-implementation`
+`batch-accounting:submit-withdraw-route-side-effect-port`
 
 ## Next Prompt
 
-`batch-accounting:submit-withdraw-route-side-effect-port`
+`batch-accounting:repair-compat-quarantine`

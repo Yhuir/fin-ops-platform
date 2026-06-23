@@ -79,6 +79,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-24 | Submit/withdraw route owner 抽取：mutation session/JSON 仍在 `server.py`，DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 进入 `BatchAccountingApiRoutes` 显式 callback 边界 | route ownership 变化；业务/UI/read model/worker 状态定义不变 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries`、批量账务 submit/withdraw API 回归 |
 | 2026-06-23 | Route handler 边界守卫：GET 只能委托 `BatchAccountingService.build_payload(...)`，不得执行 repair/write/read model schedule；submit/withdraw route 必须经 mutation session 并委托 service，不得 direct relation write | `server.py` 批量账务 route ownership；不改变业务/UI/read model/worker 状态定义 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries` |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |
 | 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；页面展示 reason/scope 和未入队提示。写阻断口径已由 2026-06-13 canonical write safety 更新替代。 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh` |

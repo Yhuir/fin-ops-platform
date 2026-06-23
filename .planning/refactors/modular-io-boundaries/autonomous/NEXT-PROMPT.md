@@ -1,15 +1,16 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `batch-accounting:legacy-route-implementation` slice.
+Continue the autonomous modular IO refactor after the `batch-accounting:submit-withdraw-route-side-effect-port` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `batch-accounting:legacy-route-implementation`
+- Last completed boundary: `batch-accounting:submit-withdraw-route-side-effect-port`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- The completed batch-accounting slice extracted read-only `GET /api/batch-accounting` query normalization and list error mapping into `BatchAccountingApiRoutes`; `BatchAccountingService.build_payload(..., use_sql_read_model=True)` remains the read contract owner.
-- Submit/withdraw mutation route mapping and write-after side-effect boundaries still remain in `server.py`.
+- The completed batch-accounting slice extracted submit/withdraw mutation DTO/service/error mapping and write-after scope/lifecycle/read-model persist orchestration into `BatchAccountingApiRoutes` with explicit callbacks.
+- `server.py` still owns mutation session, JSON body parsing and response mapping for batch-accounting routes.
+- `_repair_batch_accounting_relation_case_ids` remains an explicit compat/repair helper and still needs owner/caller/deletion-condition quarantine or removal evidence.
 - Broader `server.py` shared-boundary cleanup remains `implementation-gap-open`.
 - Broader `batch-accounting` module closure remains `implementation-gap-open`.
 - `bank_detail` remains the first read model implementation pilot and is still not module-closed.
@@ -17,7 +18,7 @@ Continue the autonomous modular IO refactor after the `batch-accounting:legacy-r
 
 ## Next Boundary
 
-`batch-accounting:submit-withdraw-route-side-effect-port`
+`batch-accounting:repair-compat-quarantine`
 
 ## Required First Steps On Resume
 
@@ -42,27 +43,29 @@ Continue the autonomous modular IO refactor after the `batch-accounting:legacy-r
 4. Read:
    - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-legacy-route-contract.md`
    - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-get-route-owner-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-submit-withdraw-route-side-effect-port.md`
    - `docs/app-architecture/runtime-and-ownership.md`
    - `docs/modules/README.md`
    - `docs/modules/batch-accounting/README.md`
    - `docs/modules/batch-accounting/state-machine.md`
    - `docs/modules/batch-accounting/tests.md`
-5. Use CodeGraph first to inspect the selected batch-accounting submit/withdraw route handlers, service owner, callers, callees and impact.
-6. Execute only one narrow batch-accounting mutation route/service implementation boundary. Do not implement Go/Fiber/Go Worker.
+5. Use CodeGraph first to inspect `_repair_batch_accounting_relation_case_ids`, `BatchAccountingService.repair_legacy_case_id_collisions`, callers, callees and impact.
+6. Execute only one narrow batch-accounting repair compat quarantine/removal boundary. Do not implement Go/Fiber/Go Worker.
 7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Convert one batch-accounting submit/withdraw route side-effect boundary from `server.py` inline mapping into an explicit route owner or side-effect port.
-- Prefer the smallest mutation route with clear existing tests.
+- Classify `_repair_batch_accounting_relation_case_ids` as removed, quarantined, compat-only or blocked-by-human-gate.
+- Prefer removal if CodeGraph and tests prove it is unused.
+- If retained, document owner, caller list, deletion condition, forbidden write list and regression tests.
 - Keep `server.py` thin: HTTP parsing, session/auth resolution, dependency wiring and response mapping only.
 
 Allowed outcomes:
 
-- Move a narrow mutation route body into an existing route/service boundary.
-- Or quarantine a legacy batch-accounting handler with owner/caller/forbidden-write/deletion-condition tests if extraction is too broad.
+- Remove the repair helper if unused.
+- Or quarantine the repair helper with owner/caller/forbidden-write/deletion-condition tests if removal is too broad.
 - Preserve API response shape, permissions, audit and read model behavior.
 - Keep write-after lifecycle/read model refresh/barrier behavior behind existing service/command boundaries.
 
@@ -77,14 +80,14 @@ Forbidden:
 ## Expected Output
 
 - An analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- One small implementation or static quarantine guard for the selected batch-accounting mutation boundary.
+- One small implementation or static quarantine guard for the selected batch-accounting repair boundary.
 - Updated module docs/state/journal/next prompt.
 - Targeted API/service/read model/permission tests, docs verification, app check and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one verified batch-accounting mutation route implementation/quarantine slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
+Complete one verified batch-accounting repair quarantine/removal slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit. Before selecting or committing each subsequent slice, reconcile `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and state-machine semantics again; if they disagree, complete another planning reconciliation slice first.
 
 ## Reporting Rule
 

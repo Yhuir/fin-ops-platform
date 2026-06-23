@@ -13057,9 +13057,21 @@ class Application:
         routes = getattr(self, "_batch_accounting_api_routes", None)
         if isinstance(routes, BatchAccountingApiRoutes):
             return routes
-        routes = BatchAccountingApiRoutes(lambda **kwargs: self._batch_accounting_service(**kwargs))
+        routes = BatchAccountingApiRoutes(
+            lambda **kwargs: self._batch_accounting_service(**kwargs),
+            scope_keys_for_row_ids=self._scope_keys_for_row_ids,
+            schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            schedule_read_model_persist=self._schedule_workbench_read_model_persist,
+            pair_relation_snapshot=self._workbench_pair_relation_service.snapshot,
+            restore_pair_relation_snapshot=self._restore_batch_accounting_pair_relation_snapshot,
+        )
         self._batch_accounting_api_routes = routes
         return routes
+
+    def _restore_batch_accounting_pair_relation_snapshot(self, snapshot: dict[str, Any]) -> None:
+        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(snapshot)
+        self._configure_workbench_exception_application_service()
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._batch_accounting_routes().list_payload(query)
@@ -13119,63 +13131,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        year = str(payload.get("year") or "")
-        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
-        try:
-            result = self._batch_accounting_service().submit(
-                year=year,
-                bank_year=str(payload.get("bank_year") or year),
-                oa_year=str(payload.get("oa_year") or year),
-                bank_row_id=str(payload.get("bank_row_id") or ""),
-                oa_row_ids=list(payload.get("oa_row_ids") or []),
-                actor=actor,
-                note=str(payload.get("note") or ""),
-                expected_version=self._optional_int(payload.get("expected_version")),
-            )
-        except BatchAccountingError as exc:
-            return self._batch_accounting_error_response(exc)
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_batch_accounting_request", "message": str(exc)},
-            )
-
-        changed_scope_keys = sorted(
-            self._scope_keys_for_row_ids(
-                month="all",
-                row_ids=list(result.get("affected_row_ids") or []),
-                month_scope=str(result.get("month_scope") or ""),
-            )
-        )
-        changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
-        try:
-            self._schedule_workbench_pair_relation_persist(
-                changed_case_ids=changed_case_ids,
-                action_name="submit_batch_accounting",
-            )
-        except Exception:
-            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
-            self._configure_workbench_exception_application_service()
-            return self._workbench_persistence_unavailable_response(
-                StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
-            )
-        self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": "submit_batch_accounting"},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            action_name="submit_batch_accounting",
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                **result,
-                "affected_months": changed_scope_keys,
-            },
-        )
+        status_code, result = self._batch_accounting_routes().submit(payload, session=session)
+        return self._json_response(status_code, result)
 
     def _handle_api_batch_accounting_withdraw(
         self,
@@ -13189,50 +13146,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        try:
-            result = self._batch_accounting_service().withdraw(
-                relation_id=relation_id,
-                actor=actor,
-                reason=str(payload.get("reason") or payload.get("note") or ""),
-                expected_version=self._optional_int(payload.get("expected_version")),
-            )
-        except BatchAccountingError as exc:
-            return self._batch_accounting_error_response(exc)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
-            )
-
-        changed_scope_keys = sorted(
-            self._scope_keys_for_row_ids(
-                month="all",
-                row_ids=list(result.get("affected_row_ids") or []),
-                month_scope=str(result.get("month_scope") or ""),
-            )
-        )
-        changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="withdraw_batch_accounting",
-        )
-        self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": "withdraw_batch_accounting"},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            action_name="withdraw_batch_accounting",
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                **result,
-                "affected_months": changed_scope_keys,
-            },
-        )
+        status_code, result = self._batch_accounting_routes().withdraw(relation_id, payload, session=session)
+        return self._json_response(status_code, result)
 
     def _batch_accounting_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
         session = resolve_oa_request_session(
