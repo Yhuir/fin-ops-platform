@@ -45,6 +45,25 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - no-OA pair service boundary audit
+
+目标：审计 no-OA 对 `pair_relation_service`、`relation_facade`、`relation_command_service` 的剩余依赖，避免把仍有语义的 snapshot/repair 依赖误删。
+
+结论：
+
+- no-OA 常规 submit、submit-selection、internal transfer 和 withdraw 的 relation 写入已经通过 `WorkbenchRelationCommandService.confirm_relation/cancel_relation`。
+- no-OA active relation 读侧多数已经通过 `WorkbenchRelationReadFacade`。
+- `NoOaBankBatchApplicationService` 仍把 pair service 用作 snapshot/version/persist/rollback port：提交前 snapshot、source version、`save_no_oa_bank_batch_mutation(...)` payload、fallback `save_workbench_pair_relations(...)` 和 `_restore_snapshots(...)`。
+- `NoOaBankBatchService` 仍把 pair service 用于 submitted relation repair 和 relation-backed stale/superseded batch 投影判断；这属于后续 read/repair port 迁移，不适合和 application snapshot extraction 合并。
+- 下一条边界是 `workbench-relations:no-oa-application-pair-snapshot-port-extraction`。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
