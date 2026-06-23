@@ -236,6 +236,33 @@ SHARED_SOURCE_VERSION_COMPARATORS = {
     ),
 }
 
+DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
+    (
+        "backend/src/fin_ops_platform/app/server.py",
+        "Application._enqueue_cost_statistics_read_model_refresh",
+    ): "legacy HTTP/app wrapper delegates to CostStatisticsRuntimeService, which uses ReadModelRefreshGateway.",
+    (
+        "backend/src/fin_ops_platform/app/server.py",
+        "Application._enqueue_tax_offset_read_model_refresh",
+    ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
+        "CostStatisticsQueryService.get_explorer",
+    ): "production SQL repository miss delegates to CostStatisticsRuntimeService gateway wrapper.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
+        "CostStatisticsRuntimeService.enqueue_refresh_for_months",
+    ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
+    (
+        "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
+        "TaxOffsetQueryService.get_month_payload",
+    ): "production SQL repository miss delegates to TaxOffsetRuntimeService gateway wrapper.",
+    (
+        "backend/src/fin_ops_platform/services/tax_offset_runtime_service.py",
+        "TaxOffsetRuntimeService.enqueue_refresh_for_months",
+    ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
+}
+
 
 class ReadModelArchitectureGuardTests(unittest.TestCase):
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
@@ -299,6 +326,17 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
                 offenders.append(f"{relative_path}:{node.lineno}:{scope_name}")
 
         self.assertEqual(offenders, [])
+
+    def test_direct_read_model_refresh_enqueue_calls_are_classified(self) -> None:
+        actual: set[tuple[str, str]] = set()
+        for path, tree, parents in self._iter_source_trees():
+            relative_path = str(path.relative_to(REPO_ROOT))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or _call_name(node.func) != "enqueue_read_model_refresh":
+                    continue
+                actual.add((relative_path, self._scope_name(node, parents)))
+
+        self.assertEqual(actual, set(DIRECT_REFRESH_ENQUEUE_ALLOWLIST))
 
     def _iter_source_trees(self) -> list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]]:
         entries: list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]] = []

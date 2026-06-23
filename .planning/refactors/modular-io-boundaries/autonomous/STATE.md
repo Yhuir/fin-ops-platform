@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-search-and-no-oa-bank-batch-contract`
+Current state: `autonomous-continue-after-legacy-read-path-removal-guards`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:search-and-no-oa-bank-batch-contract`; next execution should start with legacy read path removal/quarantine guards.
+Completed `read-models:legacy-read-path-removal-guards`; next execution should start with reconciliation Workbench amount-check query contract.
 
 ## Completed Modules
 
@@ -44,6 +44,7 @@ Completed `read-models:search-and-no-oa-bank-batch-contract`; next execution sho
 - `read-models:invoice-lifecycle-and-usage-contract` -> `closed-autonomous`
 - `read-models:cost-tax-ledger-summary-contract` -> `closed-autonomous`
 - `read-models:search-and-no-oa-bank-batch-contract` -> `closed-autonomous`
+- `read-models:legacy-read-path-removal-guards` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -55,8 +56,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:search-and-no-oa-bank-batch-contract`
+`read-models:legacy-read-path-removal-guards`
 
 ## Next Prompt
 
-`read-models:legacy-read-path-removal-guards`
+`reconciliation-workbench:amount-check-query-contract`

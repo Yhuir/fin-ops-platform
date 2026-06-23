@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Legacy read path refresh enqueue 污染守卫
+
+- 目标：执行 `read-models:legacy-read-path-removal-guards`，先把 direct `enqueue_read_model_refresh(...)` 调用点做静态分类，阻止后续旧 producer 绕过 `ReadModelRefreshGateway` / scope policy registry。
+- 影响范围：`tests/test_read_model_architecture_guards.py`、read-models 测试矩阵和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：当前允许的 direct enqueue 只限 legacy app wrapper、cost/tax query repository-miss wrapper 和 cost/tax runtime cache invalidation wrapper；这些 wrapper 最终仍委托 gateway。新增 direct enqueue 必须删除、迁移到 gateway，或登记 compat-only owner/reason/deletion condition。
+- 文档影响：同步 read-models 测试矩阵和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_direct_read_model_refresh_enqueue_calls_are_classified`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ，未执行生产 worker drain；本轮是静态守卫，不需要生产写或真实 read model 重建证据。
+- 后续事项：推进 `reconciliation-workbench:amount-check-query-contract`。
+
 ## 2026-06-23 - Search 与 no-OA bank batch read-side 合同守卫
 
 - 目标：执行 `read-models:search-and-no-oa-bank-batch-contract`，把 `search` 与 `no_oa_bank_batch` 的 self-managed freshness、projection strategy、fan-out `all`、worker、permission 和 repository port 边界固化为 manifest guard。

@@ -16,7 +16,7 @@
 | 9 | `read-models:invoice-lifecycle-and-usage-contract` | closed-autonomous | Added manifest guard preserving invoice lifecycle, input usage and output collection scoped incremental fan-out contracts and disjoint repository ports. |
 | 10 | `read-models:cost-tax-ledger-summary-contract` | closed-autonomous | Added manifest guard preserving cost parent aggregate semantics, tax/turnover fan-out contracts and disjoint repository ports. |
 | 11 | `read-models:search-and-no-oa-bank-batch-contract` | closed-autonomous | Added manifest guard preserving search partitioned index ownership and no-OA scoped incremental read-side contracts with disjoint repository ports. |
-| 12 | `read-models:legacy-read-path-removal-guards` | pending | Remove or quarantine live scan, direct queue write and legacy refresh paths that can pollute new links. |
+| 12 | `read-models:legacy-read-path-removal-guards` | closed-autonomous | Added static guard classifying direct read model refresh enqueue wrappers so new legacy producers cannot bypass gateway/scope policy unnoticed. |
 | 13 | `reconciliation-workbench:amount-check-query-contract` | pending | Narrow workbench compute/query contract after read model foundation; avoid full workbench rewrite. |
 | 14 | `batch-accounting:legacy-route-contract` | pending | Route/server.py extraction candidate. |
 | 15 | `server-py:route-owner-inventory` | pending | Inventory and small route ownership hardening only; no broad rewrite. |
