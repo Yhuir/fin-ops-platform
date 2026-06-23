@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:command-repository-snapshot-adapter-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:command-repository-snapshot-adapter-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -78,7 +78,8 @@ Current state expected on start:
 - WorkbenchRelationReadModelRepositoryPort is now wired into app/worker/projection builder relation read-model paths.
 - WorkbenchRelationDerivedLifecycleExecutor now owns derived lifecycle refresh enqueue payload behavior.
 - Transaction pair relation persist now uses `PostgresWorkbenchRelationRepository`.
-- The next pending boundary is workbench-relations:command-repository-snapshot-adapter-extraction.
+- WorkbenchRelationCommandRepositoryAdapter now owns command repository snapshot merge/apply behavior.
+- The next pending boundary is workbench-relations:pair-relation-persist-schedule-helper-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -174,21 +175,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:command-repository-snapshot-adapter-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:pair-relation-persist-schedule-helper-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:command-repository-snapshot-adapter-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-command-repository-snapshot-adapter-audit.md`.
+For workbench-relations:pair-relation-persist-schedule-helper-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-command-repository-snapshot-adapter-extraction.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Use CodeGraph for `_workbench_relation_command_repository`, `_save_workbench_relation_command_snapshot`, `_apply_workbench_relation_command_snapshot`, `_relation_history_touches_cases`, and callers/impact.
-- Extract the app-level callback repository and snapshot merge/apply helpers into an explicit adapter/port.
-- Preserve current snapshot load, optional transaction repository save, changed-case merge, history replacement, runtime mirror update and post-apply callback behavior.
-- Keep `server.py` as dependency assembly only.
-- Add focused adapter tests and a static guard that removed app-level helper methods do not return.
-- Do not remove app-level pair relation persist/schedule/background helpers in this slice.
+- Use CodeGraph for `_persist_workbench_pair_relations`, `_schedule_workbench_pair_relation_persist`, `_persist_workbench_pair_relations_in_background`, `_restore_workbench_pair_relation_snapshot`, `_workbench_write_facade`, and callers/impact.
+- Audit remaining app-level pair relation persist/schedule/background/restore helpers and WorkbenchWriteFacade callback wiring.
+- Decide the next narrow boundary from evidence.
+- Do not implement persist/schedule helper extraction during this audit slice.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests, docs verification and diff checks.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the queued implementation boundary if verification passes.
 

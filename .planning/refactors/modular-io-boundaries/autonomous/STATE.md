@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-relation-command-repository-snapshot-adapter-audit`
+Current state: `autonomous-continue-after-workbench-relation-command-repository-snapshot-adapter-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `workbench-relations:command-repository-snapshot-adapter-audit`. `workbench_relation` remains implementation-gap-open. The audit selected `workbench-relations:command-repository-snapshot-adapter-extraction` as the next narrow implementation boundary.
+Completed `workbench-relations:command-repository-snapshot-adapter-extraction`. `workbench_relation` remains implementation-gap-open. The app-level command repository callback and snapshot merge/apply logic now live in an explicit adapter. Next execution must audit the remaining pair relation persist/schedule/background helpers.
 
 ## Closed Or Deferred Slices
 
@@ -78,6 +78,7 @@ Completed `workbench-relations:command-repository-snapshot-adapter-audit`. `work
 - `read-models:workbench-relation-local-implementation-closure-audit` -> `analysis-closed`
 - `workbench-relations:transaction-persist-repository-owner-split` -> `implementation-closed`
 - `workbench-relations:command-repository-snapshot-adapter-audit` -> `analysis-closed`
+- `workbench-relations:command-repository-snapshot-adapter-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -85,7 +86,7 @@ Completed `workbench-relations:command-repository-snapshot-adapter-audit`. `work
 - `bank_detail` was the first implementation pilot, but the module is not closed.
 - `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. These are local slice evidence only; full module closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
-- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction and transaction persist repository owner split are implemented. Command repository snapshot adapter extraction is selected next; broader relation write lifecycle and pair relation persist/schedule/background helper cleanup remain open.
+- `workbench_relation` is selected as the next implementation pilot. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split and command repository snapshot adapter extraction are implemented. Broader relation write lifecycle and pair relation persist/schedule/background helper cleanup remain open.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
@@ -100,8 +101,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`workbench-relations:command-repository-snapshot-adapter-audit`
+`workbench-relations:command-repository-snapshot-adapter-extraction`
 
 ## Next Prompt
 
-`workbench-relations:command-repository-snapshot-adapter-extraction`
+`workbench-relations:pair-relation-persist-schedule-helper-audit`

@@ -131,6 +131,31 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - command repository snapshot adapter extraction
+
+目标：把 app-level relation command repository callback 和 snapshot merge/apply 逻辑抽到显式 adapter。
+
+变更：
+
+- 新增 `WorkbenchRelationCommandRepositoryAdapter`。
+- `Application._workbench_relation_command_repository(...)` 只负责构造 adapter。
+- 删除 app-level `_save_workbench_relation_command_snapshot(...)`、`_apply_workbench_relation_command_snapshot(...)` 和 `_relation_history_touches_cases(...)`。
+- 保留 runtime mirror 原地更新、changed-case merge、history replacement、optional transaction repository save 和 post-apply exception application service reconfigure 行为。
+- 新增 adapter 单测和静态 guard。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_command_repository_adapter -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_relation_command_repository_uses_explicit_snapshot_adapter tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_transaction_pair_relation_persist_uses_relation_repository_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_command_service tests.test_workbench_uow_contract tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
+剩余风险：
+
+- 该阶段不迁移 pair relation persist/schedule/background helper，不关闭 broader relation lifecycle，也不声明生产 PostgreSQL/worker/App Status/high-row/browser evidence。
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

@@ -1199,6 +1199,38 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_relation_command_repository_uses_explicit_snapshot_adapter(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        factory_source = _function_source(server_tree, server_source, "_workbench_relation_command_repository")
+        adapter_path = SERVICES_ROOT / "workbench_relation_command_repository_adapter.py"
+        adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
+        violations: list[str] = []
+
+        for removed_helper in (
+            "_save_workbench_relation_command_snapshot",
+            "_apply_workbench_relation_command_snapshot",
+            "_relation_history_touches_cases",
+        ):
+            if _function_source(server_tree, server_source, removed_helper):
+                violations.append(f"server.py still owns removed relation command repository helper {removed_helper}")
+        if "WorkbenchRelationCommandRepositoryAdapter(" not in factory_source:
+            violations.append("relation command repository factory does not build explicit adapter")
+        if "CallbackWorkbenchRelationRepository(" in factory_source:
+            violations.append("relation command repository factory still builds callback repository inline")
+        for snippet in (
+            "class WorkbenchRelationCommandRepositoryAdapter",
+            "def load_workbench_pair_relations(",
+            "def save_workbench_pair_relations(",
+            "self._pair_relation_service._pair_relations",
+            "self._after_apply()",
+        ):
+            if snippet not in adapter_source:
+                violations.append(f"relation command repository adapter missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
         source = path.read_text(encoding="utf-8")
