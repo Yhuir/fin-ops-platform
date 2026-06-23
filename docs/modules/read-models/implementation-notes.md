@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Bank detail 与账户余额 read model 合同守卫
+
+- 目标：执行 `read-models:bank-detail-and-bank-account-balance-contract`，锁定银行明细和账户余额两个高频 read model 的 scope、repository port、test owner 和 all-scope 语义，防止后续模块化时把余额事实源和 bank detail rows 混用。
+- 影响范围：`backend/src/fin_ops_platform/services/read_model_manifest.py`、`tests/test_read_model_manifest.py`、read-models/bank-details 模块文档和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：`bank_detail:all` 继续只作为 fan-out command，页面 freshness proof 以月份 shard 或明确 status 为准。`bank_account_balance` 保持独立 scope/event/table/list-save port，交易数量可按页面筛选参考 bank detail rows，但余额金额、余额 readiness 和 balance status 不能由 bank detail rows 替代。
+- 文档影响：同步 read-models 测试矩阵、bank-details 状态机变更记录和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_bank_detail_and_balance_manifest_keep_separate_contracts`，并把 `bank_account_balance` manifest test owner 修正为 `tests/test_bank_account_balance_read_model.py`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime -v`。
+- 未测风险：本轮不连接真实 PostgreSQL，不执行银行导入或 worker drain；真实生产 worker/SLO 仍由后续 infra-smoke 或发布窗口验证。
+- 后续事项：推进 `read-models:pending-invoice-and-oa-pending-payment-contract`。
+
 ## 2026-06-23 - Workbench active generation 特例合同守卫
 
 - 目标：执行 `read-models:workbench-active-generation-contract`，锁定 Workbench 作为 active generation read model 的特殊合同，防止后续模块化时误套普通 read model rebuild/gateway 语义。

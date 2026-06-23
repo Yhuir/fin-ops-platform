@@ -162,6 +162,45 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh_active_generation_scope")
         self.assertLessEqual(required_active_generation_ports, set(entry.repository_port_contract))
 
+    def test_bank_detail_and_balance_manifest_keep_separate_contracts(self) -> None:
+        bank_detail = READ_MODEL_MANIFEST["bank_detail"]
+        balance = READ_MODEL_MANIFEST["bank_account_balance"]
+        required_bank_detail_ports = {
+            "bank_detail_scope_keys_for_range",
+            "bank_detail_scope_summary",
+            "list_bank_detail_transactions",
+            "list_bank_detail_accounts",
+            "get_bank_detail_tagged_rows_by_transaction_ids",
+            "list_bank_detail_tagged_rows_by_month",
+            "save_bank_detail_rows",
+            "mark_bank_detail_scope",
+        }
+        required_balance_ports = {
+            "bank_account_balance_scope_summary",
+            "list_bank_account_balances",
+            "save_bank_account_balances",
+        }
+
+        self.assertEqual(bank_detail.scope_type, "bank_detail")
+        self.assertEqual(balance.scope_type, "bank_account_balance")
+        self.assertEqual(bank_detail.query_status_contract, "self_managed_freshness")
+        self.assertEqual(balance.query_status_contract, "self_managed_freshness")
+        self.assertEqual(bank_detail.projection_strategy, "partitioned_scoped_incremental")
+        self.assertEqual(balance.projection_strategy, "partitioned_scoped_incremental")
+        self.assertEqual(bank_detail.all_scope_semantics, "fan_out_command")
+        self.assertEqual(balance.all_scope_semantics, "fan_out_command")
+        self.assertEqual(bank_detail.force_refresh_contract, "gateway_force_refresh")
+        self.assertEqual(balance.force_refresh_contract, "gateway_force_refresh")
+        self.assertEqual(bank_detail.query_owner, "BankDetailsApplicationService")
+        self.assertEqual(balance.query_owner, "BankDetailsApplicationService")
+        self.assertEqual(bank_detail.permission_owner, "bank_details_api_session")
+        self.assertEqual(balance.permission_owner, "bank_details_api_session")
+        self.assertEqual(bank_detail.test_owner, "tests/test_bank_details_sql_runtime.py")
+        self.assertEqual(balance.test_owner, "tests/test_bank_account_balance_read_model.py")
+        self.assertLessEqual(required_bank_detail_ports, set(bank_detail.repository_port_contract))
+        self.assertEqual(required_balance_ports, set(balance.repository_port_contract))
+        self.assertFalse(set(bank_detail.repository_port_contract).intersection(balance.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()

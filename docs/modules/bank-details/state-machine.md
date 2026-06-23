@@ -101,3 +101,4 @@ Refresh 触发来源：
 | 2026-06-18 | 补大表格与遮挡浏览器验收 | 不改变状态机；120 行长字段、桌面/窄屏、分类筛选、分类选择浮层、导出菜单和表格横向滚动必须保持可见且未被覆盖 | `web/e2e/bank-details-large-scroll-flow.spec.ts` |
 | 2026-06-18 | 补银行明细权限与会话 gate 浏览器验收 | 不改变状态机；`read_export_only` 只能读和导出且零 mutation，`admin` 可执行分类写入，forbidden/expired session 在银行明细路由进入 session gate 且不调用银行明细 protected API | `web/e2e/bank-details-filtered-export-permissions.spec.ts` |
 | 2026-06-18 | 补首屏与 fresh 空态浏览器验收 | 不改变状态机；默认当前年 accounts/transactions query、全部账户视图、账户余额、默认列、relation/category 字段和 fresh 空结果空态必须在真实浏览器可见；非 fresh 空态仍走诊断态 | `web/e2e/bank-details-initial-state.spec.ts` |
+| 2026-06-23 | 补 `bank_detail` / `bank_account_balance` manifest 合同守卫 | 不改变状态机；锁定银行明细与账户余额独立 scope、repository port、test owner 和 `all` fan-out 语义，防止账户余额 readiness/金额被 bank detail rows 替代 | `tests.test_read_model_manifest.ReadModelManifestTests.test_bank_detail_and_balance_manifest_keep_separate_contracts` |

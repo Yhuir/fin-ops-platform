@@ -119,7 +119,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         query_owner="BankDetailsApplicationService",
         repository_owner="PostgresReadModelRepository.bank_account_balance",
         permission_owner="bank_details_api_session",
-        test_owner="tests/test_bank_details_sql_runtime.py",
+        test_owner="tests/test_bank_account_balance_read_model.py",
     ),
     "pending_invoice": ReadModelManifestEntry(
         key="pending_invoice",

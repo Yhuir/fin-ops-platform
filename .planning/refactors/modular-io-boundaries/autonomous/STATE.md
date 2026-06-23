@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-workbench-active-generation-contract`
+Current state: `autonomous-continue-after-bank-detail-and-bank-account-balance-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:workbench-active-generation-contract`; next execution should start with bank detail and bank account balance read model contracts.
+Completed `read-models:bank-detail-and-bank-account-balance-contract`; next execution should start with pending invoice and OA pending payment read model contracts.
 
 ## Completed Modules
 
@@ -39,6 +39,7 @@ Completed `read-models:workbench-active-generation-contract`; next execution sho
 - `read-models:refresh-gateway-force-refresh-and-operation-barrier` -> `closed-autonomous`
 - `read-models:repository-port-and-sql-owner-split-plan` -> `closed-autonomous`
 - `read-models:workbench-active-generation-contract` -> `closed-autonomous`
+- `read-models:bank-detail-and-bank-account-balance-contract` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -50,8 +51,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:workbench-active-generation-contract`
+`read-models:bank-detail-and-bank-account-balance-contract`
 
 ## Next Prompt
 
-`read-models:bank-detail-and-bank-account-balance-contract`
+`read-models:pending-invoice-and-oa-pending-payment-contract`
