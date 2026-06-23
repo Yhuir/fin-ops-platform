@@ -437,6 +437,7 @@ from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as 
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_pair_relation_persist_service import WorkbenchPairRelationPersistService
+from fin_ops_platform.services.workbench_payload_relation_read_port import WorkbenchPayloadRelationReadPort
 from fin_ops_platform.services.workbench_pair_relation_rollback_restore_service import (
     WorkbenchPairRelationRollbackRestoreService,
 )
@@ -3195,6 +3196,11 @@ class Application:
             relation_repository=self._workbench_relation_command_repository(repository=repository),
             relation_facade=relation_facade,
             require_fresh_relations=False if require_fresh_relations is None else require_fresh_relations,
+        )
+
+    def _workbench_payload_relation_read_port(self) -> WorkbenchPayloadRelationReadPort:
+        return WorkbenchPayloadRelationReadPort(
+            self._workbench_relation_command_service(require_fresh_relations=False)
         )
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
@@ -18528,13 +18534,14 @@ class Application:
         open_section = result.setdefault("open", {})
         if supplement_missing_rows:
             self._supplement_missing_active_pair_relation_rows(paired_section, open_section)
+        relation_read_port = self._workbench_payload_relation_read_port()
         for row_type in ("oa", "bank", "invoice"):
             source_paired_rows = list(paired_section.get(row_type, []))
             source_open_rows = list(open_section.get(row_type, []))
             patched_paired_rows: list[dict[str, object]] = []
             patched_open_rows: list[dict[str, object]] = []
             for row in [*source_paired_rows, *source_open_rows]:
-                relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(str(row.get("id", "")))
+                relation = relation_read_port.get_active_relation_by_row_id(str(row.get("id", "")))
                 if isinstance(relation, dict):
                     patched_paired_rows.append(self._apply_pair_relation_to_row(row, relation))
                 elif row in source_paired_rows:
@@ -18561,7 +18568,8 @@ class Application:
                         rows_by_id[row_id] = row
 
         missing_row_ids: list[str] = []
-        for relation in self._workbench_pair_relation_service.list_active_relations():
+        relation_read_port = self._workbench_payload_relation_read_port()
+        for relation in relation_read_port.list_active_relations():
             for row_id in list(relation.get("row_ids") or []):
                 normalized_row_id = str(row_id or "").strip()
                 if normalized_row_id and normalized_row_id not in rows_by_id:
@@ -20665,11 +20673,12 @@ class Application:
         return relation_mode == NO_OA_BANK_BATCH_RELATION_MODE
 
     def _relation_for_group(self, group: dict[str, object]) -> dict[str, object] | None:
+        relation_read_port = self._workbench_payload_relation_read_port()
         for key in ("oa_rows", "bank_rows", "invoice_rows"):
             for row in list(group.get(key, [])):
                 if not isinstance(row, dict):
                     continue
-                relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(str(row.get("id", "")))
+                relation = relation_read_port.get_active_relation_by_row_id(str(row.get("id", "")))
                 if isinstance(relation, dict):
                     return relation
         return None
@@ -20918,6 +20927,7 @@ class Application:
     def _resolve_live_rows_direct(self, row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
         normalized_row_ids = [str(row_id) for row_id in row_ids]
         resolved_rows = self._resolve_rows_from_cached_read_models(normalized_row_ids, month_hint=month_hint)
+        relation_read_port = self._workbench_payload_relation_read_port()
         unresolved_live_row_ids: list[str] = []
 
         for row_id in normalized_row_ids:
@@ -20933,7 +20943,7 @@ class Application:
                 oa_row = self._workbench_query_service.serialize_row(
                     self._workbench_query_service.get_row_record(row_id, month_hint=month_hint)
                 )
-                pair_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+                pair_relation = relation_read_port.get_active_relation_by_row_id(row_id)
                 paired_row = self._apply_pair_relation_to_row(oa_row, pair_relation) if isinstance(pair_relation, dict) else oa_row
                 resolved_rows[row_id] = self._workbench_override_service.apply_to_row(paired_row)
             except KeyError:
@@ -20952,7 +20962,7 @@ class Application:
                 live_row = live_rows.get(row_id)
                 if live_row is None:
                     raise KeyError(row_id)
-                pair_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+                pair_relation = relation_read_port.get_active_relation_by_row_id(row_id)
                 paired_row = self._apply_pair_relation_to_row(live_row, pair_relation) if isinstance(pair_relation, dict) else live_row
                 resolved_rows[row_id] = self._workbench_override_service.apply_to_row(paired_row)
 

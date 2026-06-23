@@ -3031,3 +3031,39 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-workbench-payload-relation-read-port-extraction`。
+
+## 2026-06-24 - server Workbench payload relation read port extraction
+
+目标：把 Workbench 页面 payload/live-row enrichment 中的 active relation 读取从 `server.py` direct pair service 调用迁移到显式 read port。
+
+变更：
+
+- 新增 `WorkbenchPayloadRelationReadPort`。
+- `WorkbenchRelationCommandService` 新增只读方法 `get_active_relation_by_row_id(...)`。
+- `Application._workbench_payload_relation_read_port(...)` 使用 `WorkbenchRelationCommandService(require_fresh_relations=False)` 构造 port。
+- 以下 helper 不再直接读取 `_workbench_pair_relation_service`：
+  - `_apply_pair_relations_to_payload(...)`
+  - `_supplement_missing_active_pair_relation_rows(...)`
+  - `_relation_for_group(...)`
+  - `_resolve_live_rows_direct(...)`
+- 新增静态 guard，防止上述 payload/live-row helper 回退到 direct pair service read。
+
+未闭环：
+
+- source-version relation snapshot reads 仍在 `server.py`，下一条边界处理。
+- repair/precondition、transaction-persist、rollback、whole-state persistence snapshot surfaces 保持单独后续 slice。
+- `workbench_relation` 模块仍未完整闭环，Go/Fiber/Go Worker 仍阻塞。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_payload_relation_read_port.py backend/src/fin_ops_platform/services/workbench_relation_command_service.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_workbench_payload_relation_reads_use_payload_read_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_pair_relation_application_supplements_missing_active_oa_rows tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_active_relation_rows_for_selected_oa_context -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_falls_back_to_underlying_live_row_services_when_group_payload_is_missing_selected_rows -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-source-version-relation-snapshot-provider-extraction`。

@@ -450,6 +450,10 @@ class WorkbenchRelationCommandService:
     def list_active_relations(self) -> list[dict[str, Any]]:
         return self._pair_service().list_active_relations()
 
+    def get_active_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        relation = self._pair_service().get_active_relation_by_row_id(str(row_id or ""))
+        return deepcopy(relation) if isinstance(relation, dict) else None
+
     def list_history(self) -> list[dict[str, Any]]:
         return self._pair_service().list_history()
 

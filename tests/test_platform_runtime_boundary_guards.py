@@ -1173,6 +1173,39 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_workbench_payload_relation_reads_use_payload_read_port(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        port_source = (SERVICES_ROOT / "workbench_payload_relation_read_port.py").read_text(encoding="utf-8")
+
+        checked_sources = {
+            method_name: _function_source(tree, source, method_name)
+            for method_name in (
+                "_apply_pair_relations_to_payload",
+                "_supplement_missing_active_pair_relation_rows",
+                "_relation_for_group",
+                "_resolve_live_rows_direct",
+            )
+        }
+        violations: list[str] = []
+        if "class WorkbenchPayloadRelationReadPort" not in port_source:
+            violations.append("Workbench payload relation read port is missing")
+        if "from fin_ops_platform.services.workbench_payload_relation_read_port import WorkbenchPayloadRelationReadPort" not in source:
+            violations.append("Application does not import WorkbenchPayloadRelationReadPort")
+        if "def _workbench_payload_relation_read_port(self) -> WorkbenchPayloadRelationReadPort" not in source:
+            violations.append("Application does not expose Workbench payload relation read port factory")
+        for method_name, method_source in checked_sources.items():
+            if "_workbench_pair_relation_service" in method_source:
+                violations.append(f"{method_name} still reads broad pair relation service directly")
+            if "_workbench_payload_relation_read_port()" not in method_source:
+                violations.append(f"{method_name} does not use Workbench payload relation read port")
+        for required in ("get_active_relation_by_row_id", "list_active_relations"):
+            if required not in port_source:
+                violations.append(f"WorkbenchPayloadRelationReadPort is missing {required}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")
