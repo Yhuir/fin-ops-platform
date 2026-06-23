@@ -1527,6 +1527,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_server_case_id_allocation_uses_allocator(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_next_workbench_relation_case_id")
+        allocator_source = (SERVICES_ROOT / "workbench_relation_case_id_allocator.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "class WorkbenchRelationCaseIdAllocator" not in allocator_source:
+            violations.append("Workbench relation case-id allocator is missing")
+        if "def next_case_id" not in allocator_source:
+            violations.append("WorkbenchRelationCaseIdAllocator does not expose next_case_id")
+        if "pair_relations" in method_source:
+            violations.append("_next_workbench_relation_case_id still parses pair relation snapshot shape")
+        if "_workbench_pair_relation_service.snapshot()" in method_source:
+            violations.append("_next_workbench_relation_case_id still reads relation snapshot directly")
+        if "WorkbenchRelationCaseIdAllocator(" not in method_source:
+            violations.append("_next_workbench_relation_case_id does not use WorkbenchRelationCaseIdAllocator")
+        if "relation_snapshot_provider=self._workbench_pair_relation_service.snapshot" not in method_source:
+            violations.append("_next_workbench_relation_case_id does not pass relation snapshot provider")
+        if "next_case_id=self._workbench_override_service._next_case_id" not in method_source:
+            violations.append("_next_workbench_relation_case_id does not preserve override case-id source")
+        if "pair_relations" not in allocator_source:
+            violations.append("WorkbenchRelationCaseIdAllocator does not inspect relation case ids")
+
+        self.assertEqual(violations, [])
+
     def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

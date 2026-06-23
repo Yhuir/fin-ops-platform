@@ -192,24 +192,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-case-id-allocation-service-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:transaction-persist-closure-accounting-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-case-id-allocation-service-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-case-id-allocation-relation-read-owner-audit.md`.
+For workbench-relations:transaction-persist-closure-accounting-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-case-id-allocation-service-extraction.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-server-precondition-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_next_workbench_relation_case_id`, `next_case_id`, `CASE-AUTO-0001`, and case id collision behavior.
-- Add `WorkbenchRelationCaseIdAllocator`.
-- Move relation snapshot parsing and used-case-id collision avoidance out of `Application._next_workbench_relation_case_id(...)`.
-- Keep `Application._next_workbench_relation_case_id(...)` as a thin delegate or inject allocator method directly into `WorkbenchWriteFacade`.
-- Preserve confirm-link auto case id behavior, especially skipping active `CASE-AUTO-0001`.
-- Add static guard coverage.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_pair_relation_persist_service.py`, `backend/src/fin_ops_platform/services/workbench_pair_relation_rollback_restore_service.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_persist_workbench_pair_relations`, `_persist_workbench_pair_relations_in_transaction`, `WorkbenchPairRelationPersistService`, `save_workbench_pair_relations`, `snapshot_case_ids`, and transaction relation persist tests.
+- Audit transaction and non-transaction relation persist surfaces.
+- Classify each as implemented, compat-only, next implementation boundary, production-evidence-deferred, or blocked-by-human-gate.
+- Decide whether remaining work is a code implementation slice or closure/defer accounting.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run focused case-id allocation/static guard tests, app check, docs verification and diff checks as applicable.
+- Run docs verification and diff checks; run code tests only if this audit finds and fixes a testable code inconsistency.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

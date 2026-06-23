@@ -460,6 +460,7 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
     WorkbenchRelationCommandRepositoryAdapter,
 )
+from fin_ops_platform.services.workbench_relation_case_id_allocator import WorkbenchRelationCaseIdAllocator
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor import (
     WorkbenchRelationDerivedLifecycleExecutor,
@@ -3157,18 +3158,11 @@ class Application:
         )
 
     def _next_workbench_relation_case_id(self) -> str:
-        snapshot = self._workbench_pair_relation_service.snapshot()
-        relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else {}
-        used_case_ids = {
-            str(case_id).strip()
-            for case_id in (relations.keys() if isinstance(relations, dict) else [])
-            if str(case_id).strip()
-        }
-        for _attempt in range(10000):
-            case_id = self._workbench_override_service._next_case_id()
-            if case_id not in used_case_ids:
-                return case_id
-        raise RuntimeError("Unable to allocate an unused workbench relation case id.")
+        allocator = WorkbenchRelationCaseIdAllocator(
+            relation_snapshot_provider=self._workbench_pair_relation_service.snapshot,
+            next_case_id=self._workbench_override_service._next_case_id,
+        )
+        return allocator.next_case_id()
 
     def _bank_transaction_category_codes_for_workbench_row_ids(self, row_ids: list[str]) -> dict[str, str]:
         no_oa_service = self._no_oa_bank_batch_application_service()

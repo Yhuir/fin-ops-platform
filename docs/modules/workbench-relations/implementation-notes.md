@@ -3313,3 +3313,29 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-case-id-allocation-service-extraction`。
+
+## 2026-06-24 - server case-id allocation service extraction
+
+目标：把 `_next_workbench_relation_case_id(...)` 中的 relation snapshot parsing 和 `CASE-AUTO-*` collision avoidance 移到显式服务。
+
+变更：
+
+- 新增 `WorkbenchRelationCaseIdAllocator`。
+- `Application._next_workbench_relation_case_id(...)` 保留为 thin delegate。
+- `server.py` 不再解析 `pair_relations` snapshot shape。
+- 保留 `WorkbenchOverrideService._next_case_id` 作为自动 case id 来源。
+- 保留 active `CASE-AUTO-0001` 已存在时跳到 `CASE-AUTO-0002` 的行为。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_case_id_allocator.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_case_id_allocation_uses_allocator -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_confirm_link_without_case_id_skips_existing_active_auto_relation_case_id -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_confirm_link_without_case_id_allocates_new_case_and_replaces_active_relation -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:transaction-persist-closure-accounting-audit`。
