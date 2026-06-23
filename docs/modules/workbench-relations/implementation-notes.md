@@ -2818,3 +2818,22 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 ```
 
 下一条边界：`workbench-relations:workbench-write-facade-cash-special-metadata-boundary-audit`。
+
+## 2026-06-24 - WorkbenchWriteFacade cash special metadata boundary audit
+
+目标：审计 `WorkbenchWriteFacade` 里剩余的 cash special metadata 直接 pair service mutation，并决定下一条最小实现边界。
+
+结论：
+
+- `confirm_cash_pass_through(...)` 和 `confirm_cash_ticket_purchase(...)` 仍直接调用 `_pair_relation_service.update_special_metadata_for_row_ids(...)`。
+- `cancel_cash_special(...)` 仍直接调用 `_pair_relation_service.clear_special_metadata_for_row_ids(...)`。
+- `_active_relation_for_cash_special(...)` 的读侧已经通过 `WorkbenchWriteRelationReadSnapshotPort`，剩余问题只在 mutation。
+- 现有 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)` 是按 case id merge metadata 的通用命令，不是 cash special 的直接替代：cancel 需要 clear/replace 语义，cash special 还需要保留 row_ids 定位、stale expected-version 检查、history operation 名称、response shape 和 scheduling 行为。
+- 下一条边界是 `workbench-relations:workbench-write-facade-cash-special-metadata-port-extraction`：先抽显式 mutation port，移除 facade 对 pair service metadata update/clear 的直接调用；后续再单独评估 command service 原生 clear/replace 能力。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
