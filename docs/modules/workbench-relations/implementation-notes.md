@@ -3097,3 +3097,23 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-repair-precondition-relation-read-port-audit`。
+
+## 2026-06-24 - server repair/precondition relation read port audit
+
+目标：审计 `server.py` 中剩余 write-adjacent repair/precondition direct active relation reads，避免把不同写前置语义合并进一个过宽实现边界。
+
+结论：
+
+- `_sync_oa_invoice_offset_auto_pair_relations(...)` 是最小下一刀：只读取 active relations 中的 `OA_INVOICE_OFFSET_AUTO_MATCH_MODE`，写入已通过 `WorkbenchRelationCommandService`，并已有聚焦测试。
+- `_repair_active_relations_with_oa_attachment_context(...)` 需要保留 full before relation、补齐附件 invoice、`replace_existing=True`，复杂度更高，后续单独抽 port。
+- `_expand_confirm_link_row_ids_for_existing_context(...)` 属于 confirm-link context expansion precondition，后续单独处理。
+- `_auto_pair_conflicts_with_manual_relation(...)` 属于 auto-pair conflict precondition，后续单独处理。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-oa-invoice-offset-relation-read-port-extraction`。
