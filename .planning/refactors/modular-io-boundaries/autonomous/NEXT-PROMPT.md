@@ -1,14 +1,15 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:pending-invoice-local-implementation-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-pending-invoice` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:pending-invoice-local-implementation-closure-audit`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `read-models:next-pilot-selection-after-pending-invoice`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `pending_invoice` was the active non-Go read model implementation pilot and is now locally accounted for.
+- `oa_pending_payment` is selected as the next non-Go read model implementation pilot.
 - `PendingInvoiceReadModelRepositoryPort` is wired.
 - Freshness/barrier audit is analysis-closed.
 - Pending invoice scope policy now rejects unsupported expense/income filter groups at gateway validation.
@@ -18,7 +19,7 @@ Continue the autonomous modular IO refactor after the `read-models:pending-invoi
 
 ## Next Boundary
 
-`read-models:next-pilot-selection-after-pending-invoice`
+`read-models:oa-pending-payment-repository-port-extraction`
 
 ## Required First Steps On Resume
 
@@ -26,44 +27,50 @@ Continue the autonomous modular IO refactor after the `read-models:pending-invoi
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-local-implementation-closure-audit.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-pending-invoice.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`
-   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - module docs/tests/implementation notes for the top remaining candidate modules.
+   - `docs/modules/oa-pending-payments/README.md`
+   - `docs/modules/oa-pending-payments/tests.md`
+   - `docs/modules/oa-pending-payments/implementation-notes.md`
    - `backend/src/fin_ops_platform/services/read_model_manifest.py`
-5. Use CodeGraph for top candidate service/route/read model impact before editing.
+   - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
+   - `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
+   - `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
+   - `backend/src/fin_ops_platform/services/postgres_state_store.py`
+   - `backend/src/fin_ops_platform/app/worker.py`
+   - relevant OA pending payment API/read model tests.
+5. Use CodeGraph for OA pending payment read model service/projection impact before editing.
 6. Update analysis/docs/state after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Select the next non-Go read model implementation pilot after pending_invoice.
-- Compare remaining candidates using current manifest contracts, module docs, tests, cross-page freshness value, blast radius, and existing local coverage.
-- Decide the next first implementation boundary, preferably a narrow repository-port or owner-boundary extraction matching the successful bank_detail/workbench_relation/pending_invoice pattern.
-- Insert the selected next implementation boundary before Go candidates.
+- Add a narrow `OaPendingPaymentReadModelRepositoryPort`.
+- Expose only manifest-listed OA pending payment read-model methods.
+- Wire `OaPendingPaymentReadModelService` and OA pending payment projection save/mark/prune paths through the port.
+- Preserve rows/filter-options/detail response shape, completed/in-progress view behavior, source-version stale behavior, all fan-out/month shard behavior and pending relation cleanup behavior.
+- Add tests proving unrelated read model repository methods are not exposed through the port.
 
 Forbidden:
 
-- Do not change pending invoice business rules, relation write behavior, status meanings or UI workflow.
-- Do not broaden API shape without a separate API contract slice and tests proving existing clients remain compatible.
+- Do not change OA payment status semantics, OA MySQL write-back, payment-admitted source adapter behavior, pending relation promotion, command service behavior, UI workflow or shared worker event semantics.
+- Do not broaden API shape without tests proving existing clients remain compatible.
 - Do not implement Go/Fiber/Go Worker.
 - Do not mark any module globally closed.
 - Do not rely on staging DB or local `PGSQL_URL`.
 
 ## Expected Output
 
-- One verified next-pilot selection slice.
+- One verified OA pending payment repository port extraction slice.
 - Updated analysis/docs/state/queue/next prompt.
-- No runtime tests unless code changes; otherwise docs verification and `git diff --check`.
+- Targeted backend tests proving port shape and preserved rows/detail/projection behavior.
+- Py compile for touched backend/test files, docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
 - Continue to the next pending boundary if safe.
 
 ## Stop Condition
 
-Complete one verified next-pilot selection slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the selected implementation boundary unless a hard stop gate is hit.
+Complete one verified OA pending payment repository port extraction slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

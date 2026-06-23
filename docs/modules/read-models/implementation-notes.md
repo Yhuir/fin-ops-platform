@@ -681,6 +681,14 @@
 - 状态：`read-models:pending-invoice-local-implementation-closure-audit` 进入 `production-evidence-deferred`，但 `pending_invoice` 不标记为 module-closed；真实 PostgreSQL/worker/App Status/high-row/browser 证据仍延期。
 - 下一步：先执行 `read-models:next-pilot-selection-after-pending-invoice`，重选下一个非 Go read model pilot；Go admission 继续 blocked。
 
+## 2026-06-24 - OA pending payment selected as next modular IO read model pilot
+
+- 目标：在 `bank_detail`、`workbench_relation`、`pending_invoice` 三个非 Go read model pilot 后，选择下一个试点。
+- 决策：选择 `oa_pending_payment`，下一条边界为 `read-models:oa-pending-payment-repository-port-extraction`。
+- 理由：`oa_pending_payment` 同时覆盖 completed OA projection、in-progress payment-admitted OA、Workbench relation、invoice lifecycle 和 pending bank claim，是“页面 A 更新、页面 B 不能读旧 fresh”风险较高的用户可见页面；已有 `OaPendingPaymentReadModelService`、manifest 合同和较完整测试，适合延续 repository port 首切模式。
+- 首切范围：新增 `OaPendingPaymentReadModelRepositoryPort`，只暴露 manifest 登记的 rows/detail/save/mark/prune 方法，先收窄 SQL read model surface；不改 OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI 或共享 worker 语义。
+- 状态：Go/Fiber/Go Worker admission 继续 blocked。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

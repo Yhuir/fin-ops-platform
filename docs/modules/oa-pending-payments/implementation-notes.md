@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-24 - selected as next modular IO read model pilot
+
+- 目标：在 `pending_invoice` 本地实现支持 accounted 后，评估 OA 待付款是否适合作为下一个非 Go read model 试点。
+- 决策：选择 `oa_pending_payment`，下一条边界为 `read-models:oa-pending-payment-repository-port-extraction`。
+- 理由：本模块同时覆盖 completed OA projection、in-progress payment-admitted OA、Workbench relation、invoice lifecycle 和 pending bank claim，是高可见、跨事实源、容易出现 stale-read bug 的页面；已有 read model service、manifest 合同和测试矩阵，适合延续 repository port 首切模式。
+- 首切范围：新增 `OaPendingPaymentReadModelRepositoryPort`，只暴露 rows/detail/save/mark/prune read model 方法；不改 OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、UI workflow 或 shared worker event semantics。
+- 状态：Go/Fiber/Go Worker admission 继续 blocked。
+
 ## 2026-06-23 - 右侧抽屉候选流水按已选 OA 月份收敛
 
 - 目标：修复 OA 待付款核对进行中视图中，勾选 OA 后打开“关联支出流水”右侧抽屉长期停留在“加载中”的问题。

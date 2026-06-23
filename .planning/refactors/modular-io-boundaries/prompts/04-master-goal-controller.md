@@ -204,27 +204,26 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-pending-invoice unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:oa-pending-payment-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-pending-invoice:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-local-implementation-closure-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-bank-detail.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`.
+For read-models:oa-pending-payment-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-pending-invoice.md`.
 - Read `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`.
-- Read `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`.
-- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, and module docs/tests/implementation notes for the top remaining candidate modules.
+- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/oa-pending-payments/tests.md`, and `docs/modules/oa-pending-payments/implementation-notes.md`.
 - Read `backend/src/fin_ops_platform/services/read_model_manifest.py`.
-- Use CodeGraph for top candidate service/route/read model impact before editing code.
-- Compare remaining read model candidates by cross-page freshness value, current structure, blast radius, tests, repository port gap, worker/freshness complexity, and local verification feasibility.
-- Select the next non-Go read model implementation pilot and its first narrow implementation boundary.
-- Insert the selected implementation boundary before Go candidates.
+- Read `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`, `invoice_usage_collection_sql_projection.py`, `invoice_usage_collection_read_model_refresh.py`, `postgres_state_store.py`, `backend/src/fin_ops_platform/app/worker.py`, and relevant OA pending payment tests.
+- Use CodeGraph for OA pending payment read model service/projection impact before editing code.
+- Add a narrow `OaPendingPaymentReadModelRepositoryPort` exposing only manifest-listed OA pending payment read-model methods.
+- Wire `OaPendingPaymentReadModelService` and OA pending payment projection save/mark/prune paths through the port.
+- Preserve rows/filter-options/detail response shape, completed/in-progress view behavior, source-version stale behavior, all fan-out/month shard behavior and pending relation cleanup behavior.
+- Add tests proving unrelated read model repository methods are not exposed through the port.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
+- Do not change OA payment status semantics, OA MySQL write-back, payment-admitted source adapter behavior, pending relation promotion, command service behavior, UI workflow or shared worker event semantics.
 - Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks; run targeted tests only if behavior changes.
+- Run targeted backend tests, py compile for touched backend/test files, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

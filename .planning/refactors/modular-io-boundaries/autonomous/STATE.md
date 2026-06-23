@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-pending-invoice-local-implementation-closure-audit`
+Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-pending-invoice`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:pending-invoice-local-implementation-closure-audit`. Local pending invoice implementation support is accounted for through repository port, freshness gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination guards and tests/docs. Real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred, so `pending_invoice` is not globally closed. The next executable boundary is selecting the next non-Go read model pilot after pending invoice.
+Completed `read-models:next-pilot-selection-after-pending-invoice`. `oa_pending_payment` is selected as the next non-Go read model implementation pilot because it combines completed OA projection, in-progress payment-admitted OA, Workbench relation, invoice lifecycle and pending bank claims while still allowing a narrow repository-port first slice. The next executable boundary is `read-models:oa-pending-payment-repository-port-extraction`.
 
 ## Closed Or Deferred Slices
 
@@ -137,6 +137,7 @@ Completed `read-models:pending-invoice-local-implementation-closure-audit`. Loca
 - `read-models:pending-invoice-scope-policy-filter-allowlist` -> `implementation-closed`
 - `read-models:pending-invoice-mutation-freshness-target-contract` -> `implementation-closed`
 - `read-models:pending-invoice-local-implementation-closure-audit` -> `production-evidence-deferred`
+- `read-models:next-pilot-selection-after-pending-invoice` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -148,7 +149,7 @@ Completed `read-models:pending-invoice-local-implementation-closure-audit`. Loca
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - `pending_invoice` was the third non-Go read model implementation pilot after `bank_detail` and `workbench_relation`. Repository port extraction is implemented, freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, income-status mutations now wait for pending invoice operation barrier targets before refetching rows, and local implementation support is accounted for. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- The next pending slice is `read-models:next-pilot-selection-after-pending-invoice`; it must select another non-Go read model pilot before any Go hot-path admission.
+- `oa_pending_payment` is selected as the next non-Go read model pilot. The first implementation boundary is repository port extraction for rows/detail lookup and projection save/mark/prune paths; it must not change OA write-back, payment-admitted source adapter behavior, pending relation promotion, command service behavior, UI workflow, shared worker runtime or Go/Fiber/Go Worker.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -163,8 +164,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:pending-invoice-local-implementation-closure-audit`
+`read-models:next-pilot-selection-after-pending-invoice`
 
 ## Next Prompt
 
-`read-models:next-pilot-selection-after-pending-invoice`
+`read-models:oa-pending-payment-repository-port-extraction`
