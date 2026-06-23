@@ -1,5 +1,23 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - pending invoice pair service boundary audit
+
+目标：审计待找发票 query/application service 对 `pair_relation_service`、`relation_facade`、`relation_command_service` 的真实依赖，决定旧 pair service 注入应删除、隔离还是保留为兼容路径。
+
+结论：
+
+- `PendingInvoiceQueryService` 仍接收并保存 `pair_relation_service`，但不调用；relation 读已经通过 `relation_facade.get_by_row_ids(...)`。
+- `PendingInvoiceApplicationService` 仍接收并保存 `pair_relation_service`，但不调用；relation 读通过 `relation_facade`，relation 写通过 `relation_command_service.confirm_relation(...)`。
+- 这不是 compat-only 必需依赖，而是可删除的未使用旧注入。
+- 下一条边界是 `workbench-relations:pending-invoice-unused-pair-service-removal`，移除 pending invoice service 构造参数、`server.py` 注入、测试 fixture 传参，并加强 runtime boundary guard。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。
