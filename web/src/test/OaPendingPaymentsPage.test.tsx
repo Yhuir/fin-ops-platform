@@ -1150,6 +1150,7 @@ describe("OA pending payments page", () => {
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
     expect(await screen.findByRole("heading", { name: "关联支出流水" })).toBeInTheDocument();
     await waitFor(() => expect(bankCandidateRequests(fetchMock).at(-1)?.searchParams.get("relation_status")).toBe("all"));
+    expect(bankCandidateRequests(fetchMock).at(-1)?.searchParams.getAll("oa_row_ids")).toEqual(["oa-candidate"]);
     expect(await screen.findByText("抽屉供应商")).toBeInTheDocument();
     expect(screen.getAllByText("已关联进行中OA").length).toBeGreaterThan(0);
     expect(screen.getByRole("checkbox", { name: /已关联供应商/ })).toBeDisabled();

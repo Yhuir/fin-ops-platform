@@ -52,6 +52,7 @@ class WorkbenchMatchingOrchestrator:
         exception_case_service: object | None = None,
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
         reconciliation_engine: WorkbenchReconciliationEngine | None = None,
+        relation_command_service: Any | None = None,
         settings_provider: Callable[[], dict[str, Any]] | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         logger: logging.Logger | None = None,
@@ -65,6 +66,7 @@ class WorkbenchMatchingOrchestrator:
         self._exception_case_service = exception_case_service
         self._decision_store = decision_store
         self._reconciliation_engine = reconciliation_engine
+        self._relation_command_service = relation_command_service
         self._settings_provider = settings_provider
         self._source_versions_provider = source_versions_provider
         self._logger = logger or LOGGER
@@ -196,6 +198,7 @@ class WorkbenchMatchingOrchestrator:
             special_adapter=WorkbenchSpecialReconciliationAdapter(
                 special_rule_service=self._special_rule_service,
             ),
+            relation_command_service=self._relation_command_service,
         )
         result = engine.run_scope(
             scope_month,
@@ -212,6 +215,9 @@ class WorkbenchMatchingOrchestrator:
             result.get("expired_decision_count") or 0
         )
         summary["suppressed_by_pair_relation_count"] += int(result.get("suppressed_by_pair_relation_count") or 0)
+        summary["auto_completed_relation_count"] = int(summary.get("auto_completed_relation_count") or 0) + int(
+            result.get("auto_completed_relation_count") or 0
+        )
         self._invalidate_read_models(scope_month)
 
     def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:

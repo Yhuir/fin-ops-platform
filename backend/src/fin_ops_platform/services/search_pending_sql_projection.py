@@ -337,6 +337,7 @@ class SearchPendingSqlProjectionBuilder:
             row_ids=[str(row.get("transaction_id") or "").strip() for row in rows],
             month=month,
         )
+        emitted_relation_groups: set[str] = set()
         for row in rows:
             transaction_id = str(row.get("transaction_id") or "").strip()
             relation_context = relation_rows_by_id.get(transaction_id) or {}
@@ -425,6 +426,11 @@ class SearchPendingSqlProjectionBuilder:
                 "effective_tag_sub_label": effective_category.get("category_sub_label"),
                 "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
             }
+            bank_transactions = _bank_transactions_payload(
+                relation_context,
+                fallback=bank_transaction,
+                paid_total=str(payment_summary.get("paid_total") or "0.00"),
+            )
             input_invoices = {
                 "primary": invoices[0] if invoices else None,
                 "relation_count": len(invoices),
@@ -445,6 +451,7 @@ class SearchPendingSqlProjectionBuilder:
             payload = {
                 "id": transaction_id,
                 "bank_transaction": bank_transaction,
+                "bank_transactions": bank_transactions,
                 "invoice_acquisition_status": status_payload,
                 "input_invoices": input_invoices,
                 "oa": oa_payload,
@@ -455,6 +462,9 @@ class SearchPendingSqlProjectionBuilder:
                 "relation_case_ids": relation_case_ids,
                 "filter_group": filter_group,
             }
+            relation_group_key = _multi_bank_relation_group_key(payload)
+            if relation_group_key and relation_group_key in emitted_relation_groups:
+                continue
             searchable_text = _join_text(
                 transaction_id,
                 bank_transaction.get("counterparty_name"),
@@ -464,6 +474,8 @@ class SearchPendingSqlProjectionBuilder:
                 payload.get("oa_applicant"),
             )
             result.append({"filter_group": filter_group, "searchable_text": searchable_text, "payload": payload})
+            if relation_group_key:
+                emitted_relation_groups.add(relation_group_key)
         return result
 
     def _pending_invoice_tag_groups(self, *, direction: str) -> dict[str, set[str]]:
@@ -646,6 +658,71 @@ def _relation_paid_total(relation_context: dict[str, object]) -> str:
         start=Decimal("0.00"),
     )
     return _decimal_to_str(total)
+
+
+def _bank_transactions_payload(
+    relation_context: dict[str, object],
+    *,
+    fallback: dict[str, object],
+    paid_total: str,
+) -> dict[str, object]:
+    summaries: list[dict[str, object]] = []
+    seen: set[str] = set()
+    linked_count = 0
+    if isinstance(relation_context, dict):
+        for bank in list(relation_context.get("linked_bank_transactions") or []):
+            if not isinstance(bank, dict):
+                continue
+            transaction_id = text(bank.get("id") or bank.get("transaction_id") or bank.get("row_id"))
+            if not transaction_id or transaction_id in seen:
+                continue
+            seen.add(transaction_id)
+            if _distribution_item_is_linked(bank):
+                linked_count += 1
+            amount = text(bank.get("amount"))
+            summaries.append(
+                {
+                    "id": transaction_id,
+                    "trade_time": text(bank.get("trade_time")),
+                    "booked_date": text(bank.get("booked_date")),
+                    "counterparty_name": text(bank.get("counterparty_name")),
+                    "amount": amount,
+                    "debit_amount": text(bank.get("debit_amount")) or amount,
+                    "credit_amount": text(bank.get("credit_amount")),
+                    "bank_name": text(bank.get("bank_name")),
+                    "bank_short_name": text(bank.get("bank_short_name") or bank.get("bank_name")),
+                    "account_last4": text(bank.get("account_last4")),
+                    "summary": text(bank.get("summary")),
+                    "remark": text(bank.get("remark")),
+                    "relation_case_id": text(bank.get("relation_case_id")),
+                    "relation_status": _distribution_item_relation_status(bank),
+                    "relation_source": text(bank.get("relation_source") or bank.get("relationSource")),
+                }
+            )
+    if not summaries:
+        summaries = [dict(fallback)]
+        linked_count = 1
+    return {
+        "primary": summaries[0] if len(summaries) == 1 else None,
+        "relation_count": len(summaries),
+        "linked_relation_count": linked_count,
+        "has_multiple": len(summaries) > 1,
+        "detail_mode": "list" if len(summaries) > 1 else "single",
+        "summaries": summaries,
+        "payment_summary": {"paid_total": paid_total},
+    }
+
+
+def _multi_bank_relation_group_key(payload: dict[str, object]) -> str | None:
+    bank_transactions = payload.get("bank_transactions") if isinstance(payload.get("bank_transactions"), dict) else {}
+    summaries = list(bank_transactions.get("summaries") or []) if isinstance(bank_transactions, dict) else []
+    if len(summaries) <= 1:
+        return None
+    for case_id in list(payload.get("relation_case_ids") or []):
+        normalized = text(case_id)
+        if normalized:
+            return normalized
+    return None
 
 
 def _distribution_item_relation_status(item: dict[str, object] | None) -> str:

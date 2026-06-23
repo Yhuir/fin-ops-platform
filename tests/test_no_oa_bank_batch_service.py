@@ -168,6 +168,18 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(drafts[0]["total_amount"], "1.25")
         self.assertNotEqual(drafts[0]["batch_id"], submitted[0]["batch_id"])
 
+    def test_submitted_batch_snapshot_freezes_row_tags(self) -> None:
+        rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
+        service = NoOaBankBatchService()
+        batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
+
+        submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="确认")
+
+        row_tag_snapshot = submitted["row_tag_snapshot"]
+        self.assertEqual(row_tag_snapshot["fee-1"]["category_code"], "fee")
+        self.assertEqual(row_tag_snapshot["fee-1"]["category_label"], "手续费")
+        self.assertEqual(service.snapshot()["batches"][submitted["batch_id"]]["row_tag_snapshot"], row_tag_snapshot)
+
     def test_stale_batch_with_active_no_oa_relation_stays_in_submitted_bucket(self) -> None:
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
@@ -215,6 +227,11 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(submitted[0]["status_bucket"], "submitted")
         self.assertTrue(submitted[0]["can_withdraw"])
         self.assertEqual(unsubmitted, [])
+
+        public_batches = service.public_snapshot()["batches"]
+        self.assertEqual(list(public_batches), ["batch-stale-active"])
+        self.assertEqual(public_batches["batch-stale-active"]["status"], "submitted")
+        self.assertEqual(public_batches["batch-stale-active"]["status_bucket"], "submitted")
 
     def test_missing_batch_with_active_no_oa_relation_is_projected_as_submitted_batch(self) -> None:
         pair_service = WorkbenchPairRelationService()
@@ -381,6 +398,7 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertFalse(batch["can_submit"])
         self.assertFalse(batch["can_withdraw"])
         self.assertEqual(batch["blocked_reason"], "内部往来存在多解，不能自动形成可提交批次。")
+        self.assertEqual(service.public_snapshot()["batches"], {})
 
     def test_internal_transfer_equal_multi_rows_pair_by_nearest_time(self) -> None:
         rows = [
@@ -1051,7 +1069,7 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(rebuilt["row_ids"], ["fee-1"])
         self.assertIsNone(pair_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
 
-    def test_submitted_single_side_batch_prunes_rows_that_no_longer_match_category(self) -> None:
+    def test_submitted_single_side_batch_keeps_rows_when_category_changes(self) -> None:
         rows = [
             bank_row("fee-1", category_code="fee", debit_amount="3.00"),
             bank_row("service-fee-1", category_code="fee", debit_amount="10000.00"),
@@ -1079,22 +1097,23 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(refreshed["batch_id"], submitted["batch_id"])
-        self.assertEqual(refreshed["row_ids"], ["fee-1"])
-        self.assertEqual(refreshed["row_count"], 1)
-        self.assertEqual(refreshed["total_amount"], "3.00")
-        self.assertEqual(refreshed["tag_counts"], {"fee": 1})
-        self.assertEqual(refreshed["version"], submitted["version"] + 1)
+        self.assertEqual(refreshed["row_ids"], ["fee-1", "service-fee-1"])
+        self.assertEqual(refreshed["row_count"], 2)
+        self.assertEqual(refreshed["total_amount"], "10003.00")
+        self.assertEqual(refreshed["tag_counts"], {"fee": 2})
+        self.assertEqual(refreshed["version"], submitted["version"])
+        self.assertEqual(refreshed["row_tag_snapshot"]["service-fee-1"]["category_code"], "fee")
         relation = pair_service.get_active_relation_by_case_id(submitted["relation_case_id"])
         assert relation is not None
-        self.assertEqual(relation["row_ids"], ["fee-1"])
-        self.assertEqual(relation["special_metadata"]["row_count"], 1)
-        self.assertEqual(relation["special_metadata"]["total_amount"], "3.00")
-        self.assertNotIn("service-fee-1", service._active_no_oa_relation_row_ids(pair_service.list_active_relations()))
+        self.assertEqual(relation["row_ids"], ["fee-1", "service-fee-1"])
+        self.assertEqual(relation["special_metadata"]["row_count"], 2)
+        self.assertEqual(relation["special_metadata"]["total_amount"], "10003.00")
+        self.assertIn("service-fee-1", service._active_no_oa_relation_row_ids(pair_service.list_active_relations()))
         migration_result = service.last_legacy_migration_result()
         self.assertTrue(migration_result["changed"])
         self.assertEqual(migration_result["affected_months"], ["2026-03"])
 
-    def test_submitted_batch_that_becomes_stale_clears_active_relation(self) -> None:
+    def test_submitted_batch_stays_submitted_after_category_change(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
         service = NoOaBankBatchService(
@@ -1105,21 +1124,20 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
         changed_categories = categories_for([{**rows[0], "category_code": "salary"}])
 
-        stale = self.assert_single_batch(
+        refreshed = self.assert_single_batch(
             service.build_batches(rows, changed_categories, pair_service.list_active_relations(), {}),
-            "stale",
+            "submitted",
         )
 
-        self.assertEqual(stale["batch_id"], submitted["batch_id"])
-        self.assertEqual(stale["status_bucket"], "unsubmitted")
-        self.assertFalse(stale["can_submit"])
-        self.assertFalse(stale["can_withdraw"])
-        self.assertEqual(stale["blocked_reason"], "源流水或分类已变化，需要复核后处理。")
-        self.assertIsNone(pair_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
-        with self.assertRaisesRegex(ValueError, "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw"):
-            service.withdraw_batch(stale["batch_id"], actor="finance-user", expected_version=stale["version"], reason="源数据变化")
+        self.assertEqual(refreshed["batch_id"], submitted["batch_id"])
+        self.assertEqual(refreshed["status_bucket"], "submitted")
+        self.assertFalse(refreshed["can_submit"])
+        self.assertTrue(refreshed["can_withdraw"])
+        self.assertEqual(refreshed["blocked_reason"], "批次已提交，不能重复提交。")
+        self.assertEqual(refreshed["row_tag_snapshot"]["fee-1"]["category_code"], "fee")
+        self.assertEqual(refreshed["row_tag_snapshot"]["fee-1"]["category_label"], "手续费")
 
-    def test_stale_without_active_no_oa_relation_is_not_withdrawable(self) -> None:
+    def test_submitted_batch_without_active_relation_stays_public_after_category_change(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
         service = NoOaBankBatchService(
@@ -1131,11 +1149,12 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         changed_categories = categories_for([{**rows[0], "category_code": "salary"}])
         pair_service.cancel_relation(submitted["relation_case_id"])
 
-        stale = self.assert_single_batch(service.build_batches(rows, changed_categories, [], {}), "stale")
+        refreshed = self.assert_single_batch(service.build_batches(rows, changed_categories, [], {}), "submitted")
 
-        self.assertFalse(stale["can_withdraw"])
-        with self.assertRaisesRegex(ValueError, "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw"):
-            service.withdraw_batch(stale["batch_id"], actor="finance-user", expected_version=stale["version"], reason="")
+        self.assertTrue(refreshed["can_withdraw"])
+        public_batches = service.public_snapshot()["batches"]
+        self.assertIn(refreshed["batch_id"], public_batches)
+        self.assertEqual({batch["status"] for batch in public_batches.values()}, {"submitted"})
 
     def test_snapshot_round_trip_preserves_batches_and_audit_log(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]

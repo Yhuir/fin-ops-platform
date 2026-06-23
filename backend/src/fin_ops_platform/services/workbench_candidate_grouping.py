@@ -128,6 +128,9 @@ class WorkbenchCandidateGroupingService:
         standalone_temp_groups = self._build_temp_groups(remaining_rows)
         merged_open_case_groups = self._merge_open_case_groups(list(open_case_groups.values()))
         merged_open_case_groups = self._split_unsafe_candidate_case_groups(merged_open_case_groups)
+        promoted_oa_attachment_source_groups, candidate_oa_attachment_source_groups = (
+            self._split_promoted_and_candidate_groups(oa_attachment_source_groups)
+        )
         promoted_open_case_groups, candidate_open_case_groups = self._split_promoted_and_candidate_groups(
             merged_open_case_groups
         )
@@ -135,12 +138,17 @@ class WorkbenchCandidateGroupingService:
 
         open_groups = [
             *candidate_open_case_groups,
-            *oa_attachment_source_groups,
+            *candidate_oa_attachment_source_groups,
             *aggregated_oa_invoice_groups,
             *turnover_relation_groups,
             *candidate_groups,
         ]
-        paired_output = [*valid_paired_groups, *promoted_open_case_groups, *promoted_groups]
+        paired_output = [
+            *valid_paired_groups,
+            *promoted_oa_attachment_source_groups,
+            *promoted_open_case_groups,
+            *promoted_groups,
+        ]
         paired_output, open_groups = self._co_locate_oa_attachment_invoices_with_parent_oa_groups(
             paired_output,
             open_groups,
@@ -517,12 +525,17 @@ class WorkbenchCandidateGroupingService:
         source_groups, remaining_source_rows = self._build_oa_attachment_source_groups(source_candidate_rows)
         if not source_groups:
             return [], open_case_groups, remaining_rows
+        extra_consumed_row_keys = self._attach_candidate_case_banks_to_oa_attachment_source_groups(
+            source_groups,
+            open_case_groups,
+        )
 
         consumed_row_keys = {
             id(row)
             for group in source_groups
             for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
         }
+        consumed_row_keys.update(extra_consumed_row_keys)
         rebuilt_open_case_groups: "OrderedDict[str, CandidateGroup]" = OrderedDict()
         for group_id, group in open_case_groups.items():
             if group_id not in splittable_group_ids:
@@ -555,6 +568,54 @@ class WorkbenchCandidateGroupingService:
             if id(row) in original_remaining_row_keys
         ]
         return source_groups, rebuilt_open_case_groups, rebuilt_remaining_rows
+
+    def _attach_candidate_case_banks_to_oa_attachment_source_groups(
+        self,
+        source_groups: list[CandidateGroup],
+        open_case_groups: "OrderedDict[str, CandidateGroup]",
+    ) -> set[int]:
+        consumed_row_keys: set[int] = set()
+        candidate_bank_rows_by_oa_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for group in open_case_groups.values():
+            if not self._can_split_open_case_group_for_oa_attachment_source(group):
+                continue
+            if len(group.oa_rows) != 1 or not group.bank_rows:
+                continue
+            oa_id = self._string_value(group.oa_rows[0].get("id"))
+            if not oa_id:
+                continue
+            candidate_bank_rows_by_oa_id[oa_id].extend(group.bank_rows)
+
+        if not candidate_bank_rows_by_oa_id:
+            return consumed_row_keys
+
+        for source_group in source_groups:
+            if len(source_group.oa_rows) != 1 or source_group.bank_rows:
+                continue
+            oa_id = self._string_value(source_group.oa_rows[0].get("id"))
+            candidate_banks = candidate_bank_rows_by_oa_id.get(oa_id, [])
+            if not candidate_banks:
+                continue
+            attachable_banks: list[dict[str, Any]] = []
+            for bank_row in candidate_banks:
+                probe = CandidateGroup(
+                    group_id=source_group.group_id,
+                    group_type=source_group.group_type,
+                    match_confidence=source_group.match_confidence,
+                    reason=source_group.reason,
+                    temp_key=source_group.temp_key,
+                    oa_rows=list(source_group.oa_rows),
+                    bank_rows=[bank_row],
+                    invoice_rows=list(source_group.invoice_rows),
+                    metadata=deepcopy(source_group.metadata),
+                )
+                if self._qualifies_for_attachment_invoice_auto_close(probe):
+                    attachable_banks.append(bank_row)
+            if len(attachable_banks) != 1:
+                continue
+            source_group.bank_rows.append(attachable_banks[0])
+            consumed_row_keys.add(id(attachable_banks[0]))
+        return consumed_row_keys
 
     def _can_split_open_case_group_for_oa_attachment_source(self, group: CandidateGroup) -> bool:
         if group.group_type != "candidate":
@@ -847,7 +908,13 @@ class WorkbenchCandidateGroupingService:
         candidates: list[CandidateGroup] = []
         for group in groups:
             if group.group_type in {"open", "open_exception", "ignored", "legacy_exception", "source_linked"}:
-                candidates.append(group)
+                if group.group_type == "source_linked" and self._qualifies_for_auto_close(group):
+                    group.group_type = "auto_closed"
+                    group.match_confidence = "high"
+                    group.reason = "unique_candidate_chain"
+                    promoted.append(group)
+                else:
+                    candidates.append(group)
                 continue
             if self._qualifies_for_auto_close(group):
                 group.group_type = "auto_closed"

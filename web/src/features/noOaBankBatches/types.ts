@@ -13,9 +13,7 @@ export type NoOaBankBatchTypeFilter = "all" | NoOaBankBatchType;
 export type NoOaBankBatchStatus =
   | "draft"
   | "submitted"
-  | "withdrawn"
-  | "conflict"
-  | "stale";
+  | "withdrawn";
 
 export type NoOaBankBatchStatusFilter = "all" | NoOaBankBatchStatus;
 export type NoOaBankBatchStatusBucket = "unsubmitted" | "submitted" | "withdrawn" | "all";

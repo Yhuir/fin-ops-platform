@@ -43,6 +43,51 @@ function waitForNoOaBankBatches(page: Page) {
   });
 }
 
+const ordinaryNoOaCheckboxCases = [
+  {
+    primaryButton: "费用 1批 · 1条",
+    subButton: "手续费 1批 · 1条",
+    tableName: "建设银行8106流水",
+    transactionId: "no-oa-bank-e2e-fee",
+  },
+  {
+    primaryButton: "薪资社保福利 4批 · 4条",
+    subButton: "工资 1批 · 1条",
+    tableName: "工商银行6386流水",
+    transactionId: "no-oa-bank-e2e-salary",
+  },
+  {
+    primaryButton: "薪资社保福利 4批 · 4条",
+    subButton: "过节费 1批 · 1条",
+    tableName: "中国银行7001流水",
+    transactionId: "no-oa-bank-e2e-holiday_bonus",
+  },
+  {
+    primaryButton: "薪资社保福利 4批 · 4条",
+    subButton: "奖金 1批 · 1条",
+    tableName: "招商银行9988流水",
+    transactionId: "no-oa-bank-e2e-bonus",
+  },
+  {
+    primaryButton: "税款 2批 · 2条",
+    subButton: "税款 1批 · 1条",
+    tableName: "农业银行2211流水",
+    transactionId: "no-oa-bank-e2e-tax_payment",
+  },
+  {
+    primaryButton: "税款 2批 · 2条",
+    subButton: "国库税款 1批 · 1条",
+    tableName: "交通银行3344流水",
+    transactionId: "no-oa-bank-e2e-treasury_tax_collection",
+  },
+  {
+    primaryButton: "薪资社保福利 4批 · 4条",
+    subButton: "社保 1批 · 1条",
+    tableName: "民生银行5566流水",
+    transactionId: "no-oa-bank-e2e-social_security",
+  },
+];
+
 test.describe("no-OA bank batches browser flow", () => {
   test("recovers list after a transient load failure when refreshed", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
@@ -109,6 +154,36 @@ test.describe("no-OA bank batches browser flow", () => {
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("shows selectable checkboxes for every ordinary draft no-OA batch type", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      noOaBankBatchScenario: "ordinaryDraftMatrix",
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/no-oa-bank-batches");
+    await expect(page.getByRole("heading", { name: "免OA流水批量处理" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "未提交 7" })).toHaveAttribute("aria-pressed", "true");
+
+    for (const item of ordinaryNoOaCheckboxCases) {
+      await page.getByRole("button", { name: item.primaryButton, exact: true }).click();
+      await page.getByRole("button", { name: item.subButton, exact: true }).click();
+
+      const table = page.getByRole("table", { name: item.tableName });
+      await expect(table).toBeVisible();
+      const checkbox = table.getByRole("checkbox", { name: `选择流水 ${item.transactionId}` });
+      await expect(checkbox).toBeVisible();
+      await expect(checkbox).toBeEnabled();
+      await checkbox.check();
+      await expect(checkbox).toBeChecked();
+      await checkbox.uncheck();
+      await expect(checkbox).not.toBeChecked();
+    }
+
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

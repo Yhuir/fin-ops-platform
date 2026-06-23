@@ -73,6 +73,7 @@ type ApiMockOptions = {
   noOaBankBatchFailuresBeforeSuccess?: number;
   noOaBankBatchReadModelStatus?: NoOaBankBatchReadModelMockStatus;
   noOaBankBatchReadModelStatuses?: NoOaBankBatchReadModelMockStatus[];
+  noOaBankBatchScenario?: NoOaBankBatchMockScenario;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
@@ -193,6 +194,7 @@ type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
 type EtcBusinessBatchStatus = "imported" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
 type NoOaBrowserBatchStatus = "draft" | "submitted" | "withdrawn";
+type NoOaBankBatchMockScenario = "single" | "ordinaryDraftMatrix";
 type CostBrowserProjectRow = {
   transaction_id: string;
   trade_time: string;
@@ -4541,7 +4543,7 @@ function noOaBankBatchVersion(status: NoOaBrowserBatchStatus) {
   return 3;
 }
 
-function noOaBankBatch(status: NoOaBrowserBatchStatus) {
+function noOaBankBatch(status: NoOaBrowserBatchStatus, overrides: Record<string, unknown> = {}) {
   return {
     batch_id: "no-oa-batch-e2e-001",
     batch_type: "fee",
@@ -4568,35 +4570,114 @@ function noOaBankBatch(status: NoOaBrowserBatchStatus) {
     conflict_reason: "",
     blocked_reason: "",
     version: noOaBankBatchVersion(status),
+    ...overrides,
   };
 }
 
-function noOaBankBatchSummary(status: NoOaBrowserBatchStatus) {
-  const draft = status === "draft" ? 1 : 0;
-  const submitted = status === "submitted" ? 1 : 0;
-  const withdrawn = status === "withdrawn" ? 1 : 0;
+const noOaOrdinaryDraftMatrixDefinitions = [
+  { batchType: "fee", batchLabel: "手续费", primaryLabel: "费用", subLabel: "手续费", bankName: "建设银行", accountLast4: "8106", amount: "1.00" },
+  { batchType: "salary", batchLabel: "工资", primaryLabel: "薪资社保福利", subLabel: "工资", bankName: "工商银行", accountLast4: "6386", amount: "2.00" },
+  { batchType: "holiday_bonus", batchLabel: "过节费", primaryLabel: "薪资社保福利", subLabel: "过节费", bankName: "中国银行", accountLast4: "7001", amount: "3.00" },
+  { batchType: "bonus", batchLabel: "奖金", primaryLabel: "薪资社保福利", subLabel: "奖金", bankName: "招商银行", accountLast4: "9988", amount: "4.00" },
+  { batchType: "tax_payment", batchLabel: "税款", primaryLabel: "税款", subLabel: "税款", bankName: "农业银行", accountLast4: "2211", amount: "5.00" },
+  { batchType: "treasury_tax_collection", batchLabel: "国库税款", primaryLabel: "税款", subLabel: "国库税款", bankName: "交通银行", accountLast4: "3344", amount: "6.00" },
+  { batchType: "social_security", batchLabel: "社保", primaryLabel: "薪资社保福利", subLabel: "社保", bankName: "民生银行", accountLast4: "5566", amount: "7.00" },
+];
+
+function noOaOrdinaryDraftMatrixBatches() {
+  return noOaOrdinaryDraftMatrixDefinitions.map((definition) => noOaBankBatch("draft", {
+    batch_id: `no-oa-batch-e2e-${definition.batchType}`,
+    batch_type: definition.batchType,
+    batch_label: definition.batchLabel,
+    category_primary_label: definition.primaryLabel,
+    category_sub_label: definition.subLabel,
+    category_label_path: [definition.primaryLabel, definition.subLabel],
+    account_key: `${definition.bankName}:${definition.accountLast4}`,
+    bank_name: definition.bankName,
+    account_last4: definition.accountLast4,
+    total_amount: definition.amount,
+    tag_counts: { [definition.batchType]: 1 },
+    direction_counts: { expense: 1 },
+  }));
+}
+
+function noOaBatchesForScenario(status: NoOaBrowserBatchStatus, scenario: NoOaBankBatchMockScenario = "single") {
+  if (scenario === "ordinaryDraftMatrix" && status === "draft") {
+    return noOaOrdinaryDraftMatrixBatches();
+  }
+  return [noOaBankBatch(status)];
+}
+
+function noOaMoneyTotal(batches: Array<Record<string, unknown>>) {
+  const total = batches.reduce((sum, batch) => {
+    const amount = Number(batch.total_amount ?? 0);
+    return Number.isFinite(amount) ? sum + amount : sum;
+  }, 0);
+  return total.toFixed(2);
+}
+
+function noOaBankBatchSummary(status: NoOaBrowserBatchStatus, batches = noOaBatchesForScenario(status)) {
+  const draft = batches.filter((batch) => batch.status_bucket === "unsubmitted" && batch.status === "draft").length;
+  const submitted = batches.filter((batch) => batch.status_bucket === "submitted").length;
+  const withdrawn = batches.filter((batch) => batch.status_bucket === "withdrawn").length;
+  const stale = batches.filter((batch) => batch.status === "stale").length;
+  const categoriesByCode = new Map<string, {
+    code: string;
+    label: string;
+    primary_label: string;
+    sub_label: string;
+    total: number;
+    draft: number;
+    submitted: number;
+    withdrawn: number;
+    conflict: number;
+    stale: number;
+    total_amount: string;
+  }>();
+  for (const batch of batches) {
+    const code = String(batch.batch_type ?? "");
+    const current = categoriesByCode.get(code) ?? {
+      code,
+      label: String(batch.batch_label ?? ""),
+      primary_label: String(batch.category_primary_label ?? ""),
+      sub_label: String(batch.category_sub_label ?? ""),
+      total: 0,
+      draft: 0,
+      submitted: 0,
+      withdrawn: 0,
+      conflict: 0,
+      stale: 0,
+      total_amount: "0.00",
+    };
+    current.total += 1;
+    if (batch.status_bucket === "unsubmitted" && batch.status === "draft") {
+      current.draft += 1;
+    }
+    if (batch.status_bucket === "submitted") {
+      current.submitted += 1;
+    }
+    if (batch.status_bucket === "withdrawn") {
+      current.withdrawn += 1;
+    }
+    if (batch.status === "conflict") {
+      current.conflict += 1;
+    }
+    if (batch.status === "stale") {
+      current.stale += 1;
+    }
+    current.total_amount = noOaMoneyTotal([{
+      total_amount: current.total_amount,
+    }, batch]);
+    categoriesByCode.set(code, current);
+  }
   return {
     draft_count: draft,
     submitted_count: submitted,
     withdrawn_count: withdrawn,
     conflict_count: 0,
-    stale_count: 0,
-    total_amount: "8.80",
-    categories: [
-      {
-        code: "fee",
-        label: "手续费",
-        primary_label: "费用",
-        sub_label: "手续费",
-        total: 1,
-        draft,
-        submitted,
-        withdrawn,
-        conflict: 0,
-        stale: 0,
-        total_amount: "8.80",
-      },
-    ],
+    stale_count: stale,
+    total_amount: noOaMoneyTotal(batches),
+    categories: Array.from(categoriesByCode.values()),
   };
 }
 
@@ -4604,50 +4685,66 @@ function noOaBankBatchesPayload(
   status: NoOaBrowserBatchStatus,
   bucket: string | null,
   readModelStatus: NoOaBankBatchReadModelMockStatus = "fresh",
+  scenario: NoOaBankBatchMockScenario = "single",
 ) {
-  const batch = noOaBankBatch(status);
-  const visible = (
-    (bucket === "submitted" && status === "submitted")
-    || (bucket === "withdrawn" && status === "withdrawn")
-    || ((bucket === null || bucket === "unsubmitted") && status === "draft")
-  );
+  const batches = noOaBatchesForScenario(status, scenario);
+  const visibleBatches = batches.filter((batch) => {
+    if (bucket === "submitted") {
+      return batch.status_bucket === "submitted";
+    }
+    if (bucket === "withdrawn") {
+      return batch.status_bucket === "withdrawn";
+    }
+    return bucket === null || bucket === "unsubmitted"
+      ? batch.status_bucket === "unsubmitted"
+      : true;
+  });
   return {
-    summary: noOaBankBatchSummary(status),
-    batches: visible ? [batch] : [],
+    summary: noOaBankBatchSummary(status, batches),
+    batches: visibleBatches,
     pagination: {
       page: 1,
       page_size: 200,
-      total: visible ? 1 : 0,
+      total: visibleBatches.length,
     },
     read_model_status: readModelStatus,
     read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`no_oa_bank_batch_${readModelStatus}`],
   };
 }
 
-function noOaBankBatchDetailPayload(status: NoOaBrowserBatchStatus) {
+function noOaBankBatchDetailPayload(
+  status: NoOaBrowserBatchStatus,
+  batchId = "no-oa-batch-e2e-001",
+  scenario: NoOaBankBatchMockScenario = "single",
+) {
+  const batch = noOaBatchesForScenario(status, scenario)
+    .find((candidate) => candidate.batch_id === batchId)
+    ?? noOaBankBatch(status);
+  const transactionId = String(batch.batch_id ?? "no-oa-batch-e2e-001").replace("no-oa-batch", "no-oa-bank");
+  const isDefaultFee = batch.batch_id === "no-oa-batch-e2e-001";
   return {
-    batch: noOaBankBatch(status),
+    batch,
     tag_counts: { fee: 1 },
     direction_counts: { expense: 1 },
     rows: [
       {
-        transaction_id: "no-oa-bank-e2e-001",
+        transaction_id: transactionId,
         trade_time: "2026-05-03 10:20:00",
-        counterparty_name: "建设银行",
+        counterparty_name: String(batch.bank_name ?? "未知对手方"),
         direction: "expense",
         direction_label: "支",
-        amount: "8.80",
-        bank_name: "建设银行",
-        account_last4: "8106",
-        account_key: "ccb:8106",
-        summary: "网银手续费",
+        amount: String(batch.total_amount ?? "0.00"),
+        bank_name: String(batch.bank_name ?? ""),
+        account_last4: String(batch.account_last4 ?? ""),
+        account_key: String(batch.account_key ?? ""),
+        summary: isDefaultFee ? "网银手续费" : `${String(batch.batch_label ?? "")}测试流水`,
         purpose: "结算",
-        remark: "浏览器 e2e 月结手续费",
-        category_code: "fee",
-        category_label: "手续费",
-        category_primary_label: "费用",
-        category_sub_label: "手续费",
-        category_label_path: ["费用", "手续费"],
+        remark: isDefaultFee ? "浏览器 e2e 月结手续费" : `浏览器 e2e ${String(batch.batch_label ?? "")}`,
+        category_code: String(batch.batch_type ?? ""),
+        category_label: String(batch.batch_label ?? ""),
+        category_primary_label: String(batch.category_primary_label ?? ""),
+        category_sub_label: String(batch.category_sub_label ?? ""),
+        category_label_path: [String(batch.category_primary_label ?? ""), String(batch.category_sub_label ?? "")].filter(Boolean),
         category_source: "auto",
         relation_status: status === "draft" ? "" : "linked",
         relation_case_ids: status === "draft" ? [] : ["no-oa-relation-e2e-001"],
@@ -8281,11 +8378,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         noOaBankBatchStatus,
         url.searchParams.get("bucket"),
         readModelStatus,
+        options.noOaBankBatchScenario ?? "single",
       ));
     }
 
-    if (path === "/api/no-oa-bank-batches/no-oa-batch-e2e-001") {
-      return json(route, noOaBankBatchDetailPayload(noOaBankBatchStatus));
+    const noOaBankBatchDetailMatch = path.match(/^\/api\/no-oa-bank-batches\/([^/]+)$/);
+    if (noOaBankBatchDetailMatch && request.method() === "GET") {
+      return json(route, noOaBankBatchDetailPayload(
+        noOaBankBatchStatus,
+        decodeURIComponent(noOaBankBatchDetailMatch[1] ?? ""),
+        options.noOaBankBatchScenario ?? "single",
+      ));
     }
 
     if (path === "/api/no-oa-bank-batches/submit-selection") {

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
-import type { PendingInvoiceRelationDetail } from "../../features/pendingInvoices/types";
+import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceRelationDrawerProps = {
   open: boolean;
   transactionId: string | null;
+  detailKind?: PendingInvoiceRelationDetailKind;
   loadDetail: (transactionId: string) => Promise<PendingInvoiceRelationDetail>;
   onClose: () => void;
 };
@@ -25,6 +26,7 @@ function RelationStatusChip({ status }: { status?: string }) {
 export default function PendingInvoiceRelationDrawer({
   open,
   transactionId,
+  detailKind = "all",
   loadDetail,
   onClose,
 }: PendingInvoiceRelationDrawerProps) {
@@ -82,7 +84,7 @@ export default function PendingInvoiceRelationDrawer({
             <Metric label="待付金额" value={formatMoney(detail.remainingAmount)} />
             <Metric label="支付差额" value={formatMoney(detail.differenceAmount)} />
           </section>
-          <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
+          {detailKind === "all" || detailKind === "invoice" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
             <h3 className="pending-invoice-panel__title" id="pending-invoice-related-invoices-title">已关联发票</h3>
             <table aria-label="已关联发票" className="pending-invoice-simple-table">
               <thead>
@@ -108,8 +110,8 @@ export default function PendingInvoiceRelationDrawer({
                 ))}
               </tbody>
             </table>
-          </section>
-          <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-oa-title">
+          </section> : null}
+          {detailKind === "all" || detailKind === "oa" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-oa-title">
             <h3 className="pending-invoice-panel__title" id="pending-invoice-related-oa-title">已关联 OA</h3>
             <table aria-label="已关联 OA" className="pending-invoice-simple-table">
               <thead>
@@ -135,8 +137,8 @@ export default function PendingInvoiceRelationDrawer({
                 ))}
               </tbody>
             </table>
-          </section>
-          <section className="pending-invoice-panel">
+          </section> : null}
+          {detailKind === "all" || detailKind === "bank" ? <section className="pending-invoice-panel">
             <table aria-label="历史支付流水" className="pending-invoice-simple-table">
               <thead>
                 <tr>
@@ -163,7 +165,7 @@ export default function PendingInvoiceRelationDrawer({
                 ))}
               </tbody>
             </table>
-          </section>
+          </section> : null}
         </>
       ) : null}
     </PendingInvoiceDrawerFrame>

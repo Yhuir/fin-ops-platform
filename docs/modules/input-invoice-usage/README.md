@@ -48,6 +48,8 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 `input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
 
+`input_invoice_usage:all` fan-out 发现当前月份 shard 后，必须清理不再属于当前进项发票事实集的旧月份 rows/scopes。否则旧 month scope 的基础 source versions 会继续参与 all 查询 freshness 聚合，导致 `oa_projection_sync_version_missing` 等 stale reason 反复出现，页面长期显示“正在刷新”。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

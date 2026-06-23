@@ -13,13 +13,16 @@ from fin_ops_platform.services.read_model_freshness import (
 )
 
 
+SourceVersionsProvider = Callable[..., dict[str, object]]
+
+
 class InputInvoiceUsageReadModelDetailService:
     def __init__(
         self,
         *,
         repository: Any,
         enqueue_refresh: Callable[[str, str], bool],
-        source_versions_provider: Callable[[], dict[str, object]],
+        source_versions_provider: SourceVersionsProvider,
     ) -> None:
         self._repository = repository
         self._enqueue_refresh = enqueue_refresh
@@ -46,7 +49,7 @@ class InputInvoiceUsageReadModelDetailService:
             return self._refreshing_payload(kind=normalized_kind, scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
-                self._source_versions_provider(),
+                _source_versions_from_provider(self._source_versions_provider, scope_key=scope_key),
                 context="input_invoice_usage_read_model_detail",
             ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
@@ -94,3 +97,14 @@ class InputInvoiceUsageReadModelDetailService:
         if stale_reasons:
             payload["read_model_stale_reasons"] = list(stale_reasons)
         return payload
+
+
+def _source_versions_from_provider(
+    provider: SourceVersionsProvider,
+    *,
+    scope_key: str | None,
+) -> dict[str, object]:
+    try:
+        return dict(provider(scope_key=scope_key) or {})
+    except TypeError:
+        return dict(provider() or {})

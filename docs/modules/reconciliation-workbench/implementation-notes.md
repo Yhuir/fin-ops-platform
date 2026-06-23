@@ -29,6 +29,53 @@
 
 ## 历史记录
 
+## 2026-06-23 - all scope 保留被 open owner 剥离后的未认领银行流水
+
+- 目标：修复月分片中存在 `case:decision:*` 自动决策 open group，但 all scope 聚合后其中未被任何其他 group 认领的银行流水消失的问题。
+- 真实原因：all-scope 聚合先按 open group owner 规则去重；当另一个更强 open group 拿走同一 OA row 后，自动决策 group 变成 partial。旧逻辑在“open group 之间去重”后也调用 `_drop_partial_all_scope_automatic_decision_group`，把剩余未被认领的银行流水一起清空。`txn_imported_1419` 属于该形状：`oa-pay-2068` 被 3 月 open group 拿走，4 月自动决策 group 里的银行流水没有其他 owner，却随 partial group 被清空。
+- 影响范围：`PostgresReadModelRepository` all-scope aggregate 的 open-group 去重；paired shard/正式 relation 抢占时清空自动决策残片的保护保持不变。
+- 关键决策：open group 之间的 owner 去重只移除被更强 open group 明确拥有的 row，不再清空自动决策 group 中剩余未被认领的事实行；当 paired group 或 canonical active relation claim 抢占 row 时，仍清空 partial automatic decision group，避免已配对流水回流到 open 区。
+- 文档影响：同步本实施记录和 `tests.md`；产品口径不变，仍以 active all generation 为 all 视图事实源。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_all_scope_keeps_unclaimed_bank_when_open_group_takes_automatic_decision_oa`，并保留 `test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards`。
+- 验证命令：本轮最终说明列出完整命令。
+- 未测风险：本地测试使用 synthetic active month shard；生产需要通过正式 Workbench refresh 重建 affected month/all active generation 后再确认 all 视图数量。
+
+## 2026-06-23 - OA 附件 source-linked 三栏闭合分区修复
+
+- 目标：修复截图中 OA、银行流水和多张 OA 附件发票三栏金额已经闭合，且页面显示“自动匹配”，但整组仍停留在未配对区的问题。
+- 真实原因：`WorkbenchCandidateGroupingService` 的分区顺序先把 paired/open rows 分开，再从 open candidate context 中抽取 OA 附件 source-linked group。抽取过程把父 OA 和附件发票移到 `source_linked` open 证据组，银行流水留在原 candidate case；即使后续发票回挂后已经形成完整三栏，`source_linked` 在 `_split_promoted_and_candidate_groups()` 中被无条件留在 open，导致架构上无法进入 paired。
+- 影响范围：关联台 grouping service 的 open/paired 分区、OA 附件发票父 OA 回挂、候选 case 三栏闭合展示；不改变发票池事实源、不改变 `app.workbench_pair_relations` confirmed fact 语义、不在前端做本地移动。
+- 关键决策：source-linked 只是父 OA 归属证据的中间态，不是最终分区状态。抽取 OA 附件 source group 后，如果同一候选 case 中存在唯一银行流水，且 1 条 OA、1 条银行流水与 1 张或多张 OA 附件发票含税合计闭合，则把银行纳入该 source group 并重新执行 auto-close promotion。没有银行、金额不闭合或多个银行候选时仍保持 source-linked open。该变更属于 Workbench SQL projection/grouping 行为变化，必须 bump month projection 和 all-scope aggregate builder source version，避免旧 active generation 继续被当作 fresh。
+- 文档影响：同步 README、state-machine、tests 和本实施记录。
+- 测试覆盖：`tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_candidate_case_oa_attachment_invoices_promote_with_matching_bank` 覆盖截图同构场景；既有 `test_oa_attachment_source_groups_248_oa_with_three_attachment_invoices_open`、`test_keeps_oa_and_multiple_invoices_open_when_bank_transaction_is_missing` 继续保护缺银行时不误进 paired。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping -v`、`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_sql_source_versions_include_matching_rules_version_for_freshness -v`。
+- 未测风险：本地复现使用截图同构 payload，不直接读取生产登录态 Workbench API；发布后需要确认 Workbench month/all refresh worker 已重建 active generation，页面才会从旧 open generation 收敛到 paired。
+- 后续事项：所有“回挂/补投影后变完整”的流程都应在后端 grouping 层重新走 paired/open policy，不能只在来源归属阶段修改 group_type。
+
+## 2026-06-23 - 三栏 exact-sum 自动配对矩阵补齐
+
+- 目标：把现有三栏自动配对从枚举式补丁补全为通用 exact-sum 证据闭环，覆盖截图中的 3 条 OA 合计 4450 + 1 条流水 4450 + 1 张发票 4450，以及单 OA 单流水多发票、多 OA/多流水/多发票等同类场景。
+- 真实原因：前一版规则已补齐银行+发票 anchor 和两栏 active relation 补第三栏，但仍主要围绕 `1:1:1`、单 OA-bank 入口和多 OA-bank pair 到单发票这几类形状展开；缺少对“任意非空 OA 组、银行组、发票组总额相等”的通用搜索和证据图校验，因此多 OA 合计到单流水单发票、`1:1:N` 或 `N:M:K` 仍可能留在未配对。
+- 影响范围：`WorkbenchFreeMatchingEngine` 三方候选生成、`workbench_matching_rules_version` freshness、matching dirty scope 自愈、关联台三栏 automatic decision，以及普通两栏 `manual_confirmed` active relation 自动补齐升级。
+- 关键决策：保留现有具体规则优先级，不改变已有自动配对逻辑；新增 `oa_bank_invoice_exact_sum` 只作为补充规则。通用规则要求三栏同方向、五个月窗口、总额严格相等、预约付款日期兼容、正式发票非 OA 附件来源、每栏组合大小受上限保护、证据图连通且每个 row 至少有一条确定性边；仅金额相等、候选组合过多、证据断裂或多个候选竞争时 fail closed，保持 open/conflict。不使用 NLP，字段空格通过确定性归一化处理。
+- 文档影响：同步本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 事实源边界。
+- 测试覆盖：新增多 OA 合计到单流水单发票、单 OA 单流水多发票无直接 OA-bank 文本、多 OA/多流水/多发票证据连通、金额-only 不提升三栏，以及多 OA+单流水 active relation 自动补齐发票的回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_reconciliation_engine -v`。
+- 未测风险：自动配对不能也不应该保证所有“人眼觉得像”的场景都自动配；缺少确定性业务证据、金额不闭合、发票方向未知、组合超过边界或存在歧义时仍会留在 open。发布后仍需生产 worker 按新 rules version 重建 matching decision 和 Workbench month/all active generation。
+- 后续事项：后续新增截图样例时，先归类为“已有 exact-sum 证据闭环被漏掉”还是“缺少可审计证据”；前者补规则/字段别名，后者保留人工确认或引入明确业务字段，不用 NLP 猜测。
+
+## 2026-06-23 - 三方自动配对补齐银行发票 anchor 和空白字段归一
+
+- 目标：修复截图中 OA、银行流水和发票金额一致且三方业务证据存在，但仍停留在未配对区的问题；同时处理字段里误输入空格导致自动配对证据读取失败的情况。
+- 真实原因：三方 free matching 主要从 OA+银行强匹配进入，再找发票；当真实强证据边是银行+发票，且 OA 通过 OA+发票或文本证据可唯一补齐时，旧规则没有反向生成三方 `oa_bank_invoice` decision。另一个问题是 `row.data.get("counterparty_name") or row.data.get("counterparty")` 这类写法会把 `" "` 当成有效值，挡住后备字段，导致截图三 OA 栏可见空格时 matching 读不到真实对方名。
+- 影响范围：`WorkbenchFreeMatchingEngine` 三方候选生成、文本 token 提取、`workbench_matching_rules_version` freshness、自愈重跑 completed matching scopes、关联台自动三栏 decision 与两栏 active relation 补齐升级。
+- 关键决策：不引入 NLP；使用确定性文本归一化和空白缺失判断。新增银行+发票强证据 anchor，只允许补齐唯一一个具备 OA-银行或 OA-发票业务证据的 OA；仅金额相同的 OA 保持 open，避免误配。规则版本 bump 到 `2026-06-23-three-way-completion-v2`，让生产 worker 自动重投旧版本 completed scope。
+- 文档影响：同步本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 事实源边界。
+- 测试覆盖：新增空白字段 fallback、银行+发票 anchor 补三方、金额-only 不提升三方三个核心回归；同时运行 free matching、legacy matching rules、reconciliation engine、matching orchestrator 和 matching dirty scope worker 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_rules tests.test_workbench_reconciliation_engine tests.test_workbench_matching_orchestrator tests.test_workbench_matching_dirty_scope_worker -v`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_free_matching_engine.py backend/src/fin_ops_platform/services/workbench_matching_rules.py`。
+- 未测风险：本地未直接连接生产数据库执行 worker drain；发布后需要确认 `workbench-matching` worker 已按新 rules version 把旧 completed scopes 转 dirty，并刷新 Workbench month/all active generation。
+- 后续事项：若以后新增 invoice type、OA 字段别名或银行对方字段别名，必须先补充 `_first_text` 后备字段和规则测试；未知字段仍 fail closed。
+
 ## 2026-06-23 - ETC summary 优先读取 batch invoice links
 
 - 目标：完成 Phase C 读取路径迁移，让关联台 ETC summary 优先以 `app.etc_batch_invoice_links` + canonical `app.invoices` 生成明细，避免 `app.etc_invoices` 与统一发票池长期竞争为发票事实源。
@@ -592,6 +639,17 @@
 - 测试覆盖：新增 `test_personal_advance_repayment_delegates_relation_write_to_command_service`、`test_personal_advance_repayment_fails_fast_without_relation_command_service`、`test_workbench_personal_advance_repayment_uses_relation_command_boundary`，并运行既有个人暂借款 API 成功/失败回归。
 - 验证命令：见 `workbench-relations` Phase 7H 记录。
 - 未测风险：其他 exception application relation mode 族仍待单独迁移，不能与个人暂借款混为同一切片。
+
+## 2026-06-23 - 进销项发票方向修复生产权限闭环
+
+- 目标：完成 `2026-06-23-invoice-direction-normalization-v1` 发布后的生产闭环，确保截图中的 5200、4900、400 三栏样例以及同类二栏/三栏自动配对项实际进入 paired。
+- 真实原因：代码规则已在生产 release `main-6e8ed50d-20260623093156` 生效，但 Workbench matching worker 重建 scope 时以 `fin_ops_app_runtime` 读取 `app.etc_batch_invoice_links` 被 PostgreSQL 拒绝；`0074_etc_batch_invoice_links.sql` 建表后未给当前统一 runtime 角色授权，导致 12 个 matching scope 全部 failed。
+- 处理结果：生产库用 migrator 身份补齐 `app.etc_batch_invoice_links` 对 `fin_ops_app_runtime` 的 `select, insert, update, delete` 权限，并重新排队权限失败的 12 个 `workbench_matching_dirty_scopes`；12 个 scope 最终全部 completed。新增 `0075_etc_batch_invoice_links_runtime_grants.sql` 固化该权限，避免新环境或后续迁移重放继续漏授权。
+- 生产验证：`oa-pay-1982 + txn_imported_1258 + inv_imported_0208`、`oa-pay-2065 + txn_imported_1415 + inv_imported_0086`、`oa-pay-2079 + txn_imported_1456 + inv_imported_0070` 均生成 `paired / oa_bank_invoice_exact_amount / 2026-06-23-invoice-direction-normalization-v1`；旧 `multiple_three_way_candidates` 决策已 expired。
+- 全局验证：生产新规则版本下 paired 覆盖 `bank_invoice`、`oa_bank`、`oa_bank_invoice`、`oa_invoice`；`job.workbench_matching_dirty_scopes` 状态为 `completed=12`，无 dirty/retry/processing/failed；生产 API、dispatcher、`workbench-matching`、`workbench-relation`、`workbench` worker 均 active。
+- 测试覆盖：`tests/test_postgres_migrations.py` 增加 migration 列表和 runtime grant contract，防止 `app.etc_batch_invoice_links` 后续缺少 `fin_ops_app_runtime` 权限。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationSqlTests -v`；生产 SQL 权限验证、matching scope 重排轮询、目标 row decision 查询和 `sudo -n /usr/local/sbin/finops-deploy-control status`。
+- 未测风险：未重新执行完整 `scripts/deploy-oa.sh` 发布包含 `0075` 的新 release；当前生产库已直接授权并完成重建，`0075` 将在下一次标准部署时作为幂等迁移记录进入 schema migration 链。
 
 ## 2026-06-23 - 多 OA active relation 后端行级归属证据闭环
 

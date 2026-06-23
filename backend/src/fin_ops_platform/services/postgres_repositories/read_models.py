@@ -35,7 +35,7 @@ BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
-WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.v2"
+WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.oa_attachment_source_promotion.v1"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -1297,6 +1297,13 @@ class PostgresReadModelRepository:
             source_versions=source_versions,
         )
 
+    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            current_scope_keys=current_scope_keys,
+        )
+
     def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         row = self._connection.fetch_one(
             """
@@ -1383,6 +1390,13 @@ class PostgresReadModelRepository:
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+        )
+
+    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            current_scope_keys=current_scope_keys,
         )
 
     def list_oa_pending_payment_rows(
@@ -1613,6 +1627,13 @@ class PostgresReadModelRepository:
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+        )
+
+    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.oa_pending_payment_rows",
+            scope_table_name="read_model.oa_pending_payment_scopes",
+            current_scope_keys=current_scope_keys,
         )
 
     def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
@@ -1871,6 +1892,37 @@ class PostgresReadModelRepository:
                 scope_type="",
                 source_versions=normalized_source_versions,
             )
+
+        run_in_transaction(self._connection, write)
+
+    def _prune_invoice_relation_scope_shards(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        current_scope_keys: list[str],
+    ) -> None:
+        normalized_scope_keys: list[str] = []
+        for scope_key in list(current_scope_keys or []):
+            normalized_scope_key = str(scope_key or "").strip()
+            if MONTH_SCOPE_RE.match(normalized_scope_key) and normalized_scope_key not in normalized_scope_keys:
+                normalized_scope_keys.append(normalized_scope_key)
+
+        def write(connection: Any) -> None:
+            if normalized_scope_keys:
+                placeholders = ", ".join(["%s"] * len(normalized_scope_keys))
+                params = tuple(normalized_scope_keys)
+                connection.execute(
+                    f"delete from {table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
+                    params,
+                )
+                connection.execute(
+                    f"delete from {scope_table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
+                    params,
+                )
+                return
+            connection.execute(f"delete from {table_name} where scope_key <> 'all'")
+            connection.execute(f"delete from {scope_table_name} where scope_key <> 'all'")
 
         run_in_transaction(self._connection, write)
 
@@ -8481,6 +8533,7 @@ def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key:
     payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
     collection = payload.get("collectionStatus") if isinstance(payload.get("collectionStatus"), dict) else {}
+    oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
     bank = payload.get("bankTransactions") if isinstance(payload.get("bankTransactions"), dict) else {}
     receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else {}
     red_invoice = payload.get("redInvoiceRelation") if isinstance(payload.get("redInvoiceRelation"), dict) else {}
@@ -8496,6 +8549,9 @@ def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key:
             "collection_status_label": text(collection.get("label")),
             "collected_amount": decimal_text(collection.get("collectedAmount")),
             "pending_amount": decimal_text(collection.get("pendingAmount")),
+            "oa_applicant": text(oa.get("applicantName")),
+            "oa_application_type": text(oa.get("applicationType")),
+            "oa_project_name": text(oa.get("projectName")),
             "bank_counterparty_name": text(bank.get("counterpartyName")),
             "bank_trade_time": text(bank.get("tradeTime")),
             "bank_amount": decimal_text(bank.get("amount")),
@@ -8503,6 +8559,7 @@ def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key:
             "bank_summary": text(bank.get("summary")),
             "receipt_status": text(receipt.get("status")),
             "receipt_status_label": text(receipt.get("label")),
+            "oa_relation_count": int_value(oa.get("relationCount"), 0),
             "bank_relation_count": int_value(bank.get("relationCount"), 0),
             "red_invoice_relation_count": int_value(red_invoice.get("relationCount"), 0),
         }
@@ -9322,12 +9379,10 @@ def _suppress_all_scope_open_rows_claimed_by_other_open_groups(open_groups: list
         return
 
     for group in open_groups:
-        before_row_count = _workbench_group_fact_row_counts(group)["rows"]
         _remove_workbench_rows_from_group_claimed_by_other_open_group(
             group,
             owner_by_claim_key=owner_by_claim_key,
         )
-        _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
         _finalize_all_scope_group(group, zone="open")
 
 

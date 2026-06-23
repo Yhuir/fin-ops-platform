@@ -98,6 +98,7 @@ class FakeCommandService:
     def __init__(self) -> None:
         self.calls: list[tuple[dict[str, Any], str]] = []
         self.link_calls: list[tuple[dict[str, Any], str]] = []
+        self.candidate_queries: list[dict[str, list[str]]] = []
 
     def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         self.calls.append((dict(payload), actor_id))
@@ -146,6 +147,7 @@ class FakeCommandService:
         }
 
     def bank_transaction_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        self.candidate_queries.append(dict(query))
         return {
             "rows": [
                 {
@@ -155,6 +157,7 @@ class FakeCommandService:
                     "amount": "100.00",
                     "relationStatus": query.get("relation_status", ["all"])[0],
                     "relationStatusLabel": "未配对",
+                    "linkedOaRowIds": query.get("oa_row_ids", []),
                 }
             ],
             "pagination": {"page": 1, "pageSize": 100, "total": 1},
@@ -521,13 +524,15 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/oa-pending-payments/bank-transaction-candidates?relation_status=unmatched",
+                "/api/oa-pending-payments/bank-transaction-candidates?relation_status=unmatched&oa_row_ids=oa-api&oa_row_ids=oa-extra",
             )
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         self.assertEqual(payload["rows"][0]["id"], "bank-api")
         self.assertEqual(payload["rows"][0]["relationStatus"], "unmatched")
+        self.assertEqual(payload["rows"][0]["linkedOaRowIds"], ["oa-api", "oa-extra"])
+        self.assertEqual(command_service.candidate_queries[0]["oa_row_ids"], ["oa-api", "oa-extra"])
 
     def test_candidate_bank_relation_is_visible_without_marking_oa_paid(self) -> None:
         bank = BankTransaction(

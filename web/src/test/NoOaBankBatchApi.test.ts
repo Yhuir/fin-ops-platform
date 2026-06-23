@@ -200,6 +200,54 @@ describe("no OA bank batch API", () => {
     expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
   });
 
+  test("maps legacy unsubmitted batch status to draft in the unsubmitted bucket", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        summary: {
+          draft_count: 1,
+          submitted_count: 0,
+          withdrawn_count: 0,
+          conflict_count: 0,
+          stale_count: 0,
+          total_amount: "40.50",
+          categories: [],
+        },
+        batches: [
+          {
+            batch_id: "batch-legacy-unsubmitted-fee",
+            batch_type: "fee",
+            batch_label: "手续费",
+            scope_month: "2026-01",
+            account_key: "ccb:8106",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            status: "unsubmitted",
+            status_bucket: "unsubmitted",
+            row_count: 14,
+            total_amount: "40.50",
+            tag_counts: { fee: 14 },
+            direction_counts: { expense: 14 },
+            can_submit: false,
+            can_withdraw: false,
+            blocked_reason: "",
+            version: 3,
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchNoOaBankBatches({ bucket: "unsubmitted" });
+
+    expect(payload.batches[0]).toMatchObject({
+      batchId: "batch-legacy-unsubmitted-fee",
+      status: "draft",
+      statusBucket: "unsubmitted",
+      canSubmit: true,
+      blockedReason: "",
+    });
+  });
+
   test("maps relation-backed stale batches as submitted", async () => {
     vi.stubGlobal(
       "fetch",
@@ -238,6 +286,68 @@ describe("no OA bank batch API", () => {
       statusBucket: "submitted",
       blockedReason: "",
       canSubmit: false,
+      canWithdraw: true,
+    });
+  });
+
+  test("filters non-public exception batch statuses from list payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        summary: {
+          draft_count: 1,
+          submitted_count: 1,
+          withdrawn_count: 0,
+          conflict_count: 0,
+          stale_count: 0,
+          total_amount: "2.00",
+          categories: [],
+        },
+        batches: [
+          {
+            batch_id: "batch-draft-fee",
+            batch_type: "fee",
+            status: "draft",
+            status_bucket: "unsubmitted",
+            can_submit: true,
+            version: 1,
+          },
+          {
+            batch_id: "batch-conflict-transfer",
+            batch_type: "internal_transfer",
+            status: "conflict",
+            status_bucket: "unsubmitted",
+            conflict_reason: "内部往来存在多解，不能自动形成可提交批次。",
+            can_submit: false,
+            version: 1,
+          },
+          {
+            batch_id: "batch-stale-fee",
+            batch_type: "fee",
+            status: "stale",
+            status_bucket: "unsubmitted",
+            blocked_reason: "源流水或分类已变化，需要复核后处理。",
+            can_submit: false,
+            version: 2,
+          },
+          {
+            batch_id: "batch-stale-submitted",
+            batch_type: "fee",
+            status: "stale",
+            status_bucket: "submitted",
+            can_withdraw: true,
+            version: 3,
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchNoOaBankBatches();
+
+    expect(payload.batches.map((batch) => batch.batchId)).toEqual(["batch-draft-fee", "batch-stale-submitted"]);
+    expect(payload.batches[1]).toMatchObject({
+      status: "submitted",
+      statusBucket: "submitted",
       canWithdraw: true,
     });
   });

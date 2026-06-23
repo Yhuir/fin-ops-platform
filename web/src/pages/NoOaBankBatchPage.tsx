@@ -23,6 +23,12 @@ import {
   submitNoOaBankBatchSelection,
   withdrawNoOaBankBatch,
 } from "../features/noOaBankBatches/api";
+import {
+  canSelectBatchRows,
+  canSubmitInternalTransferBatch,
+  canWithdrawBatch,
+  statusBucketFor,
+} from "../features/noOaBankBatches/policy";
 import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
@@ -64,12 +70,13 @@ const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
 const NO_OA_BANK_BATCH_PAGE_SIZE = 200;
 
-const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default" | "primary" | "success" | "warning" | "error" }> = {
+type BatchStatusMeta = { label: string; color: "default" | "primary" | "success" | "warning" | "error" };
+
+const STATUS_META: Record<NoOaBankBatchStatus | "unsubmitted", BatchStatusMeta> = {
   draft: { label: "待提交", color: "warning" },
+  unsubmitted: { label: "待提交", color: "warning" },
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
-  conflict: { label: "冲突", color: "error" },
-  stale: { label: "待提交", color: "warning" },
 };
 
 function currentMonth() {
@@ -169,35 +176,12 @@ function directionTagLabel(row: { direction?: string; directionLabel?: string })
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
 }
 
-function canWithdraw(batch: NoOaBankBatch) {
-  return batch.canWithdraw || batch.status === "submitted";
-}
-
-function canSelectBatchRows(batch: NoOaBankBatch, bucket: NoOaBankBatchStatusBucket) {
-  return bucket === "unsubmitted"
-    && batch.status === "draft"
-    && batch.batchType !== "internal_transfer";
-}
-
-function canSubmitInternalTransferBatch(batch: NoOaBankBatch, bucket: NoOaBankBatchStatusBucket) {
-  return bucket === "unsubmitted"
-    && batch.status === "draft"
-    && batch.canSubmit
-    && batch.batchType === "internal_transfer";
-}
-
-function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
-  if (batch.statusBucket === "submitted" || batch.status === "submitted") {
-    return "submitted";
-  }
-  if (batch.statusBucket === "withdrawn" || batch.status === "withdrawn") {
-    return "withdrawn";
-  }
-  return "unsubmitted";
+function batchBlockingReason(_batch: NoOaBankBatch) {
+  return "";
 }
 
 function BatchStatusTag({ status }: { status: string }) {
-  const meta = STATUS_META[status as NoOaBankBatchStatus] ?? { label: status, color: "default" as const };
+  const meta = STATUS_META[status as keyof typeof STATUS_META] ?? { label: status, color: "default" as const };
   return (
     <span className={cx("no-oa-bank-batches-status", `no-oa-bank-batches-status--${meta.color}`)}>
       {meta.label}
@@ -951,7 +935,7 @@ export default function NoOaBankBatchPage() {
     return Array.from(groups.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
   }, [tagSelection.activeTags]);
 
-  const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
+  const unsubmittedCount = payload.summary.draftCount;
   const resetListScope = useCallback(() => {
     clearSelection();
     manualLabelSelectionRef.current = false;
@@ -1131,9 +1115,7 @@ export default function NoOaBankBatchPage() {
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
-              const blockingReason = batch.status === "conflict"
-                ? (batch.blockedReason || batch.conflictReason)
-                : "";
+              const blockingReason = batchBlockingReason(batch);
               return (
                 <section
                   className={cx(
@@ -1194,7 +1176,7 @@ export default function NoOaBankBatchPage() {
                             提交内部往来批次
                           </button>
                         ) : null}
-                        {bucket === "submitted" && canMutateData && canWithdraw(batch) ? (
+                        {bucket === "submitted" && canMutateData && canWithdrawBatch(batch) ? (
                           <button
                             className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
                             disabled={mutating}
@@ -1210,7 +1192,7 @@ export default function NoOaBankBatchPage() {
                       <div
                         className={cx(
                           "no-oa-bank-batches-notice",
-                          batch.status === "conflict" ? "no-oa-bank-batches-notice--error" : "no-oa-bank-batches-notice--warning",
+                          "no-oa-bank-batches-notice--warning",
                         )}
                         role="alert"
                       >

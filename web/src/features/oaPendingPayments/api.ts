@@ -96,12 +96,14 @@ export async function autoReconcileOaPendingPaymentBankTransactions(
 export async function fetchOaPendingPaymentBankCandidates({
   relationStatus = "all",
   keyword = "",
+  oaRowIds = [],
   page = 1,
   pageSize = 100,
   signal,
 }: {
   relationStatus?: OaPendingPaymentBankCandidateRelationStatus;
   keyword?: string;
+  oaRowIds?: string[];
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;
@@ -110,6 +112,10 @@ export async function fetchOaPendingPaymentBankCandidates({
   params.set("relation_status", relationStatus);
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
+  oaRowIds
+    .map((rowId) => rowId.trim())
+    .filter(Boolean)
+    .forEach((rowId) => params.append("oa_row_ids", rowId));
   if (keyword.trim()) {
     params.set("keyword", keyword.trim());
   }

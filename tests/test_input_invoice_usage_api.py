@@ -15,6 +15,9 @@ from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
+from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import (
+    InputInvoiceUsageReadModelDetailService,
+)
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.invoice_usage_collection_source_versions import input_invoice_usage_source_versions
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -290,6 +293,64 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(payload["rowId"], "usage-row-read-model")
         self.assertEqual(payload["relationCount"], 2)
         self.assertEqual([summary["oaId"] for summary in payload["summaries"]], ["oa-a", "oa-b"])
+
+    def test_relation_details_compare_source_versions_with_row_scope(self) -> None:
+        current_versions = {
+            **input_invoice_usage_source_versions(),
+            "workbench_relation_source_versions": {"source_version": "2026-05-current"},
+        }
+        stale_all_versions = {
+            **input_invoice_usage_source_versions(),
+            "workbench_relation_source_versions": {"source_version": "all-stale"},
+        }
+        row = {
+            "id": "usage-row-scoped",
+            "invoiceId": "inv-scoped",
+            "oa": {
+                "relationCount": 2,
+                "hasMultiple": True,
+                "detailMode": "list",
+                "summaries": [
+                    {"oaId": "oa-a", "applicantName": "刘际涛", "amount": "40.00", "relationStatus": "linked"},
+                    {"oaId": "oa-b", "applicantName": "张三", "amount": "60.00", "relationStatus": "linked"},
+                ],
+            },
+            "bankTransactions": {"relationCount": 0, "summaries": []},
+            "invoiceRelations": {"relationCount": 1, "summaries": [{"invoiceId": "inv-scoped"}]},
+        }
+        repository = type(
+            "ScopedInputInvoiceUsageReadRepository",
+            (),
+            {
+                "get_input_invoice_usage_row_by_row_id": lambda _self, _row_id: {
+                    "row": row,
+                    "refresh_status": "fresh",
+                    "source_versions": current_versions,
+                    "read_model_scope_key": "2026-05",
+                }
+            },
+        )()
+        provider_calls: list[str | None] = []
+
+        def source_versions_provider(*, scope_key: str | None = None) -> dict[str, object]:
+            provider_calls.append(scope_key)
+            return current_versions if scope_key == "2026-05" else stale_all_versions
+
+        refreshes: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelDetailService(
+            repository=repository,
+            enqueue_refresh=lambda scope_key, reason: refreshes.append((scope_key, reason)) is None,
+            source_versions_provider=source_versions_provider,
+        )
+
+        payload = service.relation_details("usage-row-scoped", kind="oa")
+
+        self.assertEqual(provider_calls, ["2026-05"])
+        self.assertEqual(refreshes, [])
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["rowId"], "usage-row-scoped")
+        self.assertEqual(payload["relationCount"], 2)
 
     def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

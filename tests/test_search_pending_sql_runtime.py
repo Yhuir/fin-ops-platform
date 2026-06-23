@@ -12,6 +12,7 @@ from fin_ops_platform.services.pending_invoice_service import (
     PENDING_INVOICE_EXPORT_ROW_LIMIT,
     PendingInvoiceError,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
@@ -36,7 +37,7 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
         "pending_output_invoice_tag_groups_version": 1,
         "bank_auto_tag_rules_version": 1,
         "oa_attachment_invoice_parser_version": "2026-05-28-attachment-status-v1:2026-05-11-evidence-v1",
-        "oa_projection_sync_version": "2026-06-17-workflow-status-v1",
+        "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         "bank_detail_source_versions": {},
     }
 
@@ -1896,6 +1897,93 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["oa"]["relation_count"], 1)
         self.assertEqual(payload["relation_case_ids"], ["case-tian-196"])
         self.assertEqual(relation_facade.calls[0]["reason"], "pending_invoice_sql_projection")
+
+    def test_pending_invoice_sql_projection_collapses_multi_bank_relation_members(self) -> None:
+        class MultiBankConnection(PendingProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.bank_transactions" in normalized:
+                    return [
+                        {
+                            "transaction_id": transaction_id,
+                            "counterparty_name_raw": "云南供应商",
+                            "trade_time": f"2026-05-20 10:0{index}:00",
+                            "txn_date": "2026-05-20",
+                            "amount": amount,
+                            "balance": "1000.00",
+                            "currency": "CNY",
+                            "summary": "转账",
+                            "remark": "服务费",
+                            "bank_serial_no": transaction_id,
+                            "account_name": "工商银行",
+                            "account_no": "622200001234",
+                            "category_payload": {"category_code": "service_fee", "category_label": "服务费"},
+                            "invoices": [],
+                            "paid_total": "0.00",
+                            "oa_applicant": "",
+                            "oa_project_name": "",
+                            "relation_case_ids": [],
+                        }
+                        for index, (transaction_id, amount) in enumerate(
+                            [("txn-group-1", "120.00"), ("txn-group-2", "80.00"), ("txn-group-3", "50.00")],
+                            start=1,
+                        )
+                    ]
+                return super().fetch_all(sql, params)
+
+        relation_rows = [
+            {
+                "row_id": transaction_id,
+                "row_type": "bank_transaction",
+                "relation_status": "linked",
+                "group_ids": ["case-sql-multi"],
+                "linked_oa": [
+                    {"id": "oa-sql-1", "applicant": "张三", "application_type": "支付申请", "project_name": "项目一", "relation_case_id": "case-sql-multi"},
+                    {"id": "oa-sql-2", "applicant": "李四", "application_type": "日常报销", "project_name": "项目二", "relation_case_id": "case-sql-multi"},
+                ],
+                "linked_bank_transactions": [
+                    {"id": "txn-group-1", "amount": "120.00", "trade_time": "2026-05-20 10:01:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
+                    {"id": "txn-group-2", "amount": "80.00", "trade_time": "2026-05-20 10:02:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
+                    {"id": "txn-group-3", "amount": "50.00", "trade_time": "2026-05-20 10:03:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
+                ],
+                "linked_input_invoices": [
+                    {"id": "inv-sql-1", "invoice_no": "IN-SQL-001", "seller_name": "云南供应商", "total_with_tax": "100.00", "relation_case_id": "case-sql-multi"},
+                    {"id": "inv-sql-2", "invoice_no": "IN-SQL-002", "seller_name": "云南供应商", "total_with_tax": "150.00", "relation_case_id": "case-sql-multi"},
+                ],
+                "linked_output_invoices": [],
+            }
+            for transaction_id in ("txn-group-1", "txn-group-2", "txn-group-3")
+        ]
+        relation_facade = FakeWorkbenchRelationReadFacade(
+            {
+                "status": "fresh",
+                "rows": relation_rows,
+                "groups": [{"group_id": "case-sql-multi", "relation_status": "linked"}],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-05"],
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=MultiBankConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        self.assertEqual(len(rows), 1)
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["id"], "txn-group-1")
+        self.assertEqual(payload["relation_case_ids"], ["case-sql-multi"])
+        self.assertEqual(payload["bank_transactions"]["relation_count"], 3)
+        self.assertEqual(payload["bank_transactions"]["linked_relation_count"], 3)
+        self.assertEqual(
+            [transaction["id"] for transaction in payload["bank_transactions"]["summaries"]],
+            ["txn-group-1", "txn-group-2", "txn-group-3"],
+        )
+        self.assertEqual(payload["bank_transactions"]["payment_summary"]["paid_total"], "250.00")
+        self.assertEqual(payload["input_invoices"]["relation_count"], 2)
+        self.assertEqual(payload["oa"]["relation_count"], 2)
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
 
     def test_pending_invoice_sql_projection_preserves_candidate_without_closing_status(self) -> None:
         relation_facade = FakeWorkbenchRelationReadFacade(

@@ -39,17 +39,17 @@ const tagSelectionPayload = {
 
 const listPayload = {
   summary: {
-    draft_count: 2,
+    draft_count: 3,
     submitted_count: 1,
     withdrawn_count: 1,
-    conflict_count: 1,
+    conflict_count: 0,
     stale_count: 0,
-    total_amount: "20106.00",
+    total_amount: "26006.00",
     categories: [
       { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total: 2, draft: 1, submitted: 0, withdrawn: 1, conflict: 0, stale: 0, total_amount: "106.00" },
       { code: "salary", label: "工资", primary_label: "人工成本", sub_label: "工资", total: 1, draft: 0, submitted: 1, withdrawn: 0, conflict: 0, stale: 0, total_amount: "20000.00" },
       { code: "holiday_bonus", label: "过节费", primary_label: "福利", sub_label: "过节费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "5000.00" },
-      { code: "internal_transfer", label: "内部往来款", primary_label: "往来", sub_label: "内部往来款", total: 1, draft: 0, submitted: 0, withdrawn: 0, conflict: 1, stale: 0, total_amount: "30000.00" },
+      { code: "internal_transfer", label: "内部往来款", primary_label: "往来", sub_label: "内部往来款", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "1000.00" },
     ],
   },
   batches: [
@@ -314,7 +314,15 @@ function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function batchesForBucket<T extends { batches: Array<{ status_bucket?: string | null; statusBucket?: string | null }> }>(payload: T, bucket: string | null) {
+type MockNoOaBatch = {
+  status?: string | null;
+  status_bucket?: string | null;
+  statusBucket?: string | null;
+  can_withdraw?: boolean | null;
+  canWithdraw?: boolean | null;
+};
+
+function batchesForBucket<T extends { batches: MockNoOaBatch[] }>(payload: T, bucket: string | null) {
   return bucket && bucket !== "all"
     ? payload.batches.filter((batch) => (batch.status_bucket ?? batch.statusBucket) === bucket)
     : payload.batches;
@@ -330,8 +338,17 @@ function slicePage<T>(rows: T[], page: number, pageSize: number) {
   return rows.slice(start, start + pageSize);
 }
 
-function withPagination<T extends { batches: Array<{ status_bucket?: string | null; statusBucket?: string | null }> }>(payload: T, url: URL) {
-  const filteredBatches = batchesForBucket(payload, url.searchParams.get("bucket"));
+function withPagination<T extends { batches: MockNoOaBatch[] }>(payload: T, url: URL) {
+  const filteredBatches = batchesForBucket(payload, url.searchParams.get("bucket")).filter((batch) => {
+    const status = String(batch.status ?? "");
+    const bucket = String(batch.status_bucket ?? batch.statusBucket ?? "");
+    const canWithdraw = batch.can_withdraw === true || batch.canWithdraw === true;
+    return status === "draft"
+      || (status === "unsubmitted" && bucket === "unsubmitted")
+      || status === "submitted"
+      || status === "withdrawn"
+      || (status === "stale" && (bucket === "submitted" || canWithdraw));
+  });
   const page = positiveParam(url.searchParams, "page", 1);
   const pageSize = positiveParam(url.searchParams, "page_size", 200);
   return {
@@ -586,7 +603,7 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       expect(within(primaryRegion).getByRole("button", { name: "费用 1批 · 2条" })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(screen.getByRole("group", { name: "免OA批次分页" })).toHaveTextContent("1-4 / 4");
+    expect(screen.getByRole("group", { name: "免OA批次分页" })).toHaveTextContent("1-3 / 3");
     expect(within(primaryRegion).getByRole("button", { name: "福利 1批 · 5条" })).toBeInTheDocument();
 
     const subRegion = screen.getByRole("region", { name: "子标签" });
@@ -724,14 +741,14 @@ describe("NoOaBankBatchPage", () => {
     })).toBe(true);
   });
 
-  test("shows batch blocking reasons without default audit metadata", async () => {
+  test("hides exception batches while omitting default audit metadata", async () => {
     installFetchMock();
     renderPage();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
+    await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
 
-    expect(await screen.findByText("内部往来存在多解，不能自动形成可提交批次。")).toBeInTheDocument();
+    expect(screen.queryByText("内部往来存在多解，不能自动形成可提交批次。")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "已提交 1" }));
     expect(await screen.findByText("人工成本")).toBeInTheDocument();
@@ -943,6 +960,67 @@ describe("NoOaBankBatchPage", () => {
     });
   });
 
+  test("keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status", async () => {
+    const legacyUnsubmittedBatch = {
+      ...listPayload.batches[0],
+      status: "unsubmitted",
+      status_bucket: "unsubmitted",
+    };
+    const fetchMock = installFetchMock({
+      ...listPayload,
+      batches: [legacyUnsubmittedBatch, ...listPayload.batches.slice(1)],
+    });
+    const user = userEvent.setup();
+
+    renderPage();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    expect(rowCheckbox).toBeEnabled();
+
+    await user.click(rowCheckbox);
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/no-oa-bank-batches/submit-selection",
+        expect.objectContaining({
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          method: "POST",
+        }),
+      );
+    });
+  });
+
+  test("filters unsubmitted stale batches out of the main list", async () => {
+    const staleUnsubmittedBatch = {
+      ...listPayload.batches[0],
+      bank_name: "",
+      status: "stale",
+      status_bucket: "unsubmitted",
+      can_submit: false,
+      blocked_reason: "源流水或分类已变化，需要复核后处理。",
+    };
+    installFetchMock({
+      ...listPayload,
+      summary: {
+        ...listPayload.summary,
+        draft_count: 1,
+        stale_count: 1,
+      },
+      batches: [staleUnsubmittedBatch, ...listPayload.batches.slice(1)],
+    });
+
+    renderPage();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    await within(transactionRegion).findByText("中国银行7001");
+    expect(within(transactionRegion).queryByText("多账户8106")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("需复核")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("源流水或分类已变化，需要复核后处理。")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByRole("checkbox", { name: "选择流水 bank-row-001" })).not.toBeInTheDocument();
+  });
+
   test("prevents selecting rows from another bank before clearing the current bank region", async () => {
     const secondFeeBatch = {
       ...listPayload.batches[0],
@@ -1092,8 +1170,8 @@ describe("NoOaBankBatchPage", () => {
 
     try {
       renderPage();
-      await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
-      await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 5条" }));
+      await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
+      await user.click(await screen.findByRole("button", { name: "内部往来款 1批 · 2条" }));
       await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
 
       await waitFor(() => {
@@ -1115,20 +1193,19 @@ describe("NoOaBankBatchPage", () => {
     }
   });
 
-  test("shows relation context for internal transfer conflicts", async () => {
+  test("does not expose internal transfer conflicts in the main list", async () => {
     const user = userEvent.setup();
     installFetchMock();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
-    await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 5条" }));
+    await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
+    await user.click(await screen.findByRole("button", { name: "内部往来款 1批 · 2条" }));
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    expect(await within(transactionRegion).findByText("内部往来存在多解，不能自动形成可提交批次。")).toBeInTheDocument();
-    expect(await within(transactionRegion).findByText("云南溯源科技有限公司")).toBeInTheDocument();
-    expect(within(transactionRegion).getByText("关联 case-active-001")).toBeInTheDocument();
-    expect(within(transactionRegion).getByText("OA 1")).toBeInTheDocument();
-    expect(within(transactionRegion).getByText("发票 0")).toBeInTheDocument();
+    expect(await within(transactionRegion).findByText("多账户")).toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("内部往来存在多解，不能自动形成可提交批次。")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("云南溯源科技有限公司")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("关联 case-active-001")).not.toBeInTheDocument();
   });
 
   test("refreshes tag selection, list, and detail cache after bank transaction category updates", async () => {

@@ -45,6 +45,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     scope_key=scope_key,
                     list_method_name="list_input_invoice_usage_scope_shards",
                     empty_method_name="mark_input_invoice_usage_scope_empty",
+                    prune_method_name="prune_input_invoice_usage_scope_shards",
                     shard_reason="input_invoice_usage_month_shard",
                 )
                 if shard_result is not None:
@@ -73,6 +74,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     scope_key=scope_key,
                     list_method_name="list_output_invoice_collection_scope_shards",
                     empty_method_name="mark_output_invoice_collection_scope_empty",
+                    prune_method_name="prune_output_invoice_collection_scope_shards",
                     shard_reason="output_invoice_collection_month_shard",
                 )
                 if shard_result is not None:
@@ -101,6 +103,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     scope_key=scope_key,
                     list_method_name="list_oa_pending_payment_scope_shards",
                     empty_method_name="mark_oa_pending_payment_scope_empty",
+                    prune_method_name="prune_oa_pending_payment_scope_shards",
                     shard_reason="oa_pending_payment_month_shard",
                 )
                 if shard_result is not None:
@@ -123,6 +126,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
         scope_key: str,
         list_method_name: str,
         empty_method_name: str,
+        prune_method_name: str,
         shard_reason: str,
     ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, list_method_name, None)
@@ -130,6 +134,9 @@ class InvoiceUsageCollectionReadModelRefreshService:
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
+        prune_shards = getattr(self._projection_builder, prune_method_name, None)
+        if callable(prune_shards):
+            prune_shards(shard_keys)
         if not shard_keys:
             mark_empty = getattr(self._projection_builder, empty_method_name, None)
             if callable(mark_empty):

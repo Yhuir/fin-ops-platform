@@ -40,19 +40,27 @@
 
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
-| `draft` | 未提交候选批次 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
+| `draft` | 未提交候选批次；兼容旧 SQL/read model 中 `status=unsubmitted,status_bucket=unsubmitted` 的同义投影 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
 | `submitted` | 已提交免 OA 批次并写入 Workbench pair relation | 可撤回 |
 | `withdrawn` | 已撤回批次 | 只读；如果源流水仍 current，可重新生成 draft |
-| `conflict` | 规则/金额/内部往来配对不唯一或不完整 | 不可提交，需人工处理底层分类/关系 |
-| `stale` | 已提交批次的源流水或分类漂移内部兼容状态 | 如果仍有 active no-OA relation，API/页面必须投影为 `submitted` 并允许撤回；不得向用户显示“分类已变更，需复核”提示。无 active relation 的旧漂移批次不作为已提交展示，后续由 refresh/repair 生成新的 draft 或保留只读历史 |
-| `superseded` | 历史单行批次被合并替代 | 只作为迁移/兼容状态 |
+
+内部兼容状态：
+
+| 状态 | 含义 | 公开投影 |
+| --- | --- | --- |
+| `conflict` | 规则/金额/内部往来配对不唯一或不完整 | 不进入主列表/summary；用户需在银行明细、标签或关系事实源修复后重新生成 draft |
+| `stale` | 历史内部异常或源流水缺失诊断状态 | 有 active no-OA relation 时投影为 `submitted` 并允许撤回；无 active relation 时从公开 snapshot 清理。普通银行明细标签变化不得把 submitted batch 转成 stale |
+| `superseded` | 历史单行批次被合并替代 | 从公开 snapshot 清理 |
 
 候选生成规则：
 
 - 未提交候选只来自当前 tag selection 中的 tag code。
 - 未提交候选必须排除被 Workbench active relation 占用的银行流水。
 - 已提交历史批次即使标签不再准入，也继续可见并按状态管理。
+- 已提交/已撤回批次详情使用提交时冻结的 `row_tag_snapshot`；银行明细当前标签变化只影响新的未提交候选，不覆盖历史批次内流水标签。
 - 同月、同银行账户、同 category code 是 submit-selection 的硬约束。
+- 前端 API mapper 和后端公开投影必须把旧 `status=unsubmitted,status_bucket=unsubmitted` 归一为 canonical `draft` 语义，并设置为可提交；页面操作能力由 `noOaBankBatches/policy.ts` 统一判断，避免状态徽标和右侧 checkbox/提交按钮分裂。
+- 持久化必须保存公开生命周期 snapshot：`draft/submitted/withdrawn`。`conflict/stale/superseded` 不得继续写入主 read model；生产历史数据用 `repair_no_oa_bank_batch_lifecycle` dry-run/apply 清理。
 
 ### Submit Selection
 
@@ -136,6 +144,8 @@ submitted no-OA batch
 | permission disabled | 无 mutation 权限时提交、撤回、保存标签不可用或 API 403 | route/API tests |
 | tag drawer | 打开时重新 fetch tag selection；保存后 reload list | tag drawer tests |
 | selection guard | 只允许一个银行账户区域的 rows 同时被选择 | `prevents selecting rows from another bank before clearing the current bank region` |
+| ordinary row selection | 普通未提交 draft 语义批次显示行级 checkbox；兼容旧 `status=unsubmitted` 投影；不受旧批次级 `can_submit` flag 控制 | `keeps draft row selection available when legacy read model rows omit can_submit`、`keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status`、`NoOaBankBatchPolicy.test.ts` |
+| public lifecycle filter | `status=stale/conflict/superseded` 为内部兼容/诊断状态，不进入未提交主列表、summary 或 pagination；生产历史行通过 public snapshot/repair 清理 | `filters unsubmitted stale batches out of the main list`、`does not expose internal transfer conflicts in the main list` |
 | internal transfer action | internal_transfer draft 走 batch submit endpoint，不走 selected rows submit | `submits internal transfer draft batches through the batch endpoint` |
 | operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，等待 `no_oa_bank_batch` operation barrier fresh，再 reload list/detail/tag selection | operation overlay / page tests |
 | relation-backed stale projection | SQL read model 返回 `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，list/detail/mutation payload 和前端 mapper 对用户投影为 `submitted`，清空复核类阻断提示，仍显示撤回入口 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`presents relation-backed stale batches as submitted without review prompts` |

@@ -2,7 +2,7 @@
 status: resolved
 trigger: "免 OA 流水批量处理未提交流水行前没有 checkbox，无法选中流水后点击提交批次"
 created: 2026-06-21T16:33:09Z
-updated: 2026-06-21T16:39:45Z
+updated: 2026-06-23T15:08:00Z
 ---
 
 # Debug Session: no-oa-selection-checkbox
@@ -32,6 +32,14 @@ updated: 2026-06-21T16:39:45Z
   observation: `NoOaBankBatchPage` 已有 `selectedTransactionIds` state、row checkbox JSX 和 `submitNoOaBankBatchSelection` 调用，但 `canSelectBatchRows(...)` 额外依赖批次级 `canSubmit`。旧 SQL/read model payload 缺少 `can_submit` 时前端 mapper 将 `canSubmit` 归一为 `false`，从而隐藏普通 draft 行 checkbox。
 - timestamp: 2026-06-21T16:39:45Z
   observation: 补充验证 `submit_selected_rows` 同账户多条手续费后，Workbench `/api/workbench?month=all` paired 区返回 `relation_mode=no_oa_bank_batch`、`display_mode=collapsed_summary`、`default_collapsed=true`、`bank_rows=[no_oa_summary:<batch_id>]`，原始流水保存在 `collapsed_rows.bank`。
+- timestamp: 2026-06-23T14:16:00Z
+  observation: 新截图中批次标题为 `多账户8106` 且状态徽标显示“待提交”，但无 checkbox。组件复现显示 `status=stale,status_bucket=unsubmitted,blocked_reason=源流水或分类已变化，需要复核后处理。` 时页面只显示“待提交”，且只对 conflict 展示阻断原因，因此用户看不到为什么不可选。
+- timestamp: 2026-06-23T14:16:00Z
+  observation: 后端 service test `test_submitted_batch_that_becomes_stale_clears_active_relation` 定义 `status=stale,status_bucket=unsubmitted` 为源流水或分类漂移后不可提交、不可撤回状态；当时中间判断为显示“需复核”，后续生产口径已收敛为公开状态只保留 `draft/submitted/withdrawn`，该类内部诊断状态不进入主列表。
+- timestamp: 2026-06-23T14:16:00Z
+  observation: Playwright 新增 `ordinaryDraftMatrix` 场景，真实 Chromium 逐个验证 `fee/salary/holiday_bonus/bonus/tax_payment/treasury_tax_collection/social_security` 普通 draft 批次均显示行级 checkbox 且可勾选/取消。
+- timestamp: 2026-06-23T15:08:00Z
+  observation: 产品目标收敛为公开生命周期只保留 `draft/submitted/withdrawn`。`conflict/stale/superseded` 改为内部兼容/诊断状态，不进入主列表、summary 或 pagination；持久化改存 `public_snapshot()`，生产历史数据可用 `repair_no_oa_bank_batch_lifecycle` dry-run/apply 清理。
 
 ## Eliminated
 
@@ -40,7 +48,7 @@ updated: 2026-06-21T16:39:45Z
 
 ## Resolution
 
-- root_cause: 普通未提交流水行级选择入口被旧批次级 `can_submit` flag 控制；旧 read model payload 缺字段时隐藏 checkbox，污染了 `submit-selection` 新链路。
-- fix: `canSelectBatchRows(...)` 改为只依据 `bucket=unsubmitted`、`status=draft`、非 `internal_transfer`；内部往来整批提交仍保留 `canSubmit` 批次级门禁。新增页面回归测试覆盖缺失 `can_submit` 的旧 payload。
-- verification: `cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx`; `cd web && npm run build`; `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_workbench_integration.NoOaBankBatchWorkbenchIntegrationTests.test_submit_selection_fee_rows_render_as_collapsed_paired_workbench_group tests.test_workbench_candidate_grouping.WorkbenchCandidateGroupingTests.test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows tests.test_workbench_candidate_grouping.WorkbenchCandidateGroupingTests.test_single_row_no_oa_bank_batch_stays_as_regular_bank_row -v`; `cd web && npm test -- --run src/test/WorkbenchApi.test.ts src/test/CandidateGroupGrid.test.tsx`; `bash scripts/verify.sh docs`.
-- files_changed: `web/src/pages/NoOaBankBatchPage.tsx`; `web/src/test/NoOaBankBatchPage.test.tsx`; `tests/test_no_oa_bank_batch_workbench_integration.py`; `docs/modules/no-oa-bank-batches/tests.md`; `docs/modules/no-oa-bank-batches/implementation-notes.md`; `docs/modules/reconciliation-workbench/tests.md`.
+- root_cause: 两类旧状态都会造成“看起来未提交但没有 checkbox”：一是普通 draft 被旧批次级 `can_submit` 或旧 `status=unsubmitted` 污染；二是 `conflict/stale` 被当成未提交 summary/list 项暴露，但这些内部状态本来不可提交。
+- fix: 普通 draft/legacy unsubmitted 通过后端公开投影、API mapper 和 feature policy 统一判定并显示提交入口；`conflict/stale/superseded` 从公开 API/list/detail/summary/pagination 和持久化 public snapshot 清理。新增生产 repair CLI，默认 dry-run，`--apply` 才通过 PostgresStateStore 清理 DB/read model。
+- verification: `pytest tests/test_no_oa_bank_batch_service.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_lifecycle_repair.py tests/test_no_oa_bank_batch_read_model_refresh.py -q`; `cd web && npm test -- --run src/test/NoOaBankBatchApi.test.ts src/test/NoOaBankBatchPolicy.test.ts src/test/NoOaBankBatchPage.test.tsx`; `cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`; `cd web && npm run build`; `bash scripts/verify.sh docs`.
+- files_changed: `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`; `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`; `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`; `backend/src/fin_ops_platform/services/no_oa_bank_batch_lifecycle_repair.py`; `backend/src/fin_ops_platform/tools/repair_no_oa_bank_batch_lifecycle.py`; `tests/test_no_oa_bank_batch_service.py`; `tests/test_no_oa_bank_batch_application_service.py`; `tests/test_no_oa_bank_batch_lifecycle_repair.py`; `web/src/features/noOaBankBatches/api.ts`; `web/src/features/noOaBankBatches/policy.ts`; `web/src/pages/NoOaBankBatchPage.tsx`; `web/src/test/NoOaBankBatchApi.test.ts`; `web/src/test/NoOaBankBatchPolicy.test.ts`; `web/src/test/NoOaBankBatchPage.test.tsx`; `web/e2e/no-oa-bank-batches-flow.spec.ts`; `web/e2e/fixtures/apiMocks.ts`; `docs/modules/no-oa-bank-batches/*`.

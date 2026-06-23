@@ -58,8 +58,14 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
     def list_input_invoice_usage_scope_shards(self, scope_key: str) -> list[str]:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.INPUT)
 
+    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
+
     def list_output_invoice_collection_scope_shards(self, scope_key: str) -> list[str]:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.OUTPUT)
+
+    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_output_invoice_collection_scope_shards(current_scope_keys)
 
     def list_oa_pending_payment_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope_key = str(scope_key or "").strip()
@@ -75,6 +81,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             if MONTH_SCOPE_RE.match(str(month or ""))
         )
         return sorted(months, reverse=True)
+
+    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._read_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
@@ -93,8 +102,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
         )
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_input_invoice_usage_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -117,8 +127,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             sort_direction="desc",
         )
         source_versions = output_invoice_collection_source_versions()
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_output_invoice_collection_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -130,7 +141,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         normalized_scope_key = self._month_scope(scope_key)
         service = self._oa_pending_payment_service()
         context = service._query_context(month_hint=normalized_scope_key)
-        rows = service._filtered_sorted_rows(
+        completed_rows = service._filtered_sorted_rows(
             context=context,
             month=normalized_scope_key,
             keyword=None,
@@ -141,28 +152,37 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             sort_direction="desc",
             view_mode="completed",
         )
-        rows.extend(
-            service._filtered_sorted_rows(
-                context=context,
-                month=normalized_scope_key,
-                keyword=None,
-                trade_date_from=None,
-                trade_date_to=None,
-                filters=[],
-                sort_field="bank_trade_time",
-                sort_direction="desc",
-                view_mode="in_progress",
-            )
+        in_progress_rows = service._filtered_sorted_rows(
+            context=context,
+            month=normalized_scope_key,
+            keyword=None,
+            trade_date_from=None,
+            trade_date_to=None,
+            filters=[],
+            sort_field="bank_trade_time",
+            sort_direction="desc",
+            view_mode="in_progress",
         )
+        cleanup_result = self._cancel_oa_pending_relations_missing_admission(
+            month_scope=normalized_scope_key,
+            admitted_oa_row_ids=_oa_pending_payment_row_oa_ids(in_progress_rows),
+        )
+        rows = [*completed_rows, *in_progress_rows]
         source_versions = oa_pending_payment_source_versions()
-        if self._workbench_relation_read_facade.last_source_versions:
-            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._read_repository.save_oa_pending_payment_rows(
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
         )
-        return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
+        return {
+            "scope_key": normalized_scope_key,
+            "row_count": len(rows),
+            "source_versions": source_versions,
+            "pending_relation_cleanup": cleanup_result,
+        }
 
     def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
         self._read_repository.mark_input_invoice_usage_scope(
@@ -200,6 +220,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return OutputInvoiceCollectionQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
+            oa_projection=self._oa_projection_repository,
             lifecycle_repository=build_output_invoice_collection_lifecycle_repository(self._connection),
             require_fresh_relations=True,
         )
@@ -220,6 +241,37 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             source_adapter=self._oa_source_adapter,
             payment_status_repository=self._payment_status_repository,
         )
+
+    def _cancel_oa_pending_relations_missing_admission(
+        self,
+        *,
+        month_scope: str,
+        admitted_oa_row_ids: list[str],
+    ) -> dict[str, object]:
+        if self._payment_status_repository is None:
+            return {"changed_relation_ids": [], "affected_months": [], "skipped": "payment_status_repository_unavailable"}
+        read_status = self._oa_pending_payment_projection().get_read_status()
+        if str(getattr(read_status, "code", "") or "").strip() not in {"ready", "fresh"}:
+            return {
+                "changed_relation_ids": [],
+                "affected_months": [],
+                "skipped": "oa_admission_projection_not_ready",
+                "read_status": str(getattr(read_status, "code", "") or "").strip(),
+            }
+        repository = PostgresOaPendingPaymentRelationRepository(self._connection)
+        return repository.cancel_active_relations_missing_oa_admission(
+            month_scope=month_scope,
+            admitted_oa_row_ids=admitted_oa_row_ids,
+            actor_id="system:oa_pending_payment_read_model_refresh",
+        )
+
+    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+        source_versions_loader = getattr(self._read_repository, "workbench_relation_source_versions", None)
+        if callable(source_versions_loader):
+            source_versions = source_versions_loader(scope_key=scope_key)
+            if isinstance(source_versions, dict) and source_versions:
+                return dict(source_versions)
+        return dict(self._workbench_relation_read_facade.last_source_versions)
 
     def _import_service(self) -> ImportNormalizationService:
         return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)
@@ -250,3 +302,24 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         if not MONTH_SCOPE_RE.match(normalized_scope_key):
             raise ValueError(f"invoice read model scope must be a YYYY-MM shard: {scope_key}")
         return normalized_scope_key
+
+
+def _oa_pending_payment_row_oa_ids(rows: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for row in rows:
+        oa_payload = row.get("oa") if isinstance(row, dict) else None
+        if not isinstance(oa_payload, dict):
+            continue
+        candidates: list[Any] = [oa_payload.get("id"), oa_payload.get("oaId")]
+        summaries = oa_payload.get("summaries")
+        if isinstance(summaries, list):
+            for summary in summaries:
+                if isinstance(summary, dict):
+                    candidates.extend([summary.get("oaId"), summary.get("id")])
+        for candidate in candidates:
+            normalized = str(candidate).strip() if candidate is not None else ""
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                result.append(normalized)
+    return result

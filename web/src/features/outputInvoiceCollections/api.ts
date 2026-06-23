@@ -230,6 +230,54 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
   };
 }
 
+function mapOa(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["oa"]["primary"] {
+  const raw = objectValue(rawValue);
+  const id = stringValue(raw.id ?? camelOrSnake(raw, "oaId", "oa_id") ?? camelOrSnake(raw, "primaryOaId", "primary_oa_id"));
+  const applicantName = stringValue(camelOrSnake(raw, "applicantName", "applicant_name"));
+  const applicationType = stringValue(camelOrSnake(raw, "applicationType", "application_type"));
+  const projectName = stringValue(camelOrSnake(raw, "projectName", "project_name"));
+  const amount = stringValue(raw.amount);
+  if (!id && !applicantName && !applicationType && !projectName && !amount) {
+    return null;
+  }
+  return {
+    id,
+    applicantName,
+    applicationType,
+    projectName,
+    amount,
+    status: stringValue(raw.status),
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
+    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
+    detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")) || id !== "",
+  };
+}
+
+function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["invoiceRelations"]["primary"] {
+  const raw = objectValue(rawValue);
+  const id = stringValue(raw.id ?? camelOrSnake(raw, "invoiceId", "invoice_id") ?? camelOrSnake(raw, "primaryInvoiceId", "primary_invoice_id"));
+  const invoiceNo = stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no"));
+  const totalWithTax = stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax"));
+  if (!id && !invoiceNo && !totalWithTax) {
+    return null;
+  }
+  return {
+    id,
+    invoiceNo,
+    invoiceCode: stringValue(camelOrSnake(raw, "invoiceCode", "invoice_code")),
+    digitalInvoiceNo: stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no")),
+    invoiceDate: stringValue(camelOrSnake(raw, "invoiceDate", "invoice_date")),
+    buyerName: stringValue(camelOrSnake(raw, "buyerName", "buyer_name")),
+    buyerTaxNo: stringValue(camelOrSnake(raw, "buyerTaxNo", "buyer_tax_no")),
+    totalWithTax,
+    taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
+    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
+  };
+}
+
 function mapRedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["redInvoice"]["primary"] {
   const raw = objectValue(rawValue);
   const id = stringValue(camelOrSnake(raw, "relatedInvoiceId", "related_invoice_id") ?? raw.id);
@@ -257,6 +305,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
   relationCount: number;
   hasMultiple: boolean;
   receivedTotal?: string;
+  totalWithTax?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 } {
@@ -269,6 +318,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
     relationCount: numberValue(camelOrSnake(raw, "relationCount", "relation_count"), primary ? 1 : 0),
     hasMultiple: booleanValue(camelOrSnake(raw, "hasMultiple", "has_multiple")),
     receivedTotal: stringValue(camelOrSnake(raw, "receivedTotal", "received_total")),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     detailMode: detailMode === "list" || detailMode === "single" ? detailMode : primary ? "single" : "none",
     summaries,
   };
@@ -291,7 +341,9 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
           id: stringValue(camelOrSnake(row, "invoiceId", "invoice_id") ?? objectValue(row.invoice).id),
         },
         collectionStatus: mapCollectionStatus(camelOrSnake(row, "collectionStatus", "collection_status")),
+        oa: mapRelation(row.oa, mapOa),
         bank: mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank),
+        invoiceRelations: mapRelation(camelOrSnake(row, "invoiceRelations", "invoice_relations"), mapRelatedInvoice),
         redInvoice: mapRelation(camelOrSnake(row, "redInvoice", "redInvoiceRelation"), mapRedInvoice),
         receipt: {
           status: stringValue(receipt.status),
@@ -425,7 +477,7 @@ function mapBankDetailResponse(payload: unknown): OutputInvoiceCollectionDetailR
 function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
   const kind = stringValue(raw.kind);
-  const label = kind === "red_invoice" ? "红蓝票" : kind === "receipt" ? "收据" : "流水";
+  const label = kind === "oa" ? "OA" : kind === "invoice" ? "发票" : kind === "red_invoice" ? "红蓝票" : kind === "receipt" ? "收据" : "流水";
   const summaries = arrayValue(raw.summaries);
   const relations = arrayValue(raw.relations);
   return {

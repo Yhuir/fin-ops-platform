@@ -3290,6 +3290,14 @@ textarea {
   width: 190px;
 }
 
+.output-invoice-collections-col-oaApplicant {
+  width: 140px;
+}
+
+.output-invoice-collections-col-oaProject {
+  width: 150px;
+}
+
 .output-invoice-collections-col-bankCounterparty {
   width: 160px;
 }
@@ -3332,6 +3340,10 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning-soft) 66%, var(--fp-surface));
 }
 
+.output-invoice-collections-table-group-header--oa {
+  background: color-mix(in srgb, var(--fp-info-soft) 72%, var(--fp-surface));
+}
+
 .output-invoice-collections-table-group-header--bank {
   background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
 }
@@ -3356,6 +3368,10 @@ textarea {
 
 .output-invoice-collections-table-sub-header--status {
   background: color-mix(in srgb, var(--fp-warning-soft) 38%, var(--fp-surface));
+}
+
+.output-invoice-collections-table-sub-header--oa {
+  background: color-mix(in srgb, var(--fp-info-soft) 42%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header--bank {
@@ -3796,6 +3812,20 @@ textarea {
   height: 26px;
   min-height: 26px;
   padding: 0;
+}
+
+.output-invoice-collections-relation-count-button {
+  min-width: 38px;
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+}
+
+.output-invoice-collections-relation-count-button:hover:not(:disabled),
+.output-invoice-collections-relation-count-button:focus-visible {
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+  outline: none;
 }
 
 .output-invoice-collections-table-action:active:not(:disabled) {

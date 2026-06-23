@@ -254,11 +254,23 @@ function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBa
   ) as NoOaBankBatchCountMap;
 }
 
+function normalizeBatchLifecycle(rawStatus: string, rawStatusBucket: string, rawCanWithdraw: boolean) {
+  const relationBackedStale = rawStatus === "stale" && (rawStatusBucket === "submitted" || rawCanWithdraw);
+  if (relationBackedStale) {
+    return { relationBackedStale, status: "submitted", statusBucket: "submitted" };
+  }
+  const statusBucket = rawStatusBucket
+    || (rawStatus === "submitted" ? "submitted" : rawStatus === "withdrawn" ? "withdrawn" : rawStatus ? "unsubmitted" : "");
+  const status = rawStatus === "unsubmitted" && statusBucket === "unsubmitted" ? "draft" : rawStatus;
+  return { relationBackedStale, status, statusBucket };
+}
+
 function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
   const rawStatus = text(batch.status);
   const rawStatusBucket = text(batch.status_bucket ?? batch.statusBucket);
   const rawCanWithdraw = Boolean(batch.can_withdraw ?? batch.canWithdraw);
-  const relationBackedStale = rawStatus === "stale" && (rawStatusBucket === "submitted" || rawCanWithdraw);
+  const lifecycle = normalizeBatchLifecycle(rawStatus, rawStatusBucket, rawCanWithdraw);
+  const legacyDraft = rawStatus === "unsubmitted" && lifecycle.status === "draft" && lifecycle.statusBucket === "unsubmitted";
   const mapped: NoOaBankBatch = {
     batchId: text(batch.batch_id ?? batch.batchId),
     batchType: text(batch.batch_type ?? batch.batchType),
@@ -267,8 +279,8 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     accountKey: text(batch.account_key ?? batch.accountKey),
     bankName: text(batch.bank_name ?? batch.bankName),
     accountLast4: text(batch.account_last4 ?? batch.accountLast4),
-    status: relationBackedStale ? "submitted" : rawStatus,
-    statusBucket: relationBackedStale ? "submitted" : rawStatusBucket,
+    status: lifecycle.status,
+    statusBucket: lifecycle.statusBucket,
     rowCount: numberValue(batch.row_count ?? batch.rowCount),
     totalAmount: text(batch.total_amount ?? batch.totalAmount, "0.00"),
     submittedBy: text(batch.submitted_by ?? batch.submittedBy),
@@ -276,11 +288,11 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     withdrawnBy: text(batch.withdrawn_by ?? batch.withdrawnBy),
     withdrawnAt: text(batch.withdrawn_at ?? batch.withdrawnAt) || null,
     conflictReason: text(batch.conflict_reason ?? batch.conflictReason),
-    blockedReason: relationBackedStale ? "" : text(batch.blocked_reason ?? batch.blockedReason),
+    blockedReason: lifecycle.relationBackedStale ? "" : text(batch.blocked_reason ?? batch.blockedReason),
     tagCounts: countMap(batch.tag_counts ?? batch.tagCounts),
     directionCounts: countMap(batch.direction_counts ?? batch.directionCounts),
-    canSubmit: relationBackedStale ? false : Boolean(batch.can_submit ?? batch.canSubmit),
-    canWithdraw: relationBackedStale || rawCanWithdraw,
+    canSubmit: lifecycle.relationBackedStale ? false : legacyDraft ? true : Boolean(batch.can_submit ?? batch.canSubmit),
+    canWithdraw: lifecycle.relationBackedStale || rawCanWithdraw,
     version: nullableNumberValue(batch.version),
   };
   const primaryLabel = text(batch.category_primary_label ?? batch.categoryPrimaryLabel);
@@ -296,6 +308,10 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     mapped.categoryLabelPath = labelPath;
   }
   return mapped;
+}
+
+function isPublicBatch(batch: NoOaBankBatch) {
+  return batch.status === "draft" || batch.status === "submitted" || batch.status === "withdrawn";
 }
 
 function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary {
@@ -446,7 +462,7 @@ export async function fetchNoOaBankBatches({
   );
   return {
     summary: mapSummary(payload.summary),
-    batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch) : [],
+    batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch).filter(isPublicBatch) : [],
     pagination: mapPagination(payload.pagination),
     readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
     readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),

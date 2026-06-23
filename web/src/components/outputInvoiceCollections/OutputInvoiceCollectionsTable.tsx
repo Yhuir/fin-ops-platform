@@ -44,7 +44,7 @@ type OutputInvoiceCollectionColumn = {
   align?: "left" | "right" | "center";
   field?: string;
   extraFilters?: Array<{ field: string; label: string }>;
-  group: "invoice" | "status" | "bank" | "receipt";
+  group: "invoice" | "status" | "oa" | "bank" | "receipt";
 };
 
 const columns: OutputInvoiceCollectionColumn[] = [
@@ -53,6 +53,8 @@ const columns: OutputInvoiceCollectionColumn[] = [
   { id: "totalWithTax", label: "价税合计", subLabel: "税额/税率", field: "total_with_tax", align: "right", group: "invoice" },
   { id: "business", label: "业务/货物劳务", field: "taxable_item_name", group: "invoice" },
   { id: "collectionStatus", label: "收款状态", field: "collection_status", group: "status" },
+  { id: "oaApplicant", label: "OA申请人", field: "oa_applicant", extraFilters: [{ field: "oa_application_type", label: "类型" }], group: "oa" },
+  { id: "oaProject", label: "项目名称", field: "oa_project_name", group: "oa" },
   { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank" },
   { id: "bankAmount", label: "收款金额", field: "bank_amount", align: "right", group: "bank" },
   { id: "bankSummary", label: "摘要", field: "bank_summary", group: "bank" },
@@ -67,6 +69,9 @@ const defaultFilterConfigs: Record<string, OutputInvoiceCollectionFilterFieldCon
   tax_amount: { field: "tax_amount", label: "税额/税率", mode: "money", sortable: true, operators: ["between", "equals"] },
   taxable_item_name: { field: "taxable_item_name", label: "业务/货物劳务", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   collection_status: { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
+  oa_applicant: { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
+  oa_application_type: { field: "oa_application_type", label: "类型", mode: "enum_multi", sortable: true, operators: ["in", "equals"] },
+  oa_project_name: { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   bank_counterparty_name: { field: "bank_counterparty_name", label: "付款方/日期", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   bank_amount: { field: "bank_amount", label: "收款金额", mode: "money", sortable: true, operators: ["between", "equals"] },
   bank_summary: { field: "bank_summary", label: "摘要", mode: "text", sortable: true, operators: ["contains"] },
@@ -119,6 +124,7 @@ export default function OutputInvoiceCollectionsTable({
             <tr>
               <GroupHeader group="invoice" label="销项发票" span={4} />
               <GroupHeader group="status" label="收款状态" span={1} />
+              <GroupHeader group="oa" label="OA" span={2} />
               <GroupHeader group="bank" label="收入流水" span={3} />
               <GroupHeader group="receipt" label="收据" span={1} />
             </tr>
@@ -243,41 +249,66 @@ function OutputInvoiceCollectionDataRow({
   const invoiceNo = displayInvoiceNo(row);
   const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
   const bankSummaryCellExpanded = expandedCells.has(`${row.id}:bank-summary`);
+  const invoiceRelationTarget = relationListTarget(row, "invoice");
+  const oaRelationTarget = relationListTarget(row, "oa");
+  const bankRelationTarget = relationListTarget(row, "bank");
+  const oa = row.oa.primary;
   const bank = row.bank.primary;
   const bankAccountLabel = bank ? accountLabel(bank.bankName, bank.accountLast4) : "";
+  const relatedInvoice = row.invoiceRelations.primary;
+  const invoiceRelationCount = Number(row.invoiceRelations.relationCount ?? 0);
+  const invoiceDisplayNo = invoiceRelationTarget ? displayRelatedInvoiceNo(relatedInvoice) || invoiceNo : invoiceNo;
+  const invoiceIssueDate = invoiceRelationTarget ? relatedInvoice?.invoiceDate || row.invoice.issueDate : row.invoice.issueDate;
+  const invoiceBuyerName = invoiceRelationTarget ? relatedInvoice?.buyerName || row.invoice.buyerName : row.invoice.buyerName;
+  const invoiceBuyerTaxNo = invoiceRelationTarget ? relatedInvoice?.buyerTaxNo || row.invoice.buyerTaxNo : row.invoice.buyerTaxNo;
+  const invoiceTotalWithTax = invoiceRelationTarget
+    ? row.invoiceRelations.totalWithTax || relatedInvoice?.totalWithTax || row.invoice.totalWithTax
+    : row.invoice.totalWithTax;
+  const invoiceTaxSummary = invoiceRelationTarget ? `${invoiceRelationCount} 张合计` : taxSummary(row.invoice.taxAmount, row.invoice.taxRate);
+  const invoiceTaxableItemName = invoiceRelationTarget ? relatedInvoice?.taxableItemName || row.invoice.taxableItemName : row.invoice.taxableItemName;
 
   return (
     <tr className="output-invoice-collections-table-row">
       <td className="output-invoice-collections-table-cell" data-column-role="identity">
-        <span className="output-invoice-collections-inline-row">
-          <TextLine strong value={invoiceNo} />
-          <ActionButton
-            ariaLabel={`查看发票 ${invoiceNo} 详情`}
-            iconOnly
-            onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
-            tone="plain"
-          >
-            <Info aria-hidden="true" size={14} strokeWidth={2.3} />
-          </ActionButton>
-        </span>
-        <span className="output-invoice-collections-tag-row">
-          <FinanceTag>{dateOnly(row.invoice.issueDate)}</FinanceTag>
-        </span>
+        <>
+          <span className="output-invoice-collections-inline-row">
+            <TextLine strong value={invoiceDisplayNo} />
+            {invoiceRelationTarget ? (
+              <RelationCountButton
+                count={relationExtraCount(row.invoiceRelations.relationCount)}
+                label={`查看关联发票 ${row.invoiceRelations.relationCount} 张`}
+                onClick={() => onOpenDetail(invoiceRelationTarget)}
+              />
+            ) : (
+              <ActionButton
+                ariaLabel={`查看发票 ${invoiceNo} 详情`}
+                iconOnly
+                onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
+                tone="plain"
+              >
+                <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+              </ActionButton>
+            )}
+          </span>
+          <span className="output-invoice-collections-tag-row">
+            <FinanceTag>{dateOnly(invoiceIssueDate)}</FinanceTag>
+          </span>
+        </>
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="identity">
-        <TextLine strong value={row.invoice.buyerName} />
-        <TextLine muted value={row.invoice.buyerTaxNo} />
+        <TextLine strong value={invoiceBuyerName} />
+        <TextLine muted value={invoiceBuyerTaxNo} />
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" data-column-role="amount">
-        <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax)} />
-        <TextLine muted numeric value={taxSummary(row.invoice.taxAmount, row.invoice.taxRate)} />
+        <TextLine numeric strong value={formatMoney(invoiceTotalWithTax)} />
+        <TextLine muted numeric={!invoiceRelationTarget} value={invoiceTaxSummary} />
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
         <TextLine strong value={row.invoice.specificBusinessType} />
         <ExpandableCellText
           expanded={invoiceCellExpanded}
           onToggle={() => onToggleCellExpand(row.id, "invoice-business")}
-          text={row.invoice.taxableItemName}
+          text={invoiceTaxableItemName}
           threshold={18}
         />
       </td>
@@ -302,7 +333,46 @@ function OutputInvoiceCollectionDataRow({
         </span>
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--left-border" data-column-role="identity">
-        {bank ? (
+        {oaRelationTarget ? (
+          <RelationCountButton
+            count={relationExtraCount(row.oa.relationCount)}
+            label={`查看关联OA ${row.oa.relationCount} 条`}
+            onClick={() => onOpenDetail(oaRelationTarget)}
+          />
+        ) : oa ? (
+          <>
+            <TextLine strong value={oa.applicantName} />
+            <span className="output-invoice-collections-tag-row">
+              <FinanceTag>{oa.applicationType || "类型为空"}</FinanceTag>
+              {oa.relationStatus === "candidate" ? <FinanceTag tone="warning">候选</FinanceTag> : null}
+            </span>
+          </>
+        ) : <EmptyValue />}
+      </td>
+      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
+        {oaRelationTarget ? <EmptyValue /> : oa ? (
+          <>
+            <ExpandableCellText
+              expanded={expandedCells.has(`${row.id}:oa-project`)}
+              onToggle={() => onToggleCellExpand(row.id, "oa-project")}
+              text={oa.projectName}
+            />
+            {oa.amount ? (
+              <span className="output-invoice-collections-tag-row">
+                <FinanceTag tone="info">{formatMoney(oa.amount)}</FinanceTag>
+              </span>
+            ) : null}
+          </>
+        ) : <EmptyValue />}
+      </td>
+      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--left-border" data-column-role="identity">
+        {bankRelationTarget ? (
+          <RelationCountButton
+            count={relationExtraCount(row.bank.relationCount)}
+            label={`查看关联流水 ${row.bank.relationCount} 条`}
+            onClick={() => onOpenDetail(bankRelationTarget)}
+          />
+        ) : bank ? (
           <>
             <ExpandableCellText
               expanded={expandedCells.has(`${row.id}:bank-name`)}
@@ -331,15 +401,14 @@ function OutputInvoiceCollectionDataRow({
           <>
             <TextLine numeric strong value={formatMoney(row.bank.hasMultiple && row.bank.receivedTotal ? row.bank.receivedTotal : bank.amount)} />
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
-              {row.bank.hasMultiple ? <FinanceTag tone="info">多笔</FinanceTag> : null}
-              <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
-              {bankAccountLabel ? <FinanceTag>{bankAccountLabel}</FinanceTag> : null}
+              {bankRelationTarget ? null : <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>}
+              {!bankRelationTarget && bankAccountLabel ? <FinanceTag>{bankAccountLabel}</FinanceTag> : null}
             </span>
           </>
         ) : <EmptyValue />}
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
-        {bank ? (
+        {bankRelationTarget ? <EmptyValue /> : bank ? (
           <>
             <ExpandableCellText
               expanded={bankSummaryCellExpanded}
@@ -373,7 +442,7 @@ function OutputInvoiceCollectionDataRow({
   );
 }
 
-function GroupHeader({ label, span, group }: { label: string; span: number; group: "invoice" | "status" | "bank" | "receipt" }) {
+function GroupHeader({ label, span, group }: { label: string; span: number; group: "invoice" | "status" | "oa" | "bank" | "receipt" }) {
   return (
     <th
       className={cx(
@@ -474,6 +543,23 @@ function ActionButton({
   );
 }
 
+function RelationCountButton({ count, label, onClick }: { count: number; label: string; onClick: () => void }) {
+  if (count <= 0) {
+    return null;
+  }
+  return (
+    <button
+      aria-label={label}
+      className="output-invoice-collections-table-action output-invoice-collections-relation-count-button"
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {`+${count}`}
+    </button>
+  );
+}
+
 function PaginationControls({
   page,
   pageSize,
@@ -524,7 +610,23 @@ function displayedRange(page: number, pageSize: number, total: number) {
 }
 
 function firstColumnInGroup(columnId: string) {
-  return columnId === "collectionStatus" || columnId === "bankCounterparty" || columnId === "receiptStatus";
+  return columnId === "collectionStatus" || columnId === "oaApplicant" || columnId === "bankCounterparty" || columnId === "receiptStatus";
+}
+
+function relationListTarget(
+  row: OutputInvoiceCollectionRow,
+  relationKind: NonNullable<OutputInvoiceCollectionDetailTarget["relationKind"]>,
+): OutputInvoiceCollectionDetailTarget | null {
+  const relation = relationKind === "oa" ? row.oa : relationKind === "bank" ? row.bank : row.invoiceRelations;
+  if (relation.detailMode === "list" && Number(relation.relationCount ?? 0) > 1) {
+    return { kind: "relationList", id: row.id, rowId: row.id, relationKind };
+  }
+  return null;
+}
+
+function relationExtraCount(relationCount: number | string | null | undefined) {
+  const total = Number(relationCount ?? 0);
+  return Number.isFinite(total) ? Math.max(0, total - 1) : 0;
 }
 
 function accountLabel(bankName: string, accountLast4: string) {
@@ -548,6 +650,16 @@ function displayInvoiceNo(row: OutputInvoiceCollectionRow) {
     return invoice.digitalInvoiceNo;
   }
   return [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || "—";
+}
+
+function displayRelatedInvoiceNo(invoice: OutputInvoiceCollectionRow["invoiceRelations"]["primary"]) {
+  if (!invoice) {
+    return "";
+  }
+  if (invoice.digitalInvoiceNo) {
+    return invoice.digitalInvoiceNo;
+  }
+  return [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || invoice.invoiceNo || "";
 }
 
 function formatMoney(value: string) {

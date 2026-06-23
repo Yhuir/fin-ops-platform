@@ -4,9 +4,11 @@ import unittest
 from decimal import Decimal
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchReconciliationEngine
 from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_CONSUMED,
     DECISION_STATUS_EXPIRED,
     DECISION_STATUS_OPEN,
     DECISION_STATUS_PAIRED,
@@ -91,6 +93,7 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         summary = WorkbenchReconciliationEngine(
             decision_store=store,
             pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
         ).run_scope(
             "2026-05",
             oa_rows=[oa_row("oa-held")],
@@ -101,9 +104,165 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
 
         decisions = store.list_decisions("2026-05")
         self.assertEqual(summary["suppressed_by_pair_relation_count"], 2)
+        self.assertEqual(summary["auto_completed_relation_count"], 1)
         self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
         self.assertEqual(decisions[0]["row_ids"], ["oa-held", "bank-held", "invoice-held"])
+        active_relation = pair_service.get_active_relation_by_case_id("case-payment-only")
+        self.assertIsNotNone(active_relation)
+        self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held", "invoice-held"])
+        self.assertEqual(active_relation["special_metadata"]["auto_completion"]["decision_key"], decisions[0]["decision_key"])
+
+    def test_active_multi_oa_single_bank_relation_can_extend_to_matching_invoice(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-multi-oa-payment",
+            row_ids=["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel"],
+            row_types=["oa", "oa", "oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-01",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-01",
+            oa_rows=[
+                oa_row("oa-energy-a", month="2026-01", amount="1690.00") | {
+                    "reason": "昭通卷烟厂能源集中监控平台系统维护 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+                oa_row("oa-energy-b", month="2026-01", amount="1980.00") | {
+                    "reason": "红塔集团信息化不可预见维护采购项目 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+                oa_row("oa-energy-c", month="2026-01", amount="780.00") | {
+                    "reason": "昭通卷烟厂能源集中监控平台系统维护采购项目 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+            ],
+            bank_rows=[
+                bank_row("bank-hotel", month="2026-01", amount="4450.00") | {
+                    "counterparty_name": "张丽芬",
+                    "summary": "住宿费（昭通市昭阳区豪然精品酒店）",
+                }
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-hotel",
+                    month="2026-01",
+                    seller_name="昭通市昭阳区豪然精品酒店",
+                    amount="4450.00",
+                )
+            ],
+            source_versions={"engine": "v3"},
+        )
+
+        decisions = store.list_decisions("2026-01")
+        self.assertEqual(summary["auto_completed_relation_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
+        self.assertEqual(
+            decisions[0]["row_ids"],
+            ["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel", "invoice-hotel"],
+        )
+        active_relation = pair_service.get_active_relation_by_case_id("case-multi-oa-payment")
+        self.assertEqual(
+            active_relation["row_ids"],
+            ["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel", "invoice-hotel"],
+        )
+
+    def test_active_oa_invoice_relation_can_extend_to_matching_bank(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-oa-invoice",
+            row_ids=["oa-held", "invoice-held"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-05",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-held")],
+            bank_rows=[bank_row("bank-held")],
+            invoice_rows=[invoice_row("invoice-held")],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["auto_completed_relation_count"], 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
+        active_relation = pair_service.get_active_relation_by_case_id("case-oa-invoice")
+        self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held", "invoice-held"])
+        self.assertEqual(active_relation["special_metadata"]["auto_completion"]["completed_from_row_types"], ["invoice", "oa"])
+
+    def test_active_bank_invoice_relation_can_extend_to_matching_oa(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-bank-invoice",
+            row_ids=["bank-held", "invoice-held"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-05",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-held")],
+            bank_rows=[bank_row("bank-held")],
+            invoice_rows=[invoice_row("invoice-held")],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["auto_completed_relation_count"], 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
+        active_relation = pair_service.get_active_relation_by_case_id("case-bank-invoice")
+        self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held", "invoice-held"])
+
+    def test_special_two_pane_relation_is_not_auto_completed_by_free_decision(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-special",
+            row_ids=["oa-held", "bank-held"],
+            row_types=["oa", "bank"],
+            relation_mode="turnover_manual_closure",
+            created_by="tester",
+            month_scope="2026-05",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-held")],
+            bank_rows=[bank_row("bank-held")],
+            invoice_rows=[invoice_row("invoice-held")],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["auto_completed_relation_count"], 0)
+        self.assertEqual(decisions, [])
+        active_relation = pair_service.get_active_relation_by_case_id("case-special")
+        self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held"])
 
     def test_special_decisions_claim_rows_before_free_matching(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
@@ -398,6 +557,31 @@ class StaticSpecialAdapter:
             decisions=self.decisions,
             claimed_row_ids_by_domain={MATCH_DOMAIN_SPECIAL: claimed},
         )
+
+
+class PairServiceCommandRepository:
+    def __init__(self, pair_service: WorkbenchPairRelationService) -> None:
+        self._pair_service = pair_service
+
+    def load_workbench_pair_relations(self) -> dict[str, object]:
+        return self._pair_service.snapshot()
+
+    def save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: set[str] | None = None,
+    ) -> None:
+        updated = WorkbenchPairRelationService.from_snapshot(snapshot)
+        self._pair_service._pair_relations.update(updated._pair_relations)
+        self._pair_service._pair_relation_history = list(updated._pair_relation_history)
+
+
+def command_service_for(pair_service: WorkbenchPairRelationService) -> WorkbenchRelationCommandService:
+    return WorkbenchRelationCommandService(
+        relation_repository=PairServiceCommandRepository(pair_service),
+        require_fresh_relations=False,
+    )
 
 
 def oa_row(row_id: str, *, month: str = "2026-05", amount: str = "100.00") -> dict[str, object]:

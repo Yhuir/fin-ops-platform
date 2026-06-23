@@ -953,6 +953,10 @@ class Application:
             special_rule_service=self._workbench_special_pair_rule_service,
             exception_case_service=self._workbench_exception_case_service,
             decision_store=self._workbench_reconciliation_decision_store,
+            relation_command_service=self._workbench_relation_command_service(
+                repository=getattr(self, "_state_store", None),
+                require_fresh_relations=False,
+            ),
             settings_provider=self._workbench_matching_settings,
             source_versions_provider=self._workbench_matching_source_versions,
         )
@@ -1022,6 +1026,7 @@ class Application:
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
+            oa_projection=oa_adapter,
             lifecycle_repository=self._output_invoice_collection_lifecycle_repository,
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -9770,6 +9775,8 @@ class Application:
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
+            oa_projection=self._postgres_oa_projection_repository()
+            or getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None),
             lifecycle_repository=lifecycle_repository,
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -10329,7 +10336,11 @@ class Application:
                 return True
             if not isinstance(row.get("collectionStatus"), dict):
                 return True
+            if not isinstance(row.get("oa"), dict):
+                return True
             if not isinstance(row.get("bankTransactions"), dict):
+                return True
+            if not isinstance(row.get("invoiceRelations"), dict):
                 return True
             if not isinstance(row.get("redInvoiceRelation"), dict):
                 return True

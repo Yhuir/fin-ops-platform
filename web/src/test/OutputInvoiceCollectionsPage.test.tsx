@@ -70,6 +70,12 @@ const rowsPayload = {
           status: "active",
         },
       },
+      oa: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
+      },
       bankTransactions: {
         primaryBankTransactionId: "bank-001",
         counterpartyName: "云南客户科技有限公司",
@@ -98,6 +104,12 @@ const rowsPayload = {
             remark: "银行备注",
           },
         ],
+      },
+      invoiceRelations: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
       },
       redInvoiceRelation: {
         relationCount: 2,
@@ -159,6 +171,12 @@ const rowsPayload = {
         collectedAmount: "0.00",
         pendingAmount: "-12345.67",
       },
+      oa: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
+      },
       bankTransactions: {
         primaryBankTransactionId: "bank-output-candidate-001",
         counterpartyName: "候选回款客户",
@@ -192,6 +210,12 @@ const rowsPayload = {
           },
         ],
       },
+      invoiceRelations: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
+      },
       redInvoiceRelation: {
         relationCount: 0,
         hasMultiple: false,
@@ -218,11 +242,11 @@ const rowsPayload = {
   sourceVersion: "output-invoice-collections:v1",
 };
 
-function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void> } = {}) {
+function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void>; rowsPayloadOverride?: unknown } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
-      return jsonResponse(rowsPayload);
+      return jsonResponse(options.rowsPayloadOverride ?? rowsPayload);
     }
     if (url.pathname === "/api/output-invoice-collections/filter-options") {
       return jsonResponse({
@@ -344,6 +368,32 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     }
     if (url.pathname === "/api/output-invoice-collections/bank-transactions/bank-001/detail") {
       return jsonResponse({ id: "bank-001", counterpartyName: "云南客户科技有限公司", amount: "5000.00" });
+    }
+    if (url.pathname.startsWith("/api/output-invoice-collections/rows/") && url.pathname.endsWith("/relation-details")) {
+      const kind = url.searchParams.get("kind") ?? "bank";
+      const invoiceSummaries = [
+        { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", totalWithTax: "300.00" },
+        { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", totalWithTax: "100.00" },
+        { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", totalWithTax: "200.00" },
+      ];
+      return jsonResponse({
+        rowId: url.pathname.split("/")[4],
+        invoiceId: "out-001",
+        kind,
+        detailAvailable: true,
+        relationCount: kind === "invoice" ? 3 : 2,
+        hasMultiple: true,
+        sourceAvailable: true,
+        summaries: kind === "invoice" ? invoiceSummaries : [
+          kind === "oa"
+            ? { oaId: "oa-output-a", applicantName: "OA申请人甲", amount: "100.00" }
+            : { bankTransactionId: "bank-output-a", counterpartyName: "多流水客户", amount: "100.00" },
+          kind === "oa"
+            ? { oaId: "oa-output-b", applicantName: "OA申请人乙", amount: "200.00" }
+            : { bankTransactionId: "bank-output-b", counterpartyName: "多流水客户", amount: "200.00" },
+        ],
+        relations: [{ caseId: "case-output-multi", rowIds: ["oa-output-a", "bank-output-a", "out-related-a"] }],
+      });
     }
     if (url.pathname === "/api/output-invoice-collections/receipt-settings") {
       if (init?.method === "PUT") {
@@ -684,7 +734,7 @@ describe("Output invoice collections page", () => {
     expect(within(page).getByRole("table", { name: "销项发票收款情况表" })).toBeInTheDocument();
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
-    for (const label of ["销项发票", "收款状态", "收入流水", "收据"]) {
+    for (const label of ["销项发票", "收款状态", "OA", "收入流水", "收据"]) {
       expect(within(headerRows[0]).getByRole("columnheader", { name: label })).toBeInTheDocument();
     }
     for (const label of [
@@ -693,6 +743,8 @@ describe("Output invoice collections page", () => {
       "价税合计",
       "业务/货物劳务",
       "收款状态",
+      "OA申请人",
+      "项目名称",
       "付款方/日期",
       "收款金额",
       "摘要",
@@ -792,6 +844,111 @@ describe("Output invoice collections page", () => {
       expect(request?.searchParams.get("page")).toBe("2");
     });
   }, 30000);
+
+  test("shows invoice aggregate with +N entry point for multi output invoice relations", async () => {
+    const user = userEvent.setup();
+    const multiRowsPayload = {
+      ...rowsPayload,
+      rows: [
+        {
+          ...rowsPayload.rows[0],
+          id: "output-collection-row-multi",
+          invoice: {
+            ...rowsPayload.rows[0].invoice,
+            displayNo: "XSFP-MULTI-PRIMARY",
+            invoiceNo: "MULTI-PRIMARY",
+            buyerName: "多发票客户",
+            taxableItemName: "多发票服务",
+          },
+          oa: {
+            primaryOaId: "oa-output-a",
+            applicantName: "OA申请人甲",
+            applicationType: "付款申请",
+            projectName: "OA项目甲",
+            amount: "300.00",
+            relationCount: 2,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              { oaId: "oa-output-a", applicantName: "OA申请人甲", applicationType: "付款申请", projectName: "OA项目甲", amount: "100.00" },
+              { oaId: "oa-output-b", applicantName: "OA申请人乙", applicationType: "付款申请", projectName: "OA项目乙", amount: "200.00" },
+            ],
+          },
+          bankTransactions: {
+            primaryBankTransactionId: "bank-output-a",
+            counterpartyName: "多流水客户",
+            tradeTime: "2026-05-03 10:30:00",
+            amount: "100.00",
+            receivedTotal: "300.00",
+            direction: "inflow",
+            directionLabel: "收入",
+            bankName: "建设银行",
+            accountLast4: "8106",
+            summary: "多流水摘要甲",
+            remark: "",
+            relationCount: 2,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              { bankTransactionId: "bank-output-a", counterpartyName: "多流水客户", amount: "100.00", direction: "inflow", directionLabel: "收入" },
+              { bankTransactionId: "bank-output-b", counterpartyName: "多流水客户", amount: "200.00", direction: "inflow", directionLabel: "收入" },
+            ],
+          },
+          invoiceRelations: {
+            primaryInvoiceId: "out-primary",
+            invoiceNo: "MULTI-PRIMARY",
+            digitalInvoiceNo: "XSFP-MULTI-PRIMARY",
+            buyerName: "多发票客户",
+            totalWithTax: "600.00",
+            taxableItemName: "多发票服务",
+            relationCount: 3,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", buyerName: "多发票客户", totalWithTax: "300.00" },
+              { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", buyerName: "多发票客户", totalWithTax: "100.00" },
+              { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", buyerName: "多发票客户", totalWithTax: "200.00" },
+            ],
+          },
+        },
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    };
+    const fetchMock = installOutputInvoiceCollectionsFetch({ rowsPayloadOverride: multiRowsPayload });
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    await within(page).findByRole("table", { name: "销项发票收款情况表" });
+    expect(within(page).getByRole("button", { name: "查看关联发票 3 张" })).toHaveTextContent("+2");
+    expect(within(page).getByRole("button", { name: "查看关联OA 2 条" })).toHaveTextContent("+1");
+    expect(within(page).getByRole("button", { name: "查看关联流水 2 条" })).toHaveTextContent("+1");
+    expect(within(page).getByText("XSFP-MULTI-PRIMARY")).toBeInTheDocument();
+    expect(within(page).getByText("600.00")).toBeInTheDocument();
+    expect(within(page).getByText("3 张合计")).toBeInTheDocument();
+    expect(within(page).getByText("多发票客户")).toBeInTheDocument();
+    expect(within(page).queryByText("OA申请人甲")).not.toBeInTheDocument();
+    expect(within(page).queryByText("多流水摘要甲")).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "查看关联OA 2 条" }));
+    expect(await screen.findByText("OA关联明细")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看关联流水 2 条" }));
+    expect(await screen.findByText("流水关联明细")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看关联发票 3 张" }));
+    expect(await screen.findByText("发票关联明细")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/XSFP-MULTI-PRIMARY/).length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByText(/XSFP-MULTI-A/)).toBeInTheDocument();
+    expect(screen.getByText(/XSFP-MULTI-B/)).toBeInTheDocument();
+
+    const relationRequests = fetchMock.mock.calls
+      .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+      .filter((url) => url.pathname === "/api/output-invoice-collections/rows/output-collection-row-multi/relation-details");
+    expect(relationRequests.map((url) => url.searchParams.get("kind"))).toEqual(["oa", "bank", "invoice"]);
+  });
 
   test("opens the three right-side workflow drawers without reloading the main rows", async () => {
     const user = userEvent.setup();

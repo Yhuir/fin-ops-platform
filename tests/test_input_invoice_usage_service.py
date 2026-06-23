@@ -72,6 +72,100 @@ class RepositoryOnlyInvoiceFacts:
         return list(self.transactions), len(self.transactions)
 
 
+class CrossMonthWorkbenchRelationFacade:
+    def __init__(
+        self,
+        *,
+        invoice_id: str,
+        bank_ids: list[str],
+        oa_ids: list[str],
+        case_id: str = "case-cross-month-relation",
+    ) -> None:
+        self.invoice_id = invoice_id
+        self.bank_ids = list(bank_ids)
+        self.oa_ids = list(oa_ids)
+        self.case_id = case_id
+        self.month_calls: list[str] = []
+        self.row_id_calls: list[list[str]] = []
+        self._last_source_versions: dict[str, object] = {}
+
+    @property
+    def last_source_versions(self) -> dict[str, object]:
+        return dict(self._last_source_versions)
+
+    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        self.month_calls.append(str(month))
+        self._last_source_versions = {"source_version": f"workbench_relation:{month}"}
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": self.invoice_id,
+                    "row_type": "input_invoice",
+                    "relation_status": "unlinked",
+                    "group_ids": [],
+                }
+            ],
+            "groups": [],
+            "source_versions": dict(self._last_source_versions),
+            "read_model_scope_keys": [str(month)],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        normalized = [str(row_id).strip() for row_id in row_ids if str(row_id).strip()]
+        self.row_id_calls.append(normalized)
+        self._last_source_versions = {"source_version": "workbench_relation:2026-04"}
+        if self.invoice_id not in normalized:
+            return {
+                "status": "fresh",
+                "rows": [],
+                "groups": [],
+                "source_versions": dict(self._last_source_versions),
+                "read_model_scope_keys": ["2026-04"],
+                "refresh_enqueued": False,
+                "stale_reasons": [],
+            }
+        row_ids_payload = [*self.oa_ids, *self.bank_ids, self.invoice_id]
+        row_types_payload = [*(["oa"] * len(self.oa_ids)), *(["bank"] * len(self.bank_ids)), "invoice"]
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": self.invoice_id,
+                    "row_type": "input_invoice",
+                    "relation_status": "linked",
+                    "group_ids": [self.case_id],
+                }
+            ],
+            "groups": [
+                {
+                    "group_id": self.case_id,
+                    "scope_month": "2026-04",
+                    "relation_source": "manual_confirmed",
+                    "relation_status": "linked",
+                    "oa_row_ids": list(self.oa_ids),
+                    "bank_transaction_ids": list(self.bank_ids),
+                    "input_invoice_ids": [self.invoice_id],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "group_id": self.case_id,
+                        "row_ids": row_ids_payload,
+                        "row_types": row_types_payload,
+                        "relation_mode": "manual_confirmed",
+                        "relation_status": "linked",
+                        "amount_check": {"matched": True},
+                    },
+                }
+            ],
+            "source_versions": dict(self._last_source_versions),
+            "read_model_scope_keys": ["2026-04"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
     def test_default_rows_read_repository_invoice_facts_when_memory_snapshot_is_empty(self) -> None:
         vendor = self._counterparty("vendor", "生产库供应商")
@@ -392,6 +486,49 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["summaries"][0]["relationStatus"], "candidate")
         self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
         self.assertEqual(row["paymentStatus"]["code"], "pending")
+
+    def test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation(self) -> None:
+        vendor = self._counterparty("vendor-lg", "良固阀门集团股份有限公司")
+        invoice = self._invoice(
+            "inv-lianggu-75799",
+            "26332000003800042821",
+            vendor,
+            amount="67078.77",
+            tax_amount="8720.23",
+            total_with_tax="75799.00",
+            invoice_date="2026-05-08",
+        )
+        bank_1 = self._bank_transaction("bank-lianggu-22739", "22739.70", trade_time="2026-04-20 17:27:21")
+        bank_2 = self._bank_transaction("bank-lianggu-53059", "53059.30", trade_time="2026-04-29 13:19:07")
+        oa_1 = self._oa("oa-lianggu-22739", "杨丽萍", "22739.70", project_name="大理卷烟厂余热综合利用项目")
+        oa_2 = self._oa("oa-lianggu-53059", "杨丽萍", "53059.30", project_name="大理卷烟厂余热综合利用项目")
+        oa_1.month = "2026-04"
+        oa_2.month = "2026-04"
+        relation_facade = CrossMonthWorkbenchRelationFacade(
+            invoice_id=invoice.id,
+            bank_ids=[bank_1.id, bank_2.id],
+            oa_ids=[oa_1.id, oa_2.id],
+        )
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(
+                existing_invoices=[invoice],
+                existing_transactions=[bank_1, bank_2],
+            ),
+            relation_facade=relation_facade,
+            oa_projection=StaticOAProjection([oa_1, oa_2]),
+        )
+
+        row = service.list_rows(month="2026-05", keyword="良固阀门集团")["rows"][0]
+
+        self.assertEqual(relation_facade.month_calls, ["2026-05"])
+        self.assertEqual(relation_facade.row_id_calls, [[invoice.id]])
+        self.assertEqual(row["invoice"]["totalWithTax"], "75799.00")
+        self.assertEqual(row["oa"]["relationCount"], 2)
+        self.assertEqual(row["bankTransactions"]["relationCount"], 2)
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 1)
+        self.assertEqual({summary["relationStatus"] for summary in row["oa"]["summaries"]}, {"linked"})
+        self.assertEqual({summary["relationStatus"] for summary in row["bankTransactions"]["summaries"]}, {"linked"})
+        self.assertEqual(row["invoiceRelations"]["summaries"][0]["relationStatus"], "linked")
 
     def test_oa_attachment_source_relation_displays_for_promoted_formal_invoice(self) -> None:
         vendor = self._counterparty("vendor", "安徽德易智莱科技有限公司")

@@ -24,6 +24,7 @@ from fin_ops_platform.services.invoice_relation_query_context import (
     summary_is_linked,
 )
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.output_invoice_collection_models import (
     OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
     RED_REFUND_STATUS_CODES,
@@ -74,6 +75,9 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "taxable_item_name": {"label": "货物或应税劳务名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "collection_status": {"label": "收款状态", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
     "pending_amount": {"label": "待收款金额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
+    "oa_applicant": {"label": "OA申请人", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "oa_application_type": {"label": "类型", "mode": "enum_multi", "operators": {"in", "equals"}, "sortable": True},
+    "oa_project_name": {"label": "项目名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "bank_counterparty_name": {"label": "付款方", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "bank_trade_time": {"label": "收款日期", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
     "bank_amount": {"label": "收款金额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
@@ -356,6 +360,7 @@ class OutputInvoiceCollectionQueryService:
         *,
         import_service: ImportNormalizationService,
         relation_facade: WorkbenchRelationReadFacade | None = None,
+        oa_projection: Any | None = None,
         status_rule_service: OutputInvoiceCollectionStatusRuleService | None = None,
         receipt_preview_service: OutputInvoiceReceiptPreviewService | None = None,
         lifecycle_repository: Any | None = None,
@@ -365,6 +370,7 @@ class OutputInvoiceCollectionQueryService:
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
+        self._oa_projection = oa_projection
         self._status_rule_service = status_rule_service or OutputInvoiceCollectionStatusRuleService()
         self._receipt_preview_service = receipt_preview_service or OutputInvoiceReceiptPreviewService()
         self._lifecycle_repository = lifecycle_repository
@@ -598,6 +604,7 @@ class OutputInvoiceCollectionQueryService:
         return DistributedInvoiceRelationContext(
             import_service=self._import_service,
             relation_facade=self._relation_facade,
+            oa_projection=self._oa_projection,
             month_hint=month_hint,
             require_fresh_relations=self._require_fresh_relations,
         )
@@ -778,8 +785,8 @@ class OutputInvoiceCollectionQueryService:
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
         normalized_kind = str(kind or "").strip()
-        if normalized_kind not in {"bank", "red_invoice", "receipt"}:
-            raise OutputInvoiceCollectionError("invalid_relation_kind", "kind must be bank, red_invoice or receipt.")
+        if normalized_kind not in {"oa", "bank", "invoice", "red_invoice", "receipt"}:
+            raise OutputInvoiceCollectionError("invalid_relation_kind", "kind must be oa, bank, invoice, red_invoice or receipt.")
         context = self._query_context()
         row = self._row_by_id(row_id, context=context)
         if row is None:
@@ -788,8 +795,14 @@ class OutputInvoiceCollectionQueryService:
                 f"Output invoice collection row not found: {row_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        if normalized_kind == "bank":
+        if normalized_kind == "oa":
+            relation_payload = row["oa"]
+            summaries = relation_payload.get("summaries", [])
+        elif normalized_kind == "bank":
             relation_payload = row["bankTransactions"]
+            summaries = relation_payload.get("summaries", [])
+        elif normalized_kind == "invoice":
+            relation_payload = row["invoiceRelations"]
             summaries = relation_payload.get("summaries", [])
         elif normalized_kind == "red_invoice":
             relation_payload = row["redInvoiceRelation"]
@@ -875,7 +888,9 @@ class OutputInvoiceCollectionQueryService:
 
     def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext, tenant_id: str = "default") -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
-        context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
+        invoice_ids = [line.id for group in groups for line in group["line_items"]]
+        context.preload_relation_rows(invoice_ids)
+        context.preload_oa_records_from_relations(invoice_ids)
         rows = [self._row_payload(group, groups, context=context) for group in groups]
         return self.apply_lifecycle_overlays_to_rows(rows, tenant_id=tenant_id)
 
@@ -951,7 +966,9 @@ class OutputInvoiceCollectionQueryService:
         line_items: list[Invoice] = group["line_items"]
         invoice_ids = [line.id for line in line_items]
         relations = context.distributed_relations_for_row_ids(invoice_ids)
+        oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
+        invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
         red_payload = self._red_invoice_relation_payload(group, all_groups, context=context)
         related_groups = [
             related_group
@@ -997,7 +1014,9 @@ class OutputInvoiceCollectionQueryService:
             "invoiceIdentityKey": group["identity_key"],
             "invoice": self._invoice_summary(primary, line_items),
             "collectionStatus": collection_status,
+            "oa": oa_payload,
             "bankTransactions": bank_payload,
+            "invoiceRelations": invoice_relation_payload,
             "redInvoiceRelation": red_payload,
             "receipt": receipt_payload,
         }
@@ -1100,6 +1119,144 @@ class OutputInvoiceCollectionQueryService:
             "relationStatus": relation_status(relation),
             "relationSource": str(relation.get("relation_source") or ""),
             "_sort": (direction_rank, completeness, diff, -timestamp, bank.id),
+        }
+
+    def _oa_relation_payload(
+        self,
+        primary_invoice: Invoice,
+        line_items: list[Invoice],
+        relations: list[dict[str, Any]],
+        *,
+        context: DistributedInvoiceRelationContext,
+    ) -> dict[str, Any]:
+        oa_ids = []
+        seen: set[str] = set()
+        for relation in relations:
+            for row_id, row_type in self._typed_relation_rows(relation):
+                if row_type == "oa" and row_id not in seen:
+                    seen.add(row_id)
+                    oa_ids.append(row_id)
+        records = context.oa_records_by_id(oa_ids)
+        summaries = [
+            self._oa_summary(oa_id, records.get(oa_id), primary_invoice, line_items, self._relation_for_row_id(relations, oa_id))
+            for oa_id in oa_ids
+        ]
+        summaries.sort(key=lambda item: item["_sort"])
+        public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
+        primary = public_summaries[0] if public_summaries else {}
+        has_complete_amounts = all(str(summary.get("amount") or "").strip() for summary in public_summaries)
+        total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
+        return {
+            "primaryOaId": primary.get("oaId"),
+            "applicantName": primary.get("applicantName", ""),
+            "applicationType": primary.get("applicationType", ""),
+            "projectName": primary.get("projectName", ""),
+            "amount": _money(total_amount) if public_summaries and has_complete_amounts else "",
+            "relationCount": len(public_summaries),
+            "hasMultiple": len(public_summaries) > 1,
+            "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
+            "detailAvailable": any(summary.get("detailAvailable") for summary in public_summaries),
+            "summaries": public_summaries,
+        }
+
+    def _oa_summary(
+        self,
+        oa_id: str,
+        record: OAApplicationRecord | None,
+        primary_invoice: Invoice,
+        line_items: list[Invoice],
+        relation: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        invoice_total = abs(sum((_invoice_total(line) for line in line_items), start=ZERO))
+        oa_amount = abs(_decimal(record.amount)) if record is not None else ZERO
+        diff = abs(oa_amount - invoice_total) if record is not None else Decimal("999999999")
+        completeness = 0 if relation and self._relation_amount_check_is_matched(relation) else 1
+        return {
+            "oaId": oa_id,
+            "applicantName": record.applicant if record is not None else "",
+            "applicationType": record.apply_type if record is not None else "",
+            "projectName": (record.project_name_display or record.project_name) if record is not None else "",
+            "amount": _money(record.amount) if record is not None else "",
+            "status": record.section if record is not None else "",
+            "detailAvailable": record is not None,
+            "relationCaseId": relation.get("case_id", "") if relation else "",
+            "relationStatus": relation_status(relation),
+            "relationSource": str((relation or {}).get("relation_source") or ""),
+            "_sort": (completeness, diff, oa_id),
+        }
+
+    def _invoice_relation_payload(
+        self,
+        primary_invoice: Invoice,
+        line_items: list[Invoice],
+        relations: list[dict[str, Any]],
+        *,
+        context: DistributedInvoiceRelationContext,
+    ) -> dict[str, Any]:
+        invoice_map = {
+            invoice.id: invoice
+            for invoice in context.list_invoices(month="all", invoice_type=InvoiceType.OUTPUT)
+        }
+        summaries = []
+        seen: set[str] = set()
+        for relation in relations:
+            for row_id, row_type in self._typed_relation_rows(relation):
+                invoice = invoice_map.get(row_id)
+                if row_type == "invoice" and invoice is not None and invoice.id not in seen:
+                    seen.add(invoice.id)
+                    summaries.append(self._invoice_relation_summary(invoice, primary_invoice, relation))
+        if relations:
+            for invoice in line_items:
+                if invoice.id not in seen:
+                    seen.add(invoice.id)
+                    summaries.append(
+                        self._invoice_relation_summary(
+                            invoice,
+                            primary_invoice,
+                            self._relation_for_row_id(relations, invoice.id),
+                        )
+                    )
+        summaries.sort(key=lambda item: item["_sort"])
+        public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
+        primary = public_summaries[0] if public_summaries else {}
+        total_with_tax = sum((_decimal(summary.get("totalWithTax")) for summary in public_summaries), start=ZERO)
+        return {
+            "primaryInvoiceId": primary.get("invoiceId"),
+            "digitalInvoiceNo": primary.get("digitalInvoiceNo", ""),
+            "invoiceNo": primary.get("invoiceNo", ""),
+            "invoiceCode": primary.get("invoiceCode", ""),
+            "buyerName": primary.get("buyerName", ""),
+            "buyerTaxNo": primary.get("buyerTaxNo", ""),
+            "invoiceDate": primary.get("invoiceDate", ""),
+            "taxableItemName": primary.get("taxableItemName", ""),
+            "totalWithTax": _money(total_with_tax) if public_summaries else "",
+            "relationCount": len(public_summaries),
+            "hasMultiple": len(public_summaries) > 1,
+            "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
+            "summaries": public_summaries,
+        }
+
+    @staticmethod
+    def _invoice_relation_summary(
+        invoice: Invoice,
+        primary_invoice: Invoice,
+        relation: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        same_primary = invoice.id == primary_invoice.id
+        return {
+            "invoiceId": invoice.id,
+            "invoiceNo": invoice.invoice_no or "",
+            "invoiceCode": invoice.invoice_code or "",
+            "digitalInvoiceNo": invoice.digital_invoice_no or "",
+            "invoiceDate": invoice.invoice_date or "",
+            "buyerName": invoice.buyer_name or invoice.counterparty.name,
+            "buyerTaxNo": invoice.buyer_tax_no or invoice.counterparty.tax_no or "",
+            "totalWithTax": _money(_invoice_total(invoice)),
+            "taxableItemName": invoice.taxable_item_name or "",
+            "relationCaseId": relation.get("case_id", "") if relation else "",
+            "relationStatus": relation_status(relation),
+            "relationSource": str((relation or {}).get("relation_source") or ""),
+            "_sort": (0 if same_primary else 1, str(invoice.invoice_date or ""), invoice.id),
         }
 
     def _red_invoice_relation_payload(
@@ -1518,6 +1675,7 @@ class OutputInvoiceCollectionQueryService:
     @staticmethod
     def _field_value(row: dict[str, Any], field: str) -> Any:
         invoice = row["invoice"]
+        oa = row["oa"]
         bank = row["bankTransactions"]
         collection = row["collectionStatus"]
         receipt = row["receipt"]
@@ -1534,6 +1692,9 @@ class OutputInvoiceCollectionQueryService:
             "taxable_item_name": invoice.get("taxableItemName"),
             "collection_status": collection.get("code"),
             "pending_amount": collection.get("pendingAmount"),
+            "oa_applicant": oa.get("applicantName"),
+            "oa_application_type": oa.get("applicationType"),
+            "oa_project_name": oa.get("projectName"),
             "bank_counterparty_name": bank.get("counterpartyName"),
             "bank_trade_time": bank.get("tradeTime"),
             "bank_amount": bank.get("amount"),
@@ -1620,6 +1781,14 @@ class OutputInvoiceCollectionQueryService:
             row_type = row_types[index] if index < len(row_types) else _infer_row_type(row_id)
             typed.append((row_id, row_type))
         return typed
+
+    @classmethod
+    def _relation_for_row_id(cls, relations: list[dict[str, Any]], row_id: str) -> dict[str, Any] | None:
+        normalized_id = str(row_id)
+        for relation in relations:
+            if any(typed_row_id == normalized_id for typed_row_id, _row_type in cls._typed_relation_rows(relation)):
+                return relation
+        return None
 
     @staticmethod
     def _relation_amount_check_is_matched(relation: dict[str, Any]) -> bool:

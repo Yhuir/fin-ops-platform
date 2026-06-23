@@ -418,7 +418,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(categories_by_code["fee"]["sub_label"], "银行手续费")
         self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
 
-    def test_bucket_filter_returns_unsubmitted_and_submitted_after_category_drift(self) -> None:
+    def test_bucket_filter_keeps_submitted_batch_after_category_drift(self) -> None:
         app = self._app_with_transactions(
             [
                 bank_transaction("bank-202603-fee-1", amount="3.00"),
@@ -448,26 +448,18 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(submitted_payload["summary"]["draft_count"], 1)
         self._replace_transaction_text(app, "bank-202603-fee-1", "其他流水")
         app._workbench_relation_facade = FakeNoOaRelationFacade([])
-        stale = next(
-            batch
-            for batch in self._list_batches(app, "?bucket=unsubmitted")["batches"]
-            if batch["batch_id"] == submitted["batch_id"]
-        )
-        withdraw_response = app.handle_request(
-            "POST",
-            f"/api/no-oa-bank-batches/{stale['batch_id']}/withdraw",
-            body=json.dumps({"expected_version": stale["version"], "reason": "测试"}),
-        )
-        self.assertEqual(withdraw_response.status_code, 400, withdraw_response.body)
-        self.assertEqual(json.loads(withdraw_response.body)["error"], "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
 
         unsubmitted = self._list_batches(app, "?bucket=unsubmitted")
+        submitted_after_change = self._list_batches(app, "?bucket=submitted")
         withdrawn_payload = self._list_batches(app, "?bucket=withdrawn")
         all_payload = self._list_batches(app, "?bucket=all")
 
-        self.assertEqual([batch["batch_id"] for batch in unsubmitted["batches"]], [submitted["batch_id"], salary_batch["batch_id"]])
+        self.assertEqual([batch["batch_id"] for batch in unsubmitted["batches"]], [salary_batch["batch_id"]])
+        self.assertEqual([batch["batch_id"] for batch in submitted_after_change["batches"]], [submitted["batch_id"]])
+        self.assertEqual(submitted_after_change["batches"][0]["status"], "submitted")
+        self.assertTrue(submitted_after_change["batches"][0]["can_withdraw"])
         self.assertEqual(withdrawn_payload["batches"], [])
-        self.assertEqual({batch["status_bucket"] for batch in all_payload["batches"]}, {"unsubmitted"})
+        self.assertEqual({batch["status_bucket"] for batch in all_payload["batches"]}, {"submitted", "unsubmitted"})
         self.assertEqual(withdrawn_payload["summary"]["withdrawn_count"], 0)
         self.assertEqual(withdrawn_payload["summary"]["draft_count"], 1)
 
@@ -636,7 +628,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual([result["status"] for result in payload["results"]], ["submitted", "failed"])
         self.assertEqual(payload["results"][1]["error"], "no_oa_bank_batch_version_conflict")
 
-    def test_stale_batch_after_category_drift_clears_relation_and_is_not_withdrawable(self) -> None:
+    def test_submitted_batch_after_category_drift_remains_withdrawable(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
         batch = self._list_batches(app)["batches"][0]
         submit_response = app.handle_request(
@@ -647,20 +639,20 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         submitted = json.loads(submit_response.body)["batch"]
         self._replace_transaction_text(app, "bank-202603-fee-1", "其他流水")
 
-        stale_payload = self._list_batches(app, "?bucket=unsubmitted")
-        stale = stale_payload["batches"][0]
+        submitted_payload = self._list_batches(app, "?bucket=submitted")
+        submitted_after_change = submitted_payload["batches"][0]
         response = app.handle_request(
             "POST",
-            f"/api/no-oa-bank-batches/{stale['batch_id']}/withdraw",
-            body=json.dumps({"expected_version": stale["version"], "reason": "源分类变化"}),
+            f"/api/no-oa-bank-batches/{submitted_after_change['batch_id']}/withdraw",
+            body=json.dumps({"expected_version": submitted_after_change["version"], "reason": "源分类变化"}),
         )
         payload = json.loads(response.body)
 
-        self.assertEqual(stale["batch_id"], submitted["batch_id"])
-        self.assertEqual(stale["status"], "stale")
-        self.assertFalse(stale["can_withdraw"])
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(payload["error"], "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
+        self.assertEqual(submitted_after_change["batch_id"], submitted["batch_id"])
+        self.assertEqual(submitted_after_change["status"], "submitted")
+        self.assertTrue(submitted_after_change["can_withdraw"])
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["batch"]["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
 
     def test_submit_version_conflict_returns_409(self) -> None:

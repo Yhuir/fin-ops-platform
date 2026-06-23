@@ -4074,6 +4074,86 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertIn("case:no_oa_batch_1", [group["group_id"] for group in aggregate_group_payloads])
 
+    def test_repository_all_scope_keeps_unclaimed_bank_when_open_group_takes_automatic_decision_oa(self) -> None:
+        class AggregateAllOpenAutomaticDecisionOwnerConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                oa_row = {
+                    "id": "oa-pay-2068",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                }
+                bank_row = {
+                    "id": "txn_imported_1419",
+                    "type": "bank",
+                    "source_kind": "bank_transaction",
+                    "status": "open",
+                }
+                return [
+                    {
+                        "scope_key": "2026-03",
+                        "scope_month": "2026-03-01",
+                        "zone": "open",
+                        "group_id": "temp:0001",
+                        "generated_at": "2026-06-23T16:44:00+08:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:0001",
+                            "zone": "open",
+                            "group_type": "open",
+                            "reason": "reconciliation_decision_open",
+                            "oa_rows": [oa_row],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-04",
+                        "scope_month": "2026-04-01",
+                        "zone": "open",
+                        "group_id": "case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419",
+                        "generated_at": "2026-06-23T16:44:00+08:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "existing_case_candidate",
+                            "oa_rows": [{**oa_row, "case_id": "decision:2026-04:oa_bank_exact_amount"}],
+                            "bank_rows": [
+                                {
+                                    **bank_row,
+                                    "case_id": "decision:2026-04:oa_bank_exact_amount",
+                                    "relation_mode": "automatic_decision",
+                                }
+                            ],
+                            "invoice_rows": [],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllOpenAutomaticDecisionOwnerConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        payloads_by_id = {group["group_id"]: group for group in aggregate_group_payloads}
+        self.assertIn("scope:2026-03:temp:0001", payloads_by_id)
+        self.assertIn("case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419", payloads_by_id)
+        self.assertEqual(payloads_by_id["scope:2026-03:temp:0001"]["oa_rows"][0]["id"], "oa-pay-2068")
+        decision_group = payloads_by_id["case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419"]
+        self.assertEqual(decision_group["oa_rows"], [])
+        self.assertEqual([row["id"] for row in decision_group["bank_rows"]], ["txn_imported_1419"])
+
     def test_repository_all_scope_suppresses_open_invoice_rows_claimed_by_stronger_open_group(self) -> None:
         class AggregateAllOpenInvoiceDuplicateConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

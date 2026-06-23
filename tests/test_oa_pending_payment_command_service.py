@@ -582,6 +582,43 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-linked"])
         self.assertEqual(payload["rows"][0]["relationStatusLabel"], "已关联进行中OA")
 
+    def test_bank_transaction_candidates_uses_selected_oa_month_scope(self) -> None:
+        service = _service(
+            oa_records=[_oa("oa-june", "2152.80", workflow_status="in_progress", month="2026-06")],
+            transactions=[
+                _bank("bank-june", "2152.80", txn_date="2026-06-18", trade_time="2026-06-18 10:00:00"),
+                _bank("bank-may", "2152.80", txn_date="2026-05-18", trade_time="2026-05-18 10:00:00"),
+            ],
+            relation_command=FakeRelationCommandService(),
+            payment_repository=FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439011"),
+        )
+
+        payload = service.bank_transaction_candidates({
+            "oa_row_ids": ["oa-june"],
+            "keyword": ["2152"],
+        })
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-june"])
+        self.assertEqual(payload["filters"]["oaRowIds"], ["oa-june"])
+        self.assertEqual(payload["filters"]["monthScopes"], ["2026-06"])
+
+    def test_bank_transaction_candidates_with_selected_oa_does_not_fallback_all_when_month_missing(self) -> None:
+        service = _service(
+            oa_records=[_oa("oa-no-month", "2152.80", workflow_status="in_progress", month="")],
+            transactions=[_bank("bank-history", "2152.80", txn_date="2026-05-18")],
+            relation_command=FakeRelationCommandService(),
+            payment_repository=FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439011"),
+        )
+
+        payload = service.bank_transaction_candidates({
+            "oa_row_ids": ["oa-no-month"],
+            "keyword": ["2152"],
+        })
+
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["filters"]["oaRowIds"], ["oa-no-month"])
+        self.assertEqual(payload["filters"]["monthScopes"], [])
+
     def test_amount_mismatch_does_not_confirm_relation_or_write_mysql(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439013")
         relation_command = FakeRelationCommandService()

@@ -54,6 +54,35 @@ function upgradedRows() {
         effective_tag_sub_label: "设备采购",
         effective_tag_label_path: ["货款", "设备采购"],
       },
+      bank_transactions: {
+        primary: {
+          id: "txn-paid-pending",
+          counterparty_name: "云南开票供应商",
+          trade_time: "2026-04-19T10:52:02+08:00",
+          amount: "1200.00",
+          debit_amount: "1200.00",
+          bank_name: "建设银行",
+          account_last4: "8106",
+          summary: "电子转账",
+        },
+        relation_count: 1,
+        linked_relation_count: 1,
+        has_multiple: false,
+        detail_mode: "single",
+        summaries: [
+          {
+            id: "txn-paid-pending",
+            counterparty_name: "云南开票供应商",
+            trade_time: "2026-04-19T10:52:02+08:00",
+            amount: "1200.00",
+            debit_amount: "1200.00",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            summary: "电子转账",
+          },
+        ],
+        payment_summary: { paid_total: "0.00" },
+      },
       invoice_acquisition_status: {
         code: "paid_pending_invoice",
         label: "已支付待开票",
@@ -96,6 +125,40 @@ function upgradedRows() {
         voucher_type: "电子凭证",
         voucher_no: "v-not-paid",
       },
+      bank_transactions: {
+        primary: null,
+        relation_count: 2,
+        linked_relation_count: 2,
+        has_multiple: true,
+        detail_mode: "list",
+        summaries: [
+          {
+            id: "txn-invoice-not-paid",
+            counterparty_name: "分期供应商",
+            trade_time: "2026-05-03 09:00:00",
+            amount: "1200.00",
+            debit_amount: "1200.00",
+            bank_name: "建设银行",
+            account_last4: "8826",
+            summary: "合同付款",
+            relation_case_id: "case-001",
+            relation_status: "linked",
+          },
+          {
+            id: "txn-old-payment",
+            counterparty_name: "分期供应商二号",
+            trade_time: "2026-04-20 09:00:00",
+            amount: "300.00",
+            debit_amount: "300.00",
+            bank_name: "建设银行",
+            account_last4: "8826",
+            summary: "历史付款",
+            relation_case_id: "case-old",
+            relation_status: "linked",
+          },
+        ],
+        payment_summary: { paid_total: "1500.00" },
+      },
       invoice_acquisition_status: {
         code: "invoice_not_fully_paid",
         label: "未支付完已开票",
@@ -121,7 +184,7 @@ function upgradedRows() {
           { id: "inv-001", digital_invoice_no: "DIG-001", issue_date: "2026-05-04", seller_name: "分期供应商", seller_tax_no: "915300001111", total_with_tax: "2000.00" },
           { id: "inv-002", digital_invoice_no: "DIG-002", issue_date: "2026-05-05", seller_name: "分期供应商二号", seller_tax_no: "915300002222", total_with_tax: "800.00" },
         ],
-        payment_summary: { paid_total: "1200.00", invoice_total: "2800.00", remaining_amount: "1600.00", difference_amount: "-1600.00" },
+        payment_summary: { paid_total: "1500.00", invoice_total: "2800.00", remaining_amount: "1300.00", difference_amount: "-1300.00" },
       },
       oa: {
         primary: { id: "oa-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中" },
@@ -895,15 +958,18 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("发票价税合计大于已付合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
     const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
+    expect(within(pendingRow).getByText("1,200.00")).toBeInTheDocument();
+    expect(within(pendingRow).queryByText("0.00")).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "补票" })).not.toBeInTheDocument();
-    expect(within(page).getByText("DIG-001")).toBeInTheDocument();
-    expect(within(page).getAllByText("+1").length).toBeGreaterThanOrEqual(2);
+    expect(within(page).queryByText("DIG-001")).not.toBeInTheDocument();
+    expect(within(page).queryByText("李四")).not.toBeInTheDocument();
+    expect(within(page).getAllByText("+2").length).toBeGreaterThanOrEqual(3);
     expect(within(page).getByText("2,800.00")).toBeInTheDocument();
-    expect(within(page).getByText("已付 1,200.00")).toBeInTheDocument();
-    expect(within(page).getByText("待付 1,600.00")).toBeInTheDocument();
+    expect(within(page).getByText("已付 1,500.00")).toBeInTheDocument();
+    expect(within(page).getByText("待付 1,300.00")).toBeInTheDocument();
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
     expect(request.searchParams.get("direction")).toBe("expense");
@@ -1079,41 +1145,39 @@ describe("Pending invoices page", () => {
     });
   }, 30_000);
 
-  test("opens relation, object detail, rules, and export drawers with loading callbacks", async () => {
+  test("opens relation, rules, and export drawers with loading callbacks", async () => {
     const user = userEvent.setup();
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    const relationRow = await within(page).findByRole("row", { name: /分期供应商/ });
-    await user.click(within(relationRow).getByRole("button", { name: "分期供应商 查看全部发票关系" }));
+    await within(page).findByText("云南开票供应商");
+    await user.click(within(page).getByRole("button", { name: "查看全部发票关系" }));
     expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭关系明细抽屉" })).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "已关联发票" })).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "已关联 OA" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();
     expect(await screen.findByText("已付合计")).toBeInTheDocument();
-    expect(screen.getByText("1,500.00")).toBeInTheDocument();
+    expect(screen.getAllByText("1,500.00").length).toBeGreaterThan(0);
     expect(screen.getByText("DIG-002")).toBeInTheDocument();
     expect(screen.getByText("分期供应商二号")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看全部流水关系" }));
+    expect(await screen.findByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "已关联发票" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看全部 OA 关系" }));
+    expect(await screen.findByRole("table", { name: "已关联 OA" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "已关联发票" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
     expect(screen.getByText("王五")).toBeInTheDocument();
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
     expect(screen.getAllByText("case-old").length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
-
-    await user.click(within(relationRow).getByRole("button", { name: /发票详情 DIG-001/ }));
-    expect(await screen.findByRole("heading", { name: "DIG-001" })).toBeInTheDocument();
-    expect(screen.getByText("发票字段")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(relationRow).getByRole("button", { name: /OA详情 李四/ }));
-    const oaDialog = await screen.findByRole("dialog", { name: "打印选择" });
-    expect(within(oaDialog).getAllByText("支付申请").length).toBeGreaterThan(0);
-    expect(within(oaDialog).getByRole("button", { name: "打印下载" })).toBeInTheDocument();
-    expect(within(oaDialog).getByText("申请人")).toBeInTheDocument();
-    expect(within(oaDialog).getAllByText("李四").length).toBeGreaterThan(0);
-    expect(within(oaDialog).getByText("项目负责人审核")).toBeInTheDocument();
-    await user.click(within(oaDialog).getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();

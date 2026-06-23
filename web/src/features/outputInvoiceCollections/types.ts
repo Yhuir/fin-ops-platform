@@ -41,7 +41,7 @@ export type OutputInvoiceCollectionDetailTarget = {
   kind: "invoice" | "bank" | "relationList";
   id: string;
   rowId?: string;
-  relationKind?: "bank" | "red_invoice" | "receipt";
+  relationKind?: "oa" | "bank" | "invoice" | "red_invoice" | "receipt";
 };
 
 export type OutputInvoiceCollectionInvoiceSummary = {
@@ -105,11 +105,40 @@ export type OutputInvoiceCollectionBankSummary = {
   detailAvailable: boolean;
 };
 
+export type OutputInvoiceCollectionOaSummary = {
+  id: string;
+  applicantName: string;
+  applicationType: string;
+  projectName: string;
+  amount: string;
+  status: string;
+  relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
+  detailAvailable: boolean;
+};
+
+export type OutputInvoiceCollectionRelatedInvoiceSummary = {
+  id: string;
+  invoiceNo: string;
+  invoiceCode: string;
+  digitalInvoiceNo: string;
+  invoiceDate: string;
+  buyerName: string;
+  buyerTaxNo: string;
+  totalWithTax: string;
+  taxableItemName: string;
+  relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
+};
+
 export type OutputInvoiceCollectionRelationSummary<T> = {
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;
   receivedTotal?: string;
+  totalWithTax?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 };
@@ -149,7 +178,9 @@ export type OutputInvoiceCollectionRow = {
   invoiceIdentityKey?: string;
   invoice: OutputInvoiceCollectionInvoiceSummary;
   collectionStatus: OutputInvoiceCollectionStatus;
+  oa: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionOaSummary>;
   bank: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionBankSummary>;
+  invoiceRelations: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionRelatedInvoiceSummary>;
   redInvoice: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionRedInvoiceSummary>;
   receipt: OutputInvoiceCollectionReceiptSummary;
 };
