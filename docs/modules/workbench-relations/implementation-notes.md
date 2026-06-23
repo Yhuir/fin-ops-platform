@@ -3009,3 +3009,25 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:server-relation-read-helper-boundary-audit`。
+
+## 2026-06-24 - server relation read helper boundary audit
+
+目标：审计 `server.py` 中剩余直接读取 `_workbench_pair_relation_service` 的 helper/call site，避免把 snapshot、source-version、repair/write precondition 和页面 payload enrichment 混成一个过大的实现边界。
+
+结论：
+
+- 剩余 direct relation reads 不是同一类 legacy path。
+- `_apply_pair_relations_to_payload(...)`、`_supplement_missing_active_pair_relation_rows(...)`、`_relation_for_group(...)`、`_resolve_live_rows_direct(...)` 属于 Workbench 页面 payload/live-row enrichment，是下一条最小安全实现边界。
+- `_no_oa_bank_batch_source_versions(...)` 和 `_workbench_read_model_source_versions(...)` 属于 freshness/source-version fact read，后续单独抽 source-version provider。
+- `_persist_workbench_pair_relations_in_transaction(...)` 属于事务内 relation persistence snapshot，已走 `PostgresWorkbenchRelationRepository`，不和页面 read helper 合并。
+- `_apply_workbench_exception_application(...)` 和 `_batch_accounting_routes(...)` 属于 rollback snapshot/route callback，后续单独处理。
+- `_sync_oa_invoice_offset_auto_pair_relations(...)`、`_repair_active_relations_with_oa_attachment_context(...)`、`_expand_confirm_link_row_ids_for_existing_context(...)`、`_auto_pair_conflicts_with_manual_relation(...)` 属于 repair/write or auto-pair precondition read，后续单独抽 precondition/repair port。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-workbench-payload-relation-read-port-extraction`。

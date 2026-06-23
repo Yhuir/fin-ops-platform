@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:workbench-matching-relation-read-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:server-relation-read-helper-boundary-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -92,8 +92,9 @@ Current state expected on start:
 - WorkbenchWriteFacade cash special metadata mutation now goes through `WorkbenchWriteRelationSpecialMetadataMutationPort`.
 - WorkbenchWriteFacade no longer stores or accepts broad `pair_relation_service`.
 - Workbench matching/orchestrator active relation reads now go through `WorkbenchMatchingRelationReadPort` backed by existing command-boundary reads.
-- Remaining `server.py` direct relation read helpers still need classification before Go admission.
-- The next pending boundary is workbench-relations:server-relation-read-helper-boundary-audit.
+- Remaining `server.py` direct relation read/snapshot helpers are classified.
+- Workbench page payload/live-row active relation reads are the next smallest safe extraction boundary.
+- The next pending boundary is workbench-relations:server-workbench-payload-relation-read-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -189,23 +190,24 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:server-relation-read-helper-boundary-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:server-workbench-payload-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:server-relation-read-helper-boundary-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-workbench-matching-relation-read-port-extraction.md`.
+For workbench-relations:server-workbench-payload-relation-read-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-relation-read-helper-boundary-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect remaining direct relation read helpers/call sites in `backend/src/fin_ops_platform/app/server.py`, their route/service owners, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `_workbench_pair_relation_service`, `list_active_relations`, `active_relations_for_row_ids`, `get_active_relation_by_row_id`, and `snapshot`.
-- Audit every remaining `server.py` direct `_workbench_pair_relation_service` read helper/call site.
-- Classify each touched old path as removed, explicit-port candidate, compat-only, or blocked-by-human-gate.
-- Identify the next smallest safe extraction/removal boundary.
-- Keep this slice analysis-only unless the audit proves a trivial unused helper can be safely removed without widening scope.
-- Do not change relation writes, matching rules, read model refresh, dirty scopes, API response shape or frontend behavior in the audit slice.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_apply_pair_relations_to_payload`, `_supplement_missing_active_pair_relation_rows`, `_relation_for_group`, `_resolve_live_rows_direct`, `get_active_relation_by_row_id`, and `list_active_relations`.
+- Add an explicit server-side Workbench payload relation read port for active relation reads used by payload/live-row enrichment.
+- Move these direct pair service calls behind the port: `_apply_pair_relations_to_payload(...)`, `_supplement_missing_active_pair_relation_rows(...)`, `_relation_for_group(...)`, and `_resolve_live_rows_direct(...)`.
+- Preserve returned row/group payload shape, pair relation projection, missing row supplementation and override application behavior.
+- Add static guard coverage focused on the extracted payload enrichment methods.
+- Do not change repair/write precondition reads, source-version snapshot reads, transaction-persist, rollback or whole-state persistence snapshot reads in this slice.
+- Do not change relation writes, command service behavior, matching rules, dirty scopes, read model refresh, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks as applicable.
+- Run focused Workbench payload/API regression tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 
