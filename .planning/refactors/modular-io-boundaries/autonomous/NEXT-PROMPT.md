@@ -1,58 +1,58 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:bank-detail-derived-lifecycle-executor-port-extraction` slice.
+Continue the autonomous modular IO refactor after the `read-models:bank-detail-service-factory-collaborator-closure-audit` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:bank-detail-derived-lifecycle-executor-port-extraction`
-- Last status: `implementation-closed`
+- Last completed boundary: `read-models:bank-detail-service-factory-collaborator-closure-audit`
+- Last status: `production-evidence-deferred`
 - Queue semantics remain corrected: slice status is not module closure.
-- `bank_detail` is still the first read model implementation pilot and remains `implementation-gap-open` until the remaining service factory collaborator wiring is audited.
-- Completed local bank detail pilot work now includes repository port extraction, freshness/operation-barrier response contracts, legacy SQL helper removal, server read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction.
-- Remaining local question:
-  - Is `Application._bank_details_application_service(...)` now acceptable dependency assembly/wiring, or does it still contain bank_detail implementation logic that needs another extraction?
-- Production DB/worker/App Status/high-row evidence remains deferred and must not require local `PGSQL_URL` or staging DB.
-- Go hot-path candidates remain blocked by prerequisites until relevant IO contracts, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback evidence exist.
+- `bank_detail` local implementation closure evidence is recorded.
+- `bank_detail` full module closure is not claimed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- The remaining `Application._bank_details_application_service(...)` code has been audited as acceptable dependency assembly/wiring.
+- Go hot-path candidates remain blocked by prerequisites.
 
 ## Next Boundary
 
-`read-models:bank-detail-service-factory-collaborator-closure-audit`
+`read-models:next-pilot-selection-after-bank-detail`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean.
 3. Perform planning-state preflight by reading `.planning/ROADMAP.md`, `.planning/refactors/README.md`, the modular IO requirements/state/roadmap/gates/runbook/stop-gates/Go carve-out docs, and all files in `.planning/refactors/modular-io-boundaries/autonomous/`.
-4. Read the latest bank detail analysis files and bank-details module docs.
-5. Use CodeGraph before editing to inspect `Application._bank_details_application_service(...)`, `BankDetailsApplicationService.__init__`, and all bank_detail provider/producer/port collaborators.
-6. Execute only one narrow bank detail closure audit or implementation boundary. Do not implement Go/Fiber/Go Worker.
-7. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
+4. Read:
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-service-factory-collaborator-closure-audit.md`
+   - `docs/app-architecture/runtime-and-ownership.md`
+   - `docs/modules/README.md`
+5. Select the next read model implementation pilot from current manifest/roadmap evidence. Do not select Go/Fiber/Go Worker.
+6. Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this file after verification.
 
 ## Boundary Scope
 
 Target:
 
-- Audit whether `Application._bank_details_application_service(...)` is now only dependency assembly and fallback wiring.
-- If it contains business/read-model/worker behavior, split a new implementation boundary before module closure.
-- If it is acceptable wiring, record local implementation closure evidence and defer only production PostgreSQL/worker/App Status/high-row evidence.
-- Preserve API response shape, permissions, audit behavior, operation-barrier targets and read model freshness behavior.
+- Compare remaining read model candidates such as `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `invoice_lifecycle`, `input_invoice_usage`, `output_invoice_collection`, `cost_statistics`, `tax_offset`, `turnover_ledger`, `search` and `no_oa_bank_batch`.
+- Choose the next highest-value implementation pilot based on bug frequency, cross-page freshness risk, remaining legacy contamination, test coverage, scope size and implementation sequencing.
+- Queue the first narrow implementation boundary for that pilot.
+- Keep Go hot-path admission blocked until prerequisite modular IO implementation evidence exists.
 
 Forbidden:
 
-- Do not perform broad `server.py` splitting.
-- Do not change finance business rules, category matching semantics, permission checks, audit action names, API shape, read model freshness semantics or frontend behavior.
 - Do not implement Go/Fiber/Go Worker.
 - Do not touch production state.
+- Do not perform runtime code changes unless a tiny static verification helper is required for the selection artifact.
 
 ## Expected Output
 
 - An analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- Runtime code changes only if the audit finds a narrow required extraction.
-- Updated module docs/state/journal/next prompt.
-- Targeted guard/docs/app checks.
+- Updated queue/state/journal/next prompt.
+- Docs verification and diff checks.
 - Commit and push to `origin/dev` if verification passes.
 
 ## Stop Condition
 
-Complete one verified `read-models:bank-detail-service-factory-collaborator-closure-audit` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.
+Complete one verified `read-models:next-pilot-selection-after-bank-detail` slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending implementation boundary unless a hard stop gate is hit.

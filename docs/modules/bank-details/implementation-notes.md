@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Bank detail service factory collaborator closure audit
+
+- 目标：执行 `read-models:bank-detail-service-factory-collaborator-closure-audit`，审计 `Application._bank_details_application_service(...)` 是否仍包含银行明细业务/read model/worker 实现逻辑。
+- 影响范围：modular IO planning state 和银行明细实施记录；不改变运行时代码、API response shape、权限、审计、operation barrier、read model freshness、worker 或前端。
+- 关键决策：`Application._bank_details_application_service(...)` 当前只做 explicit dependency assembly 和 provider/port 注入，不再拥有 suggestion、refresh/wakeup、available-month scope、derived lifecycle、read/cache helper 或 SQL read model 行为；银行明细试点本地实现闭环，剩余为生产 PostgreSQL/worker/App Status/high-row 证据延后。
+- 文档影响：新增 modular IO closure audit analysis，更新 autonomous queue/state/journal/next prompt；银行明细状态机定义不变。
+- 测试覆盖：本轮无运行时代码变更；沿用 provider/producer/executor/read-model/API/static guard 作为闭环证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-service-factory-collaborator-closure-audit.md`。
+- 未测风险：真实 PostgreSQL dirty/outbox/readiness、worker drain、App Status、高行数历史数据和生产浏览器 smoke 继续作为生产证据延后。
+
 ## 2026-06-24 - Bank detail derived lifecycle executor port extraction
 
 - 目标：执行 `read-models:bank-detail-derived-lifecycle-executor-port-extraction`，把银行明细 derived lifecycle executor 从 `Application` 抽到显式 services-layer executor。

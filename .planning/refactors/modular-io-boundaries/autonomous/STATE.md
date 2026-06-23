@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-bank-detail-derived-lifecycle-executor-extraction`
+Current state: `autonomous-continue-after-bank-detail-local-closure-evidence`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-detail-derived-lifecycle-executor-port-extraction`. `bank_detail` remains `implementation-gap-open` until the remaining service factory collaborator wiring is audited for closure or split into another implementation slice. Next execution must start with `read-models:bank-detail-service-factory-collaborator-closure-audit` unless a planning-state inconsistency is found first.
+Completed `read-models:bank-detail-service-factory-collaborator-closure-audit`. `bank_detail` local implementation closure is recorded; full module closure is not claimed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred. Next execution must start with `read-models:next-pilot-selection-after-bank-detail` unless a planning-state inconsistency is found first.
 
 ## Closed Or Deferred Slices
 
@@ -70,12 +70,13 @@ Completed `read-models:bank-detail-derived-lifecycle-executor-port-extraction`. 
 - `read-models:bank-detail-refresh-producer-port-extraction` -> `implementation-closed`
 - `read-models:bank-detail-available-month-scope-provider-extraction` -> `implementation-closed`
 - `read-models:bank-detail-derived-lifecycle-executor-port-extraction` -> `implementation-closed`
+- `read-models:bank-detail-service-factory-collaborator-closure-audit` -> `production-evidence-deferred`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
 - `bank_detail` is selected as the first implementation pilot, but the module is not closed.
-- `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented; module closure now depends on auditing whether the remaining service factory collaborator wiring is acceptable dependency assembly or still requires another extraction. Production DB/worker evidence also remains unavailable.
+- `bank_detail` repository port/query boundary, freshness/barrier response contract, first legacy SQL helper removal, unused `server.py` read/cache helper quarantine, category side-effect port extraction, suggestion provider port extraction, refresh producer port extraction, available-month scope provider extraction and derived lifecycle executor extraction are implemented. Remaining service factory collaborator wiring has been audited as acceptable dependency assembly. Full closure is not claimed because production DB/worker/App Status/high-row/browser evidence remains unavailable.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
@@ -91,8 +92,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:bank-detail-derived-lifecycle-executor-port-extraction`
+`read-models:bank-detail-service-factory-collaborator-closure-audit`
 
 ## Next Prompt
 
-`read-models:bank-detail-service-factory-collaborator-closure-audit`
+`read-models:next-pilot-selection-after-bank-detail`
