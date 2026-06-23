@@ -1004,7 +1004,6 @@ class Application:
         self._pending_invoice_command_repository = InMemoryPendingInvoiceCommandRepository(self._pending_invoice_commands)
         self._pending_invoice_query_service = PendingInvoiceQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             category_service=self._bank_transaction_category_service,
             app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
             effective_category_provider=self._bank_transaction_tag_reader(),
@@ -1060,7 +1059,6 @@ class Application:
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             command_repository=self._pending_invoice_command_repository,
             audit_recorder=self._pending_invoice_lifecycle_service.record_manual_invoice_audit,
             finalizer=self._pending_invoice_lifecycle_service.finalize_manual_invoice,

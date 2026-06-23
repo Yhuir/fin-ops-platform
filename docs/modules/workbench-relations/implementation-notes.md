@@ -18,6 +18,33 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - pending invoice unused pair service removal
+
+目标：移除待找发票 query/application service 中已经不用的 `pair_relation_service` 注入，防止旧 pair relation service 继续污染新链路。
+
+变更：
+
+- `PendingInvoiceQueryService` 不再接收或保存 `pair_relation_service`。
+- `PendingInvoiceApplicationService` 不再接收或保存 `pair_relation_service`。
+- `Application` 构造待找发票 query/application service 时不再传入 `_workbench_pair_relation_service`。
+- 待找发票测试 fixture 不再把 pair service 注入 pending invoice services；pair service 只作为 `LiveWorkbenchRelationFacade` 和 command service repository fake 的底层数据源。
+- `tests/test_platform_runtime_boundary_guards.py` 的 downstream relation query service guard 纳入 `pending_invoice_service.py`，防止重新 import 或接受 `WorkbenchPairRelationService`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service.PendingInvoiceQueryServiceTests tests.test_pending_invoice_service.PendingInvoiceApplicationServiceTests tests.test_invoice_lifecycle_page_integration.InvoiceLifecyclePageIntegrationTests.test_pending_invoice_rows_delegate_acquisition_status_to_lifecycle_policy -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_downstream_relation_query_services_do_not_accept_pair_relation_service -v
+```
+
+待提交前还需运行：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - read model 第二试点选择
 
 目标：在 `bank_detail` 当前本地 implementation support slices 完成到 collaborator audit 后，选择下一个 read model 模块化 IO 实现试点。

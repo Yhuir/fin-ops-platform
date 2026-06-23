@@ -12,7 +12,6 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class FakeLifecyclePolicy:
@@ -83,7 +82,6 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
         transaction = _bank("bank-expense", "88.00", TransactionDirection.OUTFLOW)
         service = PendingInvoiceQueryService(
             import_service=ImportNormalizationService(existing_transactions=[transaction]),
-            pair_relation_service=WorkbenchPairRelationService(),
             category_service=BankTransactionCategoryService(),
             app_settings_provider=lambda: {},
             lifecycle_policy=policy,

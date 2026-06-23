@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:pending-invoice-pair-service-boundary-audit.
-- Last status: analysis-closed.
+- Last completed boundary: workbench-relations:pending-invoice-unused-pair-service-removal.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -83,9 +83,9 @@ Current state expected on start:
 - WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
 - WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
 - Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- Pending invoice query/application services still receive unused pair service injection, but audited reads use `relation_facade` and writes use `relation_command_service`.
+- Pending invoice query/application services no longer receive pair service injection; reads use `relation_facade` and writes use `relation_command_service`.
 - No-OA, ETC and WorkbenchWriteFacade relation dependencies still need focused classification.
-- The next pending boundary is workbench-relations:pending-invoice-unused-pair-service-removal.
+- The next pending boundary is workbench-relations:no-oa-pair-service-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -181,26 +181,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:pending-invoice-unused-pair-service-removal unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:no-oa-pair-service-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:pending-invoice-unused-pair-service-removal:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-pending-invoice-pair-service-boundary-audit.md`.
+For workbench-relations:no-oa-pair-service-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-pending-invoice-unused-pair-service-removal.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Read `docs/modules/pending-invoices/README.md`, `state-machine.md`, and `tests.md`.
-- Read `backend/src/fin_ops_platform/services/pending_invoice_service.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant pending-invoice relation tests.
-- Use CodeGraph/text search for `PendingInvoiceQueryService`, `PendingInvoiceApplicationService`, `pair_relation_service`, `_pair_relation_service`, `relation_facade`, `relation_command_service`, and write/read callers.
-- Remove unused `pair_relation_service` parameter and `_pair_relation_service` field from `PendingInvoiceQueryService`.
-- Remove unused `pair_relation_service` parameter and `_pair_relation_service` field from `PendingInvoiceApplicationService`.
-- Remove pending invoice `pair_relation_service=...` wiring in `server.py`.
-- Update pending invoice tests/fixtures to stop passing pair services.
-- Strengthen runtime boundary guards so pending invoice services cannot re-accept or import `WorkbenchPairRelationService`.
-- Remove stale pending invoice allowed-context entries for direct pair relation reads if they are no longer needed.
-- Do not change pending invoice attach/manual invoice business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
-- Do not change `relation_facade` or `relation_command_service` semantics.
+- Read `docs/modules/no-oa-bank-batches/README.md`, `state-machine.md`, and `tests.md`.
+- Read `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`, `backend/src/fin_ops_platform/app/server.py`, and relevant no-OA relation tests.
+- Use CodeGraph/text search for `NoOaBankBatchService`, `NoOaLegacyRelationMigrationService`, `pair_relation_service`, `_pair_relation_service`, `relation_facade`, `relation_command_service`, `confirm_relation`, `withdraw_relation`, and write/read callers.
+- Audit no-OA relation dependencies and classify remaining pair service reads/writes.
+- Decide whether each no-OA pair service dependency can be removed, should become read-facade/command-service-only, or must remain `compat-only`.
+- Classify normal submit/withdraw, internal transfer, legacy migration/repair/consolidation and read model refresh paths separately.
+- Do not change no-OA submit/withdraw/internal transfer business rules, API payloads, dirty scope semantics, read model refresh semantics or production state.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted pending invoice service/boundary guard tests, app check, docs verification and diff checks.
+- Run targeted docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

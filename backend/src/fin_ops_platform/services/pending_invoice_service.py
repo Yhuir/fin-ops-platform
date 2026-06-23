@@ -31,7 +31,6 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     is_valid_pending_invoice_oa_row_id,
     pending_invoice_relation_identity,
 )
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -159,7 +158,6 @@ class PendingInvoiceQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService,
         category_service: BankTransactionCategoryService,
         app_settings_provider: Callable[[], dict[str, Any]],
         effective_category_provider: Any | None = None,
@@ -169,7 +167,6 @@ class PendingInvoiceQueryService:
         lifecycle_policy: Any | None = None,
     ) -> None:
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._category_service = category_service
         self._app_settings_provider = app_settings_provider
         self._effective_category_provider = effective_category_provider
@@ -1918,7 +1915,6 @@ class PendingInvoiceApplicationService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService,
         command_store: dict[str, dict[str, Any]] | None = None,
         command_repository: Any | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
@@ -1929,7 +1925,6 @@ class PendingInvoiceApplicationService:
         fault_injector: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
         self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)

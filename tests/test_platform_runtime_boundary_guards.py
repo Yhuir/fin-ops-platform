@@ -165,13 +165,6 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
         class_name = self._class_stack[-1] if self._class_stack else ""
         function_name = self._function_stack[-1] if self._function_stack else ""
         allowed_methods = {
-            "backend/src/fin_ops_platform/services/pending_invoice_service.py": {
-                "PendingInvoiceApplicationService._create_relation",
-                "PendingInvoiceApplicationService._create_attach_existing_relation",
-                "PendingInvoiceApplicationService._attach_existing_conflicts",
-                "PendingInvoiceApplicationService._paid_total_for_invoice",
-                "PendingInvoiceApplicationService._invoice_has_pending_relation",
-            },
             "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
                 "BatchAccountingService._submit_unlocked",
                 "BatchAccountingService.repair_legacy_case_id_collisions",
@@ -752,6 +745,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_downstream_relation_query_services_do_not_accept_pair_relation_service(self) -> None:
         downstream_query_service_paths = {
+            SERVICES_ROOT / "pending_invoice_service.py",
             SERVICES_ROOT / "input_invoice_usage_service.py",
             SERVICES_ROOT / "oa_pending_payment_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",

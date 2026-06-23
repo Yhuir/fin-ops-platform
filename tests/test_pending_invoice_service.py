@@ -1665,7 +1665,6 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             )
         return PendingInvoiceQueryService(
             import_service=resolved_import_service,
-            pair_relation_service=resolved_pair_service,
             category_service=category_service or BankTransactionCategoryService(),
             app_settings_provider=lambda: settings_payload,
             effective_category_provider=effective_category_provider,
@@ -1696,7 +1695,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -1770,7 +1768,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         blocking_pair_service = WriteBlockingPendingInvoicePairRelationService()
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=blocking_pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository({}),
             relation_facade=LiveWorkbenchRelationFacade(
                 pair_service=blocking_pair_service,
@@ -1798,7 +1795,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         command_store: dict[str, dict[str, object]] = {}
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(command_store),
             relation_facade=self._relation_facade(import_service=self.import_service),
             relation_command_service=StalePendingInvoiceRelationCommandService(),
@@ -1858,7 +1854,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         failing = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
@@ -1888,7 +1883,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         failing = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
@@ -1970,7 +1964,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2022,7 +2015,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_command = RecordingPendingInvoiceRelationCommandService()
         service = PendingInvoiceApplicationService(
             import_service=import_service,
-            pair_relation_service=blocking_pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository({}),
             relation_facade=LiveWorkbenchRelationFacade(
                 pair_service=blocking_pair_service,
@@ -2093,7 +2085,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2178,7 +2169,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2283,7 +2273,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         )
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2382,7 +2371,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         relation_command = RecordingPendingInvoiceRelationCommandService()
         service = PendingInvoiceApplicationService(
             import_service=import_service,
-            pair_relation_service=blocking_pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository({}),
             relation_facade=LiveWorkbenchRelationFacade(
                 pair_service=blocking_pair_service,
@@ -2448,7 +2436,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
 
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2492,7 +2479,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.import_service = ImportNormalizationService(existing_transactions=[income_txn])
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2537,7 +2523,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.import_service = ImportNormalizationService(existing_transactions=[income_txn, expense_txn])
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
@@ -2576,7 +2561,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.import_service = ImportNormalizationService(existing_transactions=[income_txn])
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
-            pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
