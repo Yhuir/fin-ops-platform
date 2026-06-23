@@ -5,13 +5,14 @@ Continue the autonomous modular IO refactor from the current state.
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:cost-tax-ledger-summary-contract`
+- Last completed boundary: `read-models:search-and-no-oa-bank-batch-contract`
 - Last status: `closed-autonomous`
-- Cost statistics is guarded as a queryable parent aggregate read model; tax offset and turnover ledger are guarded as fan-out/incremental read models with explicit worker/query/permission owners and disjoint repository ports.
+- Search is guarded as a partitioned scoped index with `search` as primary worker and search auxiliary workers explicitly bounded.
+- no-OA bank batch is guarded as a scoped incremental read model with `NoOaBankBatchApplicationService` query owner and `no-oa-bank-batch` worker ownership.
 
 ## Next Boundary
 
-`read-models:search-and-no-oa-bank-batch-contract`
+`read-models:legacy-read-path-removal-guards`
 
 ## Required First Steps On Resume
 
@@ -22,16 +23,13 @@ Continue the autonomous modular IO refactor from the current state.
    - `docs/modules/read-models/state-machine.md`
    - `docs/modules/read-models/tests.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - `docs/product-specs/bank-turnover-and-no-oa.md`
-   - `docs/modules/no-oa-bank-batches/README.md`
-   - `docs/modules/no-oa-bank-batches/state-machine.md`
-   - `docs/modules/no-oa-bank-batches/tests.md`
-   - `docs/modules/no-oa-bank-batches/implementation-notes.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`
-4. Use CodeGraph for `Search read API`, `SearchPendingReadModelRefreshService`, `NoOaBankBatchApplicationService`, `NoOaBankBatchReadModelRefreshService`, search/no-OA repository methods, query gateway ownership, scope policy entries, freshness/status handling, and production fail-closed behavior.
-5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`.
-6. If implementation starts in that boundary, keep it to search / no-OA bank batch manifest contract tests, owner refinement, or one tiny guard. Do not rewrite search indexing, no-OA business batch writes, worker rebuild, Go/Fiber, Go Worker, or production state.
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md`
+4. Use CodeGraph for `ReadModelRefreshGateway`, `ReadModelQueryGateway`, `RuntimeQueueRepository.enqueue_read_model_refresh`, direct `read_model_status=fresh` writers, direct `source_version_mismatch_reasons`, direct SQL writes to `job.outbox_events` / `job.read_model_dirty_scopes`, and legacy live scan/read fallback call paths.
+5. Produce `.planning/refactors/modular-io-boundaries/analysis/read-model-legacy-read-path-removal-guards.md`.
+6. Keep implementation narrow: add or tighten static architecture guards, remove a proven-unused old path, or quarantine one compat-only path with owner/caller/deletion condition. Do not rewrite read model gateways, workers, repositories, Go/Fiber, Go Worker, or production state.
 
 ## Stop Condition
 
-Complete one narrow verified search / no-OA bank batch read-side contract slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one narrow verified legacy read-path removal/quarantine guard slice, update docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-cost-tax-ledger-summary-contract`
+Current state: `autonomous-continue-after-search-and-no-oa-bank-batch-contract`
 
 Go hot-path state: `candidate-gated-not-started`
 
@@ -29,7 +29,7 @@ Go hot-path state: `candidate-gated-not-started`
 
 ## Current Module
 
-Completed `read-models:cost-tax-ledger-summary-contract`; next execution should start with search and no-OA bank batch read-side freshness/status contracts.
+Completed `read-models:search-and-no-oa-bank-batch-contract`; next execution should start with legacy read path removal/quarantine guards.
 
 ## Completed Modules
 
@@ -43,6 +43,7 @@ Completed `read-models:cost-tax-ledger-summary-contract`; next execution should 
 - `read-models:pending-invoice-and-oa-pending-payment-contract` -> `closed-autonomous`
 - `read-models:invoice-lifecycle-and-usage-contract` -> `closed-autonomous`
 - `read-models:cost-tax-ledger-summary-contract` -> `closed-autonomous`
+- `read-models:search-and-no-oa-bank-batch-contract` -> `closed-autonomous`
 
 ## Deferred Modules
 
@@ -54,8 +55,8 @@ No Go candidate has passed admission.
 
 ## Last Prompt
 
-`read-models:cost-tax-ledger-summary-contract`
+`read-models:search-and-no-oa-bank-batch-contract`
 
 ## Next Prompt
 
-`read-models:search-and-no-oa-bank-batch-contract`
+`read-models:legacy-read-path-removal-guards`

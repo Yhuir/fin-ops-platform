@@ -351,6 +351,43 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertFalse(set(cost_statistics.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
         self.assertFalse(set(tax_offset.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
 
+    def test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts(self) -> None:
+        search = READ_MODEL_MANIFEST["search"]
+        no_oa_bank_batch = READ_MODEL_MANIFEST["no_oa_bank_batch"]
+        required_search_ports = {
+            "search_index",
+            "save_search_index_rows",
+        }
+        required_no_oa_ports = {
+            "list_no_oa_bank_batch_rows",
+        }
+
+        for entry in (search, no_oa_bank_batch):
+            with self.subTest(read_model_key=entry.key):
+                self.assertEqual(entry.query_status_contract, "self_managed_freshness")
+                self.assertEqual(entry.all_scope_semantics, "fan_out_command")
+                self.assertEqual(entry.force_refresh_contract, "gateway_force_refresh")
+                self.assertEqual(entry.operation_barrier_contract, "app_status_registry_target")
+                self.assertEqual(entry.refresh_event_type, f"{entry.scope_type}.read_model.refresh")
+
+        self.assertEqual(search.scope_type, "search")
+        self.assertEqual(no_oa_bank_batch.scope_type, "no_oa_bank_batch")
+        self.assertEqual(search.projection_strategy, "partitioned_scoped_index")
+        self.assertEqual(no_oa_bank_batch.projection_strategy, "scoped_incremental")
+        self.assertEqual(search.primary_worker_instance, "search")
+        self.assertEqual(no_oa_bank_batch.primary_worker_instance, "no-oa-bank-batch")
+        self.assertEqual(search.auxiliary_refresh_worker_instances, ("search-pending", "search-secondary", "search-tertiary"))
+        self.assertEqual(no_oa_bank_batch.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(search.query_owner, "Search read API")
+        self.assertEqual(no_oa_bank_batch.query_owner, "NoOaBankBatchApplicationService")
+        self.assertEqual(search.permission_owner, "search_api_session")
+        self.assertEqual(no_oa_bank_batch.permission_owner, "no_oa_bank_batch_api_session")
+        self.assertEqual(search.test_owner, "tests/test_search_pending_sql_runtime.py")
+        self.assertEqual(no_oa_bank_batch.test_owner, "tests/test_no_oa_bank_batch_application_service.py")
+        self.assertEqual(required_search_ports, set(search.repository_port_contract))
+        self.assertEqual(required_no_oa_ports, set(no_oa_bank_batch.repository_port_contract))
+        self.assertFalse(set(search.repository_port_contract).intersection(no_oa_bank_batch.repository_port_contract))
+
 
 if __name__ == "__main__":
     unittest.main()

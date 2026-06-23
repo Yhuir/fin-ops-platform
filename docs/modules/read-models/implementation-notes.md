@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-23 - Search 与 no-OA bank batch read-side 合同守卫
+
+- 目标：执行 `read-models:search-and-no-oa-bank-batch-contract`，把 `search` 与 `no_oa_bank_batch` 的 self-managed freshness、projection strategy、fan-out `all`、worker、permission 和 repository port 边界固化为 manifest guard。
+- 影响范围：`tests/test_read_model_manifest.py`、read-models/no-oa 模块文档和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
+- 关键决策：Search 保持 `partitioned_scoped_index` 与 `search` primary worker，`search-pending/search-secondary/search-tertiary` 只能作为 auxiliary；no-OA 保持 `scoped_incremental`、`no-oa-bank-batch` primary worker 和 `NoOaBankBatchApplicationService` query owner。两者 `all` 均是 fan-out command，不是可伪造 fresh 的 parent proof。
+- 文档影响：同步 read-models 测试矩阵、no-OA 状态机变更记录和 planning analysis；长期状态语义不变。
+- 测试覆盖：新增 `tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_search_pending_sql_runtime tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_read_model_refresh -v`。
+- 未测风险：未连接真实 PostgreSQL/Redis/RabbitMQ，未执行生产 worker drain；本轮不需要生产写或真实 read model 重建证据。
+- 后续事项：推进 `read-models:legacy-read-path-removal-guards`。
+
 ## 2026-06-23 - Cost/tax/turnover summary read model 合同守卫
 
 - 目标：执行 `read-models:cost-tax-ledger-summary-contract`，把 `cost_statistics`、`tax_offset`、`turnover_ledger` 的 query gateway、parent/fan-out semantics、worker、permission 和 repository port 边界固化为 manifest guard。
