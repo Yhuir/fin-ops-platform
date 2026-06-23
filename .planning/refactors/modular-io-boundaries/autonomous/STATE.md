@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-completion-semantics-reclassification`
+Current state: `autonomous-continue-after-read-model-pilot-selection`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `planning:completion-semantics-and-queue-reclassification`; next execution must start with `read-models:pilot-gap-audit-and-contract-selection`.
+Completed `read-models:pilot-gap-audit-and-contract-selection`; next execution must start with `read-models:bank-detail-repository-port-extraction`.
 
 ## Closed Or Deferred Slices
 
@@ -52,12 +52,14 @@ Completed `planning:completion-semantics-and-queue-reclassification`; next execu
 - `server-py:route-owner-inventory` -> `inventory-guard-closed`
 - `planning:state-reconciliation-and-roadmap-alignment` -> `planning-closed`
 - `planning:completion-semantics-and-queue-reclassification` -> `planning-closed`
+- `read-models:pilot-gap-audit-and-contract-selection` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
 - Prior read model slices established analysis, manifest, and guard evidence only; they do not close implementation migration.
+- `bank_detail` is selected as the first implementation pilot, but the module is not closed.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual read model pilot work must start before Go admission: repository port extraction, freshness/force-refresh/operation-barrier implementation, legacy contamination removal, and verification/template revision.
+- Actual `bank_detail` pilot work must start before Go admission: repository port extraction, freshness/force-refresh/operation-barrier implementation, legacy contamination removal, and verification/template revision.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -70,8 +72,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`planning:completion-semantics-and-queue-reclassification`
+`read-models:pilot-gap-audit-and-contract-selection`
 
 ## Next Prompt
 
-`read-models:pilot-gap-audit-and-contract-selection`
+`read-models:bank-detail-repository-port-extraction`

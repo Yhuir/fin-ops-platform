@@ -77,11 +77,12 @@ This refactor has multiple planning sources. Read and report them separately; ne
 - MODULE-QUEUE.md Module Closure is the implementation closure signal.
 
 Current corrected state:
-- Last completed boundary is expected to be planning:completion-semantics-and-queue-reclassification.
-- Last status is expected to be planning-closed.
-- Next executable boundary is expected to be read-models:pilot-gap-audit-and-contract-selection.
+- Last completed boundary is expected to be read-models:pilot-gap-audit-and-contract-selection.
+- Last status is expected to be analysis-closed.
+- First read model implementation pilot is expected to be bank_detail.
+- Next executable boundary is expected to be read-models:bank-detail-repository-port-extraction.
 - Go hot-path candidates are expected to be blocked-by-prerequisite.
-- Do not select GoHotPath next unless the queue has been legitimately updated after the read model/pilot implementation prerequisites are closed.
+- Do not select GoHotPath next unless the queue has been legitimately updated after the bank_detail/read model implementation prerequisites are closed.
 
 Non-negotiable completion semantics:
 - analysis-closed means analysis/inventory slice closed only.
@@ -102,9 +103,9 @@ Boundary selection priority:
 5. If the selected boundary is too broad, split it by updating MODULE-QUEUE.md and immediately execute the first smaller boundary.
 
 Immediate next boundary:
-Start with read-models:pilot-gap-audit-and-contract-selection unless a planning-state inconsistency is found first.
+Start with read-models:bank-detail-repository-port-extraction unless a planning-state inconsistency is found first.
 
-For read-models:pilot-gap-audit-and-contract-selection:
+For read-models:bank-detail-repository-port-extraction:
 - Read:
   - .planning/refactors/modular-io-boundaries/analysis/completion-semantics-and-queue-reclassification.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-modularization-pre-analysis.md
@@ -112,32 +113,26 @@ For read-models:pilot-gap-audit-and-contract-selection:
   - .planning/refactors/modular-io-boundaries/analysis/read-model-query-gateway-contract-and-status-parity.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-refresh-gateway-force-refresh-and-operation-barrier.md
   - .planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md
+  - .planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md
   - docs/modules/read-models/README.md
   - docs/modules/read-models/state-machine.md
   - docs/modules/read-models/tests.md
   - docs/modules/runtime-workers/README.md
   - docs/modules/runtime-workers/state-machine.md
-- Use CodeGraph first for structural lookup of symbols, callers, callees, traces and impact.
+- Use CodeGraph first for structural lookup of bank_detail symbols, callers, callees, traces and impact.
 - Use rg for literal text, route paths, env keys, docs references and test names.
-- Evaluate pilot candidates:
-  - bank_detail
-  - workbench_relation
-  - pending_invoice
-  - oa_pending_payment
-- Select exactly one first implementation pilot.
-- Produce .planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md.
-- The analysis must include:
-  - selected pilot and rejected candidates
-  - current query/write/refresh/repository/worker/frontend/API entry points
-  - IO contract gaps
-  - freshness, force-refresh and operation-barrier gaps
-  - legacy contamination risks
-  - seven-category test plan
-  - exact first implementation slice
-  - state-machine impact and transition
-- Update MODULE-QUEUE.md so the next pending item is a concrete implementation boundary, not Go admission.
+- Keep the implementation boundary narrow:
+  - Create or identify a narrow bank_detail repository port/wrapper around existing PostgresReadModelRepository.bank_detail methods.
+  - Move server.py bank detail SQL read helper dependencies to that port through an application/query service boundary.
+  - Preserve API response shape for accounts, transactions and export.
+  - Add tests proving the API/query boundary uses the bank_detail port and does not reach unrelated read model repository methods.
+  - Do not split all of postgres_repositories/read_models.py.
+  - Do not migrate workbench_relation, pending_invoice or oa_pending_payment.
+  - Do not implement Go/Fiber/Go Worker.
+- Produce or update an analysis file for the implementation slice under .planning/refactors/modular-io-boundaries/analysis/.
+- Update MODULE-QUEUE.md so the next pending item remains a concrete implementation boundary, not Go admission.
 - Update STATE.md, JOURNAL.md and NEXT-PROMPT.md.
-- Run docs verification and diff checks.
+- Run targeted tests, docs verification and diff checks.
 - Commit and push to origin/dev if verification passes.
 - Continue immediately to the next pending implementation boundary.
 
