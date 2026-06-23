@@ -303,6 +303,13 @@
 - 未测风险：未执行真实 PostgreSQL 大数据量、真实 worker drain、App Status 或浏览器 smoke；后续 freshness/barrier audit 继续拆分这些证据或记录生产 evidence defer。
 - 后续事项：审计并必要时补强 pending invoice force-refresh、freshness status、special scope `expense|income:<filter>[:YYYY-MM]` 和 operation barrier。
 
+## 2026-06-24 - pending invoice freshness/barrier audit
+
+- 目标：检查待找发票 read model 在关系或银行明细更新后的 fresh/stale 判断、force refresh scope、worker expansion 和写后可见性边界。
+- 有效保护：rows/filter-options 查询会在 SQL read model miss/schema stale/source-version stale 时返回 `refreshing` 并入队；expected source versions 覆盖 bank detail 与 workbench relation source versions；SLO smoke 包含 `expense:all` page-first scope；worker 会把 base scope 扩展成 month shard。
+- 待修缺口：scope policy 目前没有限制 filter group allowlist，非法 `expense:<unknown>` 或 `income:<unknown>` 不应通过 gateway；下一步需加测试和 policy 校验。
+- 后续候选：统一 pending invoice mutation 响应的 `freshness_targets` 或明确现有页面 refetch/barrier 合同，避免写后页面同步语义分散。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。

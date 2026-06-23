@@ -649,6 +649,14 @@
 - 未测风险：本轮不连接真实 PostgreSQL，不验证 EXPLAIN、高行数分页、真实 worker drain 或 App Status；这些证据继续由后续 freshness/barrier audit 与生产 evidence/defer slice 处理。
 - 后续事项：下一条边界审计 pending invoice freshness、force-refresh、特殊 scope 和 operation barrier，确认 read model 不会在关系或银行明细更新后伪装 fresh。
 
+## 2026-06-24 - pending invoice freshness/barrier audit
+
+- 目标：审计 `pending_invoice` fresh gate、expected source versions、force-refresh/page-first scope、worker base-scope expansion 和 operation barrier 合同。
+- 结论：现有 rows/filter-options fresh gate、source-version stale enqueue、manifest force-refresh 合同、SLO page-first scope 和 worker month-shard expansion 已有测试/合同保护。
+- 发现的 P0 缺口：`ReadModelScopePolicy` 对 `pending_invoice` 只校验 direction 与 month shape，不校验 direction-specific filter allowlist；非法 `expense:unknown_filter` 可能通过 gateway 后在 projection 阶段失败。下一条边界必须在 gateway scope policy 层 fail fast。
+- 发现的 P1 缺口：pending invoice mutation 响应没有统一的 `freshness_targets` 合同；规则保存已有 `read_model_status=refreshing`，attach-existing/income-status 返回 affected months，但 operation barrier target 合同需要单独审/补。
+- 非目标：本轮不改业务状态、API shape、UI、worker runtime 或生产数据；Go/Fiber/Go Worker 继续 blocked。
+
 ## 2026-06-20 - 当前 gzip release write-operation apply 被业务校验拒绝
 
 - 目标：在用户明确批准后，对单条 turnover minimal scenario 执行 production Write Operation E2E apply，并验证真实写入口、read model/worker fan-out 和 post API probes。

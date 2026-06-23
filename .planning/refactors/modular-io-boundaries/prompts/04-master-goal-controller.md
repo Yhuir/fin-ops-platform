@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:pending-invoice-repository-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:pending-invoice-refresh-freshness-operation-barrier-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -107,7 +107,8 @@ Current state expected on start:
 - Real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
 - `pending_invoice` is selected as the next non-Go read model implementation pilot because it consumes both `bank_detail` and `workbench_relation` source versions and has special `expense|income:<filter>[:YYYY-MM]` scope semantics.
 - `PendingInvoiceReadModelRepositoryPort` now narrows rows, filter-options, source-version and projection save/mark repository access.
-- The next pending boundary is read-models:pending-invoice-refresh-freshness-operation-barrier-audit.
+- Pending invoice freshness/barrier audit found that scope policy lacks direction-specific filter allowlist validation; mutation freshness target contract remains a later pending boundary.
+- The next pending boundary is read-models:pending-invoice-scope-policy-filter-allowlist.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -203,15 +204,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:pending-invoice-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:pending-invoice-scope-policy-filter-allowlist unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:pending-invoice-refresh-freshness-operation-barrier-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-repository-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-and-oa-pending-payment-contract.md`.
+For read-models:pending-invoice-scope-policy-filter-allowlist:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-refresh-freshness-operation-barrier-audit.md`.
 - Read `docs/modules/read-models/README.md`, `docs/modules/pending-invoices/README.md`, `tests.md`, and `implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`, `search_pending_read_model_refresh.py`, `search_pending_sql_projection.py`, `read_model_scope_policy.py`, and relevant tests.
-- Audit pending invoice freshness, force-refresh, special scope and operation barrier behavior.
-- If local implementation gaps remain, insert the next narrow implementation boundary before Go.
+- Read `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `pending_invoice_service.py`, `search_pending_sql_projection.py`, and `tests/test_read_model_refresh_gateway.py`.
+- Tighten `pending_invoice` scope policy so invalid filter groups fail at gateway validation and never reach runtime worker/projection.
+- Preserve valid base and month shard scopes for supported expense/income filters.
+- Add targeted gateway tests for invalid filter group rejection and valid scope preservation.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
