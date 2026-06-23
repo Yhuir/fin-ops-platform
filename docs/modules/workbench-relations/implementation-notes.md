@@ -3502,3 +3502,16 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:settings-data-reset-pair-service-boundary-audit`。
+
+## 2026-06-24 - settings data reset pair service boundary audit
+
+目标：审计 `SettingsDataResetService(workbench_pair_relation_service=...)` 是否仍是 broad pair service 泄漏。
+
+结论：
+
+- settings data reset 对 relation 的清理/筛选是合法 reset 边界，不应改走普通 relation command service。
+- 当前服务仍直接接收 broad `workbench_pair_relation_service`，用于 snapshot、OA relation 过滤和保存筛选后的 snapshot。
+- 该 broad injection 不能作为本地闭环，需要抽取显式 settings reset pair snapshot/save port。
+- `reset_oa_and_rebuild` 的现有语义必须保留：删除 OA 派生 relation，保留纯银行-发票 relation，清空 workbench read model 和 candidate matches。
+
+下一条边界：`workbench-relations:settings-data-reset-pair-snapshot-port-extraction`。

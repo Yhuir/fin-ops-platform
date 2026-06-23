@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: workbench-relations:turnover-local-pair-snapshot-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: workbench-relations:settings-data-reset-pair-service-boundary-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
 - bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -102,7 +102,8 @@ Current state expected on start:
 - Relation case-id collision avoidance now goes through `WorkbenchRelationCaseIdAllocator`.
 - Broad app `_persist_state(...)` no longer serializes Workbench relation snapshot facts.
 - Turnover primary builders and `TurnoverLedgerLocalClosureConnection` now depend on explicit `TurnoverLedgerLocalPairSnapshotPort` instead of broad pair service injection.
-- The next pending boundary is workbench-relations:settings-data-reset-pair-service-boundary-audit.
+- Settings data reset relation clearing/filtering is a legitimate reset boundary, but `SettingsDataResetService` still accepts broad pair service.
+- The next pending boundary is workbench-relations:settings-data-reset-pair-snapshot-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -198,23 +199,25 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:settings-data-reset-pair-service-boundary-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:settings-data-reset-pair-snapshot-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:settings-data-reset-pair-service-boundary-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-turnover-local-pair-snapshot-port-extraction.md`.
+For workbench-relations:settings-data-reset-pair-snapshot-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-settings-data-reset-pair-service-boundary-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
 - Read `docs/modules/settings/README.md`, `state-machine.md`, and `tests.md`.
 - Inspect `backend/src/fin_ops_platform/services/settings_data_reset_service.py`, `backend/src/fin_ops_platform/app/server.py`, `tests/test_settings_data_reset_service.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph/text search for `SettingsDataResetService`, `workbench_pair_relation_service`, `save_workbench_pair_relations`, `clear`, `reset`, `pair_relation_service`, and settings data reset tests.
-- Audit whether `SettingsDataResetService(workbench_pair_relation_service=...)` is a legitimate reset boundary, an old broad service leak, or a candidate for explicit reset/snapshot port extraction.
-- Classify every settings reset pair relation interaction as removed, quarantined, compat-only, or requiring a follow-up implementation slice.
-- Determine whether the next action should be an implementation slice or final local closure/defer accounting.
-- Preserve data reset semantics, relation persistence semantics, API response shape, read model freshness contracts, dirty scopes and operation barriers.
+- Use CodeGraph/text search for `SettingsDataResetService`, `workbench_pair_relation_service`, `_pair_relations`, `save_workbench_pair_relations`, `RESET_OA_AND_REBUILD_ACTION`, and settings data reset pair relation tests.
+- Add an explicit settings data reset pair snapshot/save port.
+- Remove broad `workbench_pair_relation_service` from `SettingsDataResetService` constructor/storage.
+- Preserve bank reset and invoice reset clearing behavior.
+- Preserve OA reset filtering that removes OA-derived relations and keeps pure bank-invoice relations.
+- Preserve deleted counts, protected targets, API response shape, read model cleanup, derived lifecycle fan-out and reset job behavior.
+- Add or update static guard coverage proving `SettingsDataResetService` no longer accepts broad pair service.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted settings/workbench relation tests if changed, docs verification and diff checks.
+- Run targeted settings reset pair relation tests, static guard, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 
