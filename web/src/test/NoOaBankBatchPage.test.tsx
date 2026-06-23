@@ -943,6 +943,38 @@ describe("NoOaBankBatchPage", () => {
     });
   });
 
+  test("keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status", async () => {
+    const legacyUnsubmittedBatch = {
+      ...listPayload.batches[0],
+      status: "unsubmitted",
+      status_bucket: "unsubmitted",
+    };
+    const fetchMock = installFetchMock({
+      ...listPayload,
+      batches: [legacyUnsubmittedBatch, ...listPayload.batches.slice(1)],
+    });
+    const user = userEvent.setup();
+
+    renderPage();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    expect(rowCheckbox).toBeEnabled();
+
+    await user.click(rowCheckbox);
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/no-oa-bank-batches/submit-selection",
+        expect.objectContaining({
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          method: "POST",
+        }),
+      );
+    });
+  });
+
   test("prevents selecting rows from another bank before clearing the current bank region", async () => {
     const secondFeeBatch = {
       ...listPayload.batches[0],

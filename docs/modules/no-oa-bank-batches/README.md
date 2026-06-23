@@ -19,6 +19,7 @@
 
 - `web/src/pages/NoOaBankBatchPage.tsx`
 - `web/src/features/noOaBankBatches/*`
+- `web/src/features/noOaBankBatches/policy.ts`
 - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`
@@ -49,6 +50,7 @@
 - Read model 保存：`save_no_oa_bank_batches` 写入的是当前完整 no-OA snapshot；缺席于新 snapshot 的旧 draft/conflict/submitted row 必须从 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 移除，避免旧未提交/冲突批次残留。
 - 自动决策清理：submitted no-OA batch 的 `bank_transaction_ids` 是历史 cleanup 的闭环占用证据。即使对应 Workbench relation snapshot 已取消或暂时缺失，`oa_bank_exact_sum` repair dry-run 也必须把这些银行流水视为已闭环，避免旧自动 decision 重新污染关联台。
 - 用户可见状态：页面主状态只呈现未提交、已提交和历史。SQL read model 中 relation-backed 的旧 `stale/category drift` 批次（`status_bucket=submitted` 或 `can_withdraw=true`）必须在 API/前端投影为 `submitted` 并保留撤回入口，不显示“分类已变更，需复核”类提示；真实 `conflict` 仍保持阻断提示且不可提交。
+- 前端操作能力：普通行级选择、内部往来整批提交、撤回可用性由 `web/src/features/noOaBankBatches/policy.ts` 统一判断。旧 SQL/read model `status=unsubmitted,status_bucket=unsubmitted` 在 API mapper 中归一为 `draft` 语义；普通未提交批次显示右侧行级 checkbox，`internal_transfer` 走整批提交按钮。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回通过 relation command service 取消 Workbench active relation，并使流水回到可匹配状态。
 - 操作闭环：前端 submit-selection、单批次 submit、withdraw 和 tag-selection 保存必须接入 `GlobalOperationOverlayProvider`。写 API 成功后等待 `no_oa_bank_batch` operation barrier 对 affected months/current scope fresh，再重新加载列表或标签选择；overlay 关闭不能依赖本地列表移动或前端事件。
 - App Status：`no_oa_bank_batches` domain 绑定 `no-oa-bank-batch` worker、`no_oa_bank_batch` read model、`no_oa_bank_batch.read_model.refresh` job type。

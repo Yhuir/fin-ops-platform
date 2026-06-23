@@ -29,6 +29,30 @@
 
 ## 历史记录
 
+## 2026-06-23 - 三栏 exact-sum 自动配对矩阵补齐
+
+- 目标：把现有三栏自动配对从枚举式补丁补全为通用 exact-sum 证据闭环，覆盖截图中的 3 条 OA 合计 4450 + 1 条流水 4450 + 1 张发票 4450，以及单 OA 单流水多发票、多 OA/多流水/多发票等同类场景。
+- 真实原因：前一版规则已补齐银行+发票 anchor 和两栏 active relation 补第三栏，但仍主要围绕 `1:1:1`、单 OA-bank 入口和多 OA-bank pair 到单发票这几类形状展开；缺少对“任意非空 OA 组、银行组、发票组总额相等”的通用搜索和证据图校验，因此多 OA 合计到单流水单发票、`1:1:N` 或 `N:M:K` 仍可能留在未配对。
+- 影响范围：`WorkbenchFreeMatchingEngine` 三方候选生成、`workbench_matching_rules_version` freshness、matching dirty scope 自愈、关联台三栏 automatic decision，以及普通两栏 `manual_confirmed` active relation 自动补齐升级。
+- 关键决策：保留现有具体规则优先级，不改变已有自动配对逻辑；新增 `oa_bank_invoice_exact_sum` 只作为补充规则。通用规则要求三栏同方向、五个月窗口、总额严格相等、预约付款日期兼容、正式发票非 OA 附件来源、每栏组合大小受上限保护、证据图连通且每个 row 至少有一条确定性边；仅金额相等、候选组合过多、证据断裂或多个候选竞争时 fail closed，保持 open/conflict。不使用 NLP，字段空格通过确定性归一化处理。
+- 文档影响：同步本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 事实源边界。
+- 测试覆盖：新增多 OA 合计到单流水单发票、单 OA 单流水多发票无直接 OA-bank 文本、多 OA/多流水/多发票证据连通、金额-only 不提升三栏，以及多 OA+单流水 active relation 自动补齐发票的回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_reconciliation_engine -v`。
+- 未测风险：自动配对不能也不应该保证所有“人眼觉得像”的场景都自动配；缺少确定性业务证据、金额不闭合、发票方向未知、组合超过边界或存在歧义时仍会留在 open。发布后仍需生产 worker 按新 rules version 重建 matching decision 和 Workbench month/all active generation。
+- 后续事项：后续新增截图样例时，先归类为“已有 exact-sum 证据闭环被漏掉”还是“缺少可审计证据”；前者补规则/字段别名，后者保留人工确认或引入明确业务字段，不用 NLP 猜测。
+
+## 2026-06-23 - 三方自动配对补齐银行发票 anchor 和空白字段归一
+
+- 目标：修复截图中 OA、银行流水和发票金额一致且三方业务证据存在，但仍停留在未配对区的问题；同时处理字段里误输入空格导致自动配对证据读取失败的情况。
+- 真实原因：三方 free matching 主要从 OA+银行强匹配进入，再找发票；当真实强证据边是银行+发票，且 OA 通过 OA+发票或文本证据可唯一补齐时，旧规则没有反向生成三方 `oa_bank_invoice` decision。另一个问题是 `row.data.get("counterparty_name") or row.data.get("counterparty")` 这类写法会把 `" "` 当成有效值，挡住后备字段，导致截图三 OA 栏可见空格时 matching 读不到真实对方名。
+- 影响范围：`WorkbenchFreeMatchingEngine` 三方候选生成、文本 token 提取、`workbench_matching_rules_version` freshness、自愈重跑 completed matching scopes、关联台自动三栏 decision 与两栏 active relation 补齐升级。
+- 关键决策：不引入 NLP；使用确定性文本归一化和空白缺失判断。新增银行+发票强证据 anchor，只允许补齐唯一一个具备 OA-银行或 OA-发票业务证据的 OA；仅金额相同的 OA 保持 open，避免误配。规则版本 bump 到 `2026-06-23-three-way-completion-v2`，让生产 worker 自动重投旧版本 completed scope。
+- 文档影响：同步本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 事实源边界。
+- 测试覆盖：新增空白字段 fallback、银行+发票 anchor 补三方、金额-only 不提升三方三个核心回归；同时运行 free matching、legacy matching rules、reconciliation engine、matching orchestrator 和 matching dirty scope worker 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_rules tests.test_workbench_reconciliation_engine tests.test_workbench_matching_orchestrator tests.test_workbench_matching_dirty_scope_worker -v`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_free_matching_engine.py backend/src/fin_ops_platform/services/workbench_matching_rules.py`。
+- 未测风险：本地未直接连接生产数据库执行 worker drain；发布后需要确认 `workbench-matching` worker 已按新 rules version 把旧 completed scopes 转 dirty，并刷新 Workbench month/all active generation。
+- 后续事项：若以后新增 invoice type、OA 字段别名或银行对方字段别名，必须先补充 `_first_text` 后备字段和规则测试；未知字段仍 fail closed。
+
 ## 2026-06-23 - ETC summary 优先读取 batch invoice links
 
 - 目标：完成 Phase C 读取路径迁移，让关联台 ETC summary 优先以 `app.etc_batch_invoice_links` + canonical `app.invoices` 生成明细，避免 `app.etc_invoices` 与统一发票池长期竞争为发票事实源。

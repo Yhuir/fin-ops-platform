@@ -5,7 +5,7 @@
 ## 当前决策
 
 - 免 OA 流水批量处理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、application/service、API contract、read model/worker、前端交互、Workbench integration 和旧功能回归。
-- 普通未提交 draft 流水的行级选择入口属于 `submit-selection` 新链路，前端显示 checkbox 只依据 `bucket=unsubmitted`、`status=draft` 且非 `internal_transfer`；不得再由旧批次级 `can_submit` flag 控制。`can_submit` 仍可用于内部往来整批提交等批次级动作，最终提交合法性由后端 `submit-selection` 校验同月、同账户、同 `category_code` 和标签准入。
+- 普通未提交 draft 流水的行级选择入口属于 `submit-selection` 新链路，前端显示 checkbox 只依据 canonical lifecycle：`bucket=unsubmitted`、`status=draft`（兼容旧 SQL/read model `status=unsubmitted` 归一后的 draft 语义）且非 `internal_transfer`；不得再由旧批次级 `can_submit` flag 控制。`can_submit` 仍可用于内部往来整批提交等批次级动作，最终提交合法性由后端 `submit-selection` 校验同月、同账户、同 `category_code` 和标签准入。
 - 2026-06-19 Spec-first E2E Audit 校准后，本地 `NO-OA-E2E-001..009` 已有 Browser、组件、API、service 和 integration 映射；`NO-OA-E2E-010` 真实基础设施 worker drain 保持 staging/runtime `external-risk`。
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
@@ -19,6 +19,30 @@
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 - relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
+
+## 2026-06-23 - 旧 unsubmitted 状态归一与右侧选择列 policy 化
+
+- 目标：修复免 OA 流水批量处理右侧流水栏部分普通未提交批次没有 checkbox 的问题；截图中的 `费用 / 手续费` 应走普通行级 `submit-selection`，不能因为旧 read model 状态值而隐藏选择列。
+- 根因：页面可见状态和操作能力没有共享同一个 lifecycle 契约。API/read model 新契约使用 `status=draft,status_bucket=unsubmitted` 表示未提交草稿，但旧 SQL/read model 或旧 mock 可能返回 `status=unsubmitted,status_bucket=unsubmitted`。页面能力判断原先直接依赖 `status === "draft"`，导致同属未提交 bucket 的普通费用批次被判为不可逐行选择。内部往来原本也存在同类风险，只是它显示的是整批提交按钮而不是 checkbox。
+- 影响范围：`web/src/features/noOaBankBatches/api.ts`、`web/src/features/noOaBankBatches/policy.ts`、`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/NoOaBankBatchPolicy.test.ts`、`web/src/test/NoOaBankBatchPage.test.tsx`、本模块维护文档。
+- 架构决策：
+  - API client mapper 在前端边界归一 batch lifecycle：`status=unsubmitted,status_bucket=unsubmitted` 投影为 canonical `status=draft,status_bucket=unsubmitted`；relation-backed stale 继续投影为 submitted。
+  - 新增 `web/src/features/noOaBankBatches/policy.ts`，集中维护 `statusBucketFor`、普通行级选择、内部往来整批提交和撤回可用性。页面组件只调用 policy，不再散落生命周期判断。
+  - 普通类型（fee/salary/holiday_bonus/bonus/tax_payment/treasury_tax_collection/social_security）在 `unsubmitted` bucket 且 draft 语义下显示右侧行级 checkbox；`internal_transfer` 在同状态下不显示行级 checkbox，改走批次级提交按钮；`conflict/stale/submitted/withdrawn` 不开放提交控件。
+  - 状态徽标保留 legacy `unsubmitted -> 待提交` 文案兜底，避免局部测试或未来详情 payload 绕过 mapper 时出现英文状态。
+- 测试覆盖：
+  - `web/src/test/NoOaBankBatchApi.test.ts::maps legacy unsubmitted batch status to draft in the unsubmitted bucket` 覆盖 API 边界归一。
+  - `web/src/test/NoOaBankBatchPolicy.test.ts` 覆盖普通类型行级选择、内部往来整批提交分流、非 draft 状态禁用和撤回能力。
+  - `web/src/test/NoOaBankBatchPage.test.tsx::keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status` 覆盖页面右侧 checkbox 可见、可点击并调用 `submit-selection`。
+- 七类测试覆盖：
+  - Business core unit tests：不适用，本轮不改后端批次生成、金额、状态流转或提交校验。
+  - Service-layer tests：不适用，本轮不改 application service、repository、audit、rollback、dirty scope 或 worker。
+  - API contract tests：适用前端 API mapper contract，HTTP 后端字段和 response shape 未变。
+  - Read model/cache/background job tests：不适用，本轮不改 freshness、cache、read model 写入或后台任务。
+  - Frontend component and interaction tests：适用，新增 API mapper、policy 和页面 interaction 回归。
+  - End-to-end business-flow integration tests：不新增，本轮只修前端状态投影和控件显隐；既有 Browser selected-row submit/withdraw flow 继续保护主链路。
+  - Existing feature regression tests：适用，防止旧 lifecycle status 再次隐藏普通行级选择，并保护 internal_transfer 与普通类型分流。
+- 未测风险：未使用真实生产登录态回放 2026-01 大月份截图数据；真实历史 SQL/read model 中如果存在新的未知状态值，仍需按生产数据巡检扩展 mapper/policy。
 
 ## 2026-06-22 - 未提交普通流水选择列不再受旧 can_submit 污染
 

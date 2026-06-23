@@ -113,6 +113,66 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held", "invoice-held"])
         self.assertEqual(active_relation["special_metadata"]["auto_completion"]["decision_key"], decisions[0]["decision_key"])
 
+    def test_active_multi_oa_single_bank_relation_can_extend_to_matching_invoice(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-multi-oa-payment",
+            row_ids=["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel"],
+            row_types=["oa", "oa", "oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-01",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-01",
+            oa_rows=[
+                oa_row("oa-energy-a", month="2026-01", amount="1690.00") | {
+                    "reason": "昭通卷烟厂能源集中监控平台系统维护 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+                oa_row("oa-energy-b", month="2026-01", amount="1980.00") | {
+                    "reason": "红塔集团信息化不可预见维护采购项目 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+                oa_row("oa-energy-c", month="2026-01", amount="780.00") | {
+                    "reason": "昭通卷烟厂能源集中监控平台系统维护采购项目 住宿费 昭通市昭阳区豪然精品酒店"
+                },
+            ],
+            bank_rows=[
+                bank_row("bank-hotel", month="2026-01", amount="4450.00") | {
+                    "counterparty_name": "张丽芬",
+                    "summary": "住宿费（昭通市昭阳区豪然精品酒店）",
+                }
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-hotel",
+                    month="2026-01",
+                    seller_name="昭通市昭阳区豪然精品酒店",
+                    amount="4450.00",
+                )
+            ],
+            source_versions={"engine": "v3"},
+        )
+
+        decisions = store.list_decisions("2026-01")
+        self.assertEqual(summary["auto_completed_relation_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
+        self.assertEqual(
+            decisions[0]["row_ids"],
+            ["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel", "invoice-hotel"],
+        )
+        active_relation = pair_service.get_active_relation_by_case_id("case-multi-oa-payment")
+        self.assertEqual(
+            active_relation["row_ids"],
+            ["oa-energy-a", "oa-energy-b", "oa-energy-c", "bank-hotel", "invoice-hotel"],
+        )
+
     def test_active_oa_invoice_relation_can_extend_to_matching_bank(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
         pair_service = WorkbenchPairRelationService()

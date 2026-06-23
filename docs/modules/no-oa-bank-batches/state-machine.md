@@ -40,7 +40,7 @@
 
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
-| `draft` | 未提交候选批次 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
+| `draft` | 未提交候选批次；兼容旧 SQL/read model 中 `status=unsubmitted,status_bucket=unsubmitted` 的同义投影 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
 | `submitted` | 已提交免 OA 批次并写入 Workbench pair relation | 可撤回 |
 | `withdrawn` | 已撤回批次 | 只读；如果源流水仍 current，可重新生成 draft |
 | `conflict` | 规则/金额/内部往来配对不唯一或不完整 | 不可提交，需人工处理底层分类/关系 |
@@ -53,6 +53,7 @@
 - 未提交候选必须排除被 Workbench active relation 占用的银行流水。
 - 已提交历史批次即使标签不再准入，也继续可见并按状态管理。
 - 同月、同银行账户、同 category code 是 submit-selection 的硬约束。
+- 前端 API mapper 必须把旧 `status=unsubmitted,status_bucket=unsubmitted` 归一为 canonical `draft` 语义；页面操作能力由 `noOaBankBatches/policy.ts` 统一判断，避免状态徽标和右侧 checkbox/提交按钮分裂。
 
 ### Submit Selection
 
@@ -136,6 +137,7 @@ submitted no-OA batch
 | permission disabled | 无 mutation 权限时提交、撤回、保存标签不可用或 API 403 | route/API tests |
 | tag drawer | 打开时重新 fetch tag selection；保存后 reload list | tag drawer tests |
 | selection guard | 只允许一个银行账户区域的 rows 同时被选择 | `prevents selecting rows from another bank before clearing the current bank region` |
+| ordinary row selection | 普通未提交 draft 语义批次显示行级 checkbox；兼容旧 `status=unsubmitted` 投影；不受旧批次级 `can_submit` flag 控制 | `keeps draft row selection available when legacy read model rows omit can_submit`、`keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status`、`NoOaBankBatchPolicy.test.ts` |
 | internal transfer action | internal_transfer draft 走 batch submit endpoint，不走 selected rows submit | `submits internal transfer draft batches through the batch endpoint` |
 | operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，等待 `no_oa_bank_batch` operation barrier fresh，再 reload list/detail/tag selection | operation overlay / page tests |
 | relation-backed stale projection | SQL read model 返回 `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，list/detail/mutation payload 和前端 mapper 对用户投影为 `submitted`，清空复核类阻断提示，仍显示撤回入口 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`presents relation-backed stale batches as submitted without review prompts` |

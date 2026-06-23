@@ -26,11 +26,12 @@ from fin_ops_platform.services.workbench_scheduled_payment_evidence import (
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-06-23-invoice-direction-normalization-v1"
+RULE_VERSION = "2026-06-23-three-way-exact-sum-completion-v3"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
 MAX_PAYMENT_PAIR_COMBINATION_SIZE = 6
+MAX_THREE_PANE_COMBINATION_SIZE = 6
 MAX_SUBSET_GROUP_RESULTS = 2
 MAX_SUBSET_SEARCH_STATES = 20000
 OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH = 4
@@ -148,8 +149,190 @@ class WorkbenchFreeMatchingEngine:
                             ),
                         )
                     )
+        candidates.extend(self._bank_invoice_anchor_three_way_candidates(oa_rows, bank_rows, invoice_rows, window))
         candidates.extend(self._oa_bank_pair_groups_for_single_invoice(oa_rows, bank_rows, invoice_rows, window))
+        candidates.extend(
+            self._generic_three_pane_exact_sum_candidates(
+                oa_rows,
+                bank_rows,
+                invoice_rows,
+                window,
+                protected_candidates=tuple(candidates),
+            )
+        )
+        return self._dedupe_three_way_candidates(candidates)
+
+    def _bank_invoice_anchor_three_way_candidates(
+        self,
+        oa_rows: list[_Row],
+        bank_rows: list[_Row],
+        invoice_rows: list[_Row],
+        window: tuple[str, ...],
+    ) -> list[_ThreeWayCandidate]:
+        candidates: list[_ThreeWayCandidate] = []
+        for bank in bank_rows:
+            for invoice in invoice_rows:
+                bank_invoice_candidates = [
+                    candidate
+                    for candidate in self._bank_invoice_candidate(bank, invoice)
+                    if candidate.invoice.amount == bank.amount
+                ]
+                if len(bank_invoice_candidates) != 1:
+                    continue
+                bank_invoice_candidate = bank_invoice_candidates[0]
+                compatible_oas = [
+                    oa
+                    for oa in oa_rows
+                    if oa.direction == bank.direction
+                    and oa.amount == bank.amount
+                    and self._oa_bank_scheduled_payment_date_compatible(oa, bank)
+                    and self._has_oa_completion_evidence(oa, bank, invoice)
+                ]
+                if len(compatible_oas) != 1:
+                    continue
+                oa = compatible_oas[0]
+                invoices = (invoice,)
+                candidates.append(
+                    _ThreeWayCandidate(
+                        oas=(oa,),
+                        banks=(bank,),
+                        invoices=invoices,
+                        rule_code="oa_bank_invoice_exact_amount",
+                        invoice_amount_closed=True,
+                        warning_codes=(),
+                        evidence=self._evidence_payload(
+                            window=window,
+                            oa=oa,
+                            bank=bank,
+                            invoices=invoices,
+                            three_way_evidence="bank_invoice_anchor",
+                            extra={
+                                "bank_invoice_subject_evidence": bank_invoice_candidate.subject_evidence,
+                                "bank_invoice_supporting_evidence": bank_invoice_candidate.supporting_evidence,
+                                "bank_invoice_score": bank_invoice_candidate.score,
+                            },
+                        ),
+                    )
+                )
         return candidates
+
+    def _has_oa_completion_evidence(self, oa: _Row, bank: _Row, invoice: _Row) -> bool:
+        return self._has_pair_evidence(oa, bank, "oa_bank") or self._has_pair_evidence(oa, invoice, "oa_invoice")
+
+    def _dedupe_three_way_candidates(self, candidates: list[_ThreeWayCandidate]) -> list[_ThreeWayCandidate]:
+        deduped: dict[tuple[str, ...], _ThreeWayCandidate] = {}
+        for candidate in candidates:
+            deduped.setdefault(self._row_ids(candidate), candidate)
+        return list(deduped.values())
+
+    def _generic_three_pane_exact_sum_candidates(
+        self,
+        oa_rows: list[_Row],
+        bank_rows: list[_Row],
+        invoice_rows: list[_Row],
+        window: tuple[str, ...],
+        *,
+        protected_candidates: tuple[_ThreeWayCandidate, ...] = (),
+    ) -> list[_ThreeWayCandidate]:
+        candidates: list[_ThreeWayCandidate] = []
+        matchable_invoices = [
+            invoice
+            for invoice in invoice_rows
+            if invoice.data.get("source_kind") != OA_ATTACHMENT_INVOICE_SOURCE_KIND
+        ]
+        for direction in sorted(MATCHABLE_DIRECTIONS):
+            oas = sorted(
+                [row for row in oa_rows if row.direction == direction and row.amount > Decimal("0.00")],
+                key=lambda row: row.row_id,
+            )
+            banks = sorted(
+                [row for row in bank_rows if row.direction == direction and row.amount > Decimal("0.00")],
+                key=lambda row: row.row_id,
+            )
+            invoices = sorted(
+                [row for row in matchable_invoices if row.direction == direction and row.amount > Decimal("0.00")],
+                key=lambda row: row.row_id,
+            )
+            if not oas or not banks or not invoices:
+                continue
+
+            oa_groups_by_sum = self._subset_groups_by_sum(
+                oas,
+                max_size=MAX_THREE_PANE_COMBINATION_SIZE,
+                amount_getter=lambda row: row.amount,
+            )
+            bank_groups_by_sum = self._subset_groups_by_sum(
+                banks,
+                max_size=MAX_THREE_PANE_COMBINATION_SIZE,
+                amount_getter=lambda row: row.amount,
+            )
+            invoice_groups_by_sum = self._subset_groups_by_sum(
+                invoices,
+                max_size=MAX_THREE_PANE_COMBINATION_SIZE,
+                amount_getter=lambda row: row.amount,
+            )
+            for amount_cents in sorted(set(oa_groups_by_sum).intersection(bank_groups_by_sum, invoice_groups_by_sum)):
+                for oas_group in oa_groups_by_sum[amount_cents]:
+                    for banks_group in bank_groups_by_sum[amount_cents]:
+                        if not self._oa_group_bank_dates_compatible(oas_group, banks_group):
+                            continue
+                        for invoices_group in invoice_groups_by_sum[amount_cents]:
+                            if self._covered_by_protected_three_way_candidate(
+                                oas=oas_group,
+                                banks=banks_group,
+                                invoices=invoices_group,
+                                protected_candidates=protected_candidates,
+                            ):
+                                continue
+                            evidence = self._three_pane_group_evidence(
+                                oas=oas_group,
+                                banks=banks_group,
+                                invoices=invoices_group,
+                                window=window,
+                            )
+                            if evidence is None:
+                                continue
+                            candidates.append(
+                                _ThreeWayCandidate(
+                                    oas=oas_group,
+                                    banks=banks_group,
+                                    invoices=invoices_group,
+                                    rule_code="oa_bank_invoice_exact_sum",
+                                    invoice_amount_closed=True,
+                                    warning_codes=(),
+                                    evidence=evidence,
+                                )
+                            )
+        return candidates
+
+    def _covered_by_protected_three_way_candidate(
+        self,
+        *,
+        oas: tuple[_Row, ...],
+        banks: tuple[_Row, ...],
+        invoices: tuple[_Row, ...],
+        protected_candidates: tuple[_ThreeWayCandidate, ...],
+    ) -> bool:
+        candidate_row_ids = {
+            *(row.row_id for row in oas),
+            *(row.row_id for row in banks),
+            *(row.row_id for row in invoices),
+        }
+        payment_row_ids = {
+            *(row.row_id for row in oas),
+            *(row.row_id for row in banks),
+        }
+        for protected in protected_candidates:
+            protected_row_ids = set(self._row_ids(protected))
+            if protected_row_ids and protected_row_ids < candidate_row_ids:
+                return True
+            protected_payment_row_ids = {
+                *(row.row_id for row in protected.oas),
+                *(row.row_id for row in protected.banks),
+            }
+            if protected_payment_row_ids == payment_row_ids:
+                return True
+        return False
 
     def _attachment_candidate(
         self,
@@ -336,6 +519,166 @@ class WorkbenchFreeMatchingEngine:
             tuple(eligible[group_index] for group_index in result)
             for result in target_groups[:MAX_SUBSET_GROUP_RESULTS]
         ]
+
+    def _subset_groups_by_sum(
+        self,
+        items: list[Any],
+        *,
+        max_size: int,
+        amount_getter,
+    ) -> dict[int, list[tuple[Any, ...]]]:
+        eligible = [
+            item
+            for item in items
+            if self._amount_cents(amount_getter(item)) > 0
+        ]
+        if not eligible:
+            return {}
+
+        resolved_max_size = max(1, min(len(eligible), int(max_size)))
+        groups_by_state: dict[tuple[int, int], list[tuple[int, ...]]] = {(0, 0): [()]}
+        groups_by_sum: dict[int, list[tuple[int, ...]]] = {}
+        for index, item in enumerate(eligible):
+            amount_cents = self._amount_cents(amount_getter(item))
+            additions: dict[tuple[int, int], list[tuple[int, ...]]] = {}
+            for (count, total), groups in list(groups_by_state.items()):
+                if count >= resolved_max_size:
+                    continue
+                next_count = count + 1
+                next_total = total + amount_cents
+                state = (next_count, next_total)
+                for group in groups:
+                    next_group = (*group, index)
+                    result_bucket = groups_by_sum.setdefault(next_total, [])
+                    if next_group not in result_bucket and len(result_bucket) < MAX_SUBSET_GROUP_RESULTS:
+                        result_bucket.append(next_group)
+                    state_bucket = additions.setdefault(state, [])
+                    if next_group not in state_bucket and len(state_bucket) < MAX_SUBSET_GROUP_RESULTS:
+                        state_bucket.append(next_group)
+            for state, groups in additions.items():
+                bucket = groups_by_state.setdefault(state, [])
+                for group in groups:
+                    if group not in bucket and len(bucket) < MAX_SUBSET_GROUP_RESULTS:
+                        bucket.append(group)
+            if len(groups_by_state) > MAX_SUBSET_SEARCH_STATES:
+                return {}
+
+        return {
+            amount_cents: [
+                tuple(eligible[group_index] for group_index in group)
+                for group in groups[:MAX_SUBSET_GROUP_RESULTS]
+            ]
+            for amount_cents, groups in groups_by_sum.items()
+        }
+
+    def _oa_group_bank_dates_compatible(self, oas: tuple[_Row, ...], banks: tuple[_Row, ...]) -> bool:
+        return all(
+            any(self._oa_bank_scheduled_payment_date_compatible(oa, bank) for bank in banks)
+            for oa in oas
+        )
+
+    def _three_pane_group_evidence(
+        self,
+        *,
+        oas: tuple[_Row, ...],
+        banks: tuple[_Row, ...],
+        invoices: tuple[_Row, ...],
+        window: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        edges = self._three_pane_group_edges(oas=oas, banks=banks, invoices=invoices)
+        if not edges:
+            return None
+        row_ids = [*(row.row_id for row in oas), *(row.row_id for row in banks), *(row.row_id for row in invoices)]
+        adjacency = {row_id: set() for row_id in row_ids}
+        for edge in edges:
+            left = str(edge.get("left_row_id") or "")
+            right = str(edge.get("right_row_id") or "")
+            if left in adjacency and right in adjacency:
+                adjacency[left].add(right)
+                adjacency[right].add(left)
+        if any(not neighbors for neighbors in adjacency.values()):
+            return None
+        pending = [row_ids[0]]
+        visited: set[str] = set()
+        while pending:
+            row_id = pending.pop()
+            if row_id in visited:
+                continue
+            visited.add(row_id)
+            pending.extend(sorted(adjacency[row_id].difference(visited)))
+        if visited != set(row_ids):
+            return None
+
+        oa_total = sum((row.amount for row in oas), Decimal("0.00"))
+        bank_total = sum((row.amount for row in banks), Decimal("0.00"))
+        invoice_total = sum((row.amount for row in invoices), Decimal("0.00"))
+        return {
+            "scope_window": list(window),
+            "uniqueness_scope": "five_month_window",
+            "three_way_evidence": "three_pane_exact_sum_connected",
+            "amount_relation": "three_pane_exact_sum",
+            "oa_total": str(oa_total),
+            "bank_total": str(bank_total),
+            "invoice_total": str(invoice_total),
+            "oa_count": len(oas),
+            "bank_count": len(banks),
+            "invoice_count": len(invoices),
+            "evidence_edges": edges,
+        }
+
+    def _three_pane_group_edges(
+        self,
+        *,
+        oas: tuple[_Row, ...],
+        banks: tuple[_Row, ...],
+        invoices: tuple[_Row, ...],
+    ) -> list[dict[str, Any]]:
+        edges: list[dict[str, Any]] = []
+        for oa in oas:
+            for bank in banks:
+                if not self._oa_bank_scheduled_payment_date_compatible(oa, bank):
+                    continue
+                matches = matching_tokens(self._tokens(oa), self._tokens(bank))
+                if matches:
+                    edge: dict[str, Any] = {
+                        "kind": "oa_bank",
+                        "left_row_id": oa.row_id,
+                        "right_row_id": bank.row_id,
+                        "matches": matches,
+                    }
+                    scheduled_match = self._oa_bank_scheduled_payment_date_match(oa, bank)
+                    if scheduled_match is not None:
+                        edge["scheduled_payment_date_match"] = scheduled_match
+                    edges.append(edge)
+        for oa in oas:
+            for invoice in invoices:
+                matches = matching_tokens(self._tokens(oa), self._tokens(invoice))
+                if matches:
+                    edges.append(
+                        {
+                            "kind": "oa_invoice",
+                            "left_row_id": oa.row_id,
+                            "right_row_id": invoice.row_id,
+                            "matches": matches,
+                        }
+                    )
+        for bank in banks:
+            for invoice in invoices:
+                if bank.direction != invoice.direction:
+                    continue
+                subject_evidence = self._bank_invoice_subject_evidence(bank, invoice)
+                supporting_evidence = self._bank_invoice_supporting_evidence(bank, invoice)
+                if subject_evidence or supporting_evidence:
+                    edges.append(
+                        {
+                            "kind": "bank_invoice",
+                            "left_row_id": bank.row_id,
+                            "right_row_id": invoice.row_id,
+                            "subject_evidence": subject_evidence,
+                            "supporting_evidence": supporting_evidence,
+                        }
+                    )
+        return edges
 
     def _conflicted_rows(self, candidates: list[_ThreeWayCandidate]) -> dict[str, dict[str, Any]]:
         by_oa_bank: dict[tuple[str, str], list[_ThreeWayCandidate]] = {}
@@ -1292,7 +1635,7 @@ class WorkbenchFreeMatchingEngine:
         detail_fields = row.data.get("detail_fields") if isinstance(row.data.get("detail_fields"), dict) else {}
         return evidence_tokens(
             {
-                "bank.counterparty": row.data.get("counterparty") or row.data.get("counterparty_name"),
+                "bank.counterparty": self._first_text(row.data.get("counterparty"), row.data.get("counterparty_name")),
                 "bank.counterparty_tax_no": row.data.get("counterparty_tax_no"),
                 "bank.detail_counterparty": detail_fields.get("对方户名") if isinstance(detail_fields, dict) else None,
             }
@@ -1449,15 +1792,15 @@ class WorkbenchFreeMatchingEngine:
             return evidence_tokens(
                 {
                     "oa.applicant": row.data.get("applicant"),
-                    "oa.counterparty": row.data.get("counterparty_name") or row.data.get("counterparty"),
-                    "oa.project": row.data.get("project_name") or row.data.get("project"),
-                    "oa.reason": row.data.get("reason") or row.data.get("summary"),
+                    "oa.counterparty": self._first_text(row.data.get("counterparty_name"), row.data.get("counterparty")),
+                    "oa.project": self._first_text(row.data.get("project_name"), row.data.get("project")),
+                    "oa.reason": self._first_text(row.data.get("reason"), row.data.get("summary")),
                 }
             )
         if row.row_type == "bank":
             return evidence_tokens(
                 {
-                    "bank.counterparty": row.data.get("counterparty") or row.data.get("counterparty_name"),
+                    "bank.counterparty": self._first_text(row.data.get("counterparty"), row.data.get("counterparty_name")),
                     "bank.summary": row.data.get("summary"),
                     "bank.remark": row.data.get("remark"),
                 }
@@ -1559,6 +1902,8 @@ class WorkbenchFreeMatchingEngine:
         return "bridged_by_oa"
 
     def _three_way_explanation(self, candidate: _ThreeWayCandidate) -> str:
+        if candidate.rule_code == "oa_bank_invoice_exact_sum":
+            return "OA, bank and invoice group totals close exactly with connected business evidence in the five-month window."
         if candidate.rule_code == "oa_bank_pairs_single_invoice_exact_sum":
             return "Multiple OA-bank payment pairs sum exactly to one invoice in the five-month window."
         if candidate.warning_codes:
@@ -1597,3 +1942,11 @@ class WorkbenchFreeMatchingEngine:
 
     def _decision_key(self, scope_month: str, rule_code: str, row_ids: tuple[str, ...]) -> str:
         return f"decision:{scope_month}:{rule_code}:{':'.join(row_ids)}"
+
+    @staticmethod
+    def _first_text(*values: Any) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
