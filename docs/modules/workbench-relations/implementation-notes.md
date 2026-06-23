@@ -270,6 +270,33 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - exception rollback restore service extraction
+
+目标：把 exception/pair/candidate/override rollback restore 从 `server.py` 抽到显式 service。
+
+变更：
+
+- 新增 `WorkbenchExceptionRollbackRestoreService`。
+- `_restore_workbench_exception_write_snapshots(...)`、`_restore_workbench_exception_pair_snapshots(...)`、`_restore_workbench_exception_override_snapshots(...)` 改为兼容 wrapper，只委托 service。
+- `_apply_workbench_exception_application(...)` 和 `_persist_workbench_exception_and_override_change(...)` 中的 inline restore block 改为委托 service。
+- 保留 exception case / pair relation / candidate match / override snapshot restore 语义，以及 exception/override restore 的 best-effort `state_store.save_workbench_exception_cases(...)`。
+- 新增 service 单测和静态 guard，防止 wrapper 或 inline restore block 回流到 `server.py`。
+
+决策：
+
+- 本 slice 不迁移 batch-accounting restore helper。
+- `workbench_relation` 仍是 `implementation-gap-open`，下一步需要重新做 local closure audit，确认是否还有本地 implementation gap 或进入 production-evidence defer。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_rollback_restore_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_exception_restore_uses_explicit_service_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+```
+
 ## 2026-06-21 - automatic decision 三方展示边界修复
 
 目标：修复 OA 附件发票 `derived_from_oa_id=oa-exp-*:item:*` 已能回连父 OA 展示，但 matching engine 仍未把它识别为父 OA 附件，导致三方含税闭合退化为 OA+银行 automatic decision 加 open 发票附着的问题。

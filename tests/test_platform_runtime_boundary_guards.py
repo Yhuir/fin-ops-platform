@@ -1309,6 +1309,70 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_exception_restore_uses_explicit_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "workbench_exception_rollback_restore_service.py"
+        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
+        factory_source = _function_source(server_tree, server_source, "_workbench_exception_rollback_restore_service")
+        wrapper_sources = [
+            _function_source(server_tree, server_source, name)
+            for name in (
+                "_restore_workbench_exception_write_snapshots",
+                "_restore_workbench_exception_pair_snapshots",
+                "_restore_workbench_exception_override_snapshots",
+            )
+        ]
+        inline_restore_sources = [
+            _function_source(server_tree, server_source, name)
+            for name in (
+                "_apply_workbench_exception_application",
+                "_persist_workbench_exception_and_override_change",
+            )
+        ]
+        violations: list[str] = []
+
+        if "WorkbenchExceptionRollbackRestoreService(" not in factory_source:
+            violations.append("server.py does not build explicit exception rollback restore service")
+        for source in wrapper_sources:
+            if "restore_" not in source:
+                violations.append("exception restore wrapper does not delegate to service restore method")
+            for forbidden in (
+                "WorkbenchExceptionCaseService.from_snapshot",
+                "WorkbenchCandidateMatchService.from_snapshot",
+                "WorkbenchOverrideService.from_snapshot",
+                "save_workbench_exception_cases(",
+            ):
+                if forbidden in source:
+                    violations.append(f"server.py exception restore wrapper still owns behavior {forbidden}")
+        for source in inline_restore_sources:
+            if "_workbench_exception_rollback_restore_service().restore_" not in source:
+                violations.append("exception inline restore path does not delegate to rollback restore service")
+            for forbidden in (
+                "WorkbenchExceptionCaseService.from_snapshot",
+                "WorkbenchCandidateMatchService.from_snapshot",
+                "WorkbenchOverrideService.from_snapshot",
+                "save_workbench_exception_cases(previous_exception_snapshot)",
+            ):
+                if forbidden in source:
+                    violations.append(f"server.py exception inline restore still owns behavior {forbidden}")
+        for snippet in (
+            "class WorkbenchExceptionRollbackRestoreService",
+            "def restore_write_snapshots(",
+            "def restore_pair_snapshots(",
+            "def restore_override_snapshots(",
+            "WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)",
+            "WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)",
+            "WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)",
+            "WorkbenchOverrideService.from_snapshot(previous_override_snapshot)",
+            "save_workbench_exception_cases(",
+        ):
+            if snippet not in service_source:
+                violations.append(f"exception rollback restore service missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
         path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
         source = path.read_text(encoding="utf-8")

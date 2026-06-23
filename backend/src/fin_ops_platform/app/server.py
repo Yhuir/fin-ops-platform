@@ -422,6 +422,7 @@ from fin_ops_platform.services.workbench_exception_application_service import (
     WorkbenchExceptionApplicationService,
 )
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
+from fin_ops_platform.services.workbench_exception_rollback_restore_service import WorkbenchExceptionRollbackRestoreService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
@@ -3750,11 +3751,12 @@ class Application:
         previous_candidate_snapshot: dict[str, object],
         previous_override_snapshot: dict[str, object],
     ) -> None:
-        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
-        self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
-        self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
-        self._configure_workbench_exception_application_service()
+        self._workbench_exception_rollback_restore_service().restore_write_snapshots(
+            previous_exception_snapshot=previous_exception_snapshot,
+            previous_pair_snapshot=previous_pair_snapshot,
+            previous_candidate_snapshot=previous_candidate_snapshot,
+            previous_override_snapshot=previous_override_snapshot,
+        )
 
     def _restore_workbench_exception_pair_snapshots(
         self,
@@ -3762,9 +3764,10 @@ class Application:
         previous_exception_snapshot: dict[str, object],
         previous_pair_snapshot: dict[str, object],
     ) -> None:
-        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-        self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
-        self._configure_workbench_exception_application_service()
+        self._workbench_exception_rollback_restore_service().restore_pair_snapshots(
+            previous_exception_snapshot=previous_exception_snapshot,
+            previous_pair_snapshot=previous_pair_snapshot,
+        )
 
     def _workbench_transaction_amount_for_row_id(self, row_id: str) -> object:
         return self._import_service.get_transaction(row_id).amount
@@ -3775,13 +3778,29 @@ class Application:
         previous_exception_snapshot: dict[str, object],
         previous_override_snapshot: dict[str, object],
     ) -> None:
-        if self._state_store is not None:
-            try:
-                self._state_store.save_workbench_exception_cases(previous_exception_snapshot)
-            except Exception:
-                pass
-        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-        self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
+        self._workbench_exception_rollback_restore_service().restore_override_snapshots(
+            previous_exception_snapshot=previous_exception_snapshot,
+            previous_override_snapshot=previous_override_snapshot,
+        )
+
+    def _workbench_exception_rollback_restore_service(self) -> WorkbenchExceptionRollbackRestoreService:
+        return WorkbenchExceptionRollbackRestoreService(
+            state_store=self._state_store,
+            replace_exception_case_service=self._replace_workbench_exception_case_service,
+            replace_pair_relation_service=self._replace_workbench_pair_relation_service,
+            replace_candidate_match_service=self._replace_workbench_candidate_match_service,
+            replace_override_service=self._replace_workbench_override_service,
+            configure_exception_application_service=self._configure_workbench_exception_application_service,
+        )
+
+    def _replace_workbench_exception_case_service(self, service: WorkbenchExceptionCaseService) -> None:
+        self._workbench_exception_case_service = service
+
+    def _replace_workbench_candidate_match_service(self, service: WorkbenchCandidateMatchService) -> None:
+        self._workbench_candidate_match_service = service
+
+    def _replace_workbench_override_service(self, service: WorkbenchOverrideService) -> None:
+        self._workbench_override_service = service
 
     def _restore_workbench_pair_relation_snapshot(
         self,
@@ -7804,13 +7823,10 @@ class Application:
             else:
                 self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
         except Exception as exc:
-            if self._state_store is not None:
-                try:
-                    self._state_store.save_workbench_exception_cases(previous_exception_snapshot)
-                except Exception:
-                    pass
-            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-            self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
+            self._workbench_exception_rollback_restore_service().restore_override_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_override_snapshot=previous_override_snapshot,
+            )
             raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
         if changed_scope_keys is not None:
             self._execute_derived_data_lifecycle_event(
@@ -7871,11 +7887,12 @@ class Application:
             self._save_workbench_overrides_snapshot(changed_row_ids=row_ids)
             self._persist_workbench_candidate_matches_best_effort(operation=action_name)
         except Exception as exc:
-            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-            self._replace_workbench_pair_relation_service(WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot))
-            self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
-            self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
-            self._configure_workbench_exception_application_service()
+            self._workbench_exception_rollback_restore_service().restore_write_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_pair_snapshot=previous_pair_snapshot,
+                previous_candidate_snapshot=previous_candidate_snapshot,
+                previous_override_snapshot=previous_override_snapshot,
+            )
             raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
 
         changed_scope_keys = list(
