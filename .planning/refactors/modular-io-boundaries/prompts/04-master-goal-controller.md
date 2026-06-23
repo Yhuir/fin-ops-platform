@@ -192,23 +192,23 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with workbench-relations:post-server-precondition-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with workbench-relations:server-retained-oa-supplemental-relation-read-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For workbench-relations:post-server-precondition-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-auto-pair-conflict-relation-read-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-relation-read-helper-boundary-audit.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-server-repair-precondition-relation-read-port-audit.md`.
+For workbench-relations:server-retained-oa-supplemental-relation-read-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-post-server-precondition-local-implementation-closure-audit.md`.
 - Read `docs/modules/workbench-relations/README.md`, `state-machine.md`, `tests.md`, and `implementation-notes.md`.
-- Inspect remaining references to `_workbench_pair_relation_service`, `WorkbenchPairRelationService`, relation snapshot, relation persist, case id allocation, rollback, whole-state persistence, command-service surfaces and relation read model helpers.
-- Use CodeGraph/text search for remaining direct relation service dependencies and classify each as implemented, compat-only, next implementation boundary, production-evidence-deferred, or blocked-by-human-gate.
-- Produce an analysis/accounting slice.
-- Decide whether the next safe boundary is a concrete implementation slice, a closure/defer accounting slice, or a production evidence defer.
+- Inspect `backend/src/fin_ops_platform/app/server.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph/text search for `_supplemental_retained_oa_row_ids`, `list_active_relations`, retained OA rows, and all-scope payload tests.
+- Add or reuse an explicit relation read port for retained-OA all-scope supplemental relation reads.
+- Move `_supplemental_retained_oa_row_ids(...)` direct `list_active_relations()` call behind that port.
+- Preserve cutoff date behavior, manual retained row ids, OA/bank relation filtering, bank row date checks, and sorted returned row ids.
+- Add static guard coverage for this method.
 - Do not change relation writes, read model freshness, dirty scopes, operation barriers, API response shape or frontend behavior.
 - Do not declare `workbench_relation` module closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run docs verification and diff checks; run code tests only if this audit finds and fixes a testable code inconsistency.
+- Run focused retained-OA/static guard tests, app check, docs verification and diff checks as applicable.
 - Commit and push to origin/dev.
 - Continue to the next pending boundary if verification passes.
 

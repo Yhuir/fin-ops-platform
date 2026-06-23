@@ -3236,3 +3236,29 @@ git diff --check
 ```
 
 下一条边界：`workbench-relations:post-server-precondition-local-implementation-closure-audit`。
+
+## 2026-06-24 - post server precondition local implementation closure audit
+
+目标：在 server repair/precondition read port 全部抽离后，重新审计 `workbench_relation` 本地 implementation gap，避免过早进入 Go 或错误标记模块闭环。
+
+结论：
+
+- `workbench_relation` 仍是 `implementation-gap-open`，不能标记 closed。
+- Go/Fiber/Go Worker admission 仍阻塞。
+- 下一条最小实现边界是 `_supplemental_retained_oa_row_ids(...)` 的 retained-OA all-scope supplemental relation read port extraction。
+
+主要剩余面：
+
+- `_supplemental_retained_oa_row_ids(...)` 仍直接 `list_active_relations()`，应先抽显式 read port。
+- `_next_workbench_relation_case_id(...)` 仍通过 pair relation snapshot 做 case id 去重，后续需要 case-id allocation/read owner。
+- `_persist_state(...)` 仍包含 legacy full-state `workbench_pair_relations` snapshot，需要兼容路径分类。
+- transaction persist、rollback restore、NoOaPairRelationSnapshotPort、WorkbenchWriteFacade read/snapshot 和 special metadata ports 仍需 closure accounting，但不是本轮最小下一刀。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+下一条边界：`workbench-relations:server-retained-oa-supplemental-relation-read-port-extraction`。
