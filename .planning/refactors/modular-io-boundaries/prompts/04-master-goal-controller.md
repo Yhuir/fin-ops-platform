@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:search-runtime-import-state-refresh-producer-boundary-extraction.
+- Last completed boundary: read-models:search-all-scope-worker-fanout-producer-boundary-extraction.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -150,7 +150,8 @@ Current state expected on start:
 - Production PostgreSQL `/api/search` without a SQL repository now fails closed instead of live scanning legacy/local state.
 - `OAProjectionSyncService` now routes Search refresh fan-out through `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`.
 - Runtime import-state Search refresh fan-out now routes through `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`.
-- Search remains implementation-gap-open pending post-runtime-import-state local implementation closure audit and real environment evidence accounting.
+- Search worker `search:all` shard fan-out now routes through `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`.
+- Search remains implementation-gap-open pending post-all-scope-worker-fanout local implementation closure audit and real environment evidence accounting.
 - `bank_account_balance` remains a later implementation-gap-open candidate.
 - No module is globally closed.
 - The no-OA refresh persistence boundary is implemented: `NoOaBankBatchReadModelPersistencePort` owns public snapshot persistence delegation for the worker refresh path, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
@@ -160,7 +161,7 @@ Current state expected on start:
 - The no-OA mutation persistence fallback quarantine is implemented: `NoOaBankBatchApplicationService.persist_mutation(...)` requires `save_no_oa_bank_batch_mutation(...)`, `ApplicationStateStore` exposes the same explicit boundary, and the service-layer broad state-store fallback is guarded from returning.
 - The no-OA first local closure audit found broad `Application._persist_state(...)` still serialized `no_oa_bank_batches`; the no-OA full-state snapshot quarantine is implemented and guarded.
 - The no-OA post-full-state local closure audit is complete: no remaining local implementation gap was found after deleting dead app-owned source-version/stale-reason helpers. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
-- The next pending boundary is read-models:search-post-runtime-import-state-local-implementation-closure-audit.
+- The next pending boundary is read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -256,11 +257,11 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:search-post-runtime-import-state-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:search-post-runtime-import-state-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-fail-closed-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-oa-projection-sync-refresh-producer-boundary-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-oa-projection-sync-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-runtime-import-state-refresh-producer-boundary-extraction.md`, `docs/modules/search/README.md`, `docs/modules/search/state-machine.md`, `docs/modules/search/tests.md`, `docs/modules/search/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/worker.py`, `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`, `backend/src/fin_ops_platform/services/search_read_model_repository.py`, `backend/src/fin_ops_platform/services/search_query_freshness_service.py`, `backend/src/fin_ops_platform/services/search_read_model_refresh_producer.py`, `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`, `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`, `backend/src/fin_ops_platform/services/oa_projection_sync.py`, `tests/test_search_pending_sql_runtime.py`, `tests/test_search_api.py`, `tests/test_runtime_worker_registry.py`, `tests/test_oa_projection_sync_service.py`, `tests/test_oa_projection_sql_runtime.py`, `tests/test_runtime_worker_read_model_refresh_scopes.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Re-audit search after runtime import-state producer extraction.
+For read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-fail-closed-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-oa-projection-sync-refresh-producer-boundary-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-oa-projection-sync-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-runtime-import-state-refresh-producer-boundary-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-runtime-import-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-all-scope-worker-fanout-producer-boundary-extraction.md`, `docs/modules/search/README.md`, `docs/modules/search/state-machine.md`, `docs/modules/search/tests.md`, `docs/modules/search/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/worker.py`, `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`, `backend/src/fin_ops_platform/services/search_read_model_repository.py`, `backend/src/fin_ops_platform/services/search_query_freshness_service.py`, `backend/src/fin_ops_platform/services/search_read_model_refresh_producer.py`, `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`, `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`, `backend/src/fin_ops_platform/services/oa_projection_sync.py`, `tests/test_search_pending_sql_runtime.py`, `tests/test_search_api.py`, `tests/test_runtime_worker_registry.py`, `tests/test_oa_projection_sync_service.py`, `tests/test_oa_projection_sql_runtime.py`, `tests/test_runtime_worker_read_model_refresh_scopes.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Re-audit search after all-scope worker fan-out producer extraction.
 - Determine whether local implementation support can move to `production-evidence-deferred`, or whether another local implementation gap must be split first.
 - Do not mark `search` globally closed unless real PostgreSQL/worker/App Status/high-row/browser evidence is available and verified.
 - Do not implement Go/Fiber/Go Worker.

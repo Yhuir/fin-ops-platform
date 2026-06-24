@@ -64,3 +64,11 @@
 - 改动：`_RuntimeWorkerDerivedLifecycle` 新增可注入 `search_read_model_refresh_producer`，默认以现有 `ReadModelRefreshGateway` 构造 `SearchReadModelRefreshProducer`；`persist_import_state(...)` 的 Search fan-out 改为调用 producer；runtime worker scope test 覆盖 producer delegation；platform guard 防止 `_enqueue_scopes("search", ...)` 或 direct `enqueue_many("search", ...)` 回流。
 - 保持不变：import-state target scopes、Workbench/Workbench relation/invoice lifecycle/pending invoice/invoice usage/OA pending payment/bank detail/balance/cost/tax fan-out、Search worker event、scope policy、queue schema、API shape、Redis/cache、权限、审计和前端行为均不变。
 - 下一步：执行 `read-models:search-post-runtime-import-state-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence，或是否还有其他本地旧路径需要拆分。
+
+## 2026-06-24 - Search worker all-scope fan-out producer boundary
+
+- 目标：让 Search worker 处理 `search:all` 时的 month shard fan-out 也走统一 Search producer，避免 worker 内部保留第二套 Search enqueue owner。
+- 审计结论：post-runtime-import-state audit 发现 `SearchPendingReadModelRefreshService._enqueue_search_scope_shards(...)` 仍直接创建 `ReadModelRefreshGateway` 并调用 `enqueue_many("search", shard_keys, reason="search_all_shard")`。该路径是 Search 模块内部 worker fan-out，且仍经过 durable gateway/scope policy registry，但绕过了 `SearchReadModelRefreshProducer`。
+- 改动：`SearchReadModelRefreshProducer` 新增 `enqueue_scope_keys(...)`，保持原 `enqueue(...)` boolean contract；普通 scope normalization 保留 caller order；`SearchPendingReadModelRefreshService` 新增可注入 producer，并让 `search:all` shard fan-out 调用 producer；新增 service-layer test 和 static guard。
+- 保持不变：`search:all` 仍只作为 fan-out command；worker 仍从 projection builder 读取 shard list；`enqueued_scope_keys` 顺序、payload shape、dirty scope completion、pending invoice fan-out、Search API、worker event、queue schema、Redis/cache、权限、审计和前端行为均不变。
+- 下一步：执行 `read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence，或是否还有其他本地旧路径需要拆分。

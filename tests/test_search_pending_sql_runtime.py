@@ -56,6 +56,15 @@ class SearchRefreshGatewayRecorder:
         return list(scope_keys)
 
 
+class FakeSearchRefreshProducer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def enqueue_scope_keys(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> list[str]:
+        self.calls.append((list(scope_keys), reason))
+        return list(scope_keys)
+
+
 class UnderlyingPendingInvoiceReadModelRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
@@ -404,6 +413,7 @@ class SearchReadModelRefreshProducerTests(unittest.TestCase):
         producer = SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
 
         self.assertFalse(producer.enqueue(["2026-05"], reason="api_miss"))
+        self.assertEqual(producer.enqueue_scope_keys(["2026-05"], reason="api_miss"), [])
 
 
 class SearchPendingConnection:
@@ -2822,6 +2832,42 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue.refreshes,
             [("search", "2026-05", "search_all_shard"), ("search", "2026-04", "search_all_shard")],
         )
+        self.assertEqual(queue.completed, [("tenant-a", "search", "all")])
+
+    def test_refresh_handler_expands_search_all_through_search_producer_boundary(self) -> None:
+        class FakeBuilder:
+            def list_search_scope_shards(self, scope_key: str) -> list[str]:
+                return ["2026-05", "2026-04"]
+
+            def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(scope_key)
+
+        queue = QueueRecorder()
+        producer = FakeSearchRefreshProducer()
+        service = SearchPendingReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=queue,
+            search_read_model_refresh_producer=producer,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-all-producer",
+            tenant_id="tenant-a",
+            event_type="search.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="search",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "all", "enqueued_scope_keys": ["2026-05", "2026-04"], "row_count": 0})
+        self.assertEqual(producer.calls, [(["2026-05", "2026-04"], "search_all_shard")])
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(queue.completed, [("tenant-a", "search", "all")])
 
     def test_refresh_handler_expands_legacy_pending_scope_into_month_shards(self) -> None:

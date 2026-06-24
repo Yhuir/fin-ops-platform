@@ -96,6 +96,18 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
 ```
 
+## 2026-06-24 - Search worker all-scope fan-out producer boundary
+
+- 更新：`tests/test_search_pending_sql_runtime.py::SearchReadModelRefreshProducerTests::test_enqueue_returns_false_when_gateway_unavailable` 覆盖 `enqueue_scope_keys(...)` unavailable contract。
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_refresh_handler_expands_search_all_through_search_producer_boundary`。
+- 更新：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 `SearchPendingReadModelRefreshService` 重新直接 `enqueue_many("search", ...)`。
+- 覆盖：`search:all` worker shard fan-out 走 `SearchReadModelRefreshProducer.enqueue_scope_keys(...)`，同时保留 existing shard order、payload shape 和 completion behavior。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_into_month_shards tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_through_search_producer_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

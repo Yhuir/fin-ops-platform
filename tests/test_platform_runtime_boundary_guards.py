@@ -2109,6 +2109,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append("Runtime worker handlers still bypass SearchReadModelRefreshProducer for search refresh")
                 break
 
+        search_pending_refresh_source = (SERVICES_ROOT / "search_pending_read_model_refresh.py").read_text(encoding="utf-8")
+        if 'enqueue_many("search"' in search_pending_refresh_source or "enqueue_many('search'" in search_pending_refresh_source:
+            violations.append("SearchPendingReadModelRefreshService still bypasses SearchReadModelRefreshProducer for search fan-out")
+        if "SearchReadModelRefreshProducer" not in search_pending_refresh_source:
+            violations.append("SearchPendingReadModelRefreshService no longer uses SearchReadModelRefreshProducer")
+
         self.assertEqual(violations, [])
 
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:

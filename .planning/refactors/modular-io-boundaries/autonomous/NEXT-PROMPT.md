@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:search-runtime-import-state-refresh-producer-boundary-extraction` slice.
+Continue the autonomous modular IO refactor after the `read-models:search-all-scope-worker-fanout-producer-boundary-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:search-runtime-import-state-refresh-producer-boundary-extraction`
+- Last completed boundary: `read-models:search-all-scope-worker-fanout-producer-boundary-extraction`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `search` is the twelfth non-Go read model pilot.
@@ -17,12 +17,13 @@ Continue the autonomous modular IO refactor after the `read-models:search-runtim
 - Production PostgreSQL `/api/search` without a SQL repository fails closed instead of live scanning legacy/local state.
 - `OAProjectionSyncService` now routes Search downstream dirty fan-out through `SearchReadModelRefreshProducer` instead of direct `enqueue_many("search", ...)`.
 - Runtime import-state Search fan-out now routes through `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`.
-- `search` remains `implementation-gap-open` pending post-runtime-import-state local closure audit and real environment evidence accounting.
+- Search worker `search:all` shard fan-out now routes through `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`.
+- `search` remains `implementation-gap-open` pending post-all-scope-worker-fanout local closure audit and real environment evidence accounting.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:search-post-runtime-import-state-local-implementation-closure-audit`
+`read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit`
 
 ## Required First Steps On Resume
 
@@ -35,6 +36,8 @@ Continue the autonomous modular IO refactor after the `read-models:search-runtim
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-oa-projection-sync-refresh-producer-boundary-extraction.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-oa-projection-sync-local-implementation-closure-audit.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-runtime-import-state-refresh-producer-boundary-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-runtime-import-state-local-implementation-closure-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-all-scope-worker-fanout-producer-boundary-extraction.md`
    - `docs/modules/search/README.md`
    - `docs/modules/search/state-machine.md`
    - `docs/modules/search/tests.md`
@@ -61,7 +64,7 @@ Continue the autonomous modular IO refactor after the `read-models:search-runtim
 
 Target:
 
-- Re-audit search after runtime import-state producer extraction.
+- Re-audit search after all-scope worker fan-out producer extraction.
 - Decide whether local implementation support can move to `production-evidence-deferred`, or whether another local implementation gap must be split first.
 - Do not mark `search` globally closed unless real PostgreSQL/worker/App Status/high-row/browser evidence is available and verified.
 
@@ -74,4 +77,4 @@ Expected verification:
 
 ## Stop Condition
 
-Complete one verified search post-runtime-import-state local implementation closure audit or the first split implementation gap, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified search post-all-scope-worker-fanout local implementation closure audit or the first split implementation gap, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.

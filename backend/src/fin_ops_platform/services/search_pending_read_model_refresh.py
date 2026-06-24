@@ -4,6 +4,7 @@ from typing import Any
 
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 
 
 class SearchPendingReadModelRefreshService:
@@ -13,6 +14,7 @@ class SearchPendingReadModelRefreshService:
         projection_builder: Any | None = None,
         application: Any | None = None,
         queue_repository: Any | None = None,
+        search_read_model_refresh_producer: Any | None = None,
     ) -> None:
         if projection_builder is None:
             raise ValueError("projection_builder is required for search/pending read model refresh.")
@@ -20,6 +22,12 @@ class SearchPendingReadModelRefreshService:
             raise ValueError("SearchPendingReadModelRefreshService does not accept Application fallback dependencies.")
         self._projection_builder = projection_builder
         self._queue_repository = queue_repository
+        self._search_read_model_refresh_producer = (
+            search_read_model_refresh_producer
+            or SearchReadModelRefreshProducer(
+                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=self._queue_repository)
+            )
+        )
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_type = str(event.scope_type or event.payload.get("scope_type") or "").strip()
@@ -79,11 +87,15 @@ class SearchPendingReadModelRefreshService:
 
     def _enqueue_search_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_search_scope_shards", None)
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not callable(list_shards) or not refresh_gateway.can_enqueue():
+        if not callable(list_shards):
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        enqueued_scope_keys = refresh_gateway.enqueue_many("search", shard_keys, reason="search_all_shard")
+        enqueued_scope_keys = self._search_read_model_refresh_producer.enqueue_scope_keys(
+            shard_keys,
+            reason="search_all_shard",
+        )
+        if not enqueued_scope_keys:
+            return None
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="search", scope_key=scope_key)
