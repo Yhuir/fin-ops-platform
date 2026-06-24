@@ -4,7 +4,7 @@
 **Final status:** `planned`
 **Module closure:** `not-module-closed`
 **Controller:** T0
-**Base commit:** `ddf6c636795f2787e2cd62bf89a9df62126b2ee9`
+**Base commit:** `0266ae0d4dbd27a955ee5e1067006d1c0ba1de37`
 
 ## Target Boundary
 
@@ -20,7 +20,7 @@ Allowed operations, in order:
 1. Run the repository-supported release deploy from a clean `dev` worktree:
 
 ```bash
-./scripts/deploy-oa.sh --release-name dev-ddf6c636-no-oa-fk-20260625014906
+./scripts/deploy-oa.sh --release-name dev-no-oa-fk-20260625014906
 ```
 
 2. Collect non-secret post-deploy evidence:
@@ -57,7 +57,7 @@ ssh finops-prod-root 'set -euo pipefail; release_src="$(systemctl show fin-ops.s
 
 Stop before deploy if:
 
-- local branch is not clean `dev` at `ddf6c636795f2787e2cd62bf89a9df62126b2ee9`;
+- local branch is not clean `dev`, local `HEAD` is not aligned with `origin/dev`, or the no-OA FK delete-order fix commit is not present;
 - `origin/dev` does not match local `HEAD`;
 - `bash scripts/verify.sh docs`, targeted tests or `git diff --check` fail;
 - deploy would require secrets in local output.
