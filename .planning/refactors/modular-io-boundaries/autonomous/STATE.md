@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `admin-scope-auth-seam-runbook-written`
+Current state: `admin-scope-auth-seam-production-evidence-deferred`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Started `production:admin-scope-auth-seam-read-only-classification` in `analysis/production-admin-scope-auth-seam-read-only-classification-2026-06-25.md`. The runbook is written and must be committed/pushed before production execution. It classifies supported admin HTTP SLO env presence and target OA applicant live sessions without printing tokens/cookies/passwords/env values or running browser/write probes.
+Completed `production:admin-scope-auth-seam-read-only-classification` as `production-evidence-deferred` in `analysis/production-admin-scope-auth-seam-read-only-classification-2026-06-25.md`. No HTTP SLO admin token or cookie seam is configured, and the two configured target OA applicant live sessions are full-access non-admin with `can_admin_access=false`; the optional admin endpoint probe was not run. Pre/post health, dirty scopes, readiness, read-model outbox and dead letters stayed clean. Next boundary is `planning:controlled-write-flow-evidence-scenario-selection`.
 
 ## Closed Or Deferred Slices
 

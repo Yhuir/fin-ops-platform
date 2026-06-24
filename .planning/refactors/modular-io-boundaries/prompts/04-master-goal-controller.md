@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: production browser smoke harness packaging feasibility audit.
+- Last completed controller step: admin-scope auth seam read-only classification.
 - Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
@@ -108,7 +108,8 @@ Current state expected on start:
 - `production:read-model-authenticated-browser-page-smoke-runbook` is complete as `production-evidence-deferred` in `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`: the runbook was committed/pushed, production health/dirty/readiness/outbox/dead-letter prechecks were clean, but deployed production source lacked both `web/node_modules/.bin/playwright` and `web/e2e/production-route-shell.spec.ts`, so browser execution stopped without package install, browser download, token copy, local Playwright, admin/write probe or mutation. Postcheck stayed clean.
 - `planning:post-authenticated-browser-harness-missing-next-boundary-selection` is complete as `planning-closed` in `analysis/planning-post-authenticated-browser-harness-missing-next-boundary-selection-2026-06-25.md`: reconciled the browser gap as a deploy artifact/harness problem and selected a packaging feasibility audit before any deploy asset change.
 - `deployment:production-browser-smoke-harness-packaging-feasibility-audit` is complete as `analysis-closed` in `analysis/deployment-production-browser-smoke-harness-packaging-feasibility-audit-2026-06-25.md`: packaging only e2e/config files is insufficient without Playwright/browser runtime; packaging `node_modules` or browser binaries into release is too broad; installing/downloading on production and copying target OA tokens locally remain forbidden. Browser evidence remains deferred pending a dedicated ops runner design.
-- The next pending boundary is `production:admin-scope-auth-seam-read-only-classification`.
+- `production:admin-scope-auth-seam-read-only-classification` is complete as `production-evidence-deferred` in `analysis/production-admin-scope-auth-seam-read-only-classification-2026-06-25.md`: no HTTP SLO admin token/cookie seam is configured and the two configured target OA applicant live sessions are full-access non-admin with `can_admin_access=false`; no admin API probe, browser probe, write-flow probe or mutation occurred, and pre/post production aggregates stayed clean.
+- The next pending boundary is `planning:controlled-write-flow-evidence-scenario-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.

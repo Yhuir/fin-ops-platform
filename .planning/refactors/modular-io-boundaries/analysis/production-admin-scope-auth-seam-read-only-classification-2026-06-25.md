@@ -1,7 +1,7 @@
 # Production Admin Scope Auth Seam Read-Only Classification - 2026-06-25
 
 **Boundary:** `production:admin-scope-auth-seam-read-only-classification`
-**Status:** `runbook-written`
+**Status:** `production-evidence-deferred`
 **Module closure:** `not-module-closed`
 **Production mutation:** read-only auth/session classification only
 
@@ -154,7 +154,88 @@ Repeat command 1 after classification. Counts should remain unchanged.
 
 ## Execution Evidence
 
-Pending. This runbook must be committed and pushed before production execution.
+The runbook was committed and pushed before production execution in commit `37fd45a4`.
+
+### Precheck
+
+Release and health:
+
+```text
+release_src=/opt/fin-ops/releases/dev-turnover-source-version-persistence-20260625/src
+release_name=dev-turnover-source-version-persistence-20260625
+git_commit=8f525563e10972168014356ff410c4fc8456f377
+{'status': 'ready'}
+```
+
+Aggregate precheck:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+### Supported Admin Auth Env Presence
+
+No supported HTTP SLO admin auth seam is configured:
+
+```text
+http_slo_admin_token_configured=0
+http_slo_cookie_configured=0
+```
+
+### Target OA Applicant Session Classification
+
+Target OA applicant credentials are available and live, but they are non-admin:
+
+```json
+{
+  "access_tiers": {
+    "full_access": 2
+  },
+  "admin_auth_seam_available": false,
+  "allowed_count": 2,
+  "can_access_app_count": 2,
+  "can_admin_access_count": 0,
+  "can_mutate_data_count": 2,
+  "configured_target_credential_count": 2,
+  "login_error_codes": [],
+  "login_error_count": 0,
+  "mode": "target_oa_applicant_admin_scope_classification",
+  "session_count": 2,
+  "version": 1
+}
+```
+
+Because no live admin session seam exists, T0 obeyed the runbook stop gate and did not run the optional admin endpoint metadata probe.
+
+### Postcheck
+
+Health remained ready:
+
+```text
+{'status': 'ready'}
+```
+
+Aggregate postcheck was unchanged:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+## Result
+
+`production-evidence-deferred`.
+
+Admin-scope production evidence is blocked by auth seam availability. There is no configured `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` or `FIN_OPS_HTTP_SLO_COOKIE`, and both configured target OA applicant live sessions are `full_access` non-admin with `can_admin_access=false`. No admin API probe, browser probe, write-flow probe, secret output or production mutation occurred.
+
+Next boundary:
+
+`planning:controlled-write-flow-evidence-scenario-selection`
 
 ## Seven Test Category Assessment
 
