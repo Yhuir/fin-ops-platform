@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-pending`
+Current state: `planning-post-no-oa-production-convergence-next-boundary-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `read-models:no-oa-bank-batch-event-fk-delete-order-fix` as `implementation-closed` in `analysis/read-model-no-oa-bank-batch-event-fk-delete-order-fix-2026-06-25.md`. T0 first completed `production:no-oa-bank-batch-dead-letter-read-only-diagnosis` and proved the remaining production blocker is a no-OA public snapshot delete-order bug: all-scope refresh events dead-letter on the FK from `app.no_oa_bank_batch_events.no_oa_bank_batch_id` to a superseded batch row. The local fix deletes event rows for removed no-OA batches before deleting removed batch rows and adds repository boundary regressions. Production closure remains deferred until deploy/convergence proof. The next T0-only boundary is `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook`.
+Completed `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook` as `production-controlled` in `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`. T0 deployed release `dev-no-oa-fk-20260625014906`, requeued exact no-OA refresh event `3bc506fd-5662-4902-a9b9-19b0d8fbe4a6` once, and proved `no_oa_bank_batch:all` dirty scope done, readiness fresh, `/health/ready` clean and no new sampled no-OA FK/worker errors. Historical obsolete dead-letter rows remain but are not current health blockers. The next T0 boundary is `planning:post-no-oa-production-convergence-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 

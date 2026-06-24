@@ -568,3 +568,17 @@ git diff --check
   - End-to-end business-flow integration tests：本地未新增；当前无 staging DB / local `PGSQL_URL`，生产收敛需后续受控 runbook。
   - Existing feature regression tests：适用；复跑 repository boundary 与 no-OA refresh 回归。
 - 剩余风险：修复尚未部署；生产仍有 `no_oa_bank_batch:all` pending dirty scope、dead-lettered refresh event 和 failed readiness，需后续受控部署/收敛验证后才能声明生产闭环。
+
+## 2026-06-25 - no-OA FK 修复生产部署与收敛
+
+- 目标：将 FK 删除顺序修复发布到生产，并让 `no_oa_bank_batch:all` 从 pending/failed 收敛到 done/fresh。
+- 发布：`./scripts/deploy-oa.sh --release-name dev-no-oa-fk-20260625014906` 成功，active release 为 `/opt/fin-ops/releases/dev-no-oa-fk-20260625014906/src`，`RELEASE.json.git_commit=cc43e262eeb13c1a459d0f96e991666d0db2f280`。
+- 受控操作：发布后旧 event `3bc506fd-5662-4902-a9b9-19b0d8fbe4a6` 仍为 `dead_lettered`，dirty scope 仍为 pending；T0 通过 active release runtime env 执行一次 exact event requeue，reason=`no_oa_fk_delete_order_fix_deployed`，返回 `requeued=true`。
+- 收敛证据：
+  - exact event 变为 `done`，`attempts=1`，`processed_at=2026-06-25 01:52:57.111992+08`。
+  - `no_oa_bank_batch:all` dirty scope 变为 `done`，`source_version=35430`。
+  - `read_model.app_status_readiness` 中 `no_oa_bank_batch:all` 为 `fresh`，`source_versions={"source_version": 35430}`。
+  - `/health/ready` 返回 `status=ready`，`queue_backlog={}`，`failed_jobs=0`，`stale_dirty_scope_count=0`，required worker missing/stale/mismatch 均为 0。
+  - no-OA worker 发布后日志抽样未出现新的 FK violation、dead-letter、PoolTimeout 或 shared-memory 错误。
+- 未执行：没有手工 SQL 更新/删除、没有 mark-done、没有 broad replay、没有 repair `--apply`、没有输出 secret。
+- 剩余风险：历史 obsolete `dead_lettered` rows 仍存在，但当前 `/health/ready` 不再把它们计为 blocker；如需清理，必须另开 bounded maintenance runbook。

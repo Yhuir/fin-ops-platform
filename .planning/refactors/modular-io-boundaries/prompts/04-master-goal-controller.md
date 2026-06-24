@@ -306,19 +306,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook`.
+Start with `planning:post-no-oa-production-convergence-next-boundary-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-no-oa-bank-batch-dead-letter-read-only-diagnosis-2026-06-25.md` and `analysis/read-model-no-oa-bank-batch-event-fk-delete-order-fix-2026-06-25.md`.
-- Write a controlled production deploy/convergence runbook under `analysis/` before any production deploy, requeue, repair, readiness mutation or worker replay.
-- Include exact release/deploy command, pre/post checks, stop gates, rollback/cleanup posture, no-secret posture and exact no-OA convergence verification.
-- Prefer the existing production deploy entrypoint `./scripts/deploy-oa.sh` if the runbook proves it is the current repository-supported release path.
-- Do not perform broad DB mutation, broad queue replay, manual mark-done, arbitrary repair, unbounded worker consume/replay or secret output.
-- Classify the result as `production-evidence-deferred`, `production-controlled` or `needs-human-production-gate`.
+- Read `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`.
+- Reconcile rows 231-234 into the current commit-backed progress baseline.
+- Select the next highest-risk safe boundary from current queue and evidence.
+- Do not repeat the PostgreSQL restart, app/worker restart, no-OA deploy or exact event requeue unless new evidence shows regression.
+- Do not execute broad covered-dead-letter cleanup without a separate bounded maintenance boundary.
+- Do not claim global closure unless commit-backed reconciliation proves all module closure requirements, production/App Status/worker/browser/high-row evidence and Go admission rules are satisfied.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

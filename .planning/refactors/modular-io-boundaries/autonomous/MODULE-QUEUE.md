@@ -245,7 +245,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 231 | `production:app-worker-controlled-restart-readiness-runbook` | production-evidence-deferred | not-module-closed | T0 executed one bounded restart of `fin-ops.service`, `fin-ops-rabbitmq-dispatcher.service` and 20 explicit `fin-ops-worker@*.service` units. All selected units returned `active/running` with `NRestarts=0`, `/health/ready` returned ready within 3s and stability recheck within 1s, and no new PoolTimeout/shared-memory errors appeared. Full production closure remains deferred because one stale `no_oa_bank_batch:all` dirty scope and one dead-lettered `no_oa_bank_batch.read_model.refresh` event remain. |
 | 232 | `production:no-oa-bank-batch-dead-letter-read-only-diagnosis` | production-evidence-deferred | not-module-closed | T0 read-only evidence proved the remaining blocker: `no_oa_bank_batch:all` dirty scope pending, readiness failed at source version 35430, 14 all-scope refresh events dead-lettered on the FK from `app.no_oa_bank_batch_events.no_oa_bank_batch_id` to a still-existing `superseded` batch with 6 event rows. No DB writes, requeue, repair, replay, readiness mutation, deploy or secret output. |
 | 233 | `read-models:no-oa-bank-batch-event-fk-delete-order-fix` | implementation-closed | not-module-closed | Fixed `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)` so event rows for removed no-OA batches are deleted before removed batch rows, including empty snapshot replacement. Added repository boundary regressions and updated module implementation notes. Production closure remains deferred until deployment and controlled convergence proof. |
-| 234 | `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook` | pending | not-module-closed | T0 must prepare a controlled production deploy/convergence runbook for the no-OA FK delete-order fix. Required: deploy/release path evidence, exact post-deploy convergence/requeue or dry-run/apply scope if needed, `/health/ready`, no-OA dirty/outbox/readiness proof. No broad DB mutation, unbounded replay, secret output or manual mark-done without exact-scope proof. |
+| 234 | `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook` | production-controlled | not-module-closed | T0 deployed release `dev-no-oa-fk-20260625014906`, requeued exact event `3bc506fd-5662-4902-a9b9-19b0d8fbe4a6` once after deploy, and proved `no_oa_bank_batch:all` dirty scope done, readiness fresh, `/health/ready` clean and no new no-OA FK/worker errors. Historical obsolete dead-letter rows remain but are not current health blockers. |
+| 235 | `planning:post-no-oa-production-convergence-next-boundary-selection` | pending | not-module-closed | T0 must reconcile the latest production-controlled evidence and select the next highest-risk safe boundary. Do not claim global closure; no product module has full closure until all required production/browser/high-row/App Status evidence is reconciled. |
 
 ## Status Values
 
@@ -260,6 +261,7 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 - `implementation-closed`
 - `planning-closed`
 - `production-evidence-deferred`
+- `production-controlled`
 - `deferred-module-failure`
 - `deferred-scope-too-large`
 - `go-candidate-deferred`
