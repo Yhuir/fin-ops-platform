@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO post-full-state local closure audit
+
+- 目标：执行 `read-models:cost-statistics-post-full-state-local-implementation-closure-audit`，在 full-state snapshot quarantine 后复核成本统计本地实现是否还有必须先修的 implementation gap。
+- 影响范围：`Application` cost statistics route/runtime/query delegates、`CostStatisticsRuntimeService`、`CostStatisticsQueryService`、worker/App Status/manifest registry、modular IO state；不改变运行时代码。
+- 关键决策：未发现新的本地 implementation gap。成本统计本地支持在 repository port、SQL fresh gate、parent aggregate、worker registry、derived lifecycle executor、runtime warmup/retry/rebuild owner、explicit persistence 和 full-state snapshot quarantine 方面已 accounted；local compatibility fallback 和 startup snapshot load 不作为生产闭环证据。
+- 文档影响：新增 post-full-state local closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵。
+- 测试覆盖：本轮是 analysis/accounting only；复用 `tests/test_cost_statistics_runtime_service.py`、`tests/test_cost_statistics_derived_lifecycle_executor.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_read_model_architecture_guards.py` 作为本地证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-full-state-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；不声明 `cost_statistics` module closed。
+- 后续事项：执行 `read-models:next-pilot-selection-after-cost-statistics`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO full-state snapshot quarantine
 
 - 目标：执行 `read-models:cost-statistics-full-state-read-model-snapshot-quarantine`，移除 broad `_persist_state(...)` 对 `cost_statistics_read_models` 的旧全状态写入。

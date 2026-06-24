@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:cost-statistics-full-state-read-model-snapshot-quarantine.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:cost-statistics-post-full-state-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -130,8 +130,10 @@ Current state expected on start:
 - Cost statistics derived lifecycle executor extraction is complete: `CostStatisticsDerivedLifecycleExecutor` owns invalidation, `pending_invoice_rules_changed` persist-empty behavior, no-warmup refresh fallback metadata and enqueued-job accounting; `Application._derived_lifecycle_cost_statistics_executor(...)` is removed and guarded from returning.
 - Cost statistics post-derived local closure audit is analysis-closed: warmup/retry/rebuild app methods are compat-only delegates to `CostStatisticsRuntimeService`.
 - Cost statistics full-state snapshot quarantine is complete: broad `Application._persist_state(...)` no longer serializes `cost_statistics_read_models`, while explicit runtime/query persistence through `_persist_cost_statistics_read_models_best_effort(...)` remains available and startup compatibility loading remains.
+- Cost statistics post-full-state local closure audit is complete: no remaining local implementation gap was found, local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
+- Remaining non-Go read model candidates include `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:cost-statistics-post-full-state-local-implementation-closure-audit.
+- The next pending boundary is read-models:next-pilot-selection-after-cost-statistics.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -227,18 +229,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:cost-statistics-post-full-state-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-cost-statistics unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:cost-statistics-post-full-state-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-full-state-read-model-snapshot-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-derived-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, `docs/modules/cost-statistics/state-machine.md`, and `docs/modules/cost-statistics/tests.md`.
-- Use CodeGraph for structural lookup before any implementation decision.
-- Re-audit cost statistics local implementation closure after full-state snapshot quarantine.
-- Confirm whether any app-owned, old full-state, legacy live-read, direct dirty/outbox, cache publish, read model persistence, worker rebuild, derived lifecycle or route-owned cost statistics support path remains.
-- If no local implementation gap remains, record `production-evidence-deferred` / `not-module-closed` for `cost_statistics`, deferring only real PostgreSQL/worker/App Status/high-row/browser evidence.
-- If a local implementation gap remains, keep `cost_statistics` as `implementation-gap-open`, insert the next narrow boundary before Go candidates, and do not defer production evidence yet.
+For read-models:next-pilot-selection-after-cost-statistics:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-full-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-full-state-read-model-snapshot-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, and `docs/modules/cost-statistics/tests.md`.
+- Use CodeGraph for structural lookup before selecting implementation work.
+- Select the next non-Go read model modular IO pilot after `cost_statistics`.
+- Compare remaining candidates by user-visible stale-read risk, cross-page consistency risk, current implementation gap clarity, narrow first-slice feasibility, existing tests, and Go-admission prerequisites.
+- If the next module is clear, insert its first narrow implementation boundary before Go candidates and set it as the next prompt.
+- If candidate evidence is insufficient, insert a smaller candidate-audit boundary before selecting implementation.
 - Do not implement Go/Fiber/Go Worker while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted static guard, cost statistics runtime/SQL/derived lifecycle tests, app check, docs verification and diff checks.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 
