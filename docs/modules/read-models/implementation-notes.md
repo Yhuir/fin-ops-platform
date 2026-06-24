@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - OA pending payment local implementation closure audit
+
+- 目标：执行 `read-models:oa-pending-payment-local-implementation-closure-audit`，确认 OA 待付款 read model 的 repository port、fresh gate、source-version proof、scope policy、worker fan-out、operation barrier 和 legacy contamination 是否本地闭合。
+- 影响范围：删除 `Application` 上 OA pending payment 专属旧 rebuild/list/mark/live helper；真实 worker/projection 路径继续由 `InvoiceUsageCollectionReadModelRefreshService`、`InvoiceUsageCollectionSqlProjectionBuilder` 和 `OaPendingPaymentReadModelRepositoryPort` 承担。
+- 关键决策：旧 app-level rebuild 路径没有运行时调用者且会绕开 worker projection builder 直接写 read model，删除优于 compat-only 保留；`oa_pending_payment` 本地实现支持可进入 `production-evidence-deferred`，但全局模块 closure 不成立。
+- 文档影响：新增 modular IO analysis，更新 read-models/OA pending payments 实施记录、OA 测试矩阵和 autonomous state/queue/next prompt；共享 read model 状态定义不变。
+- 测试覆盖：`tests/test_oa_pending_payment_api.py` 新增 removed-helper guard；OA API fresh gate 与 invoice usage collection SQL runtime tests 继续覆盖真实 worker builder 路径。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-local-implementation-closure-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
+
 ## 2026-06-24 - OA pending payment freshness / operation barrier audit
 
 - 目标：执行 `read-models:oa-pending-payment-refresh-freshness-operation-barrier-audit`，审计 OA 待付款 read model fresh gate、force refresh、`all` fan-out/month proof、source-version proof 和写后 operation barrier 行为。

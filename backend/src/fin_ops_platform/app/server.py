@@ -16681,12 +16681,6 @@ class Application:
             return [normalized]
         return self._list_search_months()
 
-    def list_oa_pending_payment_scope_shards(self, scope_key: str) -> list[str]:
-        normalized = str(scope_key or "").strip()
-        if SEARCH_MONTH_RE.match(normalized):
-            return [normalized]
-        return self._list_search_months()
-
     def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
         repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
         mark_scope = getattr(repository, "mark_input_invoice_usage_scope", None)
@@ -16705,16 +16699,6 @@ class Application:
                 scope_key=str(scope_key or "all").strip() or "all",
                 row_count=0,
                 source_versions=self._output_invoice_collection_expected_source_versions(),
-            )
-
-    def mark_oa_pending_payment_scope_empty(self, scope_key: str) -> None:
-        repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
-        mark_scope = getattr(repository, "mark_oa_pending_payment_scope", None)
-        if callable(mark_scope):
-            mark_scope(
-                scope_key=str(scope_key or "all").strip() or "all",
-                row_count=0,
-                source_versions=self._oa_pending_payment_expected_source_versions(),
             )
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
@@ -16748,47 +16732,6 @@ class Application:
         source_versions = self._output_invoice_collection_expected_source_versions()
         save_rows(scope_key=month, rows=rows, source_versions=source_versions)
         return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
-
-    def rebuild_oa_pending_payment_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        month = str(scope_key or "").strip()
-        if month != "all" and not SEARCH_MONTH_RE.match(month):
-            raise ValueError("OA pending payment read model scope_key must be all or YYYY-MM.")
-        repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
-        save_rows = getattr(repository, "save_oa_pending_payment_rows", None)
-        if not callable(save_rows):
-            raise RuntimeError("OA pending payment SQL read repository is not configured.")
-        rows = self._oa_pending_payment_live_rows(month=None if month == "all" else month)
-        source_versions = self._oa_pending_payment_expected_source_versions()
-        save_rows(scope_key=month, rows=rows, source_versions=source_versions)
-        return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
-
-    def _oa_pending_payment_live_rows(self, *, month: str | None) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for view_mode in ("completed", "in_progress"):
-            rows.extend(self._oa_pending_payment_live_rows_for_view(month=month, view_mode=view_mode))
-        return rows
-
-    def _oa_pending_payment_live_rows_for_view(self, *, month: str | None, view_mode: str) -> list[dict[str, object]]:
-        page_size = 200
-        page = 1
-        rows: list[dict[str, object]] = []
-        total_rows: int | None = None
-        while True:
-            payload = self._oa_pending_payment_service().list_rows(
-                page=page,
-                page_size=page_size,
-                month=month,
-                sort_field="bank_trade_time",
-                sort_direction="desc",
-                view_mode=view_mode,
-            )
-            page_rows = [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
-            rows.extend(page_rows)
-            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
-            total_rows = int(pagination.get("total") or len(rows))
-            if len(rows) >= total_rows or not page_rows:
-                return rows
-            page += 1
 
     @staticmethod
     def _invoice_relation_live_rows(list_rows: Any, *, month: str | None) -> list[dict[str, object]]:

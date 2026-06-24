@@ -217,6 +217,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Local read model implementation closure audit
+
+- 目标：执行 `read-models:oa-pending-payment-local-implementation-closure-audit`，核对 repository port、fresh gate、source-version proof、scope policy、worker fan-out、operation barrier、legacy contamination 和测试/文档是否已本地闭合。
+- 影响范围：移除 `Application` 上已无运行时调用者的 OA pending payment app-level rebuild/list/mark/live helper；真实 worker 路径继续使用 `InvoiceUsageCollectionReadModelRefreshService`、`InvoiceUsageCollectionSqlProjectionBuilder` 和 `OaPendingPaymentReadModelRepositoryPort`。
+- 关键决策：旧 `Application.rebuild_oa_pending_payment_read_model_scope(...)` 路径会 live scan 后直接写 read model，属于可删除旧链路；删除后 OA pending payment 的本地 read model 实现支持已可进入 `production-evidence-deferred`，但模块不声明全局 closed。
+- 文档影响：新增 modular IO analysis，更新 read-models/OA pending payments 实施记录、测试矩阵、state machine、autonomous queue/state/next prompt；状态定义不变。
+- 测试覆盖：`tests/test_oa_pending_payment_api.py` 中原 legacy 行为测试改为防回归 guard，证明旧 `Application` helper 不能返回；OA API fresh gate 和 invoice usage collection projection/worker 回归继续覆盖真实路径。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-local-implementation-closure-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL dirty/outbox/readiness、`invoice-usage-collection` worker drain、App Status、high-row API 和 authenticated browser smoke 仍记录为 production evidence deferred。
+
 ## 2026-06-20 - rows 加载失败刷新恢复 Browser E2E
 
 - 目标：补齐 OA 待付款核对页的本地 `NETWORK-RECOVERY` 负面链路，防止 rows 首屏暂时失败时显示普通空态或用户无法从页面恢复。
@@ -374,10 +384,10 @@
 ## 2026-06-17 - OA pending read model runtime freshness 闭环
 
 - 目标：修复 Phase 08 runtime smoke 中发现的默认 `all` 视图持续 `refreshing`、手工 v3 rebuild 后又被旧刷新路径写回 v1/空 workflow status 的问题。
-- 影响范围：`InvoiceUsageCollectionReadModelRefreshService`、`PostgresReadModelRepository.list_oa_pending_payment_rows`、`Application.rebuild_oa_pending_payment_read_model_scope` 兼容路径、SQL runtime 测试、生产发布/worker 运维。
+- 影响范围：`InvoiceUsageCollectionReadModelRefreshService`、`PostgresReadModelRepository.list_oa_pending_payment_rows`、当时仍存在的 `Application.rebuild_oa_pending_payment_read_model_scope` 兼容路径、SQL runtime 测试、生产发布/worker 运维；该 app-level 兼容路径已在 2026-06-24 local closure audit 中删除，当前 rebuild owner 是 `InvoiceUsageCollectionSqlProjectionBuilder`。
 - 关键决策：刷新事件处理前复用 durable queue 的 `read_model_refresh_is_current` guard；stale event 不 rebuild、不 complete dirty scope；OA pending `all` freshness 优先从实际 rows 的 `source_versions` 聚合，历史空 scope 不参与有行视图的新鲜度证明。
 - 文档影响：更新本模块 implementation-notes、tests、state-machine；生产发布仍按 `scripts/deploy-oa.sh`，不能手工绕过 release/worker helper。
-- 测试覆盖：新增/更新 `tests/test_invoice_usage_collection_sql_runtime.py::test_oa_refresh_handler_skips_stale_source_version_before_rebuild`、`test_oa_repository_all_scope_aggregates_monthly_scope_source_versions`，以及 `tests/test_oa_pending_payment_api.py::test_legacy_application_rebuild_includes_completed_and_in_progress_rows`。
+- 测试覆盖：新增/更新 `tests/test_invoice_usage_collection_sql_runtime.py::test_oa_refresh_handler_skips_stale_source_version_before_rebuild`、`test_oa_repository_all_scope_aggregates_monthly_scope_source_versions`，以及当时的 `tests/test_oa_pending_payment_api.py::test_legacy_application_rebuild_includes_completed_and_in_progress_rows`；该 legacy 行为测试已在 2026-06-24 改为 removed-helper guard。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_oa_pending_payment_api tests.test_oa_pending_payment_service tests.test_oa_payment_status_service tests.test_oa_pending_payment_command_service tests.test_oa_projection_sql_runtime tests.test_mongo_oa_adapter -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations tests.test_platform_runtime_boundary_guards -v`；`cd web && npm test -- OaPendingPaymentsPage.test.tsx --run`；`cd web && npm run build`；本地 Playwright 打开 `/oa-pending-payments` 并切换“进行中 OA”。
 - 运行时证据：当前源码 rebuild 后 7 个活跃月份 scope 均写入 `oa-pending-payment:v3` / `2026-06-17-workflow-status-v1`；HTTP smoke 显示 `view_mode=in_progress` fresh 且 total=0、`view_mode=completed` fresh 且 total=210。当前 OA projection 没有 `in_progress` 行，因此页面空表是事实数据，不是未加载。
 - 未测风险：生产服务器 heartbeat 显示 `invoice-usage-collection` worker 仍在运行旧部署；未完成 release activate 前，服务器 worker 可能继续用旧逻辑覆盖 read model。由于当前工作树包含未提交 Phase 08 改动，`scripts/deploy-oa.sh` 标准发布会拒绝 dirty worktree，必须先提交/发布/重启 worker 后再做生产 smoke。

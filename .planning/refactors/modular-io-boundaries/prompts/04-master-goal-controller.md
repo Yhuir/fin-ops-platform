@@ -69,46 +69,21 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:pending-invoice-scope-policy-filter-allowlist.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:oa-pending-payment-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
-- bank_detail completed the current local implementation support slices through the collaborator audit, but bank_detail is not full module closed.
-- bank_detail production PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
-- workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed.
-- WorkbenchRelationReadModelRepositoryPort is now wired into app/worker/projection builder relation read-model paths.
-- WorkbenchRelationDerivedLifecycleExecutor now owns derived lifecycle refresh enqueue payload behavior.
-- Transaction pair relation persist now uses `PostgresWorkbenchRelationRepository`.
-- WorkbenchRelationCommandRepositoryAdapter now owns command repository snapshot merge/apply behavior.
-- WorkbenchPairRelationPersistService now owns non-transactional pair relation persist/schedule/background/timing behavior.
-- WorkbenchPairRelationRollbackRestoreService now owns pair relation snapshot rollback restore behavior.
-- WorkbenchExceptionRollbackRestoreService now owns exception/pair/candidate/override rollback restore behavior.
-- Batch-accounting restore callback now delegates to WorkbenchPairRelationRollbackRestoreService in in-memory mode.
-- No-OA normal relation writes are command-service gated and active reads mostly use `relation_facade`.
-- No-OA application snapshot/version/persist/rollback pair service usage now goes through `NoOaPairRelationSnapshotPort`.
-- No-OA domain repair/read active relation reads go through `NoOaRelationRepairReadPort`.
-- WorkbenchWriteFacade pair service call sites are classified.
-- WorkbenchWriteFacade active relation reads, withdraw preview fallback and pair snapshots now go through `WorkbenchWriteRelationReadSnapshotPort`.
-- Core confirm/cancel writes are already command-service gated by existing guards.
-- WorkbenchWriteFacade cash special metadata mutation now goes through `WorkbenchWriteRelationSpecialMetadataMutationPort`.
-- WorkbenchWriteFacade no longer stores or accepts broad `pair_relation_service`.
-- Workbench matching/orchestrator active relation reads now go through `WorkbenchMatchingRelationReadPort` backed by existing command-boundary reads.
-- Workbench payload/live-row active relation reads now go through `WorkbenchPayloadRelationReadPort`.
-- Workbench/no-OA source-version relation snapshot reads now go through `WorkbenchRelationSourceVersionProvider`.
-- OA invoice offset sync active relation reads now go through `WorkbenchOaInvoiceOffsetRelationReadPort`.
-- OA attachment context repair active relation reads now go through `WorkbenchOaAttachmentRepairRelationReadPort`.
-- Confirm-link context expansion active relation reads now go through `WorkbenchConfirmLinkContextRelationReadPort`.
-- Auto-pair conflict active relation reads now go through `WorkbenchAutoPairConflictRelationReadPort`.
-- Retained-OA supplemental relation reads now go through `WorkbenchRetainedOaSupplementalRelationReadPort`.
-- Relation case-id collision avoidance now goes through `WorkbenchRelationCaseIdAllocator`.
-- Broad app `_persist_state(...)` no longer serializes Workbench relation snapshot facts.
-- Turnover primary builders and `TurnoverLedgerLocalClosureConnection` now depend on explicit `TurnoverLedgerLocalPairSnapshotPort` instead of broad pair service injection.
-- ETC repair/link/migration callbacks are classified as explicit post-command persist boundaries.
-- Final local closure/defer accounting classified remaining local workbench relation references as explicit ports/adapters/repositories/runtime snapshot support/tools/tests.
-- Real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
-- `pending_invoice` is selected as the next non-Go read model implementation pilot because it consumes both `bank_detail` and `workbench_relation` source versions and has special `expense|income:<filter>[:YYYY-MM]` scope semantics.
-- `PendingInvoiceReadModelRepositoryPort` now narrows rows, filter-options, source-version and projection save/mark repository access.
-- Pending invoice scope policy now rejects unsupported expense/income filter groups at gateway validation.
-- The next pending boundary is read-models:pending-invoice-mutation-freshness-target-contract.
+- bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
+- workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
+- pending_invoice local implementation support is accounted for after repository port, freshness/barrier audit, scope policy filter allowlist and mutation freshness target work; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- oa_pending_payment local implementation support is accounted for after repository port, freshness/barrier audit and local closure audit; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- `OaPendingPaymentReadModelRepositoryPort` is wired for rows/detail and projection save/mark/prune paths.
+- OA pending payment Workbench relation source-version lookup uses the Workbench relation port.
+- OA pending payment rows/filter-options/detail freshness gates return refreshing/unavailable on missing/stale/source mismatch and enqueue through `ReadModelRefreshGateway`.
+- OA pending payment `all` refresh is fan-out control scope; worker expansion enqueues concrete month shards and prunes orphan shards.
+- Frontend write-after-read operation barrier selection prefers concrete month scopes over fan-out-only `all` when mutation responses return both.
+- Unused app-level OA pending payment rebuild/list/mark/live helpers were removed from `Application`.
+- No module is globally closed.
+- The next pending boundary is read-models:next-pilot-selection-after-oa-pending-payment.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -204,27 +179,24 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:oa-pending-payment-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-oa-pending-payment unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:oa-pending-payment-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-repository-port-extraction.md`.
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-refresh-freshness-operation-barrier-audit.md`.
-- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/oa-pending-payments/tests.md`, and `docs/modules/oa-pending-payments/implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/services/read_model_manifest.py`.
-- Read `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_repository.py`, `oa_pending_payment_read_model_service.py`, `invoice_usage_collection_sql_projection.py`, `invoice_usage_collection_read_model_refresh.py`, `read_model_scope_policy.py`, `read_model_refresh_gateway.py`, `operation_freshness_barrier.py`, `postgres_state_store.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/worker.py`, and relevant OA pending payment tests.
-- Use CodeGraph for remaining OA pending payment local implementation gap discovery before editing code.
-- Audit whether local OA pending payment repository port, query fresh gate, source-version proof, force refresh/scope policy, worker fan-out, operation barrier, legacy contamination, frontend stale/read-after-write behavior, tests and docs are accounted for.
-- Classify remaining local references as removed, explicit port, compat-only with deletion condition, blocked-by-human production gate, or implementation gap.
-- If a narrow local non-Go implementation gap remains, insert and implement it before Go candidates; otherwise record production-evidence-deferred for real PostgreSQL/worker/App Status/high-row/browser evidence without claiming global module closure.
+For read-models:next-pilot-selection-after-oa-pending-payment:
+- Read the completed local closure audits for bank_detail, workbench_relation, pending_invoice and oa_pending_payment.
+- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, and the module docs/tests for remaining candidates.
+- Compare remaining read model candidates such as input invoice usage, output invoice collection, cost statistics, tax offset, turnover ledger, no-OA bank batches and any other manifest entries not yet selected as implementation pilots.
+- Use CodeGraph for structural lookup before writing analysis.
+- Select exactly one next non-Go read model implementation pilot.
+- Prefer the candidate with the highest stale-read/cross-page risk, clear IO boundary, manageable first implementation slice, and existing test leverage.
+- Insert the selected pilot's first narrow implementation boundary before Go candidates.
 - Confirm Go admission remains blocked unless all documented Go prerequisites are actually satisfied.
 - Do not declare any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
-- Do not change OA payment status semantics, OA MySQL write-back, payment-admitted source adapter behavior, pending relation promotion, command service behavior, UI workflow or shared worker event semantics.
 - Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
 - Run docs verification and diff checks; run targeted tests only if behavior changes.
 - Commit and push to origin/dev.
-- Continue to the next pending boundary if verification passes.
+- Continue to the selected pilot's first implementation boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.

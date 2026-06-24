@@ -969,53 +969,18 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(seen_kwargs["view_mode"], "in_progress")
         self.assertEqual(payload["viewMode"], "in_progress")
 
-    def test_legacy_application_rebuild_includes_completed_and_in_progress_rows(self) -> None:
-        class RecordingRepository:
-            def __init__(self) -> None:
-                self.saved: dict[str, object] | None = None
+    def test_legacy_application_rebuild_helpers_are_removed(self) -> None:
+        removed_helpers = [
+            "list_oa_pending_payment_scope_shards",
+            "mark_oa_pending_payment_scope_empty",
+            "rebuild_oa_pending_payment_read_model_scope",
+            "_oa_pending_payment_live_rows",
+            "_oa_pending_payment_live_rows_for_view",
+        ]
 
-            def save_oa_pending_payment_rows(self, **kwargs: object) -> None:
-                self.saved = dict(kwargs)
-
-        class RecordingService:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def list_rows(self, **kwargs: object) -> dict[str, object]:
-                self.calls.append(dict(kwargs))
-                view_mode = str(kwargs.get("view_mode") or "completed")
-                return {
-                    "rows": [
-                        {
-                            "id": f"row-{view_mode}",
-                            "oa": {"id": f"oa-{view_mode}", "workflowStatus": view_mode},
-                            "paymentStatus": {"code": "unpaid", "label": "未支付"},
-                            "bankTransaction": {},
-                            "invoice": {},
-                        }
-                    ],
-                    "pagination": {"page": kwargs.get("page"), "pageSize": kwargs.get("page_size"), "total": 1},
-                }
-
-        app = object.__new__(Application)
-        repository = RecordingRepository()
-        service = RecordingService()
-        app._oa_pending_payment_sql_read_repository = repository
-        app._oa_pending_payment_service = lambda: service  # type: ignore[method-assign]
-
-        result = app.rebuild_oa_pending_payment_read_model_scope("2026-05")
-
-        self.assertEqual(result["scope_key"], "2026-05")
-        self.assertEqual(result["row_count"], 2)
-        self.assertEqual([call["view_mode"] for call in service.calls], ["completed", "in_progress"])
-        self.assertIsNotNone(repository.saved)
-        assert repository.saved is not None
-        self.assertEqual(repository.saved["scope_key"], "2026-05")
-        self.assertEqual(repository.saved["source_versions"], oa_pending_payment_source_versions())
-        self.assertEqual(
-            [row["oa"]["workflowStatus"] for row in repository.saved["rows"]],  # type: ignore[index]
-            ["completed", "in_progress"],
-        )
+        for helper_name in removed_helpers:
+            with self.subTest(helper_name=helper_name):
+                self.assertFalse(hasattr(Application, helper_name))
 
     def test_read_endpoints_require_fin_ops_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
