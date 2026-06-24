@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-module-closure-evidence-ownership-map-pending`
+Current state: `read-model-module-closure-worker-wave-1-prompts-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-scope-contract-runtime-classification-next-boundary-selection` as `planning-closed` in `analysis/planning-post-scope-contract-runtime-classification-next-boundary-selection-2026-06-25.md`. T0 reconciled row245 clean production matrix and row246 clean scope-contract dry-run classification, rejected final closure, production cleanup, immediate worker creation and Go admission as premature, and selected `planning:read-model-module-closure-evidence-ownership-map` as the next boundary. No production command, worker thread or closure claim occurred.
+Completed `planning:read-model-module-closure-evidence-ownership-map` as `planning-closed` in `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`. T0 mapped read-model-heavy modules to route/API surfaces, local docs/test owners, row245/246 production evidence, remaining authenticated API/browser/high-row gaps, and exact worker ownership/handoff paths. No production command, worker thread, runtime mutation or closure claim occurred. The next boundary is `planning:read-model-module-closure-worker-wave-1-prompts`.
 
 ## Closed Or Deferred Slices
 
