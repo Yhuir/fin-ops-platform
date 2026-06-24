@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batches-focused-api-freshness-recheck-selected`
+Current state: `no-oa-bank-batches-api-stale-reasons-sanitized-probe-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:no-oa-bank-batches-api-stale-read-only-diagnosis` as `production-diagnosis-closed` in `analysis/production-no-oa-bank-batches-api-stale-read-only-diagnosis-2026-06-25.md`. T0 used only read-only root SSH/deployed PostgreSQL metadata and no production API call. After Row280's GET-triggered refresh, current `month=2026-06,bucket=unsubmitted` no-OA rows have 0 source-version mismatches against both the exact deployed base expected contract and the optional downstream-key contract; dirty/outbox/readiness are done/fresh and no read-model dead letters exist. Row280's no-OA stale result is classified as stale persisted rows before the GET-triggered refresh, not a current source-version contract drift. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-focused-api-freshness-recheck`.
+Completed `production:no-oa-bank-batches-focused-api-freshness-recheck` as `production-evidence-deferred` in `analysis/production-no-oa-bank-batches-focused-api-freshness-recheck-2026-06-25.md`. T0 reused the Row280 in-process target OA applicant credential seam without printing credentials/tokens and ran only the focused `no_oa_bank_batches` probe. The endpoint returned HTTP 200 and p95 `165.274ms`, but still reported `read_model_status=stale` with `refresh_enqueued_count=1`; full user-scope/browser/admin/write probes were not run. Postcheck showed `/health/ready` ready, dirty scopes done, readiness fresh, read-model outbox done, no dead letters, and the GET-triggered no-OA refresh converged to done/fresh. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-api-stale-reasons-sanitized-probe`.
 
 ## Closed Or Deferred Slices
 
