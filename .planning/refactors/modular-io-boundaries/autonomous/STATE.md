@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-route-shell-sanitized-output-selected`
+Current state: `production-browser-runner-bundle-contract-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-ops-runner-design` as `analysis-closed` in `analysis/deployment-production-browser-smoke-ops-runner-design-2026-06-25.md`. T0 designed a dedicated controlled browser runner path that keeps Playwright/browser runtime outside the normal app release and production app host, uses an in-memory token handoff contract, emits sanitized metadata only, and requires pre/post production health/read-model aggregate checks. The design found one pre-run contract gap: `web/e2e/production-route-shell.spec.ts` failure output can include page body `textSample`. Next boundary is `frontend:production-route-shell-sanitized-output-contract`.
+Completed `frontend:production-route-shell-sanitized-output-contract` as `implementation-closed` in `analysis/frontend-production-route-shell-sanitized-output-contract-2026-06-25.md`. T0 removed production route-shell `textSample` failure output, preserved route path/session/loading classifications and mutating request guard, and extended `tests/test_playwright_e2e_strict_diagnostics.py` to reject `textSample` and `bodyText.slice`. Targeted verification passed with 8/8 tests. Next boundary is `deployment:production-browser-smoke-runner-bundle-contract`.
 
 ## Closed Or Deferred Slices
 

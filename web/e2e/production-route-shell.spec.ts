@@ -51,7 +51,7 @@ test.describe("production route shell smoke", () => {
       },
     ]);
 
-    const routeResults: Array<{ path: string; blockedSession: boolean; stillLoading: boolean; textSample: string }> = [];
+    const routeResults: Array<{ path: string; blockedSession: boolean; stillLoading: boolean }> = [];
     for (const path of routePaths) {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
@@ -59,7 +59,7 @@ test.describe("production route shell smoke", () => {
       const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
       const blockedSession = /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问/.test(bodyText);
       const stillLoading = bodyText.includes("正在加载页面") && bodyText.length < 80;
-      routeResults.push({ path, blockedSession, stillLoading, textSample: bodyText.slice(0, 80) });
+      routeResults.push({ path, blockedSession, stillLoading });
     }
 
     const failedRoutes = routeResults.filter((result) => result.blockedSession || result.stillLoading);

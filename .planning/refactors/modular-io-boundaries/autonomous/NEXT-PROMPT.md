@@ -1,52 +1,63 @@
 # Next Prompt
 
-Continue after `deployment:production-browser-smoke-ops-runner-design`.
+Continue after `frontend:production-route-shell-sanitized-output-contract`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row301 designed a dedicated controlled production browser runner path outside the normal app release and production app host.
-- The runner design keeps Playwright/browser runtime out of app releases, avoids installing/downloading tooling on the production app host, uses in-memory target OA token handoff, emits sanitized metadata only, excludes admin/write flows and requires pre/post health/read-model aggregate checks.
-- The design found a pre-run contract gap: `web/e2e/production-route-shell.spec.ts` failure output can include page body `textSample`.
-- Browser production evidence remains deferred until runner contract, token broker and execution are implemented and run.
+- Row302 removed production route-shell page body samples from failure output and added static guard coverage.
+- Targeted verification passed: `python -m pytest tests/test_playwright_e2e_strict_diagnostics.py -q` with 8/8 tests.
+- Browser production evidence remains deferred until runner bundle, runner runtime/token broker and production execution are implemented.
 - Admin evidence remains deferred because no admin HTTP SLO token/cookie seam exists and target OA applicant sessions are full-access non-admin.
 - Write apply remains blocked pending explicit approval, reviewed reversible business object, rollback/idempotency/audit acceptance, convergence expectations and suitable auth.
 - Global/module closure remains open.
 
 ## Next Boundary
 
-`frontend:production-route-shell-sanitized-output-contract`
+`deployment:production-browser-smoke-runner-bundle-contract`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row301 design evidence if it is not already committed.
-3. Inspect:
+2. Commit/push Row302 implementation evidence if it is not already committed.
+3. Review:
+   - `analysis/deployment-production-browser-smoke-ops-runner-design-2026-06-25.md`;
    - `web/e2e/production-route-shell.spec.ts`;
-   - existing e2e/static tests that can guard production smoke behavior;
    - `web/playwright.config.ts`;
    - `web/package.json`;
-   - `analysis/deployment-production-browser-smoke-ops-runner-design-2026-06-25.md`.
-4. Harden the route-shell production smoke output so failures do not persist page body samples.
+   - `scripts/deploy_oa.py`;
+   - `docs/operations/deployment.md`;
+   - `deploy/oa/README.md`.
+4. Define the minimal browser smoke runner bundle contract outside normal app release packaging.
 
 ## Constraints
 
-- Do not run production browser tests.
+- Do not add browser e2e files or Playwright dependencies to the normal app release archive.
+- Do not package `node_modules` or browser binaries into app release artifacts.
+- Do not deploy or run production browser smoke.
 - Do not install/download packages or browsers.
-- Do not change app auth semantics.
-- Do not remove the read-only mutating request guard.
-- Preserve useful diagnostics: route path, blocked-session/loading classification and mutating request method/path are allowed.
-- Do not store page body text, response bodies, tokens, cookies, env values, payload rows or business identifiers.
+- Do not implement token broker in this slice.
+- Do not print/store secrets, tokens, cookies, env values, response bodies, payload rows or business identifiers.
+
+## Expected Output
+
+An analysis/contract record that defines:
+
+- files included in the browser smoke bundle;
+- commit/release metadata;
+- pinned runtime/image expectations;
+- command shape;
+- redacted artifact rules;
+- pre/post production check requirements;
+- docs impact;
+- the next safe boundary.
 
 ## Required Verification
 
-- Prefer a targeted static/frontend test if an existing test harness can assert the output contract cheaply.
-- Run the smallest relevant local check for the changed file.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
-- Do not execute production browser smoke.
-- Do not broaden to runner implementation, token broker, deploy script changes or production commands in this slice.
-- Do not claim browser evidence or global closure from output hardening alone.
+- Stop before deploy, production browser execution, token broker implementation or production host mutation.
+- Do not claim browser evidence or global closure from the bundle contract alone.

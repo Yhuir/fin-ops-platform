@@ -178,6 +178,8 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         self.assertIn("FIN_OPS_E2E_SKIP_WEBSERVER=1", package_json)
         self.assertIn("PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com", package_json)
         self.assertIn("e2e/production-route-shell.spec.ts", package_json)
+        self.assertNotIn("textSample", source)
+        self.assertNotIn("bodyText.slice", source)
 
     def test_production_admin_app_health_smoke_keeps_secret_admin_and_readonly_guards(self) -> None:
         source = PRODUCTION_ADMIN_APP_HEALTH_SPEC_PATH.read_text(encoding="utf-8")
