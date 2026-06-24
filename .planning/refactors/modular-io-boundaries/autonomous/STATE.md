@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-no-oa-source-version-contract-deep-diagnosis-selected`
+Current state: `pending-invoice-source-version-contract-alignment-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:pending-invoice-no-oa-api-freshness-mismatch-read-only-diagnosis` as `production-diagnosis-closed` in `analysis/production-pending-invoice-no-oa-api-freshness-mismatch-read-only-diagnosis-2026-06-25.md`. T0 used root SSH and direct deployed PostgreSQL read repositories only; no API endpoint call or production mutation occurred. Pending invoice `expense:all` repository payload is fresh and populated, but API expected-source gate reports source-version mismatches, explaining `pending_invoices_rows` as HTTP 200/refreshing and `pending_invoices_filter_options` as HTTP 202/refreshing. no-OA dirty/outbox/readiness are clean, but API stale is explained by application-level row source-version comparison being stricter than App Status aggregate readiness. Exact no-OA expected-vs-row mismatch keys and pending invoice writer/expected contract remain open.
+Completed `production:pending-invoice-no-oa-source-version-contract-deep-diagnosis` as `production-diagnosis-closed` in `analysis/production-pending-invoice-no-oa-source-version-contract-deep-diagnosis-2026-06-25.md`. T0 used root SSH and direct deployed PostgreSQL read-only metadata only; no API endpoint call or production mutation occurred. Pending invoice `expense:all` expected-vs-actual source versions still mismatch after completed refreshes because aggregate source-version proof is built from all 32 historical `expense:all:%` shard rows, including zero-row historical shards not rebuilt in the recent 2026 refresh window; projection writer also includes `invoice_lifecycle_policy_schema_version` while API expected source versions omit it. no-OA exact base expected-vs-row mismatch is `bank_transaction_category_snapshot_version_mismatch`; App Status `all/fresh` remains coarser than row-level API freshness. Next boundary is a local pending invoice source-version contract alignment before any production rebuild/convergence runbook.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:pending-invoice-no-oa-api-freshness-mismatch-read-only-diagnosis`
+`production:pending-invoice-no-oa-source-version-contract-deep-diagnosis`
 
 ## Next Prompt
 
-`production:pending-invoice-no-oa-source-version-contract-deep-diagnosis`
+`read-models:pending-invoice-source-version-contract-alignment`
