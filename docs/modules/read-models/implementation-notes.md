@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset worker rebuild executor extraction
+
+- 目标：执行 `read-models:tax-offset-worker-rebuild-executor-port-extraction`，把 `Application.rebuild_tax_offset_read_model_scope(...)` 中的 app-owned worker rebuild 行为迁出到显式 executor/service boundary。
+- 影响范围：`TaxOffsetWorkerRebuildExecutor`、tax offset app service assembly、tax offset read model persistence/fresh cache publishing tests、read model architecture guards 和 modular IO state；不改变 tax business/API/UI/worker event/queue/schema/SQL projection builder 合同。
+- 关键决策：`TaxOffsetWorkerRebuildExecutor` 现在负责 month scope validation、payload loader、source-version lookup、read model upsert、snapshot persistence、fresh Redis month/summary cache envelope publish 和 `scope_key`/`month`/`entry_count` result。`Application.rebuild_tax_offset_read_model_scope(...)` 保留为 compat-only thin delegate。
+- 文档影响：新增 worker rebuild executor extraction analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；共享 read model 状态机定义不变。
+- 测试覆盖：新增 `tests/test_tax_offset_worker_rebuild_executor.py`；扩展 `tests/test_read_model_architecture_guards.py` 的 direct fresh allowlist 和 thin delegate guard；复跑 tax offset API/SQL runtime/read model architecture guard 目标测试。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`。
+
 ## 2026-06-24 - Tax offset local closure audit found worker rebuild gap
 
 - 目标：执行 `read-models:tax-offset-local-implementation-closure-audit`，确认税金抵扣本地实现支持是否可进入 production evidence defer。

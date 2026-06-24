@@ -118,7 +118,6 @@ from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor impo
     InvoiceLifecycleDerivedLifecycleExecutor,
 )
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
-from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import (
@@ -339,6 +338,7 @@ from fin_ops_platform.services.tax_offset_read_model_service import (
 )
 from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.tax_offset_worker_rebuild_executor import TaxOffsetWorkerRebuildExecutor
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import (
@@ -1292,6 +1292,12 @@ class Application:
             month_metric_emitter=self._emit_tax_offset_month_metric,
             calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
             duration_ms=self._duration_ms,
+        )
+        self._tax_offset_worker_rebuild_executor = TaxOffsetWorkerRebuildExecutor(
+            runtime_service=self._tax_offset_runtime_service,
+            read_model_service=getattr(self, "_tax_offset_read_model_service", None),
+            month_payload_loader=self._tax_api_routes.get_tax_offset,
+            persist_read_models=self._persist_tax_offset_read_models_best_effort,
         )
         self._tax_offset_dependency_key = self._tax_offset_current_dependency_key()
 
@@ -16663,55 +16669,8 @@ class Application:
         return self._cost_statistics_runtime().rebuild_read_model_scope(scope_key)
 
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        month = self._tax_offset_request_scope_key(scope_key)
-        payload = self._tax_api_routes.get_tax_offset(month)
-        source_versions = self._tax_offset_expected_source_versions()
-        read_model = self._tax_offset_read_model_service.upsert_read_model(
-            month,
-            payload,
-            generated_at=datetime.now().isoformat(),
-            source_scope_keys=[month],
-            source_versions=source_versions,
-            cache_status="ready",
-        )
-        warmed_scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
-        self._persist_tax_offset_read_models_best_effort(
-            snapshot=self._tax_offset_read_model_service.snapshot_scope_keys([warmed_scope_key]),
-            changed_scope_keys=[warmed_scope_key],
-            operation="worker_tax_offset_read_model_refresh",
-        )
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached):
-            cached_payload = dict(payload)
-            cached_payload["read_model_status"] = "fresh"
-            cached_payload["read_model_scope_key"] = warmed_scope_key
-            cached_payload["source_versions"] = source_versions
-            self._runtime_redis_set_json_best_effort(
-                self._tax_offset_redis_cache_key(warmed_scope_key, source_versions=source_versions),
-                build_fresh_cache_envelope(
-                    cached_payload,
-                    scope_key=warmed_scope_key,
-                    source_versions=source_versions,
-                    schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-                ),
-                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
-            )
-            self._runtime_redis_set_json_best_effort(
-                self._tax_offset_summary_redis_cache_key(warmed_scope_key, source_versions=source_versions),
-                build_fresh_cache_envelope(
-                    self._tax_offset_summary_payload(cached_payload, scope_key=warmed_scope_key),
-                    scope_key=warmed_scope_key,
-                    source_versions=source_versions,
-                    schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-                ),
-                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
-            )
-        return {
-            "scope_key": warmed_scope_key,
-            "month": month,
-            "entry_count": self._tax_offset_month_entry_count(payload),
-        }
+        self._ensure_tax_offset_application_services()
+        return self._tax_offset_worker_rebuild_executor.rebuild_scope(scope_key)
 
     @staticmethod
     def _invoice_relation_live_rows(list_rows: Any, *, month: str | None) -> list[dict[str, object]]:

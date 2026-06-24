@@ -50,8 +50,8 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "readModelStatus=fresh",
     ): (1, "camelCase alias for the same fresh-gated output invoice collection payload."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application.rebuild_tax_offset_read_model_scope",
+        "backend/src/fin_ops_platform/services/tax_offset_worker_rebuild_executor.py",
+        "TaxOffsetWorkerRebuildExecutor._publish_fresh_cache",
         "read_model_status=fresh",
     ): (1, "worker rebuild publishes a freshly generated payload before writing a fresh cache envelope."),
     (
@@ -89,6 +89,16 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "OutputInvoiceCollectionQueryService.export_preview_for_rows",
         "dict read_model_status=fresh",
     ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
+    (
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
+        "OutputInvoiceCollectionReadModelDetailService.relation_details",
+        "read_model_status=fresh",
+    ): (1, "relation details are emitted fresh only after repository status and source-version checks pass."),
+    (
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
+        "OutputInvoiceCollectionReadModelDetailService.relation_details",
+        "readModelStatus=fresh",
+    ): (1, "camelCase alias for the same fresh-gated output invoice collection detail payload."),
     (
         "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
         "InputInvoiceUsageReadModelDetailService.relation_details",
@@ -284,6 +294,22 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         }
 
         self.assertEqual([helper for helper in sorted(forbidden_helpers) if helper in server_source], [])
+
+    def test_tax_offset_worker_rebuild_is_explicit_executor_boundary(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        start = server_source.index("    def rebuild_tax_offset_read_model_scope(")
+        end = server_source.index("\n    @staticmethod\n    def _invoice_relation_live_rows", start)
+        helper_body = server_source[start:end]
+
+        forbidden_snippets = {
+            "upsert_read_model(",
+            "_persist_tax_offset_read_models_best_effort(",
+            "build_fresh_cache_envelope(",
+            "_runtime_redis_set_json_best_effort(",
+            "read_model_status",
+        }
+        self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in helper_body], [])
+        self.assertIn("_tax_offset_worker_rebuild_executor.rebuild_scope(scope_key)", helper_body)
 
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []

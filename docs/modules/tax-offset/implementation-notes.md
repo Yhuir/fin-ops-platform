@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO worker rebuild executor extraction
+
+- 目标：执行 `read-models:tax-offset-worker-rebuild-executor-port-extraction`，把税金抵扣 compat worker rebuild、read model persistence 和 fresh Redis month/summary cache publish 行为迁出 `Application`。
+- 影响范围：`TaxOffsetWorkerRebuildExecutor`、`Application._configure_tax_offset_application_services(...)`、`Application.rebuild_tax_offset_read_model_scope(...)`、tax offset worker executor tests、read model architecture guards；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、SQL projection builder、Redis envelope shape 或前端行为。
+- 关键决策：新增显式 `TaxOffsetWorkerRebuildExecutor` 作为 worker rebuild boundary；`Application.rebuild_tax_offset_read_model_scope(...)` 只保留 thin delegate，并由静态 guard 防止重新拥有 `upsert_read_model`、snapshot persistence、fresh cache envelope 或直接 `read_model_status=fresh` 写入。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：新增 `tests/test_tax_offset_worker_rebuild_executor.py` 覆盖 rebuild persistence、fresh month/summary cache envelope、entry_count 和非法 scope；扩展 `tests/test_read_model_architecture_guards.py` 证明 app 方法为 thin delegate。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+- 后续事项：审计 `_derived_lifecycle_tax_offset_executor(...)` 与 `_derived_lifecycle_tax_offset_month_cache_executor(...)`，再判断 `tax_offset` 是否可进入 local closure/defer accounting。
+
 ## 2026-06-24 - Modular IO local closure audit found worker rebuild gap
 
 - 目标：执行 `read-models:tax-offset-local-implementation-closure-audit`，判断税金抵扣本地实现支持是否可进入 production evidence defer。
