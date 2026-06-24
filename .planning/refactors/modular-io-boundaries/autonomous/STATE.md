@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-module-closure-worker-wave-1-prompts-pending`
+Current state: `read-model-module-closure-worker-wave-1-monitoring-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:read-model-module-closure-evidence-ownership-map` as `planning-closed` in `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`. T0 mapped read-model-heavy modules to route/API surfaces, local docs/test owners, row245/246 production evidence, remaining authenticated API/browser/high-row gaps, and exact worker ownership/handoff paths. No production command, worker thread, runtime mutation or closure claim occurred. The next boundary is `planning:read-model-module-closure-worker-wave-1-prompts`.
+Completed the prompt-generation and thread-creation part of `planning:read-model-module-closure-worker-wave-1-prompts` in `analysis/read-model-module-closure-worker-wave-1-prompts-2026-06-25.md`. T0 created four local project worker threads for Workbench/relations/turnover, invoice/OA family, bank/pending/no-OA/search, and cost/tax evidence mapping. Row249 remains open for monitoring and handoff acceptance; no worker result has been accepted yet, no production command or runtime mutation occurred, and no module/global closure is claimed. The next boundary is `planning:read-model-module-closure-worker-wave-1-monitor-and-accept`.
 
 ## Closed Or Deferred Slices
 

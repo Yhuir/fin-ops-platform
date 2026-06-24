@@ -1,18 +1,19 @@
 # Read Model Module Closure Worker Wave 1 Prompts - 2026-06-25
 
 **Boundary:** `planning:read-model-module-closure-worker-wave-1-prompts`
-**Status:** `prompts-written-thread-creation-pending`
+**Status:** `worker-threads-created-monitoring-pending`
 **Module closure:** `not-module-closed`
 **Base commit for prompts:** `d9fb9ea9b633a22aa1d301603cde5cb52688ca9f`
+**Thread creation base commit:** `71ef441df355bd26f1534a9ffeddbccf32af087a`
 **Project:** `/Users/yu/Desktop/fin-ops-platform`
 **Production mutation:** none
-**Thread creation status:** pending until this file is committed and the direct-dev write lease is released
+**Thread creation status:** four local project worker threads created
 
 ## Goal
 
 Turn row248's read-model closure evidence ownership map into four bounded worker prompts. The workers are evidence producers. They must map local docs/tests/API/browser gaps and propose closure evidence; they must not edit controller-only files, mutate production, or claim module/global closure.
 
-This controller slice intentionally separates prompt generation from thread creation. T0 currently holds `/tmp/fin-ops-dev-write.lock`; worker threads should be created only after this prompt file is committed and the lock is released so workers can safely acquire the write lease if they need to write handoff files.
+This controller slice intentionally separated prompt generation from thread creation. T0 committed this prompt file in `71ef441d`, released `/tmp/fin-ops-dev-write.lock`, created the four worker threads, then reacquired the write lease to record thread ids. Workers can acquire the write lease after this controller update is committed and released.
 
 ## Inputs Reviewed
 
@@ -56,10 +57,10 @@ Every worker prompt below inherits these rules:
 
 | Worker | Thread id | Status | Handoff path |
 |---|---|---|---|
-| W1 Workbench/Relations/Turnover | pending | prompt-written | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-workbench-relations-turnover.md` |
-| W2 Invoice/OA Family | pending | prompt-written | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-invoice-oa-family.md` |
-| W3 Bank/Pending/No-OA/Search | pending | prompt-written | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-bank-pending-nooa-search.md` |
-| W4 Cost/Tax | pending | prompt-written | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-cost-tax.md` |
+| W1 Workbench/Relations/Turnover | `019efb08-6669-7eb1-b5a2-166639ce50af` | created-monitoring-pending | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-workbench-relations-turnover.md` |
+| W2 Invoice/OA Family | `019efb08-8ff0-74a1-b0c9-300f39c96f73` | created-monitoring-pending | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-invoice-oa-family.md` |
+| W3 Bank/Pending/No-OA/Search | `019efb08-b871-7e00-9c36-8b621210d64b` | created-monitoring-pending | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-bank-pending-nooa-search.md` |
+| W4 Cost/Tax | `019efb08-e2a8-7722-8acd-452cd9629269` | created-monitoring-pending | `.planning/refactors/modular-io-boundaries/parallel/handoffs/read-model-closure-wave1-cost-tax.md` |
 
 ## W1 Prompt
 
@@ -267,10 +268,8 @@ Every worker prompt below inherits these rules:
 
 ## Next Controller Step
 
-1. Commit this prompt file after docs verification.
+1. Commit and push this thread-tracking controller update.
 2. Release `/tmp/fin-ops-dev-write.lock`.
-3. Create four Codex worker threads in project `/Users/yu/Desktop/fin-ops-platform`, local environment, using the prompts above.
-4. Reacquire the write lease.
-5. Update this analysis file's thread tracking table with returned thread ids and status.
-6. Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `prompts/04-master-goal-controller.md`.
-7. Commit and push the thread-tracking controller update.
+3. Monitor W1-W4 with `read_thread`.
+4. For each worker, verify final answer and handoff file before accepting evidence.
+5. Pull any worker commits from `origin/dev`, inspect diffs, run required verification, and update controller state in a separate T0 commit.
