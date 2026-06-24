@@ -16,3 +16,11 @@
 - 保持不变：`/api/search` response shape、fresh/stale/refreshing 语义、search ranking、group context、worker event、scope policy、queue schema、Redis/cache、permissions、frontend behavior 均不变。
 - 测试覆盖：`SearchReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 search SQL runtime、search API 和 read model manifest 测试。
 - 下一步：`read-models:search-freshness-helper-boundary-audit` 审计 app-owned fresh gate/source-version/enqueue/rebuild/invalidation helper，必要时拆第一条 extraction/quarantine boundary。
+
+## 2026-06-24 - app rebuild helper quarantine
+
+- 目标：删除未调用的 app-owned search rebuild 旧路径，避免 `Application` 继续拥有 search index rebuild 行为。
+- 审计结论：`Application.rebuild_search_index_scope(...)` 无调用者；`_build_search_index_rows_for_month(...)` 只被该 app-level rebuild helper 调用。worker/runtime rebuild owner 是 `SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)`。
+- 改动：删除 `Application.rebuild_search_index_scope(...)` 和 `_build_search_index_rows_for_month(...)`；新增 platform boundary guard 防止它们回到 `server.py`。
+- 保持不变：`/api/search` fresh gate、source-version mismatch、refresh enqueue、search ranking、worker event、scope policy、queue schema 和 API shape 均不变。
+- 下一步：抽取或隔离 `/api/search` SQL fresh/stale/miss payload assembly、expected source-version proof 和 refresh enqueue helper。

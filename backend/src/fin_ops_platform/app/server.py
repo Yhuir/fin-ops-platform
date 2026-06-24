@@ -16647,65 +16647,6 @@ class Application:
             page += 1
         return rows
 
-    def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
-        month = str(scope_key or "").strip()
-        if month != "all" and not SEARCH_MONTH_RE.match(month):
-            raise ValueError("search read model scope_key must be all or YYYY-MM.")
-        months = self._list_search_months() if month == "all" else [month]
-        repository = getattr(self, "_search_sql_read_repository", None)
-        save_rows = getattr(repository, "save_search_index_rows", None)
-        if not callable(save_rows):
-            raise RuntimeError("Search SQL read repository is not configured.")
-        total_rows = 0
-        source_versions = self._search_index_expected_source_versions()
-        for current_month in months:
-            rows = self._build_search_index_rows_for_month(current_month)
-            save_rows(scope_key=current_month, rows=rows, source_versions=source_versions)
-            total_rows += len(rows)
-        return {"scope_key": month, "row_count": total_rows, "source_versions": source_versions}
-
-    def _build_search_index_rows_for_month(self, month: str) -> list[dict[str, object]]:
-        month_index = self._search_service._load_month_index(month)
-        rows: list[dict[str, object]] = []
-        for source_kind in ("oa", "bank", "invoice"):
-            for indexed_row in list(month_index.get(source_kind, []) or []):
-                if not isinstance(indexed_row, dict):
-                    continue
-                row_payload = indexed_row.get("row") if isinstance(indexed_row.get("row"), dict) else {}
-                fields = indexed_row.get("fields") if isinstance(indexed_row.get("fields"), list) else []
-                matched_field = str(fields[0][0]) if fields and isinstance(fields[0], tuple) else "全文"
-                result_payload = self._search_service._build_result(
-                    row=row_payload,
-                    month=str(indexed_row.get("month") or month),
-                    zone_hint=str(indexed_row.get("zone_hint") or "open"),
-                    matched_field=matched_field,
-                    project_names=list(indexed_row.get("project_names") or []),
-                    group_id=str(indexed_row.get("group_id") or ""),
-                )
-                searchable_parts = [str(value) for _name, value in fields if value]
-                searchable_parts.extend(
-                    [
-                        str(result_payload.get("title") or ""),
-                        str(result_payload.get("primary_meta") or ""),
-                        str(result_payload.get("secondary_meta") or ""),
-                    ]
-                )
-                rows.append(
-                    {
-                        "row_id": result_payload.get("row_id"),
-                        "source_kind": source_kind,
-                        "status": result_payload.get("zone_hint"),
-                        "title": result_payload.get("title"),
-                        "subtitle": result_payload.get("secondary_meta"),
-                        "searchable_text": " ".join(part for part in searchable_parts if part.strip()),
-                        "project_name": " / ".join(list(indexed_row.get("project_names") or [])),
-                        "counterparty_name": row_payload.get("counterparty_name") or row_payload.get("seller_name"),
-                        "amount": row_payload.get("amount") or row_payload.get("debit_amount") or row_payload.get("credit_amount"),
-                        "payload": result_payload,
-                    }
-                )
-        return rows
-
     def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._search_service.clear_cache()
         if self._state_store is None:

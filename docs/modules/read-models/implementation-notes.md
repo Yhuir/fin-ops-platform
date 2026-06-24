@@ -1184,6 +1184,13 @@
 - 非目标：不改 search ranking、API shape、worker event、scope policy、queue schema、Redis/cache、permissions、frontend behavior 或 Go/Fiber/Go Worker。
 - 下一步：审计 app-owned search fresh gate/source-version/enqueue/rebuild/invalidation helper。
 
+## 2026-06-24 - search app rebuild helper quarantine
+
+- 目标：清理未调用的 app-owned search rebuild 旧路径。
+- 改动：删除 `Application.rebuild_search_index_scope(...)` 和 `_build_search_index_rows_for_month(...)`；新增静态 guard，确保 search rebuild 继续由 `SearchPendingSqlProjectionBuilder` 拥有并通过 `SearchReadModelRepositoryPort` 保存。
+- 保持不变：`/api/search` fresh gate、source-version mismatch、refresh enqueue、API shape、worker event、scope policy、queue schema 和搜索排序均不变。
+- 下一步：`read-models:search-query-freshness-service-extraction`。
+
 ## 2026-06-24 - pending invoice mutation freshness target contract
 
 - 目标：检查待找发票 mutation 后的页面 read model 同步语义，避免写成功后立即读旧 pending invoice rows。

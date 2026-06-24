@@ -32,6 +32,16 @@
 PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
 ```
 
+## 2026-06-24 - app rebuild helper quarantine
+
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_rebuild_helpers_stay_out_of_application`。
+- 覆盖：`server.py` 不再拥有 `rebuild_search_index_scope(...)` / `_build_search_index_rows_for_month(...)`；`SearchPendingSqlProjectionBuilder` 继续拥有 search rebuild，并通过 `SearchReadModelRepositoryPort` 保存。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_rebuild_helpers_stay_out_of_application tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

@@ -2025,6 +2025,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_search_rebuild_helpers_stay_out_of_application(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+
+        violations: list[str] = []
+        for removed_helper in (
+            "rebuild_search_index_scope",
+            "_build_search_index_rows_for_month",
+        ):
+            if _function_source(tree, source, removed_helper):
+                violations.append(f"server.py still owns removed search rebuild helper {removed_helper}")
+
+        projection_source = (SERVICES_ROOT / "search_pending_sql_projection.py").read_text(encoding="utf-8")
+        if "def rebuild_search_index_scope(" not in projection_source:
+            violations.append("SearchPendingSqlProjectionBuilder no longer owns search index rebuild")
+        if "SearchReadModelRepositoryPort" not in projection_source:
+            violations.append("Search projection no longer saves through SearchReadModelRepositoryPort")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
