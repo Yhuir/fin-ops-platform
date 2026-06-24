@@ -102,7 +102,8 @@ Current state expected on start:
 - `production:read-model-auth-preflight-and-api-smoke-runbook` is deferred in `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`: `/health/ready` was ready, but `http_slo_auth_configured=no`, so authenticated API smoke did not run; post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
 - `planning:post-auth-preflight-next-boundary-selection` is complete in `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`: Row269 auth-missing production preflight was reconciled and local/internal API contract harness broadening across `http_slo_probe.DEFAULT_API_PROBES` was selected next.
 - `contract:read-model-default-api-probe-harness-broadening` is complete in `analysis/contract-read-model-default-api-probe-harness-broadening-2026-06-25.md`: the local API contract harness now exercises `http_slo_probe.DEFAULT_API_PROBES`; targeted verification passed with 2 tests and 84 subtests.
-- The next pending boundary is `planning:post-default-api-probe-harness-next-boundary-selection`.
+- `planning:post-default-api-probe-harness-next-boundary-selection` is complete in `analysis/planning-post-default-api-probe-harness-next-boundary-selection-2026-06-25.md`: Row271 all-probe local API harness evidence was reconciled with production API/browser/high-row/worker gaps, human-provided auth secrets were rejected as a default path because T0 has the controlled root SSH production evidence gate, and `production:read-model-controlled-production-api-browser-runbook` was selected next.
+- The next pending boundary is `production:read-model-controlled-production-api-browser-runbook`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -385,18 +386,20 @@ Go/Fiber/Go Worker rules:
 - RabbitMQ can be future wakeup/transport only.
 
 Production and SSH rules:
-- SSH aliases may be used for read-only production evidence if already configured.
+- `ssh finops-prod-root` is the sanctioned T0-only path for controlled production evidence and controlled operations when local/staging PostgreSQL is unavailable.
 - Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys, or sensitive payloads.
-- Do not perform production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, file mutation, or OA mutation.
-- If production write or secret access is required, record needs-human-production-gate and continue another independent module when safe.
-- Missing production DB/worker evidence is a soft gate. Record production-evidence-deferred and never claim real production closure for that evidence.
+- Prefer read-only, metadata-only, no-payload production evidence.
+- Reasonable bounded production operations are allowed only after a runbook proves exact scope, no secret output, pre/post checks, stop gates and rollback/cleanup safety.
+- Do not perform broad DB mutation, broad/destructive production mutation, unbounded worker replay/consume, unbounded queue consume, or operations with unclear rollback/cleanup.
+- If a production action would require secret output, sensitive payload capture, broad destructive mutation or an unprovable rollback path, record `needs-human-production-gate` or `production-evidence-deferred` and continue another safe owned boundary.
+- Missing production DB/worker evidence is a soft gate unless the selected boundary has no safe owned alternative. Record production-evidence-deferred and never claim real production closure for that evidence.
 - The plan must not depend on local PGSQL_URL or a staging database.
 
 Hard stop gates:
 - Not on branch dev.
 - Unrelated/user dirty worktree files.
 - Merge conflict from origin/main.
-- Need production write, secret, DB mutation, worker replay/consume, queue mutation, or destructive operation.
+- Need secret output, sensitive payload capture, broad DB mutation, broad production write, unbounded worker replay/consume, unbounded queue mutation, destructive operation, or a production operation without a bounded runbook and proven rollback/cleanup path.
 - Tests reveal a bug that cannot be fixed within the selected slice.
 - Boundary is too broad and cannot be safely split without human choice.
 - Planning sources conflict and cannot be reconciled from documented facts.

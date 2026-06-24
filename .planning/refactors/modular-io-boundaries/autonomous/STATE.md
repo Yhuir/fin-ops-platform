@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-default-api-probe-harness-selection-pending`
+Current state: `controlled-production-api-browser-runbook-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -23,8 +23,8 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 - `ssh finops-prod` works as `finops-deploy`.
 - `finops-deploy` has no passwordless sudo.
 - `ssh finops-prod-root` works as root with key login: `user=root uid=0 host=VM-0-6-opencloudos key_login=ok`.
-- Root access allows privileged read-only production checks, but automatic runs still must not read secrets or perform production writes.
-- Production validation is non-blocking unless a production write or secret is required.
+- Root access allows privileged production checks and bounded controlled operations, but automatic runs still must not read or print secrets, capture sensitive payloads, or perform broad/destructive production writes.
+- Production validation is non-blocking unless the selected boundary has no safe owned alternative or would require secret output, broad mutation, unbounded replay/consume, or an operation with no proven rollback/cleanup path.
 - Go/Fiber/Go Worker work is candidate-gated by `11-GO-HOT-PATH-CARVE-OUT.md`.
 - Target read model strategy is partitioned scoped + scoped incremental.
 - Target worker runtime is Go Worker + PostgreSQL dual queue; RabbitMQ is wakeup/transport only.
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `contract:read-model-default-api-probe-harness-broadening` as `contract-guard-closed` in `analysis/contract-read-model-default-api-probe-harness-broadening-2026-06-25.md`. T0 broadened `tests/test_read_model_api_contract_harness.py` to exercise local `Application.handle_request(...)` against `http_slo_probe.DEFAULT_API_PROBES`, classified admin 403/local unavailable 503/import facts 501 as explicit local contracts, and verified the harness with 2 tests and 84 subtests passed. No production command or closure claim occurred.
+Completed `planning:post-default-api-probe-harness-next-boundary-selection` as `planning-closed` in `analysis/planning-post-default-api-probe-harness-next-boundary-selection-2026-06-25.md`. T0 reconciled Row271 all-probe local API harness evidence with remaining production API/browser/high-row/worker gaps and selected `production:read-model-controlled-production-api-browser-runbook` as the next boundary. The next boundary must use `ssh finops-prod-root` and existing deployed runtime configuration without printing secrets or payload rows, and must stop precisely if no non-secret authenticated/internal-equivalent evidence path exists. No production command or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`contract:read-model-default-api-probe-harness-broadening`
+`planning:post-default-api-probe-harness-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-default-api-probe-harness-next-boundary-selection`
+`production:read-model-controlled-production-api-browser-runbook`

@@ -1,57 +1,61 @@
 # Next Prompt
 
-Continue after `contract:read-model-default-api-probe-harness-broadening`.
+Continue after `planning:post-default-api-probe-harness-next-boundary-selection`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row264 mapped read-model-heavy modules to deterministic Playwright/Vitest/browser evidence, Row262 local API harness coverage, production-controlled facts and external-risk gaps.
-- Row265 ran the selected local deterministic Playwright subset.
-- Row265 first run was `49 passed, 4 failed`; root cause was stale Playwright assertions, not environment failure.
-- Row265 fixed:
-  - `web/e2e/input-invoice-usage-flow.spec.ts`
-  - `web/e2e/workbench-stale-error-flow.spec.ts`
-- Row265 failure-spec rerun passed: `20 passed`.
-- Row265 full targeted subset rerun passed: `53 passed`.
-- Row266 reconciled Row265 and selected a full deterministic smoke run because the targeted run found stale assertions inside smoke specs and repository docs define `npm run e2e:smoke` as the broad local Browser evidence layer.
-- Row267 ran `cd web && npm run e2e:smoke`.
-- Row267 result: `175 passed` in `7.6m`.
-- Row267 required no product code, Playwright spec, smoke membership or runtime configuration change.
-- Row268 reconciled full local smoke against remaining external-risk gaps and selected an auth preflight plus metadata-only production API smoke runbook.
-- Row269 confirmed production `/health/ready` ready and `http_slo_auth_configured=no`.
-- Row269 did not run authenticated API smoke because the stop gate fired.
-- Row269 post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
-- Row270 selected local/internal API contract harness broadening across `http_slo_probe.DEFAULT_API_PROBES` as the next executable evidence boundary while production auth remains absent.
-- Row271 broadened `tests/test_read_model_api_contract_harness.py` across `http_slo_probe.DEFAULT_API_PROBES`.
-- Row271 classified admin 403, local unavailable 503 and import facts 501 as explicit local contracts.
+- Row267 full deterministic local browser smoke passed: `175/175`.
+- Row269 production auth preflight found `/health/ready` ready and `http_slo_auth_configured=no`, so the standard authenticated HTTP SLO API smoke did not run.
+- Row271 broadened the local/internal API contract harness across `http_slo_probe.DEFAULT_API_PROBES`.
 - Row271 targeted verification passed: `PYTHONPATH=backend/src pytest -q tests/test_read_model_api_contract_harness.py` -> `2 passed`, `84 subtests passed`.
-- Local deterministic browser evidence is not production browser/API/high-row/worker closure.
-- Authenticated production API/browser smoke, production high-row browser, worker drain and module/global closure remain open.
+- Row272 reconciled local API/browser evidence with production gaps and selected a controlled production API/browser runbook instead of waiting for human-provided secrets.
+- The active T0 goal authorizes `ssh finops-prod-root` as the sanctioned T0-only production evidence path when commands are bounded, non-secret and read-only or cleanup-safe.
+- Local deterministic browser evidence and local API harness evidence do not prove production API response shapes, browser data hydration, high-row browser behavior, worker-drain/write-after-read convergence or module/global closure.
 
 ## Next Boundary
 
-`planning:post-default-api-probe-harness-next-boundary-selection`
+`production:read-model-controlled-production-api-browser-runbook`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Fetch `origin` and verify local `HEAD == origin/dev`.
-3. Read:
+3. Acquire the direct-dev write lease before editing:
+   - `mkdir /tmp/fin-ops-dev-write.lock`
+4. Read:
+   - `analysis/planning-post-default-api-probe-harness-next-boundary-selection-2026-06-25.md`
    - `analysis/contract-read-model-default-api-probe-harness-broadening-2026-06-25.md`
-   - `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`
    - `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`
-   - `tests/test_read_model_api_contract_harness.py`
+   - `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`
    - `backend/src/fin_ops_platform/tools/http_slo_probe.py`
    - `tests/test_http_slo_probe.py`
+   - `tests/test_read_model_api_contract_harness.py`
    - `autonomous/MODULE-QUEUE.md`
    - `autonomous/STATE.md`
    - `autonomous/JOURNAL.md`
-4. Reconcile Row271 local all-probe API harness evidence with remaining production auth/browser/high-row/worker gaps.
-5. Select the next smallest safe boundary without claiming module/global closure.
+5. Write a production runbook/evidence file under `analysis/` before running any production command.
+6. The runbook must describe exact commands, expected sanitized evidence, stop gates, post-checks, rollback/cleanup posture and why no secret output is required.
+7. If the runbook gates pass, execute only the bounded production commands described in the runbook.
+8. Update controller files with result and next boundary.
+
+## Runbook Constraints
+
+- Use `ssh finops-prod-root` and existing deployed runtime configuration only.
+- Do not print or store env values, DSNs, tokens, cookies, private keys, response bodies, payload rows or sensitive business data.
+- Start and end with `/health/ready`, active release and read-only dirty/readiness/outbox/dead-letter/worker heartbeat checks.
+- API response-shape evidence must be metadata-only: status, route classification, envelope keys, read-model status/source-version fields, counts and latency are acceptable.
+- Browser/page evidence must be separated from API evidence. If browser data hydration needs a secret-bearing user session or cookie, stop and record that blocker precisely.
+- High-row evidence must remain metadata-only and must not store business payload rows.
+- Do not deploy, restart, requeue, repair, replay workers, mutate DB/queue/readiness state, or run production business writes in this boundary unless the runbook proves a narrower bounded reversible action and there is no safer validation path.
 
 ## Stop Gates
 
-- Do not request or store production cookies, tokens, DSNs or secrets.
-- Do not claim module/global or production browser closure from deterministic local Playwright results alone.
-- Do not run authenticated probes if auth configuration is absent.
-- Do not perform production writes unless the selected boundary is runbook-bound with rollback/cleanup proof and T0-only authorization.
+- Not on branch `dev`.
+- Dirty worktree with unrelated/user files.
+- `HEAD != origin/dev` after fetch/pull.
+- Production command would reveal secrets or payload rows.
+- Production command would require broad/destructive mutation, unbounded worker replay/consume or unclear rollback/cleanup.
+- No non-secret authenticated/internal-equivalent production API or browser evidence seam exists.
+- Do not request secrets from the user; record the precise missing seam and continue another safe owned boundary.
+- Do not claim module/global closure from local browser/API tests or metadata-only production checks alone.
