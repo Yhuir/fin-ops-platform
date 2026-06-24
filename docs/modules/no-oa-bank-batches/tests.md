@@ -18,6 +18,13 @@
 
 ## 现有测试入口
 
+## 2026-06-24 - Modular IO repository/state-store boundary audit
+
+- 变更类型：analysis/accounting only。
+- 当前测试决策：本轮没有运行时代码变化，因此不新增测试；审计结论要求下一实现 slice 把 worker refresh 的 public snapshot persistence 从 broad state-store 调用中抽到显式 no-OA read model persistence boundary。
+- 下一边界建议目标测试：`tests.test_no_oa_bank_batch_read_model_refresh` 必须覆盖新 persistence boundary、stale source-version skip、month scope 保存和 relation repair 禁止；`tests.test_platform_runtime_boundary_guards` 必须防止 `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` 重新直接调用 broad `save_no_oa_bank_batches` 或 relation mutation；`tests.test_no_oa_bank_batch_application_service` 和 `tests.test_no_oa_bank_batch_workbench_integration` 继续作为业务/API 回归。
+- 不适用项：本 audit 不触发 business core、API contract、frontend interaction 或 E2E 新测试；如果下一实现只替换 worker persistence dependency 而不改 response shape/frontend barrier，则 API/frontend/E2E 仍可作为回归而非新增必需项。
+
 ## 2026-06-24 - Modular IO read model pilot selection
 
 - 变更类型：analysis/accounting only。

@@ -23,6 +23,15 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-24 - Modular IO repository/state-store boundary audit
+
+- 目标：审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，确定第一个实现抽取边界。
+- 结论：manifest、scope policy、runtime worker registry 和 route mapping 已是明确边界；`PostgresWorkbenchRepository.save_no_oa_bank_batches(...)` 负责 SQL 清理和写入 `app.no_oa_bank_batches` / `read_model.no_oa_bank_batch_rows`；`PostgresStateStore.save_no_oa_bank_batches(...)` 仍是 broad state-store facade。当前最高风险 gap 是 `NoOaBankBatchReadModelRefreshService` 在 worker handler 中直接拿 `public_snapshot()` 并调用 broad `state_store.save_no_oa_bank_batches(...)`。
+- 下一边界：`read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`。下一步应引入明确的 no-OA read model refresh persistence boundary/adapter，保持 SQL owner 不变，避免 refresh worker 继续直接依赖 broad state-store 写入口。
+- 非首选边界：list-only `NoOaBankBatchReadModelRepositoryPort` 仍需要做，但不是第一刀；它只收敛 GET/list read side，不能解决 worker 写路径的 state-store/public snapshot 污染。
+- 文档影响：全局和模块状态机定义不变；本轮没有改变业务状态、UI 状态、read model 状态、worker event、operation barrier、API shape、权限、审计或前端行为。
+- 测试决策：本轮是 analysis/accounting only；下一实现 slice 至少需要覆盖 service-layer、read model/cache/background job 和 existing feature regression categories，并复跑 no-OA refresh/application/workbench integration 目标测试。
+
 ## 2026-06-24 - Modular IO read model pilot selection
 
 - 目标：在 `turnover_ledger` 本地支持 accounted 后，把 `no_oa_bank_batch` 选为下一个非 Go read model 模块化试点。

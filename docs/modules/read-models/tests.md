@@ -30,6 +30,13 @@
 
 ## 场景覆盖清单
 
+## 2026-06-24 - No-OA bank batch repository/state-store boundary audit
+
+- 变更类型：analysis/accounting only。
+- 覆盖证据：`NoOaBankBatchReadModelRefreshService`、`NoOaBankBatchApplicationService.list_batches_payload(...)`、`PostgresStateStore.save_no_oa_bank_batches(...)`、`PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`、`PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)`、no-OA manifest/scope/worker registration 和 no-OA refresh/application/workbench integration tests。
+- 七类测试决策：本轮不新增测试；下一实现 slice 必须覆盖 service-layer、read model/cache/background job 和 existing feature regression categories。若只抽 worker persistence boundary 且不改 HTTP response shape/frontend barrier，则 API contract/frontend/E2E 作为回归可选；若 response shape 或 barrier target 变化则必须补。
+- 下一验证重点：`tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_application_service`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_platform_runtime_boundary_guards`、docs verify 和 app check。
+
 ## 2026-06-24 - No-OA bank batch next-pilot selection
 
 - 变更类型：analysis/accounting only。

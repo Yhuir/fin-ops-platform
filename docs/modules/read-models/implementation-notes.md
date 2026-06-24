@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - No-OA bank batch repository/state-store boundary audit
+
+- 目标：执行 `read-models:no-oa-bank-batch-repository-state-store-boundary-audit`，确认 no-OA 第一个实现抽取边界。
+- 影响范围：no-OA read model manifest/scope/worker registration、route mapping、application list path、refresh worker、public snapshot、PostgresStateStore、PostgresWorkbenchRepository、SQL list rows、modular IO state 和 no-OA/read-models 模块文档；不改变运行时代码。
+- 关键决策：下一实现边界是 `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`。原因是 `NoOaBankBatchReadModelRefreshService` 仍直接通过 broad `state_store.save_no_oa_bank_batches(...)` 持久化 `public_snapshot()`；而 list-only repository port 只收敛读侧，不能解决 worker 写路径污染。
+- 文档影响：新增 boundary audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现 slice 必须新增/更新 no-OA refresh persistence service-layer/read model worker/static guard 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-repository-state-store-boundary-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`。
+
 ## 2026-06-24 - No-OA bank batch selected after turnover ledger
 
 - 目标：执行 `read-models:next-pilot-selection-after-turnover-ledger`，在 `turnover_ledger` 本地支持 accounted 后选择下一个非 Go modular IO/read model pilot。
