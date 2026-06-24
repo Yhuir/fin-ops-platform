@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-source-version-persistence-fix-implemented`
+Current state: `turnover-ledger-source-version-persistence-production-controlled`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `read-models:turnover-ledger-refresh-source-version-persistence-contract-fix` as `implementation-closed` in `analysis/read-model-turnover-ledger-refresh-source-version-persistence-contract-fix-2026-06-25.md`. T0 moved turnover projection source-version capture before grouped row collection can trigger in-memory relation rebuild side effects, added a projection source-version capture regression, updated turnover docs and verified targeted/broader turnover suites. Full user-scope API, production deploy/re-smoke, browser/admin/write and global/module closure remain open. Next boundary is `production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`.
+Completed `production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence` as `production-controlled` in `analysis/production-turnover-ledger-source-version-persistence-fix-deploy-and-convergence-2026-06-25.md`. T0 deployed the source-version persistence fix, proved the first grouped GET visibly refreshed old persisted rows, then proved persisted turnover relation snapshot source versions converged to API expected and focused grouped GET returned fresh/no enqueue with no final aggregate turnover delta. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`
+`production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`
 
 ## Next Prompt
 
-`production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`
+`production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`

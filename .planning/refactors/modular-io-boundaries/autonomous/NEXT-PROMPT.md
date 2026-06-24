@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue after `read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`.
+Continue after `production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`.
 
 ## Current State
 
 - Branch: `dev`.
-- Active production release is `dev-turnover-grouped-metadata-20260625` at git commit `2dbacf9f6054baabe7084fc87b87511a49bbdb95`.
+- Active production release is `dev-turnover-source-version-persistence-20260625` at git commit `8f525563e10972168014356ff410c4fc8456f377`.
 - Row285 full user-scope API metadata smoke passed 37/37 probes, but aggregate postcheck showed one hidden `turnover_ledger:all` refresh enqueue.
 - Row286 focused diagnosis proved live grouped turnover GET returned no top-level read-model metadata while creating one `turnover_ledger.read_model.refresh` / `turnover_ledger:all` dirty scope.
 - Row287 local fix changed `TurnoverLedgerApiRoutes._flat_payload_to_grouped(...)` so SQL/read-model top-level metadata is preserved while legacy `rows` is removed and grouped fields are overwritten.
@@ -38,40 +38,45 @@ Continue after `read-models:turnover-ledger-refresh-source-version-persistence-c
   - this prevents `TurnoverLedgerService.list_grouped_ledger()` / `rebuild_from_bank_rows(...)` in-memory relation rebuild side effects from changing the version persisted by the worker;
   - new test `test_projection_source_versions_are_captured_before_relation_rebuild_side_effects`;
   - verification passed: turnover refresh `9 passed`, turnover query/read-facade/API `148 passed`, `31 subtests passed`, compileall passed.
+- Row291 production convergence:
+  - precheck mismatch `turnover_relation_snapshot_version_mismatch`, expected hash prefix `7c63fec7ba82c80c`, persisted hash prefix `198f5fd5f7ccbb8a`;
+  - deployed `dev-turnover-source-version-persistence-20260625`;
+  - first focused grouped GET exposed `read_model_status=refreshing`, `refresh_enqueued=true`, stale reason `turnover_relation_snapshot_version_mismatch`;
+  - after worker convergence, persisted top-level and first-row hash prefixes both matched expected `7c63fec7ba82c80c`, mismatch reasons were empty;
+  - post-convergence focused grouped GET returned HTTP `200`, `read_model_status=fresh`, `refresh_enqueued=false`, elapsed `67.957ms`;
+  - final aggregate postcheck stayed `/health/ready=ready`, dirty `done=187061`, readiness `fresh=498`, outbox `done=202956`, dead letters none, no additional turnover dirty/outbox delta after recheck.
 - Browser/admin/write probes and global/module closure remain open.
 
 ## Next Boundary
 
-`production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`
+`production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row290 implementation if it is not already committed.
-3. Write a bounded production deploy/convergence runbook under `.planning/refactors/modular-io-boundaries/analysis/production-turnover-ledger-source-version-persistence-fix-deploy-and-convergence-2026-06-25.md` before any production command.
-4. Precheck active release, `/health/ready`, dirty/readiness/outbox/dead-letter aggregates and current turnover persisted source-version mismatch.
-5. Deploy current `origin/dev` with the standard `./scripts/deploy-oa.sh --release-name ...` path.
-6. Run focused authenticated grouped turnover metadata re-smoke only.
-7. Run read-only persisted source-version comparison after the probe/refresh convergence.
+2. Commit/push Row291 evidence if it is not already committed.
+3. Write a bounded production smoke runbook under `.planning/refactors/modular-io-boundaries/analysis/production-read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes-2026-06-25.md` before any production command.
+4. Precheck active release, `/health/ready`, dirty/readiness/outbox/dead-letter aggregates and recent turnover outbox/dirty baseline.
+5. Run all non-admin `http_slo_probe.DEFAULT_API_PROBES` through the existing target OA applicant credential seam with `include_samples=false`.
+6. Postcheck the same aggregate evidence and classify any dirty/outbox delta by event type/scope before deciding next boundary.
 
-## Production Expectations
+## Smoke Expectations
 
-- Focused grouped turnover response should expose metadata.
-- Expected clean result after deploy/convergence: HTTP 200, `read_model_status=fresh`, `refresh_enqueued=false`, no `turnover_relation_snapshot_version_mismatch`, and persisted top-level/row-level `turnover_relation_snapshot_version` hash matching API expected.
-- If a refresh is still enqueued, it must be visible and postcheck must classify convergence.
+- All non-admin user-scope probes should pass.
+- Probe-level read-model metadata should be fresh/no enqueue where applicable.
+- Aggregate dirty/outbox totals should not increase. If they do, classify exact event type/scope and stop before browser/admin/write probes.
 
 ## Required Verification
 
-- Runbook committed/pushed before deploy if it changes repository files.
-- Deployment release and git commit recorded.
-- Focused metadata probe and persisted source-version comparison recorded with sanitized metadata only.
-- Postcheck health/dirty/readiness/outbox/dead-letter evidence recorded.
+- Runbook committed/pushed before smoke if it changes repository files.
+- Full user-scope API smoke recorded with sanitized metadata only.
+- Aggregate pre/post evidence recorded.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
-- Do not broaden into full user-scope API, browser, admin or write probes in this boundary.
+- Do not broaden into browser, admin or write probes in this boundary.
 - Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
-- Do not manually repair, direct-SQL mutate, mark readiness or run broad refresh/replay outside the runbook.
-- Do not claim module/global closure from this deploy/convergence alone.
+- Do not manually repair, direct-SQL mutate, mark readiness, refresh/replay or requeue outside a separate runbook.
+- Do not claim module/global closure from this full user-scope API smoke alone.
