@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-historical-dead-letter-resolution-next-boundary-selection-pending`
+Current state: `post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:historical-dead-letter-covered-resolution-apply-runbook` as `production-controlled` in `analysis/production-historical-dead-letter-covered-resolution-apply-runbook-2026-06-25.md`. T0 wrote the bounded apply runbook, rechecked `/health/ready`, dirty scopes, readiness and dry-run eligibility, executed `resolve-covered-dead-letters --execute` once for 24 covered historical read-model dead-letter rows, and post-checked that dead-letter residue dropped from 24 to 0 while dirty scopes remained all done, readiness remained all fresh and `/health/ready` stayed ready. No requeue, repair, worker replay, direct SQL, readiness mutation or secret output occurred. The next boundary is `planning:post-historical-dead-letter-resolution-next-boundary-selection`; no global/module closure is claimed.
+Completed `planning:post-historical-dead-letter-resolution-next-boundary-selection` as `planning-closed` in `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`. T0 reconciled row241 production-controlled dead-letter resolution evidence, confirmed residue cleanup does not prove module/global closure, and selected `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep` as the next highest-risk safe boundary. No production command or runtime mutation occurred in the planning slice.
 
 ## Closed Or Deferred Slices
 
