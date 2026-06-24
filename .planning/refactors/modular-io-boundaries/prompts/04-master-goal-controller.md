@@ -69,14 +69,14 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: production:postgres-controlled-restart-runbook.
-- Last status: planning-closed.
+- Last completed boundary: production:historical-dead-letter-covered-resolution-apply-runbook.
+- Last status: production-controlled.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
 - `server-py:workbench-group-detail-route-owner-extraction` is now implementation-closed locally.
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
-- The next pending boundary is `production:app-worker-controlled-restart-readiness-runbook`.
+- The next pending boundary is `planning:post-historical-dead-letter-resolution-next-boundary-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -203,7 +203,7 @@ Current state expected on start:
 - `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
 - `planning:parallel-orchestration-workflow` is complete as a planning slice: it defined controller/worker permissions, direct-dev write lease, worker file ownership, handoff format, final closure audit gate and 10 thread prompts. Worker prompts may auto-progress inside assigned workstreams, but controller owns global state and global closure.
 - `planning:parallel-handoff-review-and-state-update` is complete as a planning slice: T0 consumed T1-T8 handoffs, integrated accepted worker evidence in `b60a343a`, accepted T6 as partial production-read-only evidence, and kept Go admission deferred from T7.
-- The next pending boundary is `production:app-worker-controlled-restart-readiness-runbook`.
+- The next pending boundary is `planning:post-historical-dead-letter-resolution-next-boundary-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -306,19 +306,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:historical-dead-letter-covered-resolution-apply-runbook`.
+Start with `planning:post-historical-dead-letter-resolution-next-boundary-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`, `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`, and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
-- Write a bounded production apply runbook before any mutation.
-- Recheck `/health/ready`, no active dirty scopes, all readiness fresh, and `resolve-covered-dead-letters --dry-run`.
-- Execute `resolve-covered-dead-letters --execute` only if dry-run still reports all current candidates eligible.
-- Post-check dead-letter count, health/readiness/dirty scopes, and record whether historical dead-letter residue decreased without readiness regression.
-- Do not requeue, republish, repair, run worker replay, mutate readiness or print secrets.
+- Read `analysis/production-historical-dead-letter-covered-resolution-apply-runbook-2026-06-25.md`, `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`, and `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`.
+- Reconcile row 241 evidence: 24 covered historical read-model dead letters resolved, post-check `job.outbox_events done=203169`, dead-letter groups empty, dirty scopes all done, readiness all fresh and `/health/ready` ready.
+- Do not repeat the covered-dead-letter apply command unless a new bounded runbook is written for a new residue set.
+- Select the next highest-risk safe boundary from current queue facts, production evidence gaps and the commit-backed baseline.
+- Do not claim module/global closure from dead-letter cleanup alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

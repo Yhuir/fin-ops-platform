@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-historical-dead-letter-covered-resolution-apply-runbook-pending`
+Current state: `post-historical-dead-letter-resolution-next-boundary-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan` as `analysis-closed` in `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`. T0 classified the 24 historical read-model dead-letter rows with read-only production evidence and dry-run; all 24 were eligible with fresh readiness plus later done coverage and `active_dirty_count=0`. No cleanup or DB/queue/readiness mutation occurred. The next boundary is `production:historical-dead-letter-covered-resolution-apply-runbook`; no global/module closure is claimed.
+Completed `production:historical-dead-letter-covered-resolution-apply-runbook` as `production-controlled` in `analysis/production-historical-dead-letter-covered-resolution-apply-runbook-2026-06-25.md`. T0 wrote the bounded apply runbook, rechecked `/health/ready`, dirty scopes, readiness and dry-run eligibility, executed `resolve-covered-dead-letters --execute` once for 24 covered historical read-model dead-letter rows, and post-checked that dead-letter residue dropped from 24 to 0 while dirty scopes remained all done, readiness remained all fresh and `/health/ready` stayed ready. No requeue, repair, worker replay, direct SQL, readiness mutation or secret output occurred. The next boundary is `planning:post-historical-dead-letter-resolution-next-boundary-selection`; no global/module closure is claimed.
 
 ## Closed Or Deferred Slices
 
