@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-postgres-shared-memory-read-only-diagnosis-pending`
+Current state: `production-postgres-controlled-restart-runbook-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:readiness-and-worker-status-controlled-read-only-runbook` as `production-evidence-deferred` in `analysis/production-readiness-worker-status-controlled-read-only-2026-06-25.md`. T0 used only non-secret read-only SSH checks. `/health` was ready, `/health/ready` still timed out, selected workers/dispatcher were active but had high restart counts, and Workbench worker logs showed PostgreSQL pool timeout plus local shared-memory errors. The next T0-only boundary is `production:postgres-shared-memory-read-only-diagnosis`.
+Completed `production:postgres-shared-memory-read-only-diagnosis` as `production-evidence-deferred` in `analysis/production-postgres-shared-memory-read-only-diagnosis-2026-06-25.md`. T0 used only non-secret read-only SSH checks. PostgreSQL is active/listening, but PostgreSQL file logs show current repeated missing shared-memory segment errors; `/dev/shm` has capacity but no matching `PostgreSQL.*` objects. The next T0-only boundary is `production:postgres-controlled-restart-runbook`.
 
 ## Closed Or Deferred Slices
 

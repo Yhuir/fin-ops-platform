@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue after the `production:readiness-and-worker-status-controlled-read-only-runbook` slice.
+Continue after the `production:postgres-shared-memory-read-only-diagnosis` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `production:readiness-and-worker-status-controlled-read-only-runbook`
+- Last completed boundary: `production:postgres-shared-memory-read-only-diagnosis`
 - Last status: `production-evidence-deferred`
 - Queue semantics remain corrected: slice status is not module closure.
 - Parallel orchestration is now controller-led.
@@ -22,13 +22,14 @@ Continue after the `production:readiness-and-worker-status-controlled-read-only-
 - Queue evidence after reconciliation: 124 local proof/guard rows, 79 docs/analysis-only rows, 22 deferred rows and one remaining pending row.
 - No product module has `Module Closure = closed`; production evidence closure and Go admission remain 0%.
 - Production readiness evidence file: `analysis/production-readiness-worker-status-controlled-read-only-2026-06-25.md`.
+- PostgreSQL shared-memory evidence file: `analysis/production-postgres-shared-memory-read-only-diagnosis-2026-06-25.md`.
 - `/health` is ready, but `/health/ready` still times out.
 - Selected workers/dispatcher are active but have high restart counts.
-- Workbench worker logs show PostgreSQL pool timeout and local shared-memory errors.
+- PostgreSQL is active/listening, but file logs continuously report missing `/PostgreSQL.2926794240` shared-memory segment; `/dev/shm` has capacity and no matching PostgreSQL objects.
 
 ## Next Boundary
 
-`production:postgres-shared-memory-read-only-diagnosis`
+`production:postgres-controlled-restart-runbook`
 
 ## Options
 
@@ -36,17 +37,17 @@ Recommended autonomous continuation:
 
 - Use `prompts/06-t0-meta-orchestrator-goal.md`.
 - Start exactly one T0 `/goal` thread.
-- T0 will execute `production:postgres-shared-memory-read-only-diagnosis`.
-- T0 must write a new controlled production runbook/evidence file before any production command, focused on PostgreSQL service/resource/shared-memory evidence.
-- Allowed checks are read-only systemd, process/resource, filesystem, memory/shared-memory and sanitized log checks.
-- Do not restart PostgreSQL or app services, connect with secret-bearing DSNs, mutate DB/readiness/queue/worker state, deploy, or print secrets.
+- T0 will execute `production:postgres-controlled-restart-runbook`.
+- T0 must write a controlled production operation runbook before any restart command.
+- The runbook must include pre-checks, exact commands, stop gates, expected downtime/risk, rollback/cleanup posture and post-checks.
+- Do not proceed if the runbook cannot prove bounded scope, if secrets are required, or if restart would become broad/unbounded mutation.
 - Do not create worker threads for this boundary; workers must not execute the controlled production gate.
 - Do not manually start old T1-T9 worker prompts unless T0 explicitly instructs that fallback.
 
 Single-thread fallback:
 
 - Use `prompts/04-master-goal-controller.md`.
-- Start with `production:postgres-shared-memory-read-only-diagnosis`.
+- Start with `production:postgres-controlled-restart-runbook`.
 
 Manual parallel fallback:
 
@@ -63,7 +64,7 @@ Manual parallel fallback:
 4. Read `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, this prompt, and `12-PARALLEL-ORCHESTRATION.md`.
 5. If running parallel, enforce the direct-dev write lease before any worker edits files.
 6. Use the completed commit-backed audit as the progress baseline; do not recalculate from memory or raw row counts alone.
-7. For the selected boundary, write the production runbook/evidence file before using SSH; allowed checks are read-only PostgreSQL/systemd/resource/shared-memory status and sanitized logs only.
+7. For the selected boundary, write the production controlled-operation runbook before using SSH for restart. Include pre/post health, worker status and no-secret evidence capture.
 
 ## Stop Condition
 
