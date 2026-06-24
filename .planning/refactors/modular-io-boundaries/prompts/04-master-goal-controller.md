@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:tax-offset-post-derived-local-implementation-closure-audit.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:tax-offset-cache-warmup-executor-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -118,10 +118,12 @@ Current state expected on start:
 - Tax offset worker rebuild executor extraction is complete: `TaxOffsetWorkerRebuildExecutor` now owns compat worker rebuild, read model persistence and fresh Redis month/summary cache publish behavior.
 - `Application.rebuild_tax_offset_read_model_scope(...)` is now dependency assembly plus a thin delegate to `TaxOffsetWorkerRebuildExecutor.rebuild_scope(scope_key)` and is guarded from re-owning rebuild, persistence or direct fresh cache publishing.
 - Tax offset derived lifecycle executor extraction is complete: `TaxOffsetDerivedLifecycleExecutor` now owns read model invalidation and month-cache clearing behavior; registry entries use explicit executor methods and removed app-owned helper methods are guarded.
-- Tax offset post-derived local closure audit found a remaining app-owned cache warmup implementation gap: `Application._schedule_tax_offset_cache_warmup(...)` / `_run_tax_offset_cache_warmup_job(...)` still own optional cache warmup scheduling/execution, read model upsert and snapshot persistence.
-- `tax_offset` cannot move to `production-evidence-deferred` until the cache warmup boundary is extracted or explicitly quarantined.
+- Tax offset cache warmup executor extraction is complete: `TaxOffsetCacheWarmupExecutor` owns optional cache warmup env gating, month normalization, idempotent background job scheduling, run-job progress/success handling, read model upsert and snapshot persistence.
+- `Application._schedule_tax_offset_cache_warmup(...)` remains compat-only thin delegation to the executor.
+- `Application._run_tax_offset_cache_warmup_job(...)` and `_tax_offset_cache_warmup_enabled(...)` are removed and guarded from returning.
+- `tax_offset` cannot move to `production-evidence-deferred` until the final local closure audit proves no local implementation gap remains.
 - No module is globally closed.
-- The next pending boundary is read-models:tax-offset-cache-warmup-executor-port-extraction.
+- The next pending boundary is read-models:tax-offset-final-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -217,20 +219,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:tax-offset-cache-warmup-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:tax-offset-final-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:tax-offset-cache-warmup-executor-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-derived-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
-- Use CodeGraph for structural lookup before implementation edits.
-- Move optional tax offset cache warmup scheduling/job execution out of `Application` into an explicit executor/service boundary, or prove and document a stricter compat-only quarantine if extraction is not currently safe.
-- Keep `Application` as dependency assembly and thin delegate/callback provider only.
-- Preserve env gating, month normalization, reverse ordering, idempotency key shape, background job type/label/owner/visibility/source/affected scopes, progress/success/partial-success result shape, read model snapshot persistence operation name, payload build behavior and read model scope behavior.
+For read-models:tax-offset-final-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-derived-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-cache-warmup-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
+- Use CodeGraph for structural lookup before any implementation decision.
+- Re-audit `tax_offset` after cache warmup extraction across IO contract, boundary ownership, repository/query owner, fresh gate, force refresh, operation barrier, worker rebuild, derived lifecycle, optional cache warmup, legacy path removal/quarantine, permissions, audit, tests and docs.
+- If no local implementation gap remains, move only local implementation support to production-evidence-deferred and explicitly list missing real PostgreSQL/worker/App Status/high-row/browser evidence.
+- If a local implementation gap remains, keep `tax_offset` implementation-gap-open, insert the next narrow implementation boundary before Go candidates, and do not defer.
 - Preserve lifecycle event semantics, refresh scope selection, operation names, metadata shape, response shape, cache behavior, gateway-backed enqueue behavior and tax offset API behavior.
 - Do not select Go hot-path admission while modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Add executor/service tests and static guard coverage proving `Application` no longer owns payload build, upsert or read model persistence for cache warmup.
-- Produce/update an analysis file documenting previous state, inspected call graph, implementation evidence, legacy/pollution classification, state-machine impact, seven-category test applicability, verification and next boundary.
+- Produce/update an analysis file documenting implementation evidence, legacy/pollution classification, state-machine impact, seven-category test applicability, verification and next boundary.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted executor/static guard/tax offset tests, docs verification and diff checks.
+- Run targeted static guard/tax offset tests when evidence depends on executable behavior, plus docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO cache warmup executor extraction
+
+- 目标：执行 `read-models:tax-offset-cache-warmup-executor-port-extraction`，把税金抵扣 optional cache warmup scheduling/job execution 从 `Application` 迁出。
+- 影响范围：`TaxOffsetCacheWarmupExecutor`、`Application._configure_tax_offset_application_services(...)`、`Application._schedule_tax_offset_cache_warmup(...)`、read model architecture guard、tax offset/read-models 文档；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：新增显式 `TaxOffsetCacheWarmupExecutor`，由它维护 env gating、month normalize/reverse sort、idempotent background job contract、progress/success/partial-success、payload load、read model upsert 和 snapshot persistence。`Application._schedule_tax_offset_cache_warmup(...)` 只保留 thin delegate；旧 `_run_tax_offset_cache_warmup_job(...)` 和 `_tax_offset_cache_warmup_enabled(...)` 已删除并由 guard 防回归。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：新增 `tests/test_tax_offset_cache_warmup_executor.py` 覆盖 env gate、job contract、partial success、read model snapshot persistence 和无 read model no-op；扩展 `tests/test_read_model_architecture_guards.py` 证明 app 不再拥有 job creation/run/upsert/persist/env helper。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-cache-warmup-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+- 后续事项：执行 `read-models:tax-offset-final-local-implementation-closure-audit`，确认本地实现支持是否可以进入 production evidence defer。
+
 ## 2026-06-24 - Modular IO post-derived closure audit found cache warmup gap
 
 - 目标：执行 `read-models:tax-offset-post-derived-local-implementation-closure-audit`，复核 repository port、freshness/barrier、worker rebuild executor 和 derived lifecycle executor 后的本地实现闭环状态。

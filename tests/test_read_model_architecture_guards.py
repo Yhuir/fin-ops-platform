@@ -311,6 +311,51 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in helper_body], [])
         self.assertIn("_tax_offset_worker_rebuild_executor.rebuild_scope(scope_key)", helper_body)
 
+    def test_tax_offset_cache_warmup_is_explicit_executor_boundary(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        executor_source = (
+            SOURCE_ROOT / "services" / "tax_offset_cache_warmup_executor.py"
+        ).read_text(encoding="utf-8")
+        start = server_source.index("    def _schedule_tax_offset_cache_warmup(")
+        end = server_source.index("\n    def _scope_keys_for_row_ids", start)
+        helper_body = server_source[start:end]
+
+        forbidden_server_snippets = {
+            "def _run_tax_offset_cache_warmup_job(",
+            "def _tax_offset_cache_warmup_enabled(",
+            "create_or_get_idempotent_job_with_created(",
+            "_background_job_service.run_job(",
+            "upsert_read_model(",
+            "_persist_tax_offset_read_models_best_effort(",
+            "snapshot_scope_keys(",
+            "succeed_job(",
+            "update_progress(",
+            "FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED",
+        }
+        self.assertEqual([snippet for snippet in sorted(forbidden_server_snippets) if snippet in helper_body], [])
+        self.assertNotIn("def _run_tax_offset_cache_warmup_job(", server_source)
+        self.assertNotIn("def _tax_offset_cache_warmup_enabled(", server_source)
+        self.assertIn("TaxOffsetCacheWarmupExecutor(", server_source)
+        self.assertIn("_tax_offset_cache_warmup_executor.schedule(months, reason=reason)", helper_body)
+
+        required_executor_snippets = {
+            "class TaxOffsetCacheWarmupExecutor",
+            "def schedule(",
+            "def run_job(",
+            'job_type="tax_offset_cache_warmup"',
+            'operation="tax_offset_cache_warmup"',
+            "FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED",
+            "create_or_get_idempotent_job_with_created(",
+            "upsert_read_model(",
+            "snapshot_scope_keys(",
+            "succeed_job(",
+            "update_progress(",
+        }
+        self.assertEqual(
+            [snippet for snippet in sorted(required_executor_snippets) if snippet not in executor_source],
+            [],
+        )
+
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []
         for path in SOURCE_ROOT.rglob("*.py"):

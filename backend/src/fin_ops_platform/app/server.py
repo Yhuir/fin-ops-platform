@@ -330,6 +330,7 @@ from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_offset_cache_warmup_executor import TaxOffsetCacheWarmupExecutor
 from fin_ops_platform.services.tax_offset_derived_lifecycle_executor import TaxOffsetDerivedLifecycleExecutor
 from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
@@ -1263,7 +1264,10 @@ class Application:
             source_versions_provider=self._tax_offset_source_versions,
             persist_read_models=self._persist_tax_offset_read_models_best_effort,
             month_cache_clearer=getattr(tax_offset_service, "clear_month_cache", None),
-            schedule_cache_warmup=self._schedule_tax_offset_cache_warmup,
+            schedule_cache_warmup=lambda months, reason: self._tax_offset_cache_warmup_executor.schedule(
+                months,
+                reason=reason,
+            ),
             cache_error_emitter=self._emit_runtime_cache_error,
         )
         self._tax_offset_query_service = TaxOffsetQueryService(
@@ -1297,6 +1301,13 @@ class Application:
         self._tax_offset_worker_rebuild_executor = TaxOffsetWorkerRebuildExecutor(
             runtime_service=self._tax_offset_runtime_service,
             read_model_service=getattr(self, "_tax_offset_read_model_service", None),
+            month_payload_loader=self._tax_api_routes.get_tax_offset,
+            persist_read_models=self._persist_tax_offset_read_models_best_effort,
+        )
+        self._tax_offset_cache_warmup_executor = TaxOffsetCacheWarmupExecutor(
+            runtime_service=self._tax_offset_runtime_service,
+            read_model_service=getattr(self, "_tax_offset_read_model_service", None),
+            background_job_service=self._background_job_service,
             month_payload_loader=self._tax_api_routes.get_tax_offset,
             persist_read_models=self._persist_tax_offset_read_models_best_effort,
         )
@@ -19903,106 +19914,8 @@ class Application:
         return self._tax_offset_runtime().read_model_scope_key(month, read_model=read_model)
 
     def _schedule_tax_offset_cache_warmup(self, months: list[str], reason: str) -> None:
-        read_model_service = self._tax_offset_read_model_service
-        if read_model_service is None:
-            return
-        if not self._tax_offset_cache_warmup_enabled():
-            return
-        deduped_months = sorted(
-            {
-                str(month).strip()
-                for month in list(months or [])
-                if SEARCH_MONTH_RE.match(str(month).strip())
-            },
-            reverse=True,
-        )
-        if not deduped_months:
-            return
-        affected_scope_keys = [self._tax_offset_read_model_scope_key(month) for month in deduped_months]
-        idempotency_key = f"tax_offset_cache_warmup:{reason}:{','.join(deduped_months)}"
-        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-            job_type="tax_offset_cache_warmup",
-            label="预热税金抵扣缓存",
-            owner_user_id="system",
-            idempotency_key=idempotency_key,
-            visibility="system",
-            phase="queued",
-            current=0,
-            total=len(affected_scope_keys),
-            message="税金抵扣缓存预热任务已创建。",
-            result_summary={"warmed": 0, "failed": 0},
-            source={"reason": reason},
-            affected_scopes=affected_scope_keys,
-            affected_months=deduped_months,
-        )
-        if not created:
-            return
-        self._background_job_service.run_job(
-            job,
-            lambda running_job: self._run_tax_offset_cache_warmup_job(
-                running_job,
-                months=deduped_months,
-            ),
-        )
-
-    def _run_tax_offset_cache_warmup_job(
-        self,
-        running_job,
-        *,
-        months: list[str],
-    ) -> dict[str, object]:
-        read_model_service = self._tax_offset_read_model_service
-        if read_model_service is None:
-            return {"warmed": 0, "failed": 0}
-        warmed_scope_keys: list[str] = []
-        failed_scope_keys: list[str] = []
-        total = len(list(months or []))
-        for index, month in enumerate(list(months or []), start=1):
-            scope_key = self._tax_offset_read_model_scope_key(month)
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="build_tax_offset_cache",
-                message=f"正在预热税金抵扣缓存 {index}/{max(total, 1)}。",
-                current=index - 1,
-                total=total,
-                result_summary={"warmed": len(warmed_scope_keys), "failed": len(failed_scope_keys)},
-            )
-            try:
-                payload = self._tax_api_routes.get_tax_offset(month)
-            except Exception:
-                failed_scope_keys.append(scope_key)
-                continue
-            read_model = read_model_service.upsert_read_model(
-                month,
-                payload,
-                generated_at=datetime.now().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            warmed_scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
-            warmed_scope_keys.append(warmed_scope_key)
-            self._persist_tax_offset_read_models_best_effort(
-                snapshot=read_model_service.snapshot_scope_keys([warmed_scope_key]),
-                changed_scope_keys=[warmed_scope_key],
-                operation="tax_offset_cache_warmup",
-            )
-
-        result_summary = {
-            "warmed": len(warmed_scope_keys),
-            "failed": len(failed_scope_keys),
-        }
-        message = "税金抵扣缓存预热完成。" if not failed_scope_keys else "税金抵扣缓存预热部分完成。"
-        self._background_job_service.succeed_job(
-            running_job.job_id,
-            message,
-            result_summary=result_summary,
-            status="partial_success" if failed_scope_keys else "succeeded",
-        )
-        return result_summary
-
-    @staticmethod
-    def _tax_offset_cache_warmup_enabled() -> bool:
-        return os.getenv("FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+        self._ensure_tax_offset_application_services()
+        self._tax_offset_cache_warmup_executor.schedule(months, reason=reason)
 
     def _scope_keys_for_row_ids(
         self,

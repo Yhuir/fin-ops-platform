@@ -1,12 +1,12 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:tax-offset-post-derived-local-implementation-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:tax-offset-cache-warmup-executor-port-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:tax-offset-post-derived-local-implementation-closure-audit`
-- Last status: `analysis-closed`
+- Last completed boundary: `read-models:tax-offset-cache-warmup-executor-port-extraction`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `tax_offset` is the eighth non-Go modular IO/read model pilot.
 - Repository port extraction is implemented.
@@ -14,14 +14,16 @@ Continue the autonomous modular IO refactor after the `read-models:tax-offset-po
 - OA attachment invoice `invoice_type` fallback is fixed.
 - Worker rebuild extraction is implemented: `TaxOffsetWorkerRebuildExecutor` owns compat worker rebuild, read model persistence and fresh Redis cache publish behavior; `Application.rebuild_tax_offset_read_model_scope(...)` is a thin delegate.
 - Derived lifecycle extraction is implemented: `TaxOffsetDerivedLifecycleExecutor` owns read model invalidation and month-cache clearing behavior; derived lifecycle registry entries use explicit executor methods and removed app-owned helper methods are guarded.
-- Post-derived local closure audit found a remaining app-owned cache warmup support surface: `Application._schedule_tax_offset_cache_warmup(...)` and `_run_tax_offset_cache_warmup_job(...)` still normalize/cache-warm months, create background jobs, build tax payloads, upsert `TaxOffsetReadModelService` and persist read model snapshots.
-- `tax_offset` is still `implementation-gap-open`; it cannot move to `production-evidence-deferred` until the cache warmup boundary is extracted or explicitly quarantined.
+- Cache warmup extraction is implemented: `TaxOffsetCacheWarmupExecutor` owns optional cache warmup env gating, month normalization, idempotent job scheduling, run-job progress/success handling, read model upsert and snapshot persistence.
+- `Application._schedule_tax_offset_cache_warmup(...)` remains compat-only thin delegation to the executor.
+- `Application._run_tax_offset_cache_warmup_job(...)` and `_tax_offset_cache_warmup_enabled(...)` are removed and guarded from returning.
+- `tax_offset` is still `implementation-gap-open` until final local closure audit proves all local implementation support is accounted for.
 - No Go hot-path candidate has passed admission.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:tax-offset-cache-warmup-executor-port-extraction`
+`read-models:tax-offset-final-local-implementation-closure-audit`
 
 ## Required First Steps On Resume
 
@@ -40,6 +42,7 @@ Continue the autonomous modular IO refactor after the `read-models:tax-offset-po
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-derived-local-implementation-closure-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-cache-warmup-executor-port-extraction.md`
    - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
    - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
    - `docs/modules/read-models/README.md`
@@ -55,19 +58,20 @@ Continue the autonomous modular IO refactor after the `read-models:tax-offset-po
 
 Target:
 
-- Move optional tax offset cache warmup scheduling/job execution out of `Application` into an explicit executor/service boundary, or prove and document a stricter compat-only quarantine if extraction is not currently safe.
-- Keep `Application` as dependency assembly and thin delegate/callback provider only.
-- Preserve:
-  - `FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED` env gating;
-  - month normalization and reverse ordering;
-  - idempotency key shape `tax_offset_cache_warmup:{reason}:{months}`;
-  - background job type, label, owner, visibility, phase, source, affected scopes and affected months;
-  - progress messages and final `succeeded` / `partial_success` result shape;
-  - payload load behavior through the existing tax route/service boundary;
-  - read model upsert/persist operation name `tax_offset_cache_warmup`;
-  - no tax business/API/UI/worker event/queue/schema/Redis contract changes.
-- Add executor/service tests and static guard coverage proving `Application` no longer owns payload build, upsert or read model persistence for cache warmup.
-- Produce/update an analysis file documenting implementation evidence, legacy/pollution classification, state-machine impact, seven-category test applicability and verification.
+- Re-audit `tax_offset` after cache warmup extraction.
+- Prove whether all local implementation support is accounted for across:
+  - IO contract and public/internal boundary;
+  - canonical fact owner and shared fact source;
+  - repository port and query owner;
+  - read model fresh gate, force refresh and `all` fan-out/month proof;
+  - operation barrier after writes;
+  - worker rebuild and derived lifecycle ownership;
+  - optional cache warmup ownership;
+  - legacy path removal or compat-only quarantine;
+  - permission/audit/test/docs evidence.
+- If no local implementation gap remains, mark only local implementation support as accounted for and move the module to `production-evidence-deferred` with explicit missing real PostgreSQL/worker/App Status/high-row/browser evidence.
+- If a local implementation gap remains, do not defer. Insert the next narrow implementation boundary before Go candidates and set `tax_offset` to implementation-gap-open.
+- Produce/update an analysis file documenting evidence, gaps/defer decision, state-machine impact, seven-category test applicability, verification and next boundary.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, `prompts/04-master-goal-controller.md`, and affected module docs/tests.
 
 Forbidden:
@@ -80,12 +84,11 @@ Forbidden:
 
 Expected verification:
 
-- Targeted new executor/service tests.
-- Targeted static guard proving app cache warmup methods are thin/delegating or removed.
-- Relevant tax offset API/runtime tests covering optional cache warmup and SQL runtime non-regression.
+- Targeted static guards for any audited local closure claim.
+- Relevant tax offset executor/API/runtime tests when evidence depends on executable behavior.
 - `bash scripts/verify.sh docs`
 - `git diff --check`
 
 ## Stop Condition
 
-Complete one verified tax offset cache warmup executor extraction/quarantine slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified tax offset final local closure audit slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
