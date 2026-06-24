@@ -12323,7 +12323,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().confirm_cash_pass_through(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.confirm_cash_pass_through(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_cash_ticket_purchase(
@@ -12338,7 +12338,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().confirm_cash_ticket_purchase(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.confirm_cash_ticket_purchase(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_cancel_cash_special(
@@ -12353,7 +12353,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().cancel_cash_special(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.cancel_cash_special(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:

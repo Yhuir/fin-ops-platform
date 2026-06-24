@@ -95,3 +95,27 @@ class WorkbenchActionApiRoutes:
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
+
+    def confirm_cash_pass_through(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().confirm_cash_pass_through(payload, request_id=request_id)
+
+    def confirm_cash_ticket_purchase(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().confirm_cash_ticket_purchase(payload, request_id=request_id)
+
+    def cancel_cash_special(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().cancel_cash_special(payload, request_id=request_id)

@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench cash special route owner extraction
+
+目标：把现代现金特殊关系相关 action 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `confirm_cash_pass_through(...)`、`confirm_cash_ticket_purchase(...)` 和 `cancel_cash_special(...)`。
+- 以上方法现在拥有对应 `WorkbenchWriteFacade` 调用和 `request_id` 传递。
+- `Application._handle_api_workbench_confirm_cash_pass_through(...)`、`_handle_api_workbench_confirm_cash_ticket_purchase(...)` 和 `_handle_api_workbench_cancel_cash_special(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard 和 `_workbench_write_response(...)`。
+- 新增静态 guard，确保 cash special wrapper 不会重新直接调用对应 `WorkbenchWriteFacade` 方法，同时确认 JSON/freshness/request-id/response mapping 仍保留。
+
+未改变：
+
+- update-bank-exception、OA-bank exception、personal advance、cancel exception、ignore/unignore、exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link 都未迁移。
+- response shape、status code、auth、freshness guard、request timing、idempotency、special metadata、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-update-bank-exception-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_cash_special_updates_and_clears_are_replayed_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_stale_cash_special_updates_first_active_relation_for_rows_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cash_special_with_stale_expected_relation_rejects_all_entrypoints tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cash_special_scheduling_failure_propagates_after_metadata_mutation tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_cash_special_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench withdraw-link route owner extraction
 
 目标：把现代 `/api/workbench/actions/withdraw-link` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。

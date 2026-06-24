@@ -729,6 +729,48 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_cash_special_delegation_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def confirm_cash_pass_through",
+            ".confirm_cash_pass_through(",
+            "def confirm_cash_ticket_purchase",
+            ".confirm_cash_ticket_purchase(",
+            "def cancel_cash_special",
+            ".cancel_cash_special(",
+            "request_id=request_id",
+        ):
+            if marker not in route_class:
+                violations.append(f"cash special route owner is missing marker {marker}")
+
+        handler_expectations = {
+            "_handle_api_workbench_confirm_cash_pass_through": "confirm_cash_pass_through",
+            "_handle_api_workbench_confirm_cash_ticket_purchase": "confirm_cash_ticket_purchase",
+            "_handle_api_workbench_cancel_cash_special": "cancel_cash_special",
+        }
+        for handler_name, route_method in handler_expectations.items():
+            handler_source = _function_source(server_tree, server_source, handler_name)
+            for marker in (
+                "_load_json_body(body)",
+                "_workbench_write_freshness_guard()",
+                f"_workbench_action_api_routes.{route_method}(payload, request_id=request_id)",
+                "_workbench_write_response(result)",
+            ):
+                if marker not in handler_source:
+                    violations.append(f"{handler_name} no longer preserves marker {marker}")
+            if f"_workbench_write_facade().{route_method}" in handler_source:
+                violations.append(f"{handler_name} still calls WorkbenchWriteFacade.{route_method} directly")
+
+        self.assertEqual(violations, [])
+
     def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2717,14 +2759,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench withdraw-link route owner extraction is not closed as implementation")
         if (
-            "| 202 | `server-py:workbench-cash-special-route-owner-extraction` | pending"
+            "| 202 | `server-py:workbench-cash-special-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench cash special route ownership")
+            violations.append("Workbench cash special route owner extraction is not closed as implementation")
+        if (
+            "| 203 | `server-py:workbench-update-bank-exception-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench update-bank-exception route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-cash-special-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench cash special route owner extraction")
+        if "`server-py:workbench-update-bank-exception-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench update-bank-exception route owner extraction")
 
         self.assertEqual(violations, [])
 
