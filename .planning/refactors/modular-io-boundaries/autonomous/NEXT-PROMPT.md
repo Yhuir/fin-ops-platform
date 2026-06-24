@@ -1,21 +1,21 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:bank-account-balance-local-implementation-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `go-hot-path:performance-baseline-and-admission-reconciliation` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:bank-account-balance-local-implementation-closure-audit`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `go-hot-path:performance-baseline-and-admission-reconciliation`
+- Last status: `planning-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `bank_account_balance` local implementation support is accounted for after repository port, refresh producer, derived lifecycle executor, all-only scope policy, operation barrier regressions and Bank Detail fallback removal.
-- `bank_account_balance` is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- All prior non-Go read model implementation-pending queue items are locally accounted for or explicitly `production-evidence-deferred`.
+- No module is globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred where unavailable.
 - No Go/Fiber/Go Worker candidate has passed admission.
-- Go implementation remains blocked until performance evidence, shadow-run plan, rollback gates and candidate-specific IO contracts are reconciled.
+- Go implementation remains blocked until candidate-specific performance evidence, stable Python reference IO, shadow-run plan, rollback gates and freshness/operation-barrier compatibility are documented.
 
 ## Next Boundary
 
-`go-hot-path:performance-baseline-and-admission-reconciliation`
+`go-hot-path:workbench-compute-performance-baseline-contract`
 
 ## Required First Steps On Resume
 
@@ -25,33 +25,36 @@ Continue the autonomous modular IO refactor after the `read-models:bank-account-
 4. Reconcile `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this prompt.
 5. Read target evidence:
    - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
-   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-account-balance-local-implementation-closure-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-performance-baseline-and-admission-reconciliation.md`
+   - `docs/modules/reconciliation-workbench/README.md`
+   - `docs/modules/reconciliation-workbench/tests.md`
+   - `docs/modules/reconciliation-workbench/implementation-notes.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/tests.md`
-   - `docs/modules/reconciliation-workbench/README.md`
-   - `docs/modules/cost-statistics/README.md`
-   - `docs/modules/bank-account-balance/README.md`
    - `docs/operations/runtime-worker-governance.md`
-   - relevant performance/test tooling under `scripts/`, `backend/src/fin_ops_platform/tools/`, and existing tests.
+   - Workbench matching/grouping/check code and tests found through CodeGraph.
+   - Existing SLO/performance tools under `backend/src/fin_ops_platform/tools/` and their tests.
 
 ## Boundary Scope
 
 Target:
 
-- Reconcile whether all prior non-Go read model implementation-pending queue items are locally accounted for or still block Go admission.
-- Identify what performance evidence already exists locally, what can be collected without `PGSQL_URL`/staging, and what must stay `production-evidence-deferred`.
-- Decide whether any queued Go candidate can move from `blocked-by-prerequisite` to a bounded admission review.
-- If no candidate passes gates, mark the candidate(s) `go-candidate-deferred` or keep blocked with concrete missing evidence.
+- Define the exact Python reference boundary for `workbench:matching-grouping-check`.
+- Identify candidate input objects, output objects, state, events, read model dependencies, permissions/audit assumptions and forbidden writes.
+- Identify the minimum performance baseline evidence needed before `go-hot-path:workbench-compute-admission` can start.
+- Define which evidence can be collected without local `PGSQL_URL`/staging and which must stay production-evidence-deferred.
+- Define shadow-run comparison requirements: same input, Go output non-authoritative, no ack, no readiness/cache/active-generation writes.
+- Define rollback gates: Python remains reference, Go can be disabled per worker/service, and Python facade API/auth/audit remains unchanged.
+- Decide whether `go-hot-path:workbench-compute-admission` can become the next pending boundary or must remain blocked.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not change Python runtime behavior.
 
 Expected verification:
 
+- Targeted existing tests for SLO tool semantics and Workbench matching/grouping/check contract if selected as evidence.
 - `bash scripts/verify.sh docs`
 - `git diff --check`
-- Any targeted tooling/docs/tests required by the admission reconciliation.
 
 ## Stop Condition
 
-Complete one verified Go admission/performance-baseline reconciliation slice, update state-machine accounting, commit and push to `origin/dev`, then continue to the selected next boundary unless a hard stop gate is hit.
+Complete one verified Workbench compute performance-baseline/IO-contract planning slice, update state-machine accounting, commit and push to `origin/dev`, then continue to the selected next boundary unless a hard stop gate is hit.

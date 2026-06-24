@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-bank-account-balance-local-implementation-closure-audit`
+Current state: `autonomous-continue-after-go-hot-path-performance-baseline-and-admission-reconciliation`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:bank-account-balance-local-implementation-closure-audit`. Local account-balance implementation support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred. The next executable boundary is `go-hot-path:performance-baseline-and-admission-reconciliation`; this is an admission/planning slice, not Go implementation.
+Completed `go-hot-path:performance-baseline-and-admission-reconciliation`. No Go/Fiber/Go Worker candidate has enough evidence to start implementation. The next executable boundary is `go-hot-path:workbench-compute-performance-baseline-contract`; this is still a planning/admission-contract slice, not Go implementation.
 
 ## Closed Or Deferred Slices
 
@@ -214,6 +214,7 @@ Completed `read-models:bank-account-balance-local-implementation-closure-audit`.
 - `read-models:bank-account-balance-operation-barrier-regression` -> `regression-guard-closed`
 - `read-models:bank-account-balance-bank-detail-fallback-quarantine` -> `implementation-closed`
 - `read-models:bank-account-balance-local-implementation-closure-audit` -> `production-evidence-deferred`
+- `go-hot-path:performance-baseline-and-admission-reconciliation` -> `planning-closed`
 
 ## Open Implementation Closure Work
 
@@ -223,7 +224,7 @@ Completed `read-models:bank-account-balance-local-implementation-closure-audit`.
 - `batch-accounting` GET route owner extraction, submit/withdraw route side-effect port extraction and app-level repair wrapper removal are implemented; local closure evidence is recorded, but the module is not full-closed because real PostgreSQL/worker/App Status/history/high-row production evidence is deferred.
 - `workbench_relation` local implementation support is accounted for through final closure/defer accounting. Repository port extraction, derived lifecycle executor extraction, transaction persist repository owner split, command repository snapshot adapter extraction, non-transactional pair relation persist service extraction, pair relation rollback restore service extraction, exception rollback restore service extraction, batch-accounting restore service delegation, turnover unused persist callback removal, turnover Workbench pair port required-command constructor cleanup, turnover local pair snapshot port extraction, settings data reset pair snapshot port extraction, pending invoice unused pair service removal, no-OA application pair snapshot port extraction, no-OA domain repair/read port extraction, WorkbenchWriteFacade relation read/snapshot port extraction, WorkbenchWriteFacade cash special metadata mutation port extraction, WorkbenchWriteFacade required-port constructor cleanup, Workbench matching relation read port extraction, server Workbench payload relation read port extraction, server source-version relation snapshot provider extraction, OA invoice offset relation read port extraction, OA attachment repair relation read port extraction, confirm-link context relation read port extraction, auto-pair conflict relation read port extraction, retained-OA supplemental relation read port extraction, case-id allocation service extraction and broad `_persist_state(...)` relation snapshot quarantine are implemented. Transaction-persist, rollback, whole-state persistence, app health / route builder pair-service injection, settings data reset pair-service dependency, first local closure/defer accounting and ETC repair/link/migration callback accounting are analysis-closed. The module is still not globally closed because production PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - Phase 1-3 pilot audit, tests, and implementation criteria in `04-IMPLEMENTATION-ROADMAP.md` remain open.
-- Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
+- Go admission is no longer blocked by an unaccounted `bank_detail` local implementation gap, but no module is globally closed. Candidate-specific performance evidence, Python reference IO, shadow-run and rollback contracts still block Go admission.
 - `pending_invoice` was the third non-Go read model implementation pilot after `bank_detail` and `workbench_relation`. Repository port extraction is implemented, freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, income-status mutations now wait for pending invoice operation barrier targets before refetching rows, and local implementation support is accounted for. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `oa_pending_payment` was the fourth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, and `pending_invoice`. Repository port extraction is implemented: PostgreSQL read route and OA projection save/mark/prune paths now use `OaPendingPaymentReadModelRepositoryPort`, while Workbench relation source-version lookup uses the Workbench relation port. Freshness/force-refresh/operation-barrier audit found and fixed the frontend gap where default all-view mutations preferred fan-out-only `all` over concrete month barrier targets. Local closure audit removed unused app-level OA pending payment rebuild/list/mark/live helpers and accounted for remaining local support. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`. A follow-up production fail-closed gap was fixed: relation detail no longer live-rebuilds in production SQL runtime when the SQL read repository is unavailable. Local implementation support is now accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
@@ -235,8 +236,8 @@ Completed `read-models:bank-account-balance-local-implementation-closure-audit`.
 - `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot and local implementation support is accounted for after repository/state-store audit, refresh persistence boundary extraction, read model repository port extraction, freshness/derived lifecycle audit, derived lifecycle executor extraction, mutation persistence fallback quarantine, local closure audit, full-state snapshot quarantine and post-full-state local closure audit. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. Refresh producer extraction is implemented: `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization. Production repository-unavailable fail-closed behavior is implemented. OA projection sync Search fan-out now uses `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`. Runtime import-state Search fan-out now also uses `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`. Search worker `search:all` shard fan-out now uses `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`. Post-all-scope local closure audit found no remaining local implementation gap, so Search local support is accounted for; the module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Repository port extraction is implemented: projection save and Bank Details accounts SQL read paths use `BankAccountBalanceReadModelRepositoryPort`, and manifest owner names the account-balance port. Refresh producer extraction is implemented: app/API/runtime/backfill refresh enqueue now uses `BankAccountBalanceReadModelRefreshProducer` and preserves all-only `bank_account_balance:all`. Derived lifecycle executor extraction is implemented: response assembly moved out of `Application` into `BankAccountBalanceDerivedLifecycleExecutor`. Scope policy is now all-only at the gateway, matching worker/storage behavior. Dedicated operation barrier regressions now cover dirty/readiness and outbox pending behavior. Bank Detail port compatibility fallback is removed. Local closure audit found no remaining local implementation gap, so local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- The next pending boundary is `go-hot-path:performance-baseline-and-admission-reconciliation`.
-- Go hot-path implementation remains blocked until admission reconciliation proves the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
+- The next pending boundary is `go-hot-path:workbench-compute-performance-baseline-contract`.
+- Go hot-path implementation remains blocked. The global reconciliation found that local read model support is accounted for or explicitly deferred, but candidate-specific performance evidence, stable Python reference IO, shadow-run comparison and rollback gates still need to be documented before admission can start.
 
 ## Deferred Modules
 
@@ -256,12 +257,12 @@ Completed `read-models:bank-account-balance-local-implementation-closure-audit`.
 
 ## Go Candidate Status
 
-No Go candidate has passed admission. The next slice must reconcile performance evidence and admission gates before any Go/Fiber/Go Worker implementation can be selected.
+No Go candidate has passed admission. The global admission reconciliation is complete, but all implementation/admission candidates remain `blocked-by-prerequisite`. The next slice must define Workbench compute-specific performance baseline evidence, Python reference IO, shadow-run and rollback contracts before `workbench:matching-grouping-check` can enter admission review.
 
 ## Last Prompt
 
-`read-models:bank-account-balance-local-implementation-closure-audit`
+`go-hot-path:performance-baseline-and-admission-reconciliation`
 
 ## Next Prompt
 
-`go-hot-path:performance-baseline-and-admission-reconciliation`
+`go-hot-path:workbench-compute-performance-baseline-contract`

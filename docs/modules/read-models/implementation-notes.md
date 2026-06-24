@@ -1358,3 +1358,11 @@
 - 已 accounted：explicit account-balance repository port、projection save port、all-only refresh producer、runtime/backfill producer fan-out、derived lifecycle executor、all-only gateway policy、worker handler、operation barrier regressions、runtime bootstrap refreshing behavior 和 Bank Detail fallback guard。
 - 剩余：真实 PostgreSQL/worker/App Status/high-row/browser evidence。
 - 下一步：`go-hot-path:performance-baseline-and-admission-reconciliation`，只做性能证据与准入门控 reconciliation，不直接开始 Go/Fiber/Go Worker 实现。
+
+## 2026-06-24 - Go hot path performance baseline admission reconciliation
+
+- 目标：复核 read model 本地实现支持与 Go/Fiber/Go Worker 准入门槛是否足以启动候选实现。
+- 结论：不启动 Go 实现。当前 read model 本地支持已 accounted 或显式 `production-evidence-deferred`，但没有候选具备完整性能证据、Python reference IO、shadow-run、rollback 和 freshness/operation-barrier compatibility proof。
+- 已确认工具：`http_slo_probe` 可采集 authenticated API/page p95 并把 non-fresh/refresh-enqueued 判失败；`sync_slo_baseline` 可只读采集 runtime/PostgreSQL/EXPLAIN 基线；`read_model_slo_smoke` dry-run 只能证明 scope discovery，`--apply` 才能证明 enqueue-to-fresh；`write_operation_slo_audit` 缺真实样本会失败而不是假通过。
+- 剩余：真实 PostgreSQL/worker/App Status/high-row/browser/performance evidence 仍依赖生产只读或受控 smoke；没有本地 `PGSQL_URL`/staging 时不能声明 Go admission 通过。
+- 下一步：`go-hot-path:workbench-compute-performance-baseline-contract`，先定义 `workbench:matching-grouping-check` 的 Python reference IO、性能基线、shadow-run 和 rollback 合同，不直接开始 Go/Fiber/Go Worker 实现。
