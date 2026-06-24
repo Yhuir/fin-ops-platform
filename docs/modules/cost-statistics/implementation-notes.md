@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO pilot selected after tax offset
+
+- 目标：执行 `read-models:next-pilot-selection-after-tax-offset`，确认 `cost_statistics` 是否应作为 tax offset 之后的下一非 Go read model 模块化试点。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵；不改成本归因、API、UI、worker、queue 或 Redis 合同。
+- 关键决策：选择 `cost_statistics`。本模块同时消费 Workbench relation、银行明细标签、导入事实、ETC/no-OA/turnover/settings fan-out；还拥有 `active:YYYY-MM`、`all:YYYY-MM`、`active:all`、`all:all` 特殊 scope、queryable parent aggregate 和旧 `cost-tax` compatibility worker lane。首切为 `CostStatisticsReadModelRepositoryPort` 抽取。
+- 文档影响：新增 modular IO next-pilot selection analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮为 analysis/accounting only；下一实现切片必须新增/更新 repository port guard，并保持 SQL runtime/freshness/parent aggregate 测试通过。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `cost-statistics` worker drain、真实大数据性能、真实浏览器生产样本和生产 scope cleanup evidence 仍 deferred。
+- 后续事项：执行 `read-models:cost-statistics-repository-port-extraction`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-20 - 成本统计 explorer 加载失败刷新恢复
 
 - 目标：补齐 `cost-statistics` 的本地 `NETWORK-RECOVERY` Browser 负面链路，避免 explorer 首屏暂时 503 时页面显示正常空态、允许导出中心伪成功，或没有显式恢复路径。

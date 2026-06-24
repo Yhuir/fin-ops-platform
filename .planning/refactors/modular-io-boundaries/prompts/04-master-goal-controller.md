@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:tax-offset-post-full-state-local-implementation-closure-audit.
-- Last status: production-evidence-deferred.
+- Last completed boundary: read-models:next-pilot-selection-after-tax-offset.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -124,8 +124,10 @@ Current state expected on start:
 - Tax offset final local closure audit found a remaining local implementation gap: broad `Application._persist_state(...)` still serializes `tax_offset_read_models` into the legacy full-state snapshot path.
 - Tax offset full-state snapshot quarantine is complete: broad `Application._persist_state(...)` no longer serializes `tax_offset_read_models`, while explicit runtime/executor persistence through `_persist_tax_offset_read_models_best_effort(...)` remains available.
 - Tax offset post-full-state local closure audit is complete: no remaining local implementation gap was found after full-state snapshot quarantine. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- `cost_statistics` is selected as the ninth non-Go read model implementation pilot because it has high cross-page stale-read risk, special `active/all` scope grammar, queryable parent aggregate semantics, an old `cost-tax` compatibility worker lane and a narrow repository-port first slice.
+- The first `cost_statistics` implementation boundary is `read-models:cost-statistics-repository-port-extraction`.
 - No module is globally closed.
-- The next pending boundary is read-models:next-pilot-selection-after-tax-offset.
+- The next pending boundary is read-models:cost-statistics-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -221,20 +223,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-tax-offset unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:cost-statistics-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-tax-offset:
-- Read `.planning/ROADMAP.md`, `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`, `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-full-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, and `docs/modules/read-models/tests.md`.
-- Read candidate module docs for remaining implementation-gap-open read models, including `cost-statistics`, `turnover-ledger`, `no-oa-bank-batches`, `search` if present, and `bank-details` / `bank-account-balance` adjacent docs as needed.
-- Use CodeGraph for structural lookup before selecting a pilot.
-- Select exactly one next non-Go modular IO/read model pilot from remaining implementation-gap-open candidates.
-- Compare candidates by user-visible stale-read risk, canonical fact owner clarity, freshness/status boundary, worker/outbox/readiness contract, legacy/live fallback risk, narrow first slice availability, test coverage, regression blast radius, and dependency order after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection`, `invoice_lifecycle`, and `tax_offset`.
-- Do not select Go/Fiber/Go Worker while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Produce an analysis file documenting the selected pilot and first narrow implementation boundary.
+For read-models:cost-statistics-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, `docs/modules/cost-statistics/state-machine.md`, and `docs/modules/cost-statistics/tests.md`.
+- Use CodeGraph for structural lookup before implementation.
+- Add a narrow `CostStatisticsReadModelRepositoryPort` exposing only manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models`.
+- Wire PostgreSQL state-store cost statistics read wiring, `CostStatisticsQueryService`, and `CostStatisticsSqlProjectionBuilder` read/save paths through the port.
+- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior.
+- Do not move SQL table knowledge out of `PostgresReadModelRepository` in this slice.
+- Add/update tests proving the port excludes unrelated read model methods and existing SQL runtime/freshness behavior remains unchanged.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification and diff checks.
+- Run targeted backend tests, app check, docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to the selected first implementation boundary if verification passes.
+- Continue to the next selected boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.

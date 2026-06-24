@@ -41,6 +41,8 @@
 
 ## 七类测试适用性
 
+2026-06-24 modular IO 更新：`read-models:next-pilot-selection-after-tax-offset` 已选择 `cost_statistics` 作为第九个非 Go read model 试点。下一实现边界是 `read-models:cost-statistics-repository-port-extraction`，必须新增/更新 repository port guard，证明 cost statistics port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`，并保持 SQL runtime fresh gate、parent aggregate、scope gateway 和 API shape 回归通过。
+
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_cost_statistics_service.py`、`tests/test_project_costing_service.py` | 覆盖成本归因、项目范围、特殊业务链路、票据/往来排除或保留规则。 |

@@ -1,29 +1,22 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:tax-offset-post-full-state-local-implementation-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-tax-offset` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:tax-offset-post-full-state-local-implementation-closure-audit`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `read-models:next-pilot-selection-after-tax-offset`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `tax_offset` is the eighth non-Go modular IO/read model pilot.
-- `tax_offset` local implementation support is accounted for after:
-  - repository port extraction;
-  - freshness/barrier audit;
-  - worker rebuild executor extraction;
-  - derived lifecycle executor extraction;
-  - cache warmup executor extraction;
-  - full-state snapshot quarantine;
-  - post-quarantine local closure audit.
-- `tax_offset` is not globally closed. Real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- `tax_offset` local implementation support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- `cost_statistics` is selected as the ninth non-Go modular IO/read model pilot.
+- `cost_statistics` has high cross-page stale-read risk, special `active/all` scope grammar, queryable parent aggregate semantics and an old `cost-tax` compatibility worker lane.
 - No Go hot-path candidate has passed admission.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:next-pilot-selection-after-tax-offset`
+`read-models:cost-statistics-repository-port-extraction`
 
 ## Required First Steps On Resume
 
@@ -36,58 +29,50 @@ Continue the autonomous modular IO refactor after the `read-models:tax-offset-po
    - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
 5. Read target planning evidence:
-   - `.planning/ROADMAP.md`
-   - `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`
-   - `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`
    - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
    - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-full-state-local-implementation-closure-audit.md`
-   - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/modules/read-models/tests.md`
-   - candidate module docs for remaining implementation-gap-open read models, including `cost-statistics`, `turnover-ledger`, `no-oa-bank-batches`, `search` if present, and `bank-details`/`bank-account-balance` related docs as needed.
-6. Use CodeGraph for structural lookup before selecting a pilot.
+   - `docs/modules/cost-statistics/README.md`
+   - `docs/modules/cost-statistics/implementation-notes.md`
+   - `docs/modules/cost-statistics/state-machine.md`
+   - `docs/modules/cost-statistics/tests.md`
+6. Use CodeGraph for structural lookup before implementation.
 
 ## Boundary Scope
 
 Target:
 
-- Select exactly one next non-Go modular IO/read model pilot from remaining implementation-gap-open candidates.
-- Prefer the candidate with the highest stale-read/cross-page consistency risk and a narrow first implementation boundary.
-- Use actual code and test evidence, not only queue notes.
-- Consider at minimum:
-  - `cost_statistics`;
-  - `turnover_ledger`;
-  - `no_oa_bank_batch`;
-  - `search`;
-  - `bank_account_balance` / bank details adjacent read model work.
-- Compare candidates by:
-  - user-visible stale-read risk;
-  - canonical fact owner clarity;
-  - existing read model freshness/status boundary;
-  - worker/outbox/readiness contract;
-  - legacy/live fallback risk;
-  - narrow first slice availability;
-  - test coverage and regression blast radius;
-  - dependency order after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection`, `invoice_lifecycle`, and `tax_offset`.
-- Produce an analysis file documenting the selection and first narrow boundary.
-- Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, `prompts/04-master-goal-controller.md`, and affected module docs/tests.
+- Add a narrow `CostStatisticsReadModelRepositoryPort`.
+- Expose only manifest-listed methods:
+  - `load_cost_statistics_read_models`;
+  - `get_cost_statistics_view`;
+  - `save_cost_statistics_read_models`.
+- Wire PostgreSQL state-store cost statistics read wiring to return/use the port where applicable.
+- Wire `CostStatisticsQueryService` and `CostStatisticsSqlProjectionBuilder` read/save paths through the port.
+- Add/update tests proving the port excludes unrelated read model methods and existing SQL runtime/freshness behavior remains unchanged.
+- Update state machine/accounting/docs for the completed slice.
 
 Forbidden:
 
+- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior.
+- Do not move SQL table knowledge out of `PostgresReadModelRepository` in this slice.
 - Do not implement Go/Fiber/Go Worker.
 - Do not run Go admission while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Do not claim any module globally closed.
 - Do not depend on staging DB or local `PGSQL_URL`.
 - Do not perform production writes or read/print secrets.
-- Do not change business semantics, amount rules, status transitions, permissions, audit meaning, API shape, queue schema, Redis key/envelope contract or frontend behavior during this selection slice.
 
 Expected verification:
 
+- Targeted py_compile for changed backend/tests.
+- Targeted cost statistics SQL runtime / repository port tests.
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
 - `bash scripts/verify.sh docs`
 - `git diff --check`
 
 ## Stop Condition
 
-Complete one verified next-pilot selection slice, commit and push to `origin/dev`, then continue to the selected first implementation boundary unless a hard stop gate is hit.
+Complete one verified cost statistics repository port extraction slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.

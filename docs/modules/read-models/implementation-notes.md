@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics selected after tax offset
+
+- 目标：执行 `read-models:next-pilot-selection-after-tax-offset`，在 `tax_offset` 本地支持 accounted 后选择下一个非 Go modular IO/read model pilot。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵；不改运行时代码。
+- 关键决策：选择 `cost_statistics`。理由是成本统计有高跨页 stale-read 风险、特殊 `active/all` scope grammar、queryable parent aggregate、旧 `cost-tax` compatibility worker lane，且 manifest 已定义窄 repository port contract，适合以 `CostStatisticsReadModelRepositoryPort` 抽取为首切。
+- 文档影响：新增 next-pilot selection analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only；下一轮必须新增/更新 cost statistics repository port guard，并复跑目标 SQL runtime/freshness 测试。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:cost-statistics-repository-port-extraction`。
+
 ## 2026-06-24 - Tax offset post-full-state local closure audit
 
 - 目标：执行 `read-models:tax-offset-post-full-state-local-implementation-closure-audit`，复核 full-state snapshot quarantine 后 `tax_offset` 是否还存在本地 implementation gap。
