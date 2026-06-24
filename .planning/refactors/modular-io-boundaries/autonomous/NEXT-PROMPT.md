@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `planning:post-auth-preflight-next-boundary-selection`.
+Continue after `contract:read-model-default-api-probe-harness-broadening`.
 
 ## Current State
 
@@ -22,18 +22,22 @@ Continue after `planning:post-auth-preflight-next-boundary-selection`.
 - Row269 did not run authenticated API smoke because the stop gate fired.
 - Row269 post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
 - Row270 selected local/internal API contract harness broadening across `http_slo_probe.DEFAULT_API_PROBES` as the next executable evidence boundary while production auth remains absent.
+- Row271 broadened `tests/test_read_model_api_contract_harness.py` across `http_slo_probe.DEFAULT_API_PROBES`.
+- Row271 classified admin 403, local unavailable 503 and import facts 501 as explicit local contracts.
+- Row271 targeted verification passed: `PYTHONPATH=backend/src pytest -q tests/test_read_model_api_contract_harness.py` -> `2 passed`, `84 subtests passed`.
 - Local deterministic browser evidence is not production browser/API/high-row/worker closure.
 - Authenticated production API/browser smoke, production high-row browser, worker drain and module/global closure remain open.
 
 ## Next Boundary
 
-`contract:read-model-default-api-probe-harness-broadening`
+`planning:post-default-api-probe-harness-next-boundary-selection`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Fetch `origin` and verify local `HEAD == origin/dev`.
 3. Read:
+   - `analysis/contract-read-model-default-api-probe-harness-broadening-2026-06-25.md`
    - `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`
    - `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`
    - `tests/test_read_model_api_contract_harness.py`
@@ -42,8 +46,8 @@ Continue after `planning:post-auth-preflight-next-boundary-selection`.
    - `autonomous/MODULE-QUEUE.md`
    - `autonomous/STATE.md`
    - `autonomous/JOURNAL.md`
-4. Broaden `tests/test_read_model_api_contract_harness.py` so local `Application.handle_request(...)` exercises `http_slo_probe.DEFAULT_API_PROBES` with default test auth, sanitized JSON/status assertions and explicit negative auth guard coverage.
-5. Run targeted verification: `PYTHONPATH=backend/src pytest -q tests/test_read_model_api_contract_harness.py`.
+4. Reconcile Row271 local all-probe API harness evidence with remaining production auth/browser/high-row/worker gaps.
+5. Select the next smallest safe boundary without claiming module/global closure.
 
 ## Stop Gates
 

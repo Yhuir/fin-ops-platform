@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 from fin_ops_platform.app.server import Response, build_application
+from fin_ops_platform.tools.http_slo_probe import DEFAULT_API_PROBES
 
 
 class ReadModelApiContractHarnessTests(unittest.TestCase):
@@ -38,52 +39,47 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(key, payload)
 
-    def test_representative_read_model_get_routes_expose_sanitized_envelopes(self) -> None:
+    def test_default_api_probes_expose_sanitized_local_envelopes(self) -> None:
         with self._default_test_auth(enabled=True), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            cases = [
-                ("/api/session/me", {200}, ("user", "allowed", "can_access_app")),
-                ("/api/workbench/settings", {200}, ("projects", "access_control", "workbench_column_layouts")),
-                ("/api/workbench/summary?month=all", {200, 202, 503}, ()),
-                ("/api/pending-invoices/rules", {200}, ("groups", "available_tags", "permissions")),
-                ("/api/pending-invoices/rows?direction=expense&page=1&page_size=5", {200, 202, 503}, ()),
-                ("/api/input-invoice-usage/payment-status-rules", {200}, ("rules", "permissions", "version")),
-                (
-                    "/api/input-invoice-usage/rows?page=1&page_size=5",
-                    {200},
-                    ("rows", "pagination", "summary", "filterConfig"),
-                ),
-                ("/api/output-invoice-collections/status-rules", {200}, ("rules", "permissions", "version")),
-                (
-                    "/api/output-invoice-collections/rows?page=1&page_size=5",
-                    {200},
-                    ("rows", "pagination", "summary", "readModelStatus"),
-                ),
-                ("/api/tax-offset/summary?month=2026-03", {200}, ("month", "summary", "item_counts")),
-                (
-                    "/api/cost-statistics?month=2026-03&project_scope=active",
-                    {200},
-                    ("month", "summary", "rows"),
-                ),
-                (
-                    "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5",
-                    {200},
-                    ("query", "summary", "filters"),
-                ),
-            ]
+            required_keys_by_probe = {
+                "session_me": ("user", "allowed", "can_access_app"),
+                "workbench_settings": ("projects", "access_control", "workbench_column_layouts"),
+                "pending_invoices_rules": ("groups", "available_tags", "permissions"),
+                "input_invoice_usage_payment_status_rules": ("rules", "permissions", "version"),
+                "input_invoice_usage_rows": ("rows", "pagination", "summary", "filterConfig"),
+                "output_invoice_collections_status_rules": ("rules", "permissions", "version"),
+                "output_invoice_collections_rows": ("rows", "pagination", "summary", "readModelStatus"),
+                "tax_offset_summary": ("month", "summary", "item_counts"),
+                "cost_statistics": ("month", "summary", "rows"),
+                "search_all": ("query", "summary", "filters"),
+            }
 
-            for path, expected_statuses, required_keys in cases:
-                with self.subTest(path=path):
-                    response = app.handle_request("GET", path)
+            for probe in DEFAULT_API_PROBES:
+                with self.subTest(probe=probe.name, path=probe.path):
+                    response = app.handle_request("GET", probe.path)
                     payload = self._json(response)
 
+                    expected_statuses = set(probe.expected_statuses) | {503}
+                    if probe.auth_scope == "admin":
+                        expected_statuses.add(403)
+                    if probe.name in {"import_facts_batches", "import_facts_files", "import_facts_invoices"}:
+                        expected_statuses.add(501)
                     self.assertIn(response.status_code, expected_statuses)
+                    if response.status_code == 403:
+                        self.assertIn(payload.get("error"), {"admin_only", "forbidden"})
+                        self.assertIn("message", payload)
+                        continue
+                    if response.status_code == 501:
+                        self._assert_keys(payload, "error", "message")
+                        continue
                     if response.status_code == 503:
                         self._assert_keys(payload, "error", "message")
-                        if path.startswith("/api/workbench/"):
+                        if probe.path.startswith("/api/workbench/"):
                             self.assertEqual(payload.get("read_model_status"), "unavailable")
                         continue
+                    required_keys = required_keys_by_probe.get(probe.name, ())
                     self._assert_keys(payload, *required_keys)
                     self.assertNotIn(payload.get("error"), {"invalid_oa_session", "forbidden"})
 

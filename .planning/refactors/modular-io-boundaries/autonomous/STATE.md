@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `default-api-probe-harness-broadening-selected`
+Current state: `post-default-api-probe-harness-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-auth-preflight-next-boundary-selection` as `planning-closed` in `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`. T0 reconciled Row269 auth-missing production preflight, rejected repeating production auth/browser/high-row/write boundaries while auth is absent, and selected `contract:read-model-default-api-probe-harness-broadening` as the next local evidence boundary. No test, production command, runtime mutation or closure claim occurred.
+Completed `contract:read-model-default-api-probe-harness-broadening` as `contract-guard-closed` in `analysis/contract-read-model-default-api-probe-harness-broadening-2026-06-25.md`. T0 broadened `tests/test_read_model_api_contract_harness.py` to exercise local `Application.handle_request(...)` against `http_slo_probe.DEFAULT_API_PROBES`, classified admin 403/local unavailable 503/import facts 501 as explicit local contracts, and verified the harness with 2 tests and 84 subtests passed. No production command or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-auth-preflight-next-boundary-selection`
+`contract:read-model-default-api-probe-harness-broadening`
 
 ## Next Prompt
 
-`contract:read-model-default-api-probe-harness-broadening`
+`planning:post-default-api-probe-harness-next-boundary-selection`
