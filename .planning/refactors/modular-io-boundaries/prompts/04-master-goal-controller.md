@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:input-invoice-usage-relation-detail-production-repository-fail-closed.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:input-invoice-usage-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -92,8 +92,9 @@ Current state expected on start:
 - Production SQL runtime relation detail now returns `202`/refreshing and enqueues `input_invoice_usage:all` when the SQL read repository is unavailable, instead of falling back to live detail rebuild.
 - `input_invoice_usage:all` remains fan-out control scope; all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
 - Unused app-level input usage projection helpers were removed from `Application`: `list_input_invoice_usage_scope_shards(...)`, `mark_input_invoice_usage_scope_empty(...)`, and `rebuild_input_invoice_usage_read_model_scope(...)`.
+- input_invoice_usage local implementation support is accounted for after repository port, fresh gate, relation-detail fresh gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination and tests/docs; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - No module is globally closed.
-- The next pending boundary is read-models:input-invoice-usage-local-implementation-closure-audit.
+- The next pending boundary is read-models:next-pilot-selection-after-input-invoice-usage.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -189,22 +190,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:input-invoice-usage-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-input-invoice-usage unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:input-invoice-usage-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/input-invoice-usage/state-machine.md`, `docs/modules/input-invoice-usage/tests.md`, `docs/modules/input-invoice-usage/implementation-notes.md`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_repository.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, `tests/test_input_invoice_usage_api.py`, and `tests/test_read_model_architecture_guards.py`.
-- Use CodeGraph for structural lookup before implementation edits.
-- Decide whether local `input_invoice_usage` implementation support can move to `production-evidence-deferred`, or whether another narrow implementation boundary is required.
-- Account for repository port, fresh gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination, tests, docs and remaining app-level wrappers.
-- Classify retained app-level surfaces as route fresh gate, gateway-backed wrapper, source-version helper, mutation side-effect wrapper, dependency assembly, compat-only or implementation gap.
-- Prefer analysis-only if behavior is already covered; implement only a narrow fix if the audit finds a concrete gap.
-- Do not claim full module closure; missing real PostgreSQL/worker/App Status/high-row/browser evidence must be explicit production-evidence-deferred.
-- Do not change OA reverse draft creation, OA credential/token flows, Workbench relation command behavior, payment status business rules, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
-- Do not declare input_invoice_usage or any module globally closed.
-- Do not implement Go/Fiber/Go Worker.
-- Produce/update an analysis/accounting file.
+For read-models:next-pilot-selection-after-input-invoice-usage:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-workbench-relation.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-pending-invoice.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-oa-pending-payment.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-local-implementation-closure-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, and `backend/src/fin_ops_platform/services/runtime_worker_registry.py`.
+- Read candidate module docs for remaining read model pages, including output invoice collections, no-OA bank batches, cost statistics, tax offset and turnover ledger.
+- Use CodeGraph for structural lookup before planning edits.
+- Compare remaining read model candidates and select the next non-Go pilot.
+- Prefer a candidate that reuses proven patterns while reducing high stale-read/cross-page risk; `output_invoice_collection` is likely high priority because it shares the invoice-usage-collection worker/projection family, but the selection must be revalidated from current docs/code.
+- Do not implement runtime code in this selection slice.
+- Do not select Go/Fiber/Go Worker while non-Go modular IO/read model candidates remain.
+- Produce/update a next-pilot selection analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted tests if runtime behavior changes; otherwise run docs verification and diff checks.
+- Update prompts/04-master-goal-controller.md.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next safe boundary if verification passes.
 

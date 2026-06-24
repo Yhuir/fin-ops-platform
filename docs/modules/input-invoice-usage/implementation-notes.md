@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Local read model implementation closure accounting
+
+- 目标：完成 modular IO `read-models:input-invoice-usage-local-implementation-closure-audit`，确认本地非 Go read model 支持是否还有阻塞实现缺口。
+- 影响范围：仅文档和 GSD 状态；不改变进项发票使用运行时代码、API shape、worker event、OA reverse、支付规则或前端行为。
+- 关键决策：repository port、rows/filter/export/detail fresh gate、relation-detail production fail-closed、source-version proof、scope policy、worker fan-out、operation barrier、legacy helper removal 和测试/文档证据均已本地 accounted。真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，因此模块不声明全局闭环。
+- 文档影响：同步 read-models 实施记录、测试矩阵和 modular IO autonomous state。
+- 测试覆盖：本轮为 analysis/accounting only，无新增测试；复用 `tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_read_model_architecture_guards.py`、Vitest 和 Browser 覆盖。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser 证据仍未执行；下一步应选择下一个非 Go read model pilot，不能启动 Go admission。
+
 ## 2026-06-24 - Relation detail production SQL repository fail-closed
 
 - 目标：修复生产 PostgreSQL runtime 下 `/api/input-invoice-usage/rows/{row_id}/relation-details` 缺 SQL read repository 时可能 fallback 到 live detail rebuild 的缺口。
