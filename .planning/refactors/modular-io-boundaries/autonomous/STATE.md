@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `internal-api-contract-harness-design-selected`
+Current state: `internal-api-contract-harness-implementation-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-unauthenticated-api-classification-next-boundary-selection` as `planning-closed` in `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`. T0 reconciled Row259's 38/38 unauthenticated API 401 classification, rejected authenticated production HTTP retry, public browser data smoke, another unauthenticated route sweep and final closure as premature, and selected `planning:read-model-internal-api-contract-harness-design` as the next safe boundary. CodeGraph confirmed the backend is not Flask; existing evidence points to `Application`, route-owner classes and `Application.handle_request(...)` tests as the safest local contract seam. No production command, runtime mutation, code implementation or closure claim occurred.
+Completed `planning:read-model-internal-api-contract-harness-design` as `planning-closed` in `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`. T0 designed the local/internal API contract harness path around `Application.handle_request(...)`, existing unittest default auth plus explicit negative auth guard checks, `http_slo_probe.DEFAULT_API_PROBES` as route inventory, and sanitized response envelope/readiness metadata assertions. The design rejects Flask test client, production auth bypass, production HTTP retry, browser data smoke and broad fixture snapshots. No production command, runtime auth/code change, implementation or closure claim occurred. The next boundary is `contract:read-model-internal-api-contract-harness-implementation`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-unauthenticated-api-classification-next-boundary-selection`
+`planning:read-model-internal-api-contract-harness-design`
 
 ## Next Prompt
 
-`planning:read-model-internal-api-contract-harness-design`
+`contract:read-model-internal-api-contract-harness-implementation`
