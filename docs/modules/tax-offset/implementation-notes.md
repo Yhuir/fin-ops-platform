@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO post-derived closure audit found cache warmup gap
+
+- 目标：执行 `read-models:tax-offset-post-derived-local-implementation-closure-audit`，复核 repository port、freshness/barrier、worker rebuild executor 和 derived lifecycle executor 后的本地实现闭环状态。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models/tax-offset 实施记录；不改税额计算、认证导入、计划保存 API、权限、审计、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：`tax_offset` 仍不能进入 `production-evidence-deferred`。`Application._schedule_tax_offset_cache_warmup(...)` / `_run_tax_offset_cache_warmup_job(...)` 仍拥有可选 cache warmup job scheduling/execution、month payload build、read model upsert 和 snapshot persistence 行为，属于本地 app-owned implementation gap。
+- 文档影响：新增 post-derived local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮仅 analysis/accounting，无运行时代码变化；下一轮必须为 cache warmup executor/service 增加测试，并加静态 guard 证明 `Application` 不再拥有 payload build/upsert/persist 行为。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-derived-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:tax-offset-cache-warmup-executor-port-extraction`。
+
 ## 2026-06-24 - Modular IO derived lifecycle executor extraction
 
 - 目标：执行 `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`，审计并迁出税金抵扣 derived lifecycle read model invalidation 与 month-cache clearing 的 app-owned 执行逻辑。

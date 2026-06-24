@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset post-derived closure audit found cache warmup gap
+
+- 目标：执行 `read-models:tax-offset-post-derived-local-implementation-closure-audit`，确认 repository port、freshness/barrier、worker rebuild executor 和 derived lifecycle executor 后，`tax_offset` 是否可进入 local support accounted / production evidence deferred。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/tax-offset 实施记录；不改 tax business/API/UI/worker event/queue/Redis 合同。
+- 关键决策：不能 defer。`Application._schedule_tax_offset_cache_warmup(...)` / `_run_tax_offset_cache_warmup_job(...)` 仍拥有可选 cache warmup job scheduling/execution、month payload build、`TaxOffsetReadModelService.upsert_read_model(...)` 和 snapshot persistence 行为；这不是纯 dependency assembly。
+- 文档影响：新增 post-derived local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only，无运行时代码变化；下一轮 `read-models:tax-offset-cache-warmup-executor-port-extraction` 必须新增 executor/service 测试和静态 guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-derived-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，但不能用于绕过本地 cache warmup implementation gap。
+- 后续事项：执行 `read-models:tax-offset-cache-warmup-executor-port-extraction`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Tax offset derived lifecycle executor extraction
 
 - 目标：执行 `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`，把 tax offset derived lifecycle read model/cache execution 从 `Application` 迁到显式 executor。
