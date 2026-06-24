@@ -14127,7 +14127,7 @@ class Application:
         return self._workbench_write_response(result)
 
     def _handle_workbench_unignore_row_payload(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_write_facade().unignore_row(payload)
+        result = self._workbench_action_api_routes.unignore_row(payload)
         return self._workbench_write_response(result)
 
     def _handle_legacy_workbench_action(self, action: str, body: str | bytes | None) -> Response:

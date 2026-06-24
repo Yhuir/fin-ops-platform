@@ -139,3 +139,6 @@ class WorkbenchActionApiRoutes:
 
     def ignore_row(self, payload: dict[str, Any]) -> Any:
         return self._write_facade_provider().ignore_row(payload)
+
+    def unignore_row(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().unignore_row(payload)
