@@ -3,7 +3,7 @@
 **Date:** 2026-06-25
 **Status:** planning-closed
 **Previous boundary:** `planning:parallel-handoff-review-and-state-update`
-**Next executable boundary:** `planning:post-parallel-handoff-next-boundary-selection`
+**Next executable boundary:** `planning:commit-backed-state-reconciliation`
 
 ## Goal
 
@@ -56,13 +56,13 @@ The old `05-parallel-thread-prompts.md` file is retained as worker archetype/ref
 
 ## State Machine Impact
 
-No module state is closed by this slice. The next executable boundary remains:
+No module state is closed by this slice. After the 2026-06-25 state-accuracy challenge, the next executable boundary is superseded by the mandatory commit-backed reconciliation gate:
 
 ```text
-planning:post-parallel-handoff-next-boundary-selection
+planning:commit-backed-state-reconciliation
 ```
 
-That boundary should now be executed through the new T0 Meta Orchestrator prompt.
+`planning:post-parallel-handoff-next-boundary-selection` should now be executed through the T0 Meta Orchestrator only after commit-backed reconciliation has produced a current evidence-backed progress report and corrected stale state files.
 
 ## Verification
 

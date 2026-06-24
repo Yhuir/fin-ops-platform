@@ -29,6 +29,7 @@ Core target:
 Required operating mode:
 - Act as T0 only. Do not become a worker.
 - You are the only thread allowed to edit controller-only files.
+- Before trusting any refactor state file, run commit-backed state reconciliation. Do not calculate progress percentages from memory or from state files alone.
 - You may create worker threads using Codex thread tools, monitor them, read their final answers, and integrate accepted work.
 - Worker threads are evidence producers. Their outputs are not authoritative until you review and accept them.
 - Do not ask the user to manually open T1-T9 threads. If thread tools are available, create worker threads yourself.
@@ -88,7 +89,8 @@ Current known state to verify, not blindly trust:
 - The previous accepted worker batch included:
   - `b60a343a refactor(parallel): integrate accepted worker handoffs`
   - `5653f982 docs(refactor): accept parallel worker handoffs`
-- The current first pending queue row should be `planning:post-parallel-handoff-next-boundary-selection`, unless the repository has advanced.
+- The current first pending queue row should be `planning:commit-backed-state-reconciliation`, unless the repository has advanced.
+- `planning:post-parallel-handoff-next-boundary-selection` must run only after commit-backed reconciliation has produced a current evidence-backed progress report.
 - Verify these facts from git and `MODULE-QUEUE.md` before acting.
 
 Environment constraints:
@@ -168,6 +170,36 @@ Architecture gates:
 
 GSD closed-loop workflow:
 Run this loop until global closure or a hard stop.
+
+0. Commit-backed state reconciliation
+   - This is mandatory before starting more implementation or worker waves.
+   - Do not trust `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `ROADMAP.md` or prior summaries as progress truth until reconciled against git.
+   - Build a commit-backed evidence ledger from:
+     - `git log --oneline --decorate origin/main..HEAD`;
+     - `git log --oneline --decorate --all` around refactor commits;
+     - `git show --name-status --stat <commit>` for every refactor-relevant commit;
+     - current tracked files under `.planning/refactors/`, `docs/modules/`, `backend/`, `web/`, `tests/`, `scripts/`, `deploy/`;
+     - worker handoff files and controller acceptance commits;
+     - targeted tests and verification commands recorded in commits or analysis files.
+   - For each queue row and roadmap criterion, classify with evidence:
+     - `commit-proven`: code/docs/tests changed in commits and verification evidence exists;
+     - `commit-partial`: some committed evidence exists but acceptance criteria are incomplete;
+     - `docs-only`: only planning/docs accounting exists, no runtime/test proof;
+     - `deferred`: real production/staging/PG/worker/browser evidence missing;
+     - `unproven`: state file claims completion but no commit-backed evidence found;
+     - `stale-state`: state file contradicts commit evidence.
+   - Compute progress from commit-backed acceptance criteria, not from raw row counts alone:
+     - roadmap completion percentage;
+     - queue evidence percentage by status;
+     - module local implementation percentage;
+     - module global closure percentage;
+     - production evidence percentage;
+     - Go admission percentage.
+   - Write the reconciliation report under:
+     `.planning/refactors/modular-io-boundaries/analysis/commit-backed-state-reconciliation-<date>.md`
+   - If the reconciliation finds stale or incorrect state files, update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and `04-master-goal-controller.md` to match commit evidence.
+   - If the reconciliation cannot prove a claimed completed boundary from commits, downgrade it to the most precise safe status and record why.
+   - Only after this reconciliation may you select the next implementation or parallel worker boundary.
 
 1. Full pre-implementation analysis
    - Re-read required docs and current state.
@@ -339,7 +371,8 @@ Begin now:
 1. Verify branch/status and pull `origin/dev` if clean.
 2. Inventory all `.planning/refactors/**/*.md` files.
 3. Read the required documents listed above.
-4. Execute `planning:post-parallel-handoff-next-boundary-selection` unless current `MODULE-QUEUE.md` shows a different first pending row.
-5. Generate and run the next safe worker wave or inline controller slice.
-6. Continue without asking the user unless a hard stop gate is hit.
+4. Execute `planning:commit-backed-state-reconciliation` unless current `MODULE-QUEUE.md` shows a different earlier pending row.
+5. Only after commit-backed reconciliation, execute `planning:post-parallel-handoff-next-boundary-selection` or the reconciled first pending boundary.
+6. Generate and run the next safe worker wave or inline controller slice.
+7. Continue without asking the user unless a hard stop gate is hit.
 ```

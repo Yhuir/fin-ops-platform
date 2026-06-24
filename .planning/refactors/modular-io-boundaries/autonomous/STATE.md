@@ -8,11 +8,13 @@
 
 ## Global Status
 
-Current state: `parallel-orchestration-planning-ready`
+Current state: `commit-backed-state-reconciliation-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
 Queue semantics state: `slice-status-corrected`
+
+Progress accounting state: `state-files-untrusted-until-commit-backed-reconciliation`
 
 ## Environment Assumptions
 
@@ -31,7 +33,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `planning:parallel-handoff-review-and-state-update` as `planning-closed`. T0 accepted T1-T8 handoffs, integrated the accepted worker batch in commit `b60a343a`, updated queue accounting, and selected `planning:post-parallel-handoff-next-boundary-selection` as the next controller-owned boundary.
+Completed `planning:parallel-handoff-review-and-state-update` as `planning-closed`. T0 accepted T1-T8 handoffs, integrated the accepted worker batch in commit `b60a343a`, and updated queue accounting. Before any new worker wave or implementation boundary, the next controller-owned boundary is now `planning:commit-backed-state-reconciliation`; it must derive real completion percentages and stale-state corrections from actual git commits/diffs/tests, then update these state files. `planning:post-parallel-handoff-next-boundary-selection` runs only after that reconciliation.
 
 ## Closed Or Deferred Slices
 
@@ -279,7 +281,7 @@ Completed `planning:parallel-handoff-review-and-state-update` as `planning-close
 - `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. Refresh producer extraction is implemented: `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization. Production repository-unavailable fail-closed behavior is implemented. OA projection sync Search fan-out now uses `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`. Runtime import-state Search fan-out now also uses `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`. Search worker `search:all` shard fan-out now uses `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`. Post-all-scope local closure audit found no remaining local implementation gap, so Search local support is accounted for; the module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Repository port extraction is implemented: projection save and Bank Details accounts SQL read paths use `BankAccountBalanceReadModelRepositoryPort`, and manifest owner names the account-balance port. Refresh producer extraction is implemented: app/API/runtime/backfill refresh enqueue now uses `BankAccountBalanceReadModelRefreshProducer` and preserves all-only `bank_account_balance:all`. Derived lifecycle executor extraction is implemented: response assembly moved out of `Application` into `BankAccountBalanceDerivedLifecycleExecutor`. Scope policy is now all-only at the gateway, matching worker/storage behavior. Dedicated operation barrier regressions now cover dirty/readiness and outbox pending behavior. Bank Detail port compatibility fallback is removed. Local closure audit found no remaining local implementation gap, so local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - Parallel orchestration is now documented in `12-PARALLEL-ORCHESTRATION.md`, with thread prompts in `prompts/05-parallel-thread-prompts.md`. T0 consumed all T1-T8 handoffs currently present and integrated accepted worker evidence in `b60a343a`.
-- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
+- The next pending boundary is `planning:commit-backed-state-reconciliation`; `planning:post-parallel-handoff-next-boundary-selection` runs only after the commit-backed reconciliation report and state corrections are complete.
 - Go hot-path implementation remains blocked. The Workbench compute reference IO, shadow forbidden-write and rollback contracts are documented and guarded locally, and a read-only evidence collector now exists locally. Real candidate-specific production/runtime evidence was explicitly deferred because the production release lacks the collector and deployed-runtime PostgreSQL read-only sampling could not connect. The autonomous flow returns to shared modular IO boundary governance.
 
 ## Deferred Modules

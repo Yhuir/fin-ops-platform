@@ -20,7 +20,7 @@ Continue after the `planning:parallel-handoff-review-and-state-update` slice.
 
 ## Next Boundary
 
-`planning:post-parallel-handoff-next-boundary-selection`
+`planning:commit-backed-state-reconciliation`
 
 ## Options
 
@@ -28,13 +28,14 @@ Recommended autonomous continuation:
 
 - Use `prompts/06-t0-meta-orchestrator-goal.md`.
 - Start exactly one T0 `/goal` thread.
-- T0 will execute `planning:post-parallel-handoff-next-boundary-selection`, create worker threads when safe, monitor them, accept/reject handoffs, update controller-only state files, commit/push to `origin/dev`, and continue the loop.
+- T0 will first execute `planning:commit-backed-state-reconciliation`, using git commits/diffs/tests as the source of truth for progress instead of trusting state files alone.
+- After reconciliation, T0 will execute `planning:post-parallel-handoff-next-boundary-selection`, create worker threads when safe, monitor them, accept/reject handoffs, update controller-only state files, commit/push to `origin/dev`, and continue the loop.
 - Do not manually start old T1-T9 worker prompts unless T0 explicitly instructs that fallback.
 
 Single-thread fallback:
 
 - Use `prompts/04-master-goal-controller.md`.
-- Start with `planning:post-parallel-handoff-next-boundary-selection`.
+- Start with `planning:commit-backed-state-reconciliation`, then proceed to `planning:post-parallel-handoff-next-boundary-selection`.
 
 Manual parallel fallback:
 
@@ -50,7 +51,8 @@ Manual parallel fallback:
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Reconcile `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, this prompt, and `12-PARALLEL-ORCHESTRATION.md`.
 5. If running parallel, enforce the direct-dev write lease before any worker edits files.
-6. Reconcile accepted handoff risks before assigning new workers: adjacent server route-owner work, production-readiness/runbook follow-up, read-model contract gaps, frontend combined freshness propagation and Go admission blockers.
+6. Reconcile progress from actual git commits before assigning new workers; do not trust `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, or roadmap checkboxes as completion truth until the commit-backed audit is complete.
+7. Reconcile accepted handoff risks before assigning new workers: adjacent server route-owner work, production-readiness/runbook follow-up, read-model contract gaps, frontend combined freshness propagation and Go admission blockers.
 
 ## Stop Condition
 

@@ -17,6 +17,6 @@
 | `01-module-io-audit.md` | 对一个模块做 IO 合同审计，不改代码。 |
 | `02-refactor-phase-planning.md` | 基于已完成 IO 合同，为一个模块生成实现 phase 计划。 |
 | `03-autonomous-start.md` | 旧版完整 GSD 自动推进 goal prompt；保留作历史入口，但执行前必须遵守 `MODULE-QUEUE.md` 的新 slice/module closure 语义。 |
-| `04-master-goal-controller.md` | 单线程主控 Goal Prompt：自动执行 planning preflight -> 当前 pending 边界 -> 状态更新 -> 下一个 prompt；当前下一步是 `server-py:workbench-group-detail-route-owner-extraction`。不要把它同时喂给多个 thread。 |
+| `04-master-goal-controller.md` | 单线程主控 Goal Prompt：自动执行 planning preflight -> 当前 pending 边界 -> 状态更新 -> 下一个 prompt；当前下一步是 `planning:commit-backed-state-reconciliation`。不要把它同时喂给多个 thread。 |
 | `05-parallel-thread-prompts.md` | 旧版手动并发 worker prompt/archetype 参考。保留给 T0 动态生成 worker prompt 时参考；不再要求用户手动启动 T1-T9。 |
 | `06-t0-meta-orchestrator-goal.md` | 当前推荐入口：只启动一个 T0 `/goal`。T0 自动创建 worker threads、监控、收回 handoff、审阅、更新状态机、继续分发，直到全局闭环或 hard stop。 |

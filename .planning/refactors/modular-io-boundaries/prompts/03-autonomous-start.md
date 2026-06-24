@@ -2,6 +2,11 @@
 
 Copy the full prompt below into Codex to start or resume the autonomous run.
 
+Status note:
+- This is a legacy single-thread autonomous prompt. Prefer `06-t0-meta-orchestrator-goal.md` for unattended controller-led execution.
+- If this prompt is used, the first executable boundary is `planning:commit-backed-state-reconciliation`, not any stale historical "current next" boundary below.
+- Do not calculate progress or select new implementation work from memory, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, roadmap checkboxes or this prompt alone; reconcile against actual git commits/diffs/tests first.
+
 ```text
 $gsd-autonomous --auto
 

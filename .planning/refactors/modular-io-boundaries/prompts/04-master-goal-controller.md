@@ -75,7 +75,8 @@ Current state expected on start:
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
 - `server-py:workbench-group-detail-route-owner-extraction` is now implementation-closed locally.
-- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
+- The next pending boundary is `planning:commit-backed-state-reconciliation`.
+- `planning:post-parallel-handoff-next-boundary-selection` must run only after commit-backed reconciliation computes current progress from actual git commits/diffs/tests and updates stale state files.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
 - pending_invoice local implementation support is accounted for after repository port, freshness/barrier audit, scope policy filter allowlist and mutation freshness target work; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
@@ -201,7 +202,7 @@ Current state expected on start:
 - `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
 - `planning:parallel-orchestration-workflow` is complete as a planning slice: it defined controller/worker permissions, direct-dev write lease, worker file ownership, handoff format, final closure audit gate and 10 thread prompts. Worker prompts may auto-progress inside assigned workstreams, but controller owns global state and global closure.
 - `planning:parallel-handoff-review-and-state-update` is complete as a planning slice: T0 consumed T1-T8 handoffs, integrated accepted worker evidence in `b60a343a`, accepted T6 as partial production-read-only evidence, and kept Go admission deferred from T7.
-- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
+- The next pending boundary is `planning:commit-backed-state-reconciliation`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -233,6 +234,13 @@ Full module closure requires:
 - Environment evidence or explicit defer status.
 
 Autonomous loop:
+0. Reconcile completion truth from commits before selecting work.
+   - Before trusting state files, build a commit-backed evidence ledger from git logs, commit diffs, changed files, worker handoffs, controller acceptance commits and recorded verification.
+   - Do not calculate completion percentages from memory, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, roadmap checkbox counts or prior summaries alone.
+   - Classify queue rows and roadmap criteria as `commit-proven`, `commit-partial`, `docs-only`, `deferred`, `unproven`, or `stale-state`.
+   - Compute roadmap completion percentage, queue evidence percentage by status, module local implementation percentage, module global closure percentage, production evidence percentage and Go admission percentage with numerator, denominator, criteria and evidence path.
+   - Write `.planning/refactors/modular-io-boundaries/analysis/commit-backed-state-reconciliation-<date>.md`.
+   - Update stale `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this prompt before selecting the next implementation or worker wave.
 1. Reconcile planning state before selecting work.
    - Read ROADMAP.md, refactor README, modular README, 00-REQUIREMENTS.md, 03-REFACTOR-STATE-MACHINE.md, 04-IMPLEMENTATION-ROADMAP.md, MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
    - If they disagree on current state, completed boundary, next boundary, status labels, module closure meaning, or completion metrics, execute a planning:state-reconciliation-* slice first.
@@ -297,7 +305,21 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-parallel-handoff-next-boundary-selection` unless planning-state reconciliation finds an inconsistency first.
+Start with `planning:commit-backed-state-reconciliation`.
+
+For `planning:commit-backed-state-reconciliation`:
+- Treat state files as untrusted until reconciled against git.
+- Build the evidence ledger from:
+  - `git log --oneline --decorate origin/main..HEAD`;
+  - `git log --oneline --decorate --all`;
+  - `git show --name-status --stat <commit>` for refactor-relevant commits;
+  - current tracked files under `.planning/refactors/`, `docs/modules/`, `backend/`, `web/`, `tests/`, `scripts/`, `deploy/`;
+  - worker handoff files and controller acceptance commits;
+  - recorded targeted tests and verification.
+- Produce real progress percentages with numerator, denominator, criteria and evidence path.
+- Downgrade any claimed completion that cannot be proven from commits.
+- Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt.
+- Commit and push the reconciliation before selecting new worker/implementation work.
 
 For `planning:post-parallel-handoff-next-boundary-selection`:
 - Review accepted handoff risks in `.planning/refactors/modular-io-boundaries/analysis/parallel-controller-handoff-review-2026-06-24.md`.
@@ -305,6 +327,7 @@ For `planning:post-parallel-handoff-next-boundary-selection`:
 - Consider adjacent server route-owner work only if it stays outside controller-only files and has a narrow route owner target.
 - Consider production-readiness/runbook follow-up only if it can be read-only or pass the Controlled Production Gate in `12-PARALLEL-ORCHESTRATION.md`.
 - Keep Go/Fiber/Go Worker blocked unless real performance, freshness, shadow diff and rollback evidence are available.
+- Run this only after `planning:commit-backed-state-reconciliation` has completed.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the selected next boundary.
 
 Parallel execution:
@@ -314,20 +337,7 @@ Parallel execution:
 - Controller-only files must remain controller-owned.
 - Workers may auto-progress inside assigned scopes, then write handoffs for controller integration.
 
-For `server-py:workbench-group-detail-route-owner-extraction`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-detail-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Extract `GET /api/workbench/groups/detail` HTTP validation and facade response mapping behind an explicit read-only route owner.
-- Preserve `Application` as HTTP route registration/dependency assembly owner.
-- Preserve `WorkbenchQueryFacade.group_detail(...)` as the freshness/source-version/read-model-status proof boundary.
-- Preserve status codes, response payloads, stale behavior, source-version proof and refresh enqueue behavior.
-- Do not change group detail response shape, status codes, freshness/stale behavior, source-version proof, read model refresh enqueue behavior, frontend group drawer behavior or existing API tests.
-- Do not change Workbench row detail, groups page, refresh status, settings, active generation publishing, matching worker, read model queue, legacy `/workbench/actions/*`, relation write behavior or modern Workbench action behavior.
-- Do not implement Go, Go Fiber or Go Worker in this slice.
-- Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
-- Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification and diff checks.
-- Commit and push to origin/dev.
-- Continue to the next selected boundary if verification passes.
+Do not resume old `server-py:workbench-group-detail-route-owner-extraction` instructions from this prompt. That boundary is already locally implementation-closed and accepted by the controller. Select any future server route-owner work only after commit-backed reconciliation and next-boundary selection.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
