@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `planning:post-workbench-high-row-query-plan-next-boundary-selection`.
+Continue after `production:read-model-unauthenticated-api-status-shape-classification-runbook`.
 
 ## Current State
 
@@ -29,12 +29,17 @@ Continue after `planning:post-workbench-high-row-query-plan-next-boundary-select
   - representative active page-like queries use generation/scope indexes and corrected EXPLAIN completed;
   - no payload rows or mutations were used.
 - Row258 selected unauthenticated API status/shape classification with existing `http_slo_probe` as the next safe evidence boundary. This will not prove authenticated API closure.
+- Row259 ran API-only unauthenticated classification:
+  - 38/38 default API probes returned 401;
+  - public API surfaces are consistently auth-gated;
+  - no response body or payload row was stored;
+  - `/health/ready` stayed ready.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`production:read-model-unauthenticated-api-status-shape-classification-runbook`
+`planning:post-unauthenticated-api-classification-next-boundary-selection`
 
 ## Required First Steps On Resume
 
@@ -52,8 +57,8 @@ Continue after `planning:post-workbench-high-row-query-plan-next-boundary-select
 6. Read `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`.
 7. Read `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`.
 8. Read `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`.
-9. Write a bounded production runbook before any production command.
-10. Use `http_slo_probe` API probes with `--allow-unauthenticated`, no response body storage, and classify statuses/content/read-model metadata only. Do not claim authenticated API closure.
+9. Read `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`.
+10. Reconcile Row259 and choose the next safe path for API/browser closure evidence: internal contract harness, non-secret auth provisioning design, or another bounded production/read-only evidence route.
 
 ## Stop Gates
 

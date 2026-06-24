@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `unauthenticated-api-status-shape-classification-selected`
+Current state: `unauthenticated-api-classification-auth-gated`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-workbench-high-row-query-plan-next-boundary-selection` as `planning-closed` in `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`. T0 reconciled Row257, rejected final closure, authenticated HTTP retry, browser data smoke and new in-process harness work as premature, and selected `production:read-model-unauthenticated-api-status-shape-classification-runbook` using existing `http_slo_probe` API probes with `--allow-unauthenticated`. This next evidence is classification only and does not prove authenticated API closure. No production command, runtime mutation, deploy, restart, requeue, repair, replay or closure claim occurred.
+Completed `production:read-model-unauthenticated-api-status-shape-classification-runbook` as `production-evidence-deferred` in `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`. T0 ran API-only `http_slo_probe --allow-unauthenticated`; all 38 default API probes returned 401 with low latency, proving public API surfaces are consistently auth-gated and unauthenticated probing cannot produce read-model response-shape closure evidence. `/health/ready` stayed ready before and after. No response bodies, payload rows, secrets, deploy, restart, requeue, repair, replay, DB write, queue/readiness mutation or closure claim occurred. The next boundary is `planning:post-unauthenticated-api-classification-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-workbench-high-row-query-plan-next-boundary-selection`
+`production:read-model-unauthenticated-api-status-shape-classification-runbook`
 
 ## Next Prompt
 
-`production:read-model-unauthenticated-api-status-shape-classification-runbook`
+`planning:post-unauthenticated-api-classification-next-boundary-selection`

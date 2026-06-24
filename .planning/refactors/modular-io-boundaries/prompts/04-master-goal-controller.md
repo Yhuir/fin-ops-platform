@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: post-Workbench-high-row next-boundary selection.
-- Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; next selected boundary is unauthenticated API status/shape classification.
+- Last completed controller step: unauthenticated API status/shape classification.
+- Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
@@ -89,7 +89,8 @@ Current state expected on start:
 - `planning:post-shadow-read-rehearsal-next-boundary-selection` is complete in `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`: selected a PostgreSQL-native Workbench high-row query-plan/read-only runbook.
 - `production:workbench-read-model-high-row-query-plan-read-only-runbook` is complete as `production-controlled` in `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`: active Workbench generation rows are bounded, historical tables are large, and active page-like queries use generation/scope indexes under EXPLAIN.
 - `planning:post-workbench-high-row-query-plan-next-boundary-selection` is complete in `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`: selected unauthenticated API status/shape classification with existing `http_slo_probe`.
-- The next pending boundary is `production:read-model-unauthenticated-api-status-shape-classification-runbook`.
+- `production:read-model-unauthenticated-api-status-shape-classification-runbook` is complete as `production-evidence-deferred` in `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`: all 38 default API probes returned 401, so public API shape closure needs auth or an internal contract harness.
+- The next pending boundary is `planning:post-unauthenticated-api-classification-next-boundary-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -230,7 +231,8 @@ Current state expected on start:
 - `planning:post-shadow-read-rehearsal-next-boundary-selection` selected direct Workbench high-row SQL evidence because it follows the concrete Row255 timeout.
 - `production:workbench-read-model-high-row-query-plan-read-only-runbook` collected aggregate/index/EXPLAIN evidence only; it does not prove authenticated API, browser hydration/data, export/detail or module closure.
 - `planning:post-workbench-high-row-query-plan-next-boundary-selection` selected API classification next. It is not final authenticated API closure.
-- The next pending boundary is `production:read-model-unauthenticated-api-status-shape-classification-runbook`.
+- `production:read-model-unauthenticated-api-status-shape-classification-runbook` proved public API probes are uniformly auth-gated, not that API response shapes are closed.
+- The next pending boundary is `planning:post-unauthenticated-api-classification-next-boundary-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -333,15 +335,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:read-model-unauthenticated-api-status-shape-classification-runbook`.
+Start with `planning:post-unauthenticated-api-classification-next-boundary-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`, `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`, `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`, `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Before any production command, write a bounded unauthenticated API status/shape classification runbook. Use existing `http_slo_probe` API probes with `--allow-unauthenticated`, no response body storage, and status/content/read-model metadata classification only.
+- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`, `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`, `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`, `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Reconcile Row259 and select the next safe path for API/browser closure evidence without printing secrets or mutating production.
 - Do not run API probes until a non-secret auth path is configured.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.
