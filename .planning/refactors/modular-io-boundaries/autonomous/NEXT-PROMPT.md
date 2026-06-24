@@ -1,27 +1,29 @@
 # Next Prompt
 
-Continue after `production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`.
+Continue after `production:no-oa-bank-batch-category-source-version-mismatch-diagnosis`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row276 fixed pending invoice source-version contract alignment locally.
 - Row277 deployed release `dev-pending-invoice-source-17d13466-20260625` at git commit `3329d8954a7219a1c21641392aaa3f5448ec20f5`.
-- Row277 production evidence:
+- Row277 production evidence closed pending invoice source-version convergence for `expense:all`:
   - `/health/ready` was ready before and after deploy.
   - One bounded `pending_invoice=expense:all` smoke event reached `event_status=done` and `dirty_status=done`.
-  - The smoke tool returned timeout only because the explicit override scope had no App Status readiness row; this is a smoke-tool evidence gap, not a worker failure.
-  - A no-enqueue sanitized metadata probe proved pending invoice rows/filter-options for `expense:all` are `fresh`.
+  - Sanitized no-enqueue metadata proved pending invoice rows/filter-options are `fresh`.
   - Pending invoice source-version stale reasons are empty.
-  - Actual source-version keys include `invoice_lifecycle_policy_schema_version`, `bank_detail_source_versions` and `workbench_relation_source_versions`.
-  - Selected pending invoice dirty scopes/outbox are `done`; pending invoice readiness is `fresh`.
-- Pending invoice production convergence is closed for Row277.
+- Row278 read-only no-OA diagnosis closed the specific `bank_transaction_category_snapshot_version_mismatch` from Row275:
+  - Active release stayed `dev-pending-invoice-source-17d13466-20260625`.
+  - `/health/ready` stayed `ready`.
+  - Probe scope `month=2026-06,bucket=unsubmitted` had row count `8`, unique source-version hash count `1`, row source-version hash `6d33251a850b453d`.
+  - Deployed expected category snapshot hash prefix was `b1533c3ad8c74afa`; actual no-OA row category snapshot hash prefix was also `b1533c3ad8c74afa`.
+  - `source_version_mismatch_reasons` was empty.
+  - Dirty/outbox/readiness evidence showed completed `no_oa_bank_batch:all` refreshes at `2026-06-25 05:02:09+08`, readiness `all/fresh`, and no recent dead letters.
+  - No production API endpoint call, payload-row output, secret output, refresh command, requeue, repair, direct DB mutation or readiness mutation occurred.
 - Module/global closure remains open.
-- no-OA `bank_transaction_category_snapshot_version_mismatch` remains the next open production source-version issue from Row275.
 
 ## Next Boundary
 
-`production:no-oa-bank-batch-category-source-version-mismatch-diagnosis`
+`planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection`
 
 ## Required First Steps On Resume
 
@@ -31,35 +33,27 @@ Continue after `production:pending-invoice-source-version-contract-deploy-and-co
    - `mkdir /tmp/fin-ops-dev-write.lock`
 4. Read:
    - `analysis/production-pending-invoice-source-version-contract-deploy-and-convergence-runbook-2026-06-25.md`
-   - `analysis/production-pending-invoice-no-oa-source-version-contract-deep-diagnosis-2026-06-25.md`
-   - `docs/modules/no-oa-bank-batches/README.md`
-   - `docs/modules/no-oa-bank-batches/tests.md`
-   - `docs/modules/no-oa-bank-batches/implementation-notes.md`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`
-   - `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
-   - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
-   - `docs/operations/runtime-worker-governance.md`
-5. Write a read-only diagnosis/runbook file under `analysis/` before any production command.
+   - `analysis/production-no-oa-bank-batch-category-source-version-mismatch-diagnosis-2026-06-25.md`
+   - `analysis/production-read-model-controlled-production-api-browser-runbook-2026-06-25.md`
+   - `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`
+   - `autonomous/STATE.md`
+   - `autonomous/MODULE-QUEUE.md`
+5. Write a planning analysis file under `analysis/` before selecting the next executable boundary.
 
-## Diagnosis Scope
+## Selection Scope
 
-- Use root SSH controlled production evidence, but keep the first boundary read-only.
-- Reconstruct expected no-OA source versions without broad `Application` startup when possible.
-- Inspect only metadata needed for `bank_transaction_category_snapshot_version_mismatch`:
-  - expected category snapshot/source version;
-  - actual no-OA row source-version hashes/key sets for bounded month/bucket samples;
-  - current dirty/outbox/readiness/dead-letter status for no-OA and bank transaction category related scopes;
-  - whether a normal gateway-backed no-OA refresh would update the stale row source versions;
-  - whether a local code-contract mismatch exists before any production rebuild is trusted.
-- Do not print payload rows, business identifiers, counterparties, account names, tokens, cookies, DSNs or env secret values.
-- Do not mutate production in this boundary.
+Use Row277 and Row278 to reconcile the previously failing pending invoice/no-OA production API metadata gaps. The next boundary must be the smallest safe next step toward global modular IO closure, but must not claim module/global closure unless all required evidence is explicitly present.
+
+Candidate directions to evaluate:
+
+- repeat or focus a controlled user-scope authenticated production API metadata smoke only if current evidence justifies it and the command can avoid response bodies, payload rows and secret output;
+- select a browser/admin/write-flow evidence boundary if production API metadata is now clean enough to unblock it;
+- reconcile module-specific closure matrices and remaining gaps from worker wave 1 plus Row245/246/257/273/277/278 production evidence;
+- defer Go admission unless prerequisites are still explicitly satisfied, which they likely are not.
 
 ## Stop Gates
 
 - Any command would print secrets, tokens, cookies, DSNs, passwords, private keys or business payload rows.
-- Exact source-version contract cannot be derived from code/docs/tests without guessing.
-- Diagnosis would require broad DB mutation, no-OA rebuild, requeue, repair, manual mark-done, readiness mutation or worker replay.
-- The mismatch cannot be scoped to a bounded no-OA/category source-version contract.
-- Do not broaden back into pending invoice; Row277 already closed pending invoice production convergence for this slice.
-- Do not claim module/global closure from no-OA diagnosis alone.
+- Any next boundary would require broad DB mutation, requeue, repair, manual mark-done, readiness mutation, worker replay, deploy, or API/body capture without a separate controlled runbook.
+- Do not broaden back into pending invoice or no-OA refresh/rebuild; Row277 and Row278 closed the current source-version mismatch slice.
+- Do not claim module/global closure from Row278 alone.
