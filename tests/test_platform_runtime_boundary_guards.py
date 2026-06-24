@@ -2280,13 +2280,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench compute reference-contract guard is not closed as a static guard")
         if (
-            "| 183 | `go-hot-path:workbench-compute-performance-evidence-collector-contract` | pending"
+            "| 183 | `go-hot-path:workbench-compute-performance-evidence-collector-contract` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Workbench compute performance evidence collector is not the pending queue item")
-        if "| 184 | `go-hot-path:workbench-compute-admission` | blocked-by-prerequisite" not in queue_source:
-            violations.append("Workbench compute admission is no longer blocked behind guard prerequisites")
-        if "Do not implement Go, Go Fiber or Go Worker in this slice." not in next_prompt_source:
+            violations.append("Workbench compute performance evidence collector is not closed")
+        if (
+            "| 184 | `go-hot-path:workbench-compute-production-evidence-gate` | pending"
+            not in queue_source
+        ):
+            violations.append("Workbench compute production evidence gate is not the pending queue item")
+        if "| 185 | `go-hot-path:workbench-compute-admission` | blocked-by-prerequisite" not in queue_source:
+            violations.append("Workbench compute admission is no longer blocked behind production evidence prerequisites")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
 
         self.assertEqual(violations, [])

@@ -165,7 +165,8 @@ Current state expected on start:
 - `go-hot-path:performance-baseline-and-admission-reconciliation` is complete as a planning slice: current local read model support is accounted for or explicitly deferred, but no Go/Fiber/Go Worker candidate has passed admission.
 - `go-hot-path:workbench-compute-performance-baseline-contract` is complete as a planning slice: Workbench compute Python reference IO, candidate input/output, state/events/read model dependencies, permissions/audit assumptions, shadow forbidden writes, minimum performance evidence and rollback gates are documented.
 - `go-hot-path:workbench-compute-python-reference-contract-guards` is complete as a static guard slice: local tests now guard Workbench compute Python reference state-write ownership and Go shadow/admission forbidden-write queue prerequisites.
-- The next pending boundary is `go-hot-path:workbench-compute-performance-evidence-collector-contract`.
+- `go-hot-path:workbench-compute-performance-evidence-collector-contract` is complete as an implementation slice: read-only `workbench_compute_evidence` tooling now reports matching duration p95/p99, scope samples, worker heartbeat, candidate/decision counts, active generation row counts, matching-originated enqueue-to-fresh, query timing/EXPLAIN and structured configuration-missing/partial evidence status.
+- The next pending boundary is `go-hot-path:workbench-compute-production-evidence-gate`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -261,20 +262,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `go-hot-path:workbench-compute-performance-evidence-collector-contract` unless planning-state reconciliation finds an inconsistency first.
+Start with `go-hot-path:workbench-compute-production-evidence-gate` unless planning-state reconciliation finds an inconsistency first.
 
-For `go-hot-path:workbench-compute-performance-evidence-collector-contract`:
-- Read `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-performance-baseline-and-admission-reconciliation.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-python-reference-contract-guards.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/operations/runtime-worker-governance.md`, existing SLO/performance tools, and runtime queue / Workbench dirty scope code if tooling is added.
-- Define or add a read-only evidence collection contract/tooling path for Workbench compute performance.
-- Required evidence fields include worker p95/p99 duration, claimed/processed/failed/stale-completed scope counts, row counts, candidate/decision counts, dirty-scope lag, heartbeat, query timing where available and active generation enqueue-to-fresh p95/p99 after matching invalidation.
-- Reuse existing SLO tooling conventions and fail-closed semantics before adding a new tool.
-- If a tool is added, it must be read-only by default and unit-tested with fake connections/data.
-- Do not perform production writes.
+For `go-hot-path:workbench-compute-production-evidence-gate`:
+- Read `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-python-reference-contract-guards.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-evidence-collector-contract.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/operations/runtime-worker-governance.md`, `backend/src/fin_ops_platform/tools/workbench_compute_evidence.py`, and `tests/test_workbench_compute_evidence.py`.
+- Run or explicitly defer the read-only Workbench compute evidence collection path in an approved deployed/runtime context.
+- First run the collector locally without assuming `PGSQL_URL`; if configuration is missing, record the structured `configuration_missing` result as expected local evidence.
+- If SSH production access is used, perform only read-only checks. Do not write secrets into files, docs, prompts, shell scripts or git history.
+- Prefer an existing approved runtime wrapper/env on the server. Do not print database URLs or secret values.
+- If no safe approved way exists to run the collector with production database connectivity, write an analysis file that records `production-evidence-deferred` and explains the missing runtime evidence.
+- Required real evidence includes worker p95/p99 duration, claimed/processed/failed/stale-completed scope counts, row counts, candidate/decision counts, dirty-scope lag, heartbeat, query timing where available and active generation enqueue-to-fresh p95/p99 after matching invalidation.
+- Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not change canonical Python runtime behavior.
-- Keep `go-hot-path:workbench-compute-admission` blocked unless performance evidence and shadow prerequisites are satisfied.
+- Keep `go-hot-path:workbench-compute-admission` blocked unless real performance evidence and shadow prerequisites are satisfied.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification, diff checks, and targeted SLO/tooling tests required by the evidence collector slice.
+- Run docs verification, diff checks and targeted evidence-gate checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

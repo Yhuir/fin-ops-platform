@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Workbench compute 性能证据 collector
+
+- 目标：在 Go/Fiber/Go Worker admission 前补齐 `workbench:matching-grouping-check` 的只读性能证据采集路径，避免在缺少真实 p95/p99、heartbeat、row-count 和 query timing 证据时误启动 Go 实现。
+- 影响范围：新增 `fin_ops_platform.tools.workbench_compute_evidence` 和对应 fake-connection 单元测试；不改变 Workbench matching、active generation、relation command、API、worker 或前端行为。
+- 关键决策：collector 只读 `job.workbench_matching_dirty_scopes`、`job.runtime_worker_heartbeats`、`job.outbox_events`、`read_model.workbench_group_rows`、candidate/decision 表和 `pg_stat_statements`；缺 PostgreSQL 配置时返回结构化 `configuration_missing`，证据为空或不完整时返回 `partial` 并保持 Go admission blocked。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-evidence-collector-contract.md`，更新本模块测试矩阵和 autonomous state/queue/next prompt。
+- 测试覆盖：新增 `tests/test_workbench_compute_evidence.py`，覆盖证据字段汇总、只读 SQL 约束、缺证据不放行 admission、缺 PG 配置结构化报告；同步更新 `test_workbench_compute_go_shadow_admission_remains_guarded`，使其继续断言 collector closed、production evidence gate pending、Go admission blocked。
+- 验证命令：`python3 -m py_compile backend/src/fin_ops_platform/tools/workbench_compute_evidence.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_compute_evidence -v`；本 slice 最终还会运行 SLO/guard 回归、docs verify 和 `git diff --check`。
+- 未测风险：未连接真实生产 PostgreSQL；真实 Workbench matching p95/p99、dirty-scope lag、worker heartbeat、active generation enqueue-to-fresh、CPU/内存和 high-row evidence 仍需下一条只读生产证据 gate。
+- 后续事项：执行 `go-hot-path:workbench-compute-production-evidence-gate`；若无法安全获得真实 evidence，记录 `production-evidence-deferred`，不得进入 Go admission。
+
 ## 2026-06-24 - Workbench compute Python reference 守卫
 
 - 目标：在 Go admission 前增加本地可执行守卫，锁定 Workbench compute 的 Python reference 状态写边界和 Go shadow forbidden-write 合同。
