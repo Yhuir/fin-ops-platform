@@ -1,7 +1,7 @@
 # Production No-OA Source-Version Provider Fix Deploy And Convergence - 2026-06-25
 
 **Boundary:** `production:no-oa-source-version-provider-fix-deploy-and-convergence`
-**Status:** `runbook-written`
+**Status:** `production-controlled`
 **Module closure:** `not-module-closed`
 **Production mutation:** bounded release deploy/restart through repository deploy entrypoint; one focused authenticated GET may enqueue only if still stale
 **Worker threads created:** none
@@ -118,7 +118,7 @@ If a rollback target is needed, use the previous active release reported by depl
 
 ```bash
 ssh finops-prod-root 'sudo -n /usr/local/sbin/finops-deploy-control activate <previous-release-name>'
-ssh finops-prod-root 'curl -fsS http://127.0.0.1:8200/health/ready >/dev/null'
+ssh finops-prod-root 'curl -fsS http://127.0.0.1:18001/health/ready >/dev/null'
 ```
 
 Cleanup of old inactive releases is handled by the deploy entrypoint's `cleanup-releases --keep` step. No manual queue/readiness/dirty-scope cleanup is allowed in this boundary.
@@ -132,4 +132,64 @@ Cleanup of old inactive releases is handled by the deploy entrypoint's `cleanup-
 
 ## Production Evidence
 
-Pending execution by T0 after this runbook is committed or held as the current controller evidence file.
+Executed by T0 through the repository deploy entrypoint and root SSH after writing this runbook.
+
+Local predeploy gate:
+
+- `git status --short --branch`: clean `dev`.
+- `HEAD` and `origin/dev`: `d117b4519284db00c0fa88bdf7faaa938a5b1f69`.
+- `git merge-base --is-ancestor 480d2d0ebe3bbf3543a8b0a855ec252fae4bbc1a HEAD`: passed.
+- `bash scripts/verify.sh docs`: passed.
+- `git diff --check`: passed.
+
+Production precheck:
+
+- Active WorkingDirectory before deploy: `/opt/fin-ops/releases/dev-pending-invoice-source-17d13466-20260625/src`.
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187057`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=203223`.
+- Recent no-OA outbox in last hour: `done=3`, latest `2026-06-25 06:33:15.765409+08`.
+- Recent no-OA dirty in last hour: `done=3`, latest `2026-06-25 06:33:15.75908+08`.
+- Read-model dead letters: none.
+
+Deploy:
+
+- Command: `./scripts/deploy-oa.sh --release-name dev-no-oa-source-version-480d2d0e-20260625`.
+- Result: success.
+- Build warning: existing minified CSS syntax warnings from generated CSS; build completed.
+- Release activated by deploy-control.
+- Active WorkingDirectory after deploy: `/opt/fin-ops/releases/dev-no-oa-source-version-480d2d0e-20260625/src`.
+- `RELEASE.json`: `release_name=dev-no-oa-source-version-480d2d0e-20260625`, `git_branch=dev`, `git_commit=d117b4519284db00c0fa88bdf7faaa938a5b1f69`.
+- The deployed commit contains code fix commit `480d2d0ebe3bbf3543a8b0a855ec252fae4bbc1a`.
+
+Focused API metadata probe:
+
+- Configured target credential count: `2`.
+- Session: `allowed=true`, `can_access_app=true`, `can_mutate_data=true`, `can_admin_access=false`, `access_tier=full_access`.
+- Probe set: `no_oa_bank_batches` only.
+- HTTP status: `200`.
+- `read_model_statuses`: `fresh=1`.
+- `non_fresh_read_model_statuses`: none.
+- `refresh_enqueued_count`: `0`.
+- p95: `138.167ms`.
+- `freshness_pass=true`, `slo_pass=true`, focused report `status=pass`.
+
+Production postcheck:
+
+- Active WorkingDirectory: `/opt/fin-ops/releases/dev-no-oa-source-version-480d2d0e-20260625/src`.
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187057`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=203223`.
+- Recent no-OA outbox in last hour: `done=3`, latest `2026-06-25 06:33:15.765409+08`.
+- Recent no-OA dirty in last hour: `done=3`, latest `2026-06-25 06:33:15.75908+08`.
+- Read-model dead letters: none.
+
+No response body, payload row, batch id, transaction id, account name, counterparty, secret, env value, direct DB mutation, queue mutation, readiness mutation, repair, requeue or worker replay occurred in this boundary. Production mutation was limited to the deploy entrypoint activating the new release and restarting the runtime services through deploy-control.
+
+## Result
+
+The no-OA API source-version provider fix is deployed and the focused no-OA user-scope API metadata blocker is closed. The endpoint now returns HTTP `200`, `read_model_status=fresh`, `refresh_enqueued_count=0` and p95 below the `1000ms` target.
+
+Full non-admin user-scope API metadata, browser/admin/write probes and global/module closure remain open.

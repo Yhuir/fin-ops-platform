@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`read-models:pending-invoice-source-version-contract-alignment`
+`production:no-oa-source-version-provider-fix-deploy-and-convergence`
 
 ## Next Prompt
 
-`production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`
+`production:read-model-full-user-scope-api-metadata-smoke-after-no-oa-fix`
