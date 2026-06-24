@@ -61,7 +61,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     TurnoverLedgerExtraValidationError,
 )
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
-from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
+from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes, WorkbenchRowDetailApiRoutes
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
 from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.services.access_control_service import AccessControlService
@@ -1260,6 +1260,7 @@ class Application:
             self._workbench_query_service,
             self._workbench_action_service,
         )
+        self._workbench_row_detail_api_routes = self._build_workbench_row_detail_api_routes()
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
             write_facade_provider=self._workbench_write_facade,
@@ -11853,62 +11854,41 @@ class Application:
         )
 
     def _get_api_workbench_row_detail_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
-        etc_summary_row = self._etc_invoice_summary_row_detail(row_id)
-        if etc_summary_row is not None:
-            payload = {"row": etc_summary_row}
-            payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
-            return payload
-        try:
-            payload = {"row": self._live_workbench_service.get_row_detail(row_id)}
-        except KeyError:
-            month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
-            cached_rows = self._resolve_rows_from_cached_read_models(
-                [row_id],
-                month_hint=month_hint,
-            )
-            if row_id in cached_rows:
-                payload = {"row": cached_rows[row_id]}
-            elif query_facade_row := self._workbench_row_detail_from_query_facade(row_id, month_hint=month_hint):
-                payload = {"row": query_facade_row}
-            elif month_hint is None and self._workbench_query_service._looks_like_oa_row_id(row_id):
-                raise KeyError(row_id)
-            elif self._workbench_row_detail_route_fallback_allowed(row_id, month_hint):
-                payload = self._workbench_api_routes.get_row_detail(row_id)
-            else:
-                raise KeyError(row_id)
-        payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
-        return payload
+        return self._workbench_row_detail_routes().get_payload(row_id, month=month)
 
-    def _workbench_row_detail_from_query_facade(
-        self,
-        row_id: str,
-        *,
-        month_hint: str | None,
-    ) -> dict[str, object] | None:
+    def _workbench_row_detail_routes(self) -> WorkbenchRowDetailApiRoutes:
+        routes = getattr(self, "_workbench_row_detail_api_routes", None)
+        if routes is None:
+            routes = self._build_workbench_row_detail_api_routes()
+            self._workbench_row_detail_api_routes = routes
+        return routes
+
+    def _build_workbench_row_detail_api_routes(self) -> WorkbenchRowDetailApiRoutes:
+        return WorkbenchRowDetailApiRoutes(
+            etc_summary_row_detail=self._etc_invoice_summary_row_detail,
+            live_row_detail=self._live_workbench_service.get_row_detail,
+            row_month_scope_from_row_id=self._row_month_scope_from_row_id,
+            cached_rows_resolver=self._resolve_rows_from_cached_read_models,
+            query_facade_provider=self._workbench_row_detail_query_facade,
+            looks_like_oa_row_id=self._workbench_row_detail_looks_like_oa_row_id,
+            legacy_row_detail=self._workbench_api_routes.get_row_detail,
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+            route_query_service_provider=self._workbench_row_detail_route_query_service,
+            query_service_provider=lambda: getattr(self, "_workbench_query_service", None),
+            apply_row_override=self._workbench_override_service.apply_to_row,
+        )
+
+    def _workbench_row_detail_query_facade(self) -> object | None:
         facade_factory = getattr(self, "_workbench_query_facade", None)
-        if not callable(facade_factory):
-            return None
-        try:
-            result = facade_factory().row_detail(month_hint, row_id=row_id)
-        except AttributeError:
-            return None
-        if result.status_code != HTTPStatus.OK:
-            return None
-        payload = result.payload if isinstance(result.payload, dict) else {}
-        row = payload.get("row")
-        return row if isinstance(row, dict) else None
+        return facade_factory() if callable(facade_factory) else None
 
-    def _workbench_row_detail_route_fallback_allowed(
-        self,
-        row_id: str,
-        _month_hint: str | None,
-    ) -> bool:
-        if not self._requires_sql_read_model_runtime():
-            return True
-        route_query_service = getattr(getattr(self, "_workbench_api_routes", None), "_query_service", None)
-        query_service = route_query_service or getattr(self, "_workbench_query_service", None)
-        records_by_id = getattr(query_service, "_records_by_id", None)
-        return isinstance(records_by_id, dict) and row_id in records_by_id
+    def _workbench_row_detail_route_query_service(self) -> object | None:
+        return getattr(getattr(self, "_workbench_api_routes", None), "_query_service", None)
+
+    def _workbench_row_detail_looks_like_oa_row_id(self, row_id: str) -> bool:
+        query_service = getattr(self, "_workbench_query_service", None)
+        looks_like = getattr(query_service, "_looks_like_oa_row_id", None)
+        return bool(callable(looks_like) and looks_like(row_id))
 
     def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
         return self._cost_statistics_routes().handle_month(month, project_scope)

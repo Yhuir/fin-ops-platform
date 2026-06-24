@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench row detail route-owner extraction
+
+目标：把 `GET /api/workbench/rows/{row_id}` 的 payload/fallback 编排从 `Application` 抽到显式 read-only route owner。
+
+变更：
+
+- `routes_workbench.py` 新增 `WorkbenchRowDetailApiRoutes`。
+- `WorkbenchRowDetailApiRoutes.get_payload(...)` 现在拥有 row detail fallback 顺序：ETC summary、live service、cached read model、`WorkbenchQueryFacade.row_detail(...)`、opaque OA fail-closed、允许的 legacy `WorkbenchApiRoutes.get_row_detail(...)` fallback，以及 row override。
+- `Application._get_api_workbench_row_detail_payload(...)` 改为薄代理。
+- app-owned `_workbench_row_detail_from_query_facade(...)` 和 `_workbench_row_detail_route_fallback_allowed(...)` 已移除。
+- `Application` 只负责依赖组装和 `_handle_api_workbench_row_detail(...)` 的 HTTP `200/404` response mapping。
+
+未改变：
+
+- row detail response shape、status code、fallback 顺序、override application、生产 PostgreSQL route fallback blocking、opaque OA SQL active generation fallback 和前端 detail drawer 行为未改变。
+- `WorkbenchApiRoutes.get_row_detail(...)` 暂保留为现有 legacy fallback surface，未在本 slice 删除。
+
+下一条边界：`server-py:workbench-group-detail-route-owner-audit`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_row_detail_route_owner_extraction_updates_queue tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_row_detail_route_owner_audit_selects_extraction tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_prefers_live_service_and_applies_override_without_fallback tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_route_fallback_applies_override_after_live_and_cache_miss tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_production_sql_runtime_blocks_route_fallback_after_live_and_cache_miss tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_production_sql_runtime_ignores_stale_cached_read_model_row tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_sql_runtime_uses_query_facade_for_opaque_oa_after_live_and_cache_miss tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_row_detail_reads_sql_row_without_application_live_sync -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench row detail route-owner audit
 
 目标：审计 `GET /api/workbench/rows/{row_id}` 的 route ownership、live/cache/SQL fallback 顺序和 no-write relation 边界。
