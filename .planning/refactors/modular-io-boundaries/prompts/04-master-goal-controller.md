@@ -306,19 +306,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-no-oa-production-convergence-next-boundary-selection`.
+Start with `production:post-convergence-readiness-worker-db-aggregate-evidence-sweep`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`.
-- Reconcile rows 231-234 into the current commit-backed progress baseline.
-- Select the next highest-risk safe boundary from current queue and evidence.
-- Do not repeat the PostgreSQL restart, app/worker restart, no-OA deploy or exact event requeue unless new evidence shows regression.
-- Do not execute broad covered-dead-letter cleanup without a separate bounded maintenance boundary.
-- Do not claim global closure unless commit-backed reconciliation proves all module closure requirements, production/App Status/worker/browser/high-row evidence and Go admission rules are satisfied.
+- Read `analysis/planning-post-no-oa-production-convergence-next-boundary-selection-2026-06-25.md` and `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`.
+- Write a read-only production evidence file before SSH collection.
+- Collect non-secret read-only aggregate evidence: release identity, API/dispatcher/required worker status, `/health`, `/health/ready`, queue/dirty/readiness aggregates, no-OA exact scope and historical dead-letter classification.
+- Do not requeue, resolve, repair, deploy, restart, run worker replay, mutate readiness or print secrets in this boundary.
+- If aggregate evidence shows new active blockers, select the narrowest diagnosis boundary rather than broad cleanup.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

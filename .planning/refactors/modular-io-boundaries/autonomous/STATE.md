@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `planning-post-no-oa-production-convergence-next-boundary-selection-pending`
+Current state: `production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook` as `production-controlled` in `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`. T0 deployed release `dev-no-oa-fk-20260625014906`, requeued exact no-OA refresh event `3bc506fd-5662-4902-a9b9-19b0d8fbe4a6` once, and proved `no_oa_bank_batch:all` dirty scope done, readiness fresh, `/health/ready` clean and no new sampled no-OA FK/worker errors. Historical obsolete dead-letter rows remain but are not current health blockers. The next T0 boundary is `planning:post-no-oa-production-convergence-next-boundary-selection`.
+Completed `planning:post-no-oa-production-convergence-next-boundary-selection` as `planning-closed` in `analysis/planning-post-no-oa-production-convergence-next-boundary-selection-2026-06-25.md`. T0 selected `production:post-convergence-readiness-worker-db-aggregate-evidence-sweep` as the next safe boundary so production evidence can be re-baselined after PostgreSQL restart, app/worker restart, no-OA deploy and exact event convergence. The next boundary is read-only only.
 
 ## Closed Or Deferred Slices
 
