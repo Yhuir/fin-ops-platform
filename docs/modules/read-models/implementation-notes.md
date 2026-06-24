@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - No-OA bank batch freshness/derived lifecycle boundary audit
+
+- 目标：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`，复核 no-OA 在 repository/persistence port 抽取后是否已有完整 freshness、force refresh、operation barrier、dirty/outbox、App Status/worker 和 derived lifecycle 本地闭环。
+- 影响范围：no-OA refresh gateway call sites、scope policy、manifest、runtime worker registry、App Status read model/domain registry、operation barrier usage、derived lifecycle map、modular IO state 和 no-OA/read-models 模块文档；不改变运行时代码。
+- 关键决策：refresh enqueue、scope policy、manifest/worker/App Status registration 和 frontend operation barrier 证据已 accounted；但 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 仍拥有 no-OA derived lifecycle target/enqueue behavior，且 no-OA mutation persistence 仍有 broad state-store fallback。
+- 文档影响：新增 boundary audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵；全局和模块 state-machine 定义不变。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现 slice 必须新增 executor service-layer/static guard，并复跑 no-OA application/read-model/workbench integration 与 relevant lifecycle tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，随后处理 mutation persistence fallback quarantine。
+
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，把 no-OA list/query read path 从 broad `workbench_sql_read_repository` 收敛到专属 repository port。

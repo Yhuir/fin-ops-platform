@@ -88,6 +88,15 @@
 
 当前闭环新增了内部往来双入口幂等、两行 manual internal-transfer 历史迁移、active relation row 独占、PostgreSQL no-OA read model 缺席行清理测试。后续不为了覆盖率新增低价值测试，但任何线上复现都必须先补最小失败测试。
 
+## 2026-06-24 - Modular IO freshness/derived lifecycle audit note
+
+`read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit` 已完成为 analysis/accounting slice。结论：
+
+- 已有证据：no-OA refresh enqueue 走 `ReadModelRefreshGateway`/scope policy；manifest、runtime worker registry、App Status registry、worker handler stale source-version skip/dirty scope complete 和 frontend operation barrier 目标均已有本地测试或代码证据。
+- 本轮未新增测试：没有运行时代码、API shape、业务规则、worker event、queue schema、权限、审计或前端行为变化。
+- 下一实现测试要求：`read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 必须新增 focused service-layer executor tests，并补 static/runtime guard 证明 `Application` 不再拥有 no-OA derived lifecycle target/enqueue behavior；还需复跑 no-OA application/read model/workbench integration、manifest、refresh gateway 和相关 platform guard。
+- 后续风险：`NoOaBankBatchApplicationService.persist_mutation(...)` 的 broad state-store fallback 仍需单独 quarantine/removal slice 覆盖。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

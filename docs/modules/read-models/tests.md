@@ -131,6 +131,15 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 
 下一 slice 是 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，必须审计 fresh gate、force refresh、all fan-out/query proof、Workbench relation source-version proof、operation barrier targets、legacy read contamination 和 app-owned helper 分类。
 
+## 2026-06-24 - no-OA bank batch freshness/derived lifecycle audit note
+
+`read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit` 已完成为 analysis/accounting slice。结论：
+
+- 已有测试/代码证据覆盖 no-OA scope policy、gateway enqueue、manifest owner、runtime worker registration、App Status target、worker stale source-version skip、dirty scope complete、missing/stale/fresh list status 和 frontend operation barrier 目标。
+- 本轮未新增测试，因为没有改变运行时代码、HTTP contract、业务状态、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 下一 slice `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 必须新增 executor service-layer tests 和 platform/static guard，证明 no-OA derived lifecycle target scope selection、reason/metadata forwarding 和 enqueued-job accounting 已移出 `Application`。
+- `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine` 是之后的独立测试边界，必须覆盖 broad state-store fallback 被隔离或删除。
+
 ## 2026-06-24 - turnover ledger freshness/barrier audit note
 
 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice。结论：

@@ -43,6 +43,15 @@
 - 测试覆盖：新增 no-OA repository port isolation test、manifest owner assertion 和 platform guard；route-level stale/missing integration tests 改为注入 `_no_oa_bank_batch_sql_read_repository`。
 - 下一步：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`，审计 refresh enqueue、derived lifecycle、operation barrier、force refresh、dirty/outbox 和剩余 app-owned helper surfaces。
 
+## 2026-06-24 - Modular IO freshness/derived lifecycle boundary audit
+
+- 目标：审计 no-OA read model 在 persistence/repository port 抽取后的 refresh enqueue、scope policy、App Status/worker registration、operation barrier、derived lifecycle 和剩余旧链路污染面。
+- 结论：refresh enqueue 已通过 `ReadModelRefreshGateway`/scope policy；manifest、runtime worker registry、App Status read model/domain registry 和前端 operation barrier 目标已有本地证据。未发现页面把 stale no-OA read model payload 伪装为 fresh 的新增问题。
+- 未闭合 gap：`Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 仍拥有 no-OA derived lifecycle target scope 选择和 enqueue result assembly；`NoOaBankBatchApplicationService.persist_mutation(...)` 仍保留缺少 atomic mutation boundary 时的 broad state-store fallback。
+- 下一边界：先执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`；之后再执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`。
+- 文档影响：本轮不改变业务状态、UI 状态、API shape、worker event、queue schema、operation barrier 状态、权限或审计含义；`state-machine.md` 定义不变。
+- 测试决策：本轮是 analysis/accounting only；下一实现 slice 必须新增 executor service-layer/static guard，并复跑 no-OA application/read model/workbench integration 与相关 lifecycle 回归。
+
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 
 - 目标：审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，确定第一个实现抽取边界。
