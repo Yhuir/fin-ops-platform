@@ -16169,11 +16169,6 @@ class Application:
             if self._cost_statistics_read_model_service is not None
             else {}
         )
-        tax_offset_snapshot = (
-            self._tax_offset_read_model_service.snapshot()
-            if self._tax_offset_read_model_service is not None
-            else {}
-        )
         self._state_store.save(
             {
                 "imports": self._import_service.snapshot(),
@@ -16189,7 +16184,6 @@ class Application:
                 "turnover_relations": self._turnover_relation_service.snapshot(),
                 "turnover_ledger_extras": self._turnover_ledger_api_routes.extras_snapshot(),
                 "cost_statistics_read_models": cost_statistics_snapshot,
-                "tax_offset_read_models": tax_offset_snapshot,
                 "pending_invoice_commands": dict(getattr(self, "_pending_invoice_commands", {}) or {}),
             }
         )

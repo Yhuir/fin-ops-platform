@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO full-state snapshot quarantine
+
+- 目标：执行 `read-models:tax-offset-full-state-read-model-snapshot-quarantine`，移除税金抵扣 read model 在 broad `_persist_state(...)` 里的旧全量状态写入路径。
+- 影响范围：`Application._persist_state(...)`、read model architecture guard、tax offset/read-models 文档；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：`Application._persist_state(...)` 不再写 `tax_offset_read_models`；显式 `_persist_tax_offset_read_models_best_effort(...)` 作为 runtime/executor persistence dependency 保留；`TaxOffsetReadModelService.from_snapshot(...)` 继续作为 local/Mongo compatibility load path。
+- 文档影响：新增 modular IO full-state snapshot quarantine analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：扩展 `tests/test_read_model_architecture_guards.py`，新增 `_persist_state(...)` 不写 `tax_offset_read_models` 的 static guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-full-state-read-model-snapshot-quarantine.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+- 后续事项：执行 `read-models:tax-offset-post-full-state-local-implementation-closure-audit`。
+
 ## 2026-06-24 - Modular IO final local closure audit found full-state snapshot gap
 
 - 目标：执行 `read-models:tax-offset-final-local-implementation-closure-audit`，确认税金抵扣本地实现支持是否可进入 production evidence defer。

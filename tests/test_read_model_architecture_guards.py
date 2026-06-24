@@ -356,6 +356,17 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
             [],
         )
 
+    def test_tax_offset_read_models_are_not_written_by_broad_full_state_persist(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        start = server_source.index("    def _persist_state(self) -> None:")
+        end = server_source.index("\n    def _persist_state_with_workbench_invalidation", start)
+        helper_body = server_source[start:end]
+
+        self.assertNotIn("tax_offset_read_models", helper_body)
+        self.assertNotIn("_tax_offset_read_model_service.snapshot()", helper_body)
+        self.assertIn("cost_statistics_read_models", helper_body)
+        self.assertIn("def _persist_tax_offset_read_models_best_effort(", server_source)
+
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []
         for path in SOURCE_ROOT.rglob("*.py"):
