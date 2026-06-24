@@ -4,12 +4,77 @@ import unittest
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
-from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import NoOaBankBatchReadModelRefreshService
+from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
+    NoOaBankBatchReadModelPersistencePort,
+    NoOaBankBatchReadModelRefreshService,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
+    def test_persistence_port_delegates_to_store_snapshot_save(self) -> None:
+        class StateStore:
+            def __init__(self) -> None:
+                self.saved_snapshots: list[dict[str, object]] = []
+
+            def save_no_oa_bank_batches(self, snapshot: dict[str, object]) -> None:
+                self.saved_snapshots.append(dict(snapshot))
+
+        state_store = StateStore()
+        port = NoOaBankBatchReadModelPersistencePort(state_store)
+
+        port.save_public_snapshot({"batches": {"batch-1": {"status": "draft"}}})
+
+        self.assertEqual(state_store.saved_snapshots, [{"batches": {"batch-1": {"status": "draft"}}}])
+
+    def test_refresh_persists_through_explicit_persistence_boundary(self) -> None:
+        class StateStore:
+            def save_no_oa_bank_batches(self, *_args, **_kwargs) -> None:
+                raise AssertionError("refresh handler must use read_model_persistence, not broad state_store")
+
+        class Persistence:
+            def __init__(self) -> None:
+                self.saved_snapshots: list[dict[str, object]] = []
+
+            def save_public_snapshot(self, snapshot: dict[str, object]) -> None:
+                self.saved_snapshots.append(dict(snapshot))
+
+        app = build_application()
+        persistence = Persistence()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=app._import_service,
+            effective_category_provider=app._bank_transaction_effective_category_provider,
+            no_oa_bank_batch_service=app._no_oa_bank_batch_service,
+            app_settings_service=app._app_settings_service,
+            bank_transaction_category_service=app._bank_transaction_category_service,
+            pair_relation_service=app._workbench_pair_relation_service,
+            workbench_read_model_service=app._workbench_read_model_service,
+            state_store=StateStore(),
+            read_model_persistence=persistence,
+            workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-explicit-persistence",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
+                scope_type="no_oa_bank_batch",
+                scope_key="all",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:all",
+                payload={"scope_type": "no_oa_bank_batch", "scope_key": "all", "source_version": 1},
+                attempts=1,
+                status="processing",
+                source_version=1,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "all")
+        self.assertEqual(len(persistence.saved_snapshots), 1)
+
     def test_refresh_does_not_repair_workbench_relations_from_read_model_path(self) -> None:
         class ImportService:
             def list_transactions(self, *, month: str = "all"):

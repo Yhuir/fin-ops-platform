@@ -13,6 +13,19 @@ NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE = "no_oa_bank_batch.read_model.refresh"
 NO_OA_BANK_BATCH_SCOPE_TYPE = "no_oa_bank_batch"
 
 
+class NoOaBankBatchReadModelPersistencePort:
+    """Narrow persistence boundary for no-OA public read model snapshots."""
+
+    def __init__(self, state_store: Any) -> None:
+        self._state_store = state_store
+
+    def save_public_snapshot(self, snapshot: dict[str, Any]) -> None:
+        save_snapshot = getattr(self._state_store, "save_no_oa_bank_batches", None)
+        if not callable(save_snapshot):
+            raise RuntimeError("No-OA read model persistence requires save_no_oa_bank_batches.")
+        save_snapshot(snapshot)
+
+
 class NoOaBankBatchReadModelRefreshService:
     def __init__(
         self,
@@ -26,11 +39,12 @@ class NoOaBankBatchReadModelRefreshService:
         workbench_read_model_service: Any,
         state_store: Any,
         queue_repository: Any | None = None,
+        read_model_persistence: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         relation_facade: Any | None = None,
     ) -> None:
-        self._state_store = state_store
         self._queue_repository = queue_repository
+        self._read_model_persistence = read_model_persistence or NoOaBankBatchReadModelPersistencePort(state_store)
         self._application_service = NoOaBankBatchApplicationService(
             import_service=import_service,
             effective_category_provider=effective_category_provider,
@@ -67,7 +81,7 @@ class NoOaBankBatchReadModelRefreshService:
             scope_key=scope_key,
         )
         snapshot = self._no_oa_bank_batch_service.public_snapshot()
-        self._state_store.save_no_oa_bank_batches(snapshot)
+        self._read_model_persistence.save_public_snapshot(snapshot)
         self._complete_dirty_scope(event, scope_key=scope_key)
         batches = snapshot.get("batches") if isinstance(snapshot, dict) else {}
         return {

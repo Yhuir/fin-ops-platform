@@ -18,6 +18,14 @@
 
 ## 现有测试入口
 
+## 2026-06-24 - Modular IO refresh persistence boundary extraction
+
+- 变更类型：narrow implementation slice。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_persistence_port_delegates_to_store_snapshot_save`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_refresh_persists_through_explicit_persistence_boundary`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_read_model_refresh_does_not_run_relation_repairs`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；business core/API/frontend/E2E 不适用，因为没有改变生命周期规则、HTTP shape、前端 barrier 或用户流程。
+- 验证结果：no-OA refresh/application/workbench integration 目标测试通过；完整 platform guard 模块有两个无关 OA invoice / ETC repair guard 失败，已在 refactor analysis 记录。
+- 下一边界建议目标测试：repository port extraction 需要扩展 `tests/test_no_oa_bank_batch_application_service.py` 或新增 port guard，证明 no-OA list/query 只暴露 `list_no_oa_bank_batch_rows`，并复跑 manifest/no-OA application/workbench integration。
+
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 
 - 变更类型：analysis/accounting only。

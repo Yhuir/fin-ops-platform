@@ -30,6 +30,14 @@
 
 ## 场景覆盖清单
 
+## 2026-06-24 - No-OA bank batch refresh persistence boundary extraction
+
+- 变更类型：narrow implementation slice。
+- 覆盖证据：`NoOaBankBatchReadModelPersistencePort`、`NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)`、runtime worker no-OA refresh wiring、no-OA refresh/application/workbench integration tests 和 no-OA platform boundary guard。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；business core/API contract/frontend/E2E 不适用，因为本轮不改变生命周期、HTTP shape、frontend operation barrier 或用户流程。
+- 验证结果：目标 no-OA refresh/application/workbench integration 和 no-OA platform guard 通过；完整 `tests.test_platform_runtime_boundary_guards` 有两个无关 OA invoice / ETC repair guard 失败，后续不应误归因给 no-OA persistence slice。
+- 下一验证重点：repository port extraction 应覆盖 no-OA list read port guard、manifest owner/contract、application service list payload status regression 和 docs verify。
+
 ## 2026-06-24 - No-OA bank batch repository/state-store boundary audit
 
 - 变更类型：analysis/accounting only。

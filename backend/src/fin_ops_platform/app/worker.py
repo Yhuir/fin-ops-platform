@@ -49,6 +49,7 @@ from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3Ob
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
+    NoOaBankBatchReadModelPersistencePort,
     NoOaBankBatchReadModelRefreshService,
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
@@ -403,6 +404,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {}
             ),
             state_store=state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None),
+            read_model_persistence=NoOaBankBatchReadModelPersistencePort(
+                state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None)
+            ),
             queue_repository=queue,
             workbench_matching_source_versions_provider=lambda: _no_oa_workbench_matching_source_versions(
                 app_settings_service

@@ -1923,9 +1923,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         handler_source = _function_source(tree, source, "handle_runtime_event")
 
         violations: list[str] = []
+        if "class NoOaBankBatchReadModelPersistencePort" not in source:
+            violations.append("No-OA read model refresh persistence port is missing")
+        if "save_public_snapshot" not in handler_source:
+            violations.append("No-OA read model refresh must persist through the explicit persistence boundary")
         if "apply_relation_repairs=False" not in handler_source:
             violations.append("No-OA read model refresh must call refresh_batches with apply_relation_repairs=False")
         for forbidden in (
+            "save_no_oa_bank_batches",
             "save_workbench_pair_relations",
             "save_no_oa_bank_batch_mutation",
             "create_active_relation",

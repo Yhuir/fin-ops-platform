@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-no-oa-bank-batch-boundary-audit`
+Current state: `autonomous-continue-after-read-models-no-oa-refresh-persistence-boundary`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:no-oa-bank-batch-repository-state-store-boundary-audit` as an analysis/accounting slice. The audit found that no-OA manifest/scope/worker registration and route mapping are already explicit, and SQL cleanup/write ownership lives in `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`; however `NoOaBankBatchReadModelRefreshService` still directly persists `public_snapshot()` through broad `state_store.save_no_oa_bank_batches(...)`. The next executable boundary is `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`. Go hot-path admission remains blocked.
+Completed `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction` as an implementation slice. `NoOaBankBatchReadModelPersistencePort` now owns no-OA public snapshot persistence delegation for the refresh worker, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`. The next executable boundary is `read-models:no-oa-bank-batch-read-model-repository-port-extraction`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -181,6 +181,7 @@ Completed `read-models:no-oa-bank-batch-repository-state-store-boundary-audit` a
 - `read-models:turnover-ledger-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `read-models:next-pilot-selection-after-turnover-ledger` -> `analysis-closed`
 - `read-models:no-oa-bank-batch-repository-state-store-boundary-audit` -> `analysis-closed`
+- `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -199,8 +200,8 @@ Completed `read-models:no-oa-bank-batch-repository-state-store-boundary-audit` a
 - `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. Repository port extraction is implemented: `TaxOffsetReadModelRepositoryPort` exposes only manifest-listed load/get/save methods, state-store tax read/write wiring uses the port, the SQL read repository property returns the port over the optional read connection, and tax projection save paths go through the port. Freshness/barrier audit is also implemented: SQL fresh gate, force refresh scope policy, `all` fan-out/month shard proof, plan-save/certified-import operation barrier and legacy/app-owned wrappers are accounted for; OA attachment invoice evidence fallback now promotes formal invoice payloads with `invoice_type` and no `evidence_type`. Worker rebuild executor extraction moved compat worker rebuild/persist/fresh-cache publish behavior into `TaxOffsetWorkerRebuildExecutor` and made the app method a thin delegate. Derived lifecycle executor extraction moved read model invalidation and month-cache clearing behavior into `TaxOffsetDerivedLifecycleExecutor` and removed the app-owned helper methods. Cache warmup executor extraction moved optional warmup scheduling/job execution, read model upsert and snapshot persistence into `TaxOffsetCacheWarmupExecutor`; the remaining app helper is compat-only delegation. Full-state snapshot quarantine removed broad `Application._persist_state(...)` tax offset read model writes and kept explicit persistence callback ownership. Post-quarantine audit found no remaining local implementation gap, so `tax_offset` local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
 - `cost_statistics` is now the ninth non-Go read model implementation pilot. It was selected because it consumes Workbench relation, bank detail tags, import facts, ETC/no-OA/turnover/settings fan-out, owns special `active/all` scope grammar, and has a queryable parent aggregate that must be isolated before Go summary-rollup admission. Repository port extraction is implemented: manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models` are behind `CostStatisticsReadModelRepositoryPort`, PostgreSQL state-store cost SQL read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` uses it for projection save paths while preserving existing API, parent aggregate, worker and Redis behavior. Freshness/barrier audit is analysis-closed: SQL fresh gate, production repository unavailable behavior, force-refresh scope normalization, parent aggregate proof, primary/compat worker split and App Status registry are locally accounted for. Derived lifecycle executor extraction is implemented: `CostStatisticsDerivedLifecycleExecutor` now owns invalidation, `pending_invoice_rules_changed` persist-empty behavior, no-warmup refresh fallback metadata and enqueued-job accounting; `Application` only assembles runtime/gateway callbacks. Post-derived local closure audit found warmup/retry/rebuild app methods are compat-only delegates. Full-state snapshot quarantine is implemented: broad `_persist_state(...)` no longer writes `cost_statistics_read_models`, explicit runtime/query persistence remains, and startup compatibility load remains. Post-full-state local closure audit found no remaining local implementation gap, so local cost statistics support is accounted for, but the module remains not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `turnover_ledger` is now the tenth non-Go read model implementation pilot. Repository port extraction is implemented: `TurnoverLedgerReadModelRepositoryPort` exposes only manifest-listed `list_turnover_ledger_view`, `save_turnover_ledger_rows` and `clear_turnover_ledger_rows`; PostgreSQL state-store read wiring, `TurnoverLedgerQueryService` app injection and worker projection paths now use the narrow port; unrelated read model method exposure is guarded. Freshness/barrier audit found existing SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence. Refresh producer/clear extraction is implemented: app-owned turnover enqueue/clear helpers are removed, enqueue goes through `TurnoverLedgerReadModelRefreshProducer` and clear uses the turnover-specific repository port. Local closure audit found no remaining local implementation gap; local support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot. Repository/state-store boundary audit is analysis-closed: no-OA manifest/scope/worker registration and HTTP route mapping are explicit; SQL cleanup/write ownership remains in `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`; the first local implementation gap is the refresh worker's direct broad state-store persistence of `public_snapshot()`. `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
-- The next pending boundary is `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`.
+- `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot. Repository/state-store audit is analysis-closed and refresh persistence boundary extraction is implemented: the worker refresh handler persists `public_snapshot()` through `NoOaBankBatchReadModelPersistencePort` instead of directly calling broad state-store. The module remains implementation-gap-open because the list/query side still consumes broad `workbench_sql_read_repository.list_no_oa_bank_batch_rows(...)`, and app-owned enqueue/derived lifecycle helper accounting remains later work. `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
+- The next pending boundary is `read-models:no-oa-bank-batch-read-model-repository-port-extraction`.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -222,8 +223,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:no-oa-bank-batch-repository-state-store-boundary-audit`
+`read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`
 
 ## Next Prompt
 
-`read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`
+`read-models:no-oa-bank-batch-read-model-repository-port-extraction`

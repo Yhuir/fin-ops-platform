@@ -23,6 +23,16 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-24 - Modular IO refresh persistence boundary extraction
+
+- 目标：把 no-OA read model refresh worker 的 public snapshot 持久化从 broad state-store 直接调用中抽出。
+- 影响范围：`NoOaBankBatchReadModelRefreshService`、`NoOaBankBatchReadModelPersistencePort`、runtime worker wiring、no-OA refresh tests 和 platform boundary guard；不改变业务规则、API shape、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 关键决策：`NoOaBankBatchReadModelPersistencePort.save_public_snapshot(...)` 是 worker refresh 的显式持久化边界，内部继续委托现有 `save_no_oa_bank_batches(...)` capability；SQL 清理/写入 owner 仍是 `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`。
+- 保留语义：`public_snapshot()` 仍只保存公开生命周期，stale source-version event 仍 skip，月度 refresh 仍保留其它月份批次，refresh worker 仍不得 repair/persist Workbench relation。
+- 测试覆盖：新增 persistence port delegation test、refresh handler explicit persistence boundary test，并强化 no-OA refresh static guard，禁止 handler 直接出现 `save_no_oa_bank_batches`。
+- 验证限制：完整 `tests.test_platform_runtime_boundary_guards` 仍有两个无关 OA invoice / ETC repair guard 失败；本切片新增的 no-OA guard 目标测试已通过。
+- 后续事项：下一边界是 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，收敛 list/query 侧 broad `workbench_sql_read_repository` 注入。
+
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 
 - 目标：审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，确定第一个实现抽取边界。

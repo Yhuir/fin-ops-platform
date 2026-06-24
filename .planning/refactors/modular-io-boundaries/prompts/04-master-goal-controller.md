@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:no-oa-bank-batch-repository-state-store-boundary-audit.
+- Last completed boundary: read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction.
 - Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -140,8 +140,8 @@ Current state expected on start:
 - Target verification fixed a stale no-OA refresh-service constructor keyword: `NoOaBankBatchReadModelRefreshService` now passes `pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(...)` to match the current application service contract.
 - Remaining later non-Go read model candidates include `search` and `bank_account_balance`.
 - No module is globally closed.
-- The no-OA repository/state-store boundary audit is analysis-closed: manifest/scope/worker registration and route mapping are explicit, SQL cleanup/write ownership lives in `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`, and the first implementation gap is direct broad state-store persistence from `NoOaBankBatchReadModelRefreshService`.
-- The next pending boundary is read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction.
+- The no-OA refresh persistence boundary is implemented: `NoOaBankBatchReadModelPersistencePort` owns public snapshot persistence delegation for the worker refresh path, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
+- The next pending boundary is read-models:no-oa-bank-batch-read-model-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -237,18 +237,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:no-oa-bank-batch-read-model-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-repository-state-store-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`, and relevant no-OA tests.
+For read-models:no-oa-bank-batch-read-model-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-refresh-persistence-boundary-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-repository-state-store-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`, and relevant no-OA tests.
 - Use CodeGraph for structural lookup before editing.
-- Introduce a narrow no-OA read model refresh persistence boundary/adapter around the existing `save_no_oa_bank_batches(...)` capability.
-- Wire `NoOaBankBatchReadModelRefreshService` through that explicit boundary so `handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
-- Preserve SQL ownership in `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)`; do not duplicate SQL.
-- Preserve local/Mongo compatibility by delegating through the existing store capability.
-- Preserve public snapshot cleanup semantics, stale source-version skip, month-scope refresh behavior, relation-repair prohibition, queue completion, event type, scope type and return payload.
+- Add a narrow `NoOaBankBatchReadModelRepositoryPort` or local-pattern equivalent for manifest-listed `list_no_oa_bank_batch_rows(...)`.
+- Wire `NoOaBankBatchApplicationService` list/query construction through the narrow no-OA repository port instead of broad `workbench_sql_read_repository`.
+- Preserve list payload shape, missing/stale/fresh/unavailable status behavior, refresh enqueue behavior, pagination behavior and public lifecycle filtering.
+- Preserve `PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)` as SQL owner; do not duplicate SQL.
+- Add a port guard proving unrelated read model methods are not exposed.
+- Update manifest `repository_owner` only if the port becomes the new owner name.
 - Do not implement Go/Fiber/Go Worker.
-- Do not extract the list-only `NoOaBankBatchReadModelRepositoryPort` in this slice unless the persistence boundary proves impossible without it.
 - Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
 - Run targeted static evidence collection, app check, no-OA target tests where applicable, docs verification and diff checks.
