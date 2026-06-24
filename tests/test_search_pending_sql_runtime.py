@@ -16,6 +16,10 @@ from fin_ops_platform.services.pending_invoice_service import (
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
+from fin_ops_platform.services.search_query_freshness_service import (
+    SearchIndexSourceVersionsProvider,
+    SearchQueryFreshnessService,
+)
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 
@@ -89,6 +93,14 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         "bank_detail_source_versions": {},
     }
+
+
+def _search_expected_source_versions() -> dict[str, object]:
+    return SearchIndexSourceVersionsProvider(
+        bank_auto_tag_rules_version_provider=lambda: 1,
+        oa_attachment_invoice_parser_version_provider=lambda: "parser-v1",
+        oa_projection_sync_version_provider=lambda: OA_PROJECTION_SYNC_VERSION,
+    ).expected_source_versions()
 
 
 class PendingInvoiceReadModelRepositoryPortTests(unittest.TestCase):
@@ -206,6 +218,129 @@ class SearchReadModelRepositoryPortTests(unittest.TestCase):
             [name for name, _payload in underlying.calls],
             ["search_index", "save_search_index_rows"],
         )
+
+
+class SearchQueryFreshnessServiceTests(unittest.TestCase):
+    def test_missing_sql_payload_enqueues_refresh_without_live_scan(self) -> None:
+        queue = QueueRecorder()
+        service = SearchQueryFreshnessService(
+            read_repository=type("SearchRepo", (), {"search_index": lambda *_args, **_kwargs: None})(),
+            source_versions_provider=_search_expected_source_versions,
+            enqueue_refresh=lambda scope_key, *, reason, metadata=None: queue.enqueue_read_model_refresh(
+                scope_type="search",
+                scope_key=scope_key,
+                reason=reason,
+            ),
+        )
+
+        payload = service.get_payload(
+            q="昆明",
+            scope="all",
+            month="2026-05",
+            project_name=None,
+            status=None,
+            limit=20,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("search", "2026-05", "api_miss")])
+
+    def test_fresh_sql_payload_preserves_rows_and_does_not_enqueue(self) -> None:
+        queue = QueueRecorder()
+        source_versions = _search_expected_source_versions()
+        service = SearchQueryFreshnessService(
+            read_repository=type(
+                "SearchRepo",
+                (),
+                {
+                    "search_index": lambda *_args, **_kwargs: {
+                        "query": "昆明",
+                        "filters": {
+                            "scope": "all",
+                            "month": "2026-05",
+                            "project_name": None,
+                            "status": None,
+                            "limit": 20,
+                        },
+                        "summary": {"total": 1, "oa": 0, "bank": 1, "invoice": 0},
+                        "oa_results": [],
+                        "bank_results": [{"row_id": "txn-1"}],
+                        "invoice_results": [],
+                        "refresh_status": "fresh",
+                        "source_versions": source_versions,
+                    }
+                },
+            )(),
+            source_versions_provider=lambda: source_versions,
+            enqueue_refresh=lambda scope_key, *, reason, metadata=None: queue.enqueue_read_model_refresh(
+                scope_type="search",
+                scope_key=scope_key,
+                reason=reason,
+            ),
+        )
+
+        payload = service.get_payload(
+            q="昆明",
+            scope="all",
+            month="2026-05",
+            project_name=None,
+            status=None,
+            limit=20,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["bank_results"], [{"row_id": "txn-1"}])
+        self.assertEqual(queue.refreshes, [])
+
+    def test_source_version_mismatch_marks_stale_and_enqueues_refresh(self) -> None:
+        queue = QueueRecorder()
+        source_versions = _search_expected_source_versions()
+        stale_versions = dict(source_versions)
+        stale_versions["bank_auto_tag_rules_version"] = "old"
+        service = SearchQueryFreshnessService(
+            read_repository=type(
+                "SearchRepo",
+                (),
+                {
+                    "search_index": lambda *_args, **_kwargs: {
+                        "query": "昆明",
+                        "filters": {
+                            "scope": "all",
+                            "month": "2026-05",
+                            "project_name": None,
+                            "status": None,
+                            "limit": 20,
+                        },
+                        "summary": {"total": 1, "oa": 0, "bank": 1, "invoice": 0},
+                        "oa_results": [],
+                        "bank_results": [{"row_id": "txn-1"}],
+                        "invoice_results": [],
+                        "refresh_status": "fresh",
+                        "source_versions": stale_versions,
+                    }
+                },
+            )(),
+            source_versions_provider=lambda: source_versions,
+            enqueue_refresh=lambda scope_key, *, reason, metadata=None: queue.enqueue_read_model_refresh(
+                scope_type="search",
+                scope_key=scope_key,
+                reason=reason,
+            ),
+        )
+
+        payload = service.get_payload(
+            q="昆明",
+            scope="all",
+            month="2026-05",
+            project_name=None,
+            status=None,
+            limit=20,
+        )
+
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("search", "2026-05", "api_source_versions_stale")])
 
 
 class SearchPendingConnection:
@@ -1057,7 +1192,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     ],
                     "invoice_results": [],
                     "refresh_status": "fresh",
-                    "source_versions": app._search_index_expected_source_versions(),
+                    "source_versions": app._search_query_freshness_service().expected_source_versions(),
                 }
             },
         )()

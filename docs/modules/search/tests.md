@@ -42,6 +42,17 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_rebuild_helpers_stay_out_of_application tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
 ```
 
+## 2026-06-24 - query freshness service extraction
+
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchQueryFreshnessServiceTests`。
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_query_freshness_helpers_stay_out_of_application`。
+- 覆盖：SQL miss 返回 refreshing 并入队、fresh SQL payload 不触发 live scan/source-version enqueue、source-version mismatch 标记 stale 并入队；`server.py` 不再拥有 search SQL payload/helper source-version proof。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_query_freshness_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchQueryFreshnessServiceTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

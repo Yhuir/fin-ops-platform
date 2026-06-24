@@ -24,3 +24,11 @@
 - 改动：删除 `Application.rebuild_search_index_scope(...)` 和 `_build_search_index_rows_for_month(...)`；新增 platform boundary guard 防止它们回到 `server.py`。
 - 保持不变：`/api/search` fresh gate、source-version mismatch、refresh enqueue、search ranking、worker event、scope policy、queue schema 和 API shape 均不变。
 - 下一步：抽取或隔离 `/api/search` SQL fresh/stale/miss payload assembly、expected source-version proof 和 refresh enqueue helper。
+
+## 2026-06-24 - query freshness service extraction
+
+- 目标：把 `/api/search` SQL read model miss/stale/source-version payload assembly 和 expected source-version proof 从 `Application` 移到显式 service 边界。
+- 改动：新增 `SearchQueryFreshnessService` 与 `SearchIndexSourceVersionsProvider`；删除 `Application._get_search_payload_from_sql_read_model(...)` 与 `_search_index_expected_source_versions(...)`；`/api/search` route 只负责参数校验、HTTP status 映射和无 SQL repository 时的 legacy/local fallback。
+- 保持不变：search API response shape、status code 行为、SQL miss enqueue reason、source-version stale reasons、search ranking、group context、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
+- 测试覆盖：新增 service-layer tests 覆盖 SQL miss/fresh/source-version mismatch；新增 platform guard 防止 app-owned query freshness helper 回到 `server.py`；复跑 search API/runtime/manifest 相关测试。
+- 下一步：审计并拆分 `Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)`，决定抽取 search refresh producer/invalidation service 还是保留 compat-only wrapper。

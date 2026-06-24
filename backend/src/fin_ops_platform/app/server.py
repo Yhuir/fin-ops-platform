@@ -324,6 +324,10 @@ from fin_ops_platform.services.read_model_freshness import (
 )
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
+from fin_ops_platform.services.search_query_freshness_service import (
+    SearchIndexSourceVersionsProvider,
+    SearchQueryFreshnessService,
+)
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
@@ -4814,7 +4818,7 @@ class Application:
                     "message": "status must be paired, open, ignored, or processed_exception.",
                 },
             )
-        sql_payload = self._get_search_payload_from_sql_read_model(
+        sql_payload = self._search_query_freshness_service().get_payload(
             q=q,
             scope=resolved_scope,
             month=resolved_month,
@@ -4835,63 +4839,17 @@ class Application:
         )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _get_search_payload_from_sql_read_model(
-        self,
-        *,
-        q: str,
-        scope: str,
-        month: str,
-        project_name: str | None,
-        status: str | None,
-        limit: int,
-    ) -> dict[str, object] | None:
-        repository = getattr(self, "_search_sql_read_repository", None)
-        search_index = getattr(repository, "search_index", None)
-        if not callable(search_index):
-            return None
-        payload = search_index(q=q, scope=scope, month=month, project_name=project_name, status=status, limit=limit)
-        scope_key = month if month != "all" else "all"
-        if not isinstance(payload, dict):
-            self._enqueue_search_read_model_refresh(scope_key, reason="api_miss")
-            return {
-                "query": q,
-                "filters": {"scope": scope, "month": month, "project_name": project_name or None, "status": status, "limit": limit},
-                "summary": {"total": 0, "oa": 0, "bank": 0, "invoice": 0},
-                "oa_results": [],
-                "bank_results": [],
-                "invoice_results": [],
-                "read_model_status": "refreshing",
-                "read_model_scope_key": scope_key,
-            }
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if refresh_status != "fresh":
-            self._enqueue_search_read_model_refresh(scope_key, reason="api_stale")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=require_expected_source_versions(
-                self._search_index_expected_source_versions(),
-                context="search_index_read_model",
-            ),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+    def _search_query_freshness_service(self) -> SearchQueryFreshnessService:
+        source_versions_provider = SearchIndexSourceVersionsProvider(
+            bank_auto_tag_rules_version_provider=self._current_bank_auto_tag_rules_version,
+            oa_attachment_invoice_parser_version_provider=self._current_oa_attachment_invoice_parser_version,
+            oa_projection_sync_version_provider=self._current_oa_projection_sync_version,
         )
-        if stale_reasons:
-            refresh_status = "stale"
-            self._enqueue_search_read_model_refresh(scope_key, reason="api_source_versions_stale")
-        result = dict(payload)
-        result["read_model_status"] = refresh_status
-        result["read_model_scope_key"] = scope_key
-        if stale_reasons:
-            result["read_model_stale_reasons"] = stale_reasons
-        result.pop("refresh_status", None)
-        return result
-
-    def _search_index_expected_source_versions(self) -> dict[str, object]:
-        return {
-            "search_index_schema_version": "2026-05-search-index-v1",
-            "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
-            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
-        }
+        return SearchQueryFreshnessService(
+            read_repository=getattr(self, "_search_sql_read_repository", None),
+            source_versions_provider=source_versions_provider.expected_source_versions,
+            enqueue_refresh=self._enqueue_search_read_model_refresh,
+        )
 
     def _enqueue_search_read_model_refresh(
         self,

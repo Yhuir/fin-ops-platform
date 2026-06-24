@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-search-app-rebuild-helper-quarantine`
+Current state: `autonomous-continue-after-read-models-search-query-freshness-service-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:search-freshness-helper-boundary-audit` and `read-models:search-app-rebuild-helper-quarantine`. App-owned search rebuild helpers were removed; search rebuild ownership remains with `SearchPendingSqlProjectionBuilder`. The next executable boundary is `read-models:search-query-freshness-service-extraction`. Go hot-path admission remains blocked.
+Completed `read-models:search-query-freshness-service-extraction`. `/api/search` SQL miss/stale/source-version payload assembly is now owned by `SearchQueryFreshnessService`, with source-version proof supplied by `SearchIndexSourceVersionsProvider`; app-owned query freshness helpers were removed and guarded. The next executable boundary is `read-models:search-refresh-producer-invalidation-boundary-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -193,6 +193,7 @@ Completed `read-models:search-freshness-helper-boundary-audit` and `read-models:
 - `read-models:search-repository-port-extraction` -> `implementation-closed`
 - `read-models:search-freshness-helper-boundary-audit` -> `analysis-closed`
 - `read-models:search-app-rebuild-helper-quarantine` -> `implementation-closed`
+- `read-models:search-query-freshness-service-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -212,9 +213,9 @@ Completed `read-models:search-freshness-helper-boundary-audit` and `read-models:
 - `cost_statistics` is now the ninth non-Go read model implementation pilot. It was selected because it consumes Workbench relation, bank detail tags, import facts, ETC/no-OA/turnover/settings fan-out, owns special `active/all` scope grammar, and has a queryable parent aggregate that must be isolated before Go summary-rollup admission. Repository port extraction is implemented: manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models` are behind `CostStatisticsReadModelRepositoryPort`, PostgreSQL state-store cost SQL read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` uses it for projection save paths while preserving existing API, parent aggregate, worker and Redis behavior. Freshness/barrier audit is analysis-closed: SQL fresh gate, production repository unavailable behavior, force-refresh scope normalization, parent aggregate proof, primary/compat worker split and App Status registry are locally accounted for. Derived lifecycle executor extraction is implemented: `CostStatisticsDerivedLifecycleExecutor` now owns invalidation, `pending_invoice_rules_changed` persist-empty behavior, no-warmup refresh fallback metadata and enqueued-job accounting; `Application` only assembles runtime/gateway callbacks. Post-derived local closure audit found warmup/retry/rebuild app methods are compat-only delegates. Full-state snapshot quarantine is implemented: broad `_persist_state(...)` no longer writes `cost_statistics_read_models`, explicit runtime/query persistence remains, and startup compatibility load remains. Post-full-state local closure audit found no remaining local implementation gap, so local cost statistics support is accounted for, but the module remains not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `turnover_ledger` is now the tenth non-Go read model implementation pilot. Repository port extraction is implemented: `TurnoverLedgerReadModelRepositoryPort` exposes only manifest-listed `list_turnover_ledger_view`, `save_turnover_ledger_rows` and `clear_turnover_ledger_rows`; PostgreSQL state-store read wiring, `TurnoverLedgerQueryService` app injection and worker projection paths now use the narrow port; unrelated read model method exposure is guarded. Freshness/barrier audit found existing SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence. Refresh producer/clear extraction is implemented: app-owned turnover enqueue/clear helpers are removed, enqueue goes through `TurnoverLedgerReadModelRefreshProducer` and clear uses the turnover-specific repository port. Local closure audit found no remaining local implementation gap; local support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot and local implementation support is accounted for after repository/state-store audit, refresh persistence boundary extraction, read model repository port extraction, freshness/derived lifecycle audit, derived lifecycle executor extraction, mutation persistence fallback quarantine, local closure audit, full-state snapshot quarantine and post-full-state local closure audit. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. The module remains implementation-gap-open because app-owned fresh gate/source-version/enqueue/invalidation helpers still need extraction or explicit quarantine.
+- `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. The module remains implementation-gap-open because app-owned refresh producer/invalidation helpers still need extraction or explicit quarantine.
 - `bank_account_balance` remains an implementation-gap-open later candidate; it is important but narrower and currently lives as a Bank Details supporting read model.
-- The next pending boundary is `read-models:search-query-freshness-service-extraction`.
+- The next pending boundary is `read-models:search-refresh-producer-invalidation-boundary-audit`.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -237,8 +238,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:search-app-rebuild-helper-quarantine`
+`read-models:search-query-freshness-service-extraction`
 
 ## Next Prompt
 
-`read-models:search-query-freshness-service-extraction`
+`read-models:search-refresh-producer-invalidation-boundary-audit`

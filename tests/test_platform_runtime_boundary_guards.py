@@ -2046,6 +2046,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_search_query_freshness_helpers_stay_out_of_application(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+
+        violations: list[str] = []
+        for removed_helper in (
+            "_get_search_payload_from_sql_read_model",
+            "_search_index_expected_source_versions",
+        ):
+            if _function_source(tree, source, removed_helper):
+                violations.append(f"server.py still owns removed search query freshness helper {removed_helper}")
+
+        handle_search_source = _function_source(tree, source, "_handle_api_search")
+        if "_search_query_freshness_service().get_payload" not in handle_search_source:
+            violations.append("/api/search route no longer delegates SQL freshness payloads to SearchQueryFreshnessService")
+
+        service_source = (SERVICES_ROOT / "search_query_freshness_service.py").read_text(encoding="utf-8")
+        if "class SearchQueryFreshnessService" not in service_source:
+            violations.append("SearchQueryFreshnessService is missing")
+        if "require_expected_source_versions" not in service_source or "source_version_mismatch_reasons" not in service_source:
+            violations.append("SearchQueryFreshnessService no longer owns source-version freshness proof")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

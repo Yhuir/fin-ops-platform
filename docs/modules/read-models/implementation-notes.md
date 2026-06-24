@@ -40,6 +40,17 @@
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
 - 后续事项：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，随后处理 mutation persistence fallback quarantine。
 
+## 2026-06-24 - Search query freshness service extraction
+
+- 目标：执行 `read-models:search-query-freshness-service-extraction`，将 `/api/search` SQL miss/stale/source-version payload assembly 和 expected source-version proof 从 `Application` 收敛到显式 search query/freshness service。
+- 影响范围：`SearchQueryFreshnessService`、`SearchIndexSourceVersionsProvider`、`Application._handle_api_search(...)`、search runtime/API tests、platform guard、modular IO state 和 search/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
+- 关键决策：`SearchQueryFreshnessService` 拥有 SQL search payload miss/fresh/stale/source-version mismatch 行为；`Application` 只保留 HTTP 参数校验、HTTP status 映射、无 SQL repository 时的 legacy/local fallback 和 gateway callback 组装。`_enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 仍是下一边界，未在本切片关闭。
+- 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 search/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 `SearchQueryFreshnessServiceTests` 和 platform guard，防止 query freshness helper 回到 `server.py`；复跑 search API/runtime/manifest 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-search-query-freshness-service-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:search-refresh-producer-invalidation-boundary-audit`。
+
 ## 2026-06-24 - No-OA bank batch derived lifecycle executor extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，将 no-OA derived lifecycle target/enqueue behavior 从 `Application` 收敛到显式 executor。
