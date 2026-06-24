@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-browser-data-targeted-smoke-selection-pending`
+Current state: `full-deterministic-e2e-smoke-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `browser:read-model-browser-data-targeted-smoke-runbook` as `browser-guard-closed` in `analysis/browser-read-model-browser-data-targeted-smoke-runbook-2026-06-25.md`. T0 ran the targeted deterministic Playwright subset, fixed stale Playwright assertions in input invoice usage and Workbench specs, verified the failure specs with 20/20 passed, and reran the full Row265 subset with 53/53 passed. The next boundary is `planning:post-browser-data-targeted-smoke-next-boundary-selection`. No production command, product code change or closure claim occurred.
+Completed `planning:post-browser-data-targeted-smoke-next-boundary-selection` as `planning-closed` in `analysis/planning-post-browser-data-targeted-smoke-next-boundary-selection-2026-06-25.md`. T0 reconciled Row265 targeted browser evidence against Row264 coverage map and selected `browser:read-model-full-deterministic-e2e-smoke-runbook` as the next boundary. No browser test, production command, runtime mutation or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
