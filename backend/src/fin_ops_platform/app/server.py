@@ -14123,7 +14123,7 @@ class Application:
         return self._workbench_write_response(result)
 
     def _handle_workbench_ignore_row_payload(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_write_facade().ignore_row(payload)
+        result = self._workbench_action_api_routes.ignore_row(payload)
         return self._workbench_write_response(result)
 
     def _handle_workbench_unignore_row_payload(self, payload: dict[str, object]) -> Response:
