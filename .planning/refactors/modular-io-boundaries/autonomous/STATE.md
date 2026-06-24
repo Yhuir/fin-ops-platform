@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-public-page-shell-smoke-collected`
+Current state: `read-model-shadow-read-rehearsal-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-public-page-shell-smoke-runbook` as `production-controlled` in `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`. T0 first classified an API-listener base URL run as operator wrong-base 404 evidence, then verified the public frontend base and ran unauthenticated page-shell-only `http_slo_probe` against `https://www.yn-sourcing.com`. All 17 default `/fin-ops/*` page-shell routes returned HTTP 200 with `failed_probe_count=0` and `max_p95_ms=27.782`; `/health/ready` stayed ready before and after. No API probes, production mutation, secret output, deploy, restart, requeue, repair, replay or DB/queue/readiness mutation occurred. Authenticated API, browser hydration/data, high-row and module-specific closure evidence remain open. The next boundary is `planning:post-public-page-shell-smoke-next-boundary-selection`.
+Completed `planning:post-public-page-shell-smoke-next-boundary-selection` as `planning-closed` in `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`. T0 reconciled row252 auth-missing API defer and row253 public page-shell success, rejected authenticated API retry, browser data smoke, final closure and a new worker wave as premature, and selected `production:read-model-shadow-read-rehearsal-read-only-runbook` as the next safe T0-owned evidence boundary. No production command, runtime mutation, deploy, restart, requeue, repair, replay or closure claim occurred. Authenticated API, browser hydration/data, high-row and module-specific closure evidence remain open.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:read-model-public-page-shell-smoke-runbook`
+`planning:post-public-page-shell-smoke-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-public-page-shell-smoke-next-boundary-selection`
+`production:read-model-shadow-read-rehearsal-read-only-runbook`

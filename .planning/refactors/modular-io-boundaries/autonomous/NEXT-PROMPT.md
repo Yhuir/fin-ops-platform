@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:read-model-public-page-shell-smoke-runbook`.
+Continue after `planning:post-public-page-shell-smoke-next-boundary-selection`.
 
 ## Current State
 
@@ -14,12 +14,13 @@ Continue after `production:read-model-public-page-shell-smoke-runbook`.
   - all default `/fin-ops/*` page-shell paths returned 200
   - `max_p95_ms=27.782`
 - `/health/ready` remained ready before and after.
+- Row254 selected a T0-owned read-only shadow-read rehearsal runbook as the next evidence boundary.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`planning:post-public-page-shell-smoke-next-boundary-selection`
+`production:read-model-shadow-read-rehearsal-read-only-runbook`
 
 ## Required First Steps On Resume
 
@@ -33,8 +34,10 @@ Continue after `production:read-model-public-page-shell-smoke-runbook`.
    - `autonomous/JOURNAL.md`
    - this prompt
 4. Read `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`.
-5. Reconcile row252 auth-missing API defer and row253 public page-shell success.
-6. Select the next safe bounded evidence boundary for authenticated API, browser/hydration, high-row or module-specific closure gaps. Do not claim module/global closure from page-shell evidence alone.
+5. Read `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`.
+6. Write a bounded read-only shadow-read rehearsal runbook before any production command.
+7. Use `FIN_OPS_SHADOW_REHEARSAL_READ_ONLY=1`, limited domains, redacted/hash output only, and no payload rows or secrets.
+8. Treat missing deployed tool/configuration as `production-evidence-deferred`, not closure failure.
 
 ## Stop Gates
 
