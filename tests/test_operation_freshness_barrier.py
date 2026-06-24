@@ -180,6 +180,38 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         self.assertEqual(payload["targets"][0]["scope_key"], "2026-03")
         self.assertEqual(payload["targets"][0]["worker_status"], "running")
 
+    def test_invoice_lifecycle_target_uses_exact_month_scope_for_operation_barrier(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "invoice_lifecycle": {
+                        "status": "fresh",
+                        "scopes": [
+                            {"scope_type": "invoice_lifecycle", "scope_key": "2026-03", "status": "fresh"},
+                            {"scope_type": "invoice_lifecycle", "scope_key": "2026-04", "status": "fresh"},
+                        ],
+                    }
+                },
+                "outbox_statuses": {
+                    "invoice_lifecycle.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [
+                            {"scope_type": "invoice_lifecycle", "scope_key": "2026-04", "status": "pending"}
+                        ],
+                    }
+                },
+                "worker_statuses": {"invoice-lifecycle": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("invoice_lifecycle", "2026-03")])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertTrue(payload["fresh"])
+        self.assertEqual(payload["targets"][0]["scope_type"], "invoice_lifecycle")
+        self.assertEqual(payload["targets"][0]["scope_key"], "2026-03")
+        self.assertEqual(payload["targets"][0]["worker_status"], "running")
+
     def test_outbox_failure_blocks_target_even_if_readiness_is_fresh(self) -> None:
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {

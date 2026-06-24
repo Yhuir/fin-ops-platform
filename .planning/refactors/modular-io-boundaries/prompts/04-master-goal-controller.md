@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:invoice-lifecycle-repository-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit.
+- Last status: regression-guard-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -104,8 +104,11 @@ Current state expected on start:
 - `InvoiceLifecycleReadFacade` uses the narrow port for lifecycle row lookups while preserving unavailable-path behavior for missing repository methods.
 - `InvoiceLifecycleSqlProjectionBuilder` uses the narrow port for lifecycle save/mark paths.
 - No `PostgresStateStore.invoice_lifecycle_sql_read_repository` property was added because no existing property, construction path or caller exists.
+- Invoice lifecycle freshness/barrier audit is closed as a regression guard: facade reads do not expose a queryable `all`, refresh service expands `all` into month shards, source-version currentness is checked before and after rebuild, scope policy accepts month/all only, and App Status/worker/manifest contracts are registered.
+- `OperationFreshnessBarrierService` now has an invoice lifecycle regression proving exact month targets are not blocked by other-month pending outbox.
+- `Application._derived_lifecycle_invoice_lifecycle_executor(...)` remains app-owned but gateway-backed; it is the next local implementation gap.
 - No module is globally closed.
-- The next pending boundary is read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit.
+- The next pending boundary is read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -201,15 +204,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-output-invoice-collection.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/domain-events-lifecycle/README.md`, `docs/modules/domain-events-lifecycle/tests.md`, `docs/modules/pending-invoices/README.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/tax-offset/README.md`, and `docs/modules/imports-invoices/README.md`.
+For read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/domain-events-lifecycle/README.md`, and `docs/modules/domain-events-lifecycle/tests.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Audit invoice lifecycle freshness, force refresh, fan-out `all`, source-version proof, operation-barrier behavior and legacy/live rebuild contamination.
-- Inspect `InvoiceLifecycleReadFacade`, `InvoiceLifecycleReadModelRefreshService`, `InvoiceLifecycleSqlProjectionBuilder`, runtime worker wiring, scope policy, manifest, App Status target mapping and downstream lifecycle consumers.
-- If a concrete narrow gap is found and can be fixed safely inside this slice, implement it with focused tests.
-- If no runtime gap is found, close the slice as analysis with explicit evidence and queue the next narrow boundary.
+- Add `InvoiceLifecycleDerivedLifecycleExecutor`.
+- Move `Application._derived_lifecycle_invoice_lifecycle_executor(...)` behavior into the executor while preserving scope selection, reason default, metadata filtering, `deleted_counts`, `invalidated_scopes` and `enqueued_jobs` response shape.
+- Keep enqueue behind `ReadModelRefreshGateway` through the existing application refresh callback; do not directly SQL-write durable queue tables.
+- Wire `Application` to call the new executor from the derived lifecycle domain map.
+- Add unit/static guard coverage preventing `_derived_lifecycle_invoice_lifecycle_executor` from returning as app-owned implementation logic.
 - Preserve invoice lifecycle rules, payload shape, source-version semantics, worker event semantics, queue schema, API behavior and frontend behavior.
 - Do not claim `invoice_lifecycle` globally closed.
 - Produce/update an analysis file.

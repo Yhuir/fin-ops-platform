@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle freshness / operation barrier audit
+
+- 目标：执行 `read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit`，审计 `invoice_lifecycle` 的 fresh gate、force refresh、fan-out `all`、source-version proof、operation barrier 和旧链路污染风险。
+- 影响范围：invoice lifecycle facade/refresh/scope-policy/manifest/App Status/worker wiring、operation barrier regression、modular IO state；不改变 lifecycle 业务规则、payload、source-version、worker event、queue schema、API、前端或生产状态。
+- 关键决策：`invoice_lifecycle:all` 仍是 fan-out command；facade 没有 queryable all read path，`list_by_month(...)` 要求具体月份，subject/identity lookup 不把 parent `all` 当 fresh proof。`InvoiceLifecycleReadModelRefreshService` 对 `all` 扩展为月份 shards，并在 rebuild 前后检查 source-version currentness。剩余本地实现缺口是 app-owned `_derived_lifecycle_invoice_lifecycle_executor(...)`，该 helper gateway-backed 但应抽成显式 executor。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models 实施记录和测试矩阵；共享 read model/domain-events 状态机定义不变。
+- 测试覆盖：新增 `OperationFreshnessBarrierServiceTests.test_invoice_lifecycle_target_uses_exact_month_scope_for_operation_barrier`，证明其它月份 pending outbox 不会阻断当前月份 lifecycle operation barrier target。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一条边界是 `read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction`。
+
 ## 2026-06-24 - Invoice lifecycle repository port extraction
 
 - 目标：执行 `read-models:invoice-lifecycle-repository-port-extraction`，为 `invoice_lifecycle` read model 建立窄 repository port。
