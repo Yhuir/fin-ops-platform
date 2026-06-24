@@ -7,6 +7,7 @@ from fin_ops_platform.services.postgres_repositories.common import max_numeric_s
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 
 
 class TransactionRecorder:
@@ -495,6 +496,37 @@ def test_workbench_relation_repository_save_writes_relation_history_and_refresh_
     outbox_params = [params for sql, params in connection.executed if "insert into job.outbox_events" in sql]
     assert any(params[1] == "workbench_relation.read_model.refresh" for params in outbox_params)
     assert any(params[1] == "cost_statistics.read_model.refresh" for params in outbox_params)
+
+
+def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts() -> None:
+    connection = WorkbenchRelationWriteConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                }
+            },
+            "pair_relation_history": [],
+        },
+        changed_case_ids={"case-1"},
+    )
+
+    dirty_scopes = [(params[1], params[2]) for _sql, params in connection.fetch_one_calls]
+    outbox_scopes = [(params[3], params[4]) for sql, params in connection.executed if "insert into job.outbox_events" in sql]
+
+    assert dirty_scopes
+    assert dirty_scopes == outbox_scopes
+    for scope_type, scope_key in dirty_scopes:
+        normalized = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, [scope_key])
+        assert normalized == [scope_key]
 
 
 def test_workbench_repository_delegates_pair_relation_load_to_relation_repository() -> None:

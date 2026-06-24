@@ -61,7 +61,11 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     TurnoverLedgerExtraValidationError,
 )
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
-from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes, WorkbenchRowDetailApiRoutes
+from fin_ops_platform.app.routes_workbench import (
+    WorkbenchApiRoutes,
+    WorkbenchGroupDetailApiRoutes,
+    WorkbenchRowDetailApiRoutes,
+)
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
 from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.services.access_control_service import AccessControlService
@@ -1260,6 +1264,7 @@ class Application:
             self._workbench_query_service,
             self._workbench_action_service,
         )
+        self._workbench_group_detail_api_routes = self._build_workbench_group_detail_api_routes()
         self._workbench_row_detail_api_routes = self._build_workbench_row_detail_api_routes()
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
@@ -4005,25 +4010,12 @@ class Application:
         zone: str | None,
         group_id: str | None,
     ) -> Response:
-        current_month = month or "all"
-        normalized_zone = str(zone or "").strip()
-        normalized_group_id = str(group_id or "").strip()
-        if normalized_zone not in {"open", "paired"}:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
-            )
-        if not normalized_group_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_group_detail_request", "message": "group_id is required."},
-            )
-        result = self._workbench_query_facade().group_detail(
-            current_month,
-            zone=normalized_zone,
-            group_id=normalized_group_id,
+        status_code, payload = self._workbench_group_detail_routes().get_detail(
+            month,
+            zone=zone,
+            group_id=group_id,
         )
-        return self._json_response(result.status_code, result.payload)
+        return self._json_response(status_code, payload)
 
     def _handle_api_workbench_refresh_status(self, month: str | None) -> Response:
         result = self._workbench_query_facade().refresh_status(month)
@@ -11855,6 +11847,16 @@ class Application:
 
     def _get_api_workbench_row_detail_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
         return self._workbench_row_detail_routes().get_payload(row_id, month=month)
+
+    def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
+        routes = getattr(self, "_workbench_group_detail_api_routes", None)
+        if routes is None:
+            routes = self._build_workbench_group_detail_api_routes()
+            self._workbench_group_detail_api_routes = routes
+        return routes
+
+    def _build_workbench_group_detail_api_routes(self) -> WorkbenchGroupDetailApiRoutes:
+        return WorkbenchGroupDetailApiRoutes(query_facade_provider=self._workbench_query_facade)
 
     def _workbench_row_detail_routes(self) -> WorkbenchRowDetailApiRoutes:
         routes = getattr(self, "_workbench_row_detail_api_routes", None)

@@ -68,6 +68,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - empty：API 返回 `read_model_status=fresh` 且 `pagination.total=0` 时展示标准空态。
 - error：API 或解析失败时展示“进项发票使用情况加载失败，请稍后重试。”。
 - stale/refreshing：API 返回 `read_model_status=refreshing` 时，页面不展示旧 rows，保持刷新提示/轮询语义；服务端应入队对应 scope 的 read model refresh。
+- combined freshness：rows 与 filter-options 并行读取时，页面级 fresh 必须取两者合并结果；任一响应为 stale/missing/schema_mismatch/refreshing/unavailable 时，禁止进入普通 empty state、禁止启用导出，并沿用刷新诊断与重试语义。
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。
 - oa reverse staged tab：`暂存` 页签展示状态为 `oa_draft_created` 的批次摘要和两项处理动作：`我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`。暂存列表不展示 OA 草稿链接。
@@ -110,3 +111,4 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | 2026-06-23 | all-scope refresh 清理 orphan month shards | 修复旧月份 read model scope/rows 不再属于当前发票事实集但继续参与 all-scope source version 聚合，导致 `oa_projection_sync_version_missing` 并长期显示“正在刷新”的问题 | `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_api_all_scope_recovers_after_orphan_scope_prune`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_repository_prunes_orphan_scope_shards`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_refresh_handler_expands_all_scopes_and_completes_with_source_version` |
 | 2026-06-23 | 修正 `+N` 关系明细 source version scope | 关系明细按 `row_id` 命中 SQL read model 单行后，使用该行 `read_model_scope_key` 校验 expected source versions，避免列表 fresh 但明细被 all/no-scope relation 版本误判 refreshing | `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_relation_details_compare_source_versions_with_row_scope` |
 | 2026-06-23 | 补跨月配对 relation fallback | 进项发票月份 scope 返回 unlinked/empty relation row 时，仍按发票 row id 定向补查其他 scope 中的 linked group，并保持当前 shard source versions | `tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback` |
+| 2026-06-24 | T8 module IO contract reconciliation | 不改变业务状态；明确 rows 与 filter-options 合并 fresh 后才允许普通空态和导出 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`bash scripts/verify.sh docs` |

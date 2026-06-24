@@ -91,6 +91,40 @@ class WorkbenchRowDetailApiRoutes:
         return isinstance(records_by_id, dict) and row_id in records_by_id
 
 
+class WorkbenchGroupDetailApiRoutes:
+    """Read-only owner for Workbench group detail HTTP validation and mapping."""
+
+    def __init__(self, *, query_facade_provider: Callable[[], Any]) -> None:
+        self._query_facade_provider = query_facade_provider
+
+    def get_detail(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        group_id: str | None,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        current_month = month or "all"
+        normalized_zone = str(zone or "").strip()
+        normalized_group_id = str(group_id or "").strip()
+        if normalized_zone not in {"open", "paired"}:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+            )
+        if not normalized_group_id:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_group_detail_request", "message": "group_id is required."},
+            )
+        result = self._query_facade_provider().group_detail(
+            current_month,
+            zone=normalized_zone,
+            group_id=normalized_group_id,
+        )
+        return result.status_code, result.payload
+
+
 class WorkbenchApiRoutes:
     def __init__(self, query_service: WorkbenchQueryService, action_service: WorkbenchActionService) -> None:
         self._query_service = query_service

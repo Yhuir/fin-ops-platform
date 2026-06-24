@@ -512,9 +512,45 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+    expect(within(page).getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeInTheDocument();
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
+  });
+
+  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/input-invoice-usage/rows") {
+        return new Response(JSON.stringify({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "fresh",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/input-invoice-usage/filter-options") {
+        return new Response(JSON.stringify({ fields: [], read_model_status: "stale" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
   });
 
   test("unmounts the page while away and retries after route remount", async () => {

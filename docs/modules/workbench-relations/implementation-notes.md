@@ -1,5 +1,34 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench group detail route-owner extraction
+
+目标：把 `GET /api/workbench/groups/detail` 的 HTTP 参数校验和 facade response mapping 从 `Application` 抽到显式 read-only route owner。
+
+变更：
+
+- `routes_workbench.py` 新增 `WorkbenchGroupDetailApiRoutes`。
+- `WorkbenchGroupDetailApiRoutes.get_detail(...)` 现在拥有 group detail 的 route-local validation：`month` 默认 `all`、`zone` 仅允许 `open` / `paired`、`group_id` 必填并 trim。
+- `Application._handle_api_workbench_group_detail(...)` 改为薄代理，只调用 `_workbench_group_detail_routes().get_detail(...)` 并用 `_json_response(...)` 序列化结果。
+- 新增 `tests/test_workbench_routes.py` 覆盖 validation error payload、参数归一化、facade delegation 和 status/payload passthrough。
+
+未改变：
+
+- `WorkbenchQueryFacade.group_detail(...)` 继续拥有 active generation `source_versions`、`read_model_status`、`read_model_version`、stale refresh enqueue 和 stale/not-found mapping。
+- group detail response shape、status code、前端详情 drawer 行为、relation 写入、dirty scope、outbox、readiness、Redis cache 和 active generation publishing 未改变。
+
+未关闭：
+
+- controller-owned `MODULE-QUEUE.md`、`STATE.md`、`JOURNAL.md`、`NEXT-PROMPT.md` 和 master prompt 文件未在本 worker slice 修改；需要 controller 后续记账和选择下一条 adjacent route-owner boundary。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_routes tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_group_detail_stale_source_versions_do_not_return_stale_group tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_group_detail_refreshing_status_does_not_return_stale_group tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_includes_active_generation_freshness_contract -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench.py backend/src/fin_ops_platform/app/server.py tests/test_workbench_routes.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench group detail route-owner audit
 
 目标：审计 `GET /api/workbench/groups/detail` 的 route ownership、freshness/source-version/read-model-status proof 和 no-write relation 边界。

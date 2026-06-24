@@ -46,6 +46,8 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 生产 PostgreSQL runtime 下，`/api/input-invoice-usage/rows` 和 filter/export 相关 all-rows helper 必须依赖 SQL read model repository。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)` 进行 live scan 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
 
+页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
+
 `input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
 
 `input_invoice_usage:all` fan-out 发现当前月份 shard 后，必须清理不再属于当前进项发票事实集的旧月份 rows/scopes。否则旧 month scope 的基础 source versions 会继续参与 all 查询 freshness 聚合，导致 `oa_projection_sync_version_missing` 等 stale reason 反复出现，页面长期显示“正在刷新”。

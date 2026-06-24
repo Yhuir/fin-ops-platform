@@ -48,6 +48,7 @@
 
 - 列表读接口优先读取 SQL read model `output_invoice_collection`；miss/stale/schema/source version mismatch 时返回 `202` 与 `read_model_status=refreshing`，不得在请求线程同步 live rebuild。
 - 生产 PostgreSQL runtime 下，SQL read repository 缺失也属于 read model unavailable：API 必须 enqueue `output_invoice_collection` 对应 month/all scope 并返回 `read_model_status=refreshing`，不能回退 `OutputInvoiceCollectionQueryService.list_rows(...)` 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
+- 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
 - 生产 PostgreSQL runtime 下，`/rows/{row_id}/relation-details` 也必须优先读取 SQL read model detail row；SQL read repository 或 row detail lookup 缺失时返回 `202`、`read_model_status=refreshing` 并 enqueue `output_invoice_collection:all`，不能回退 live detail rebuild。legacy/local 模式保留 query service detail 作为开发兼容路径。
 - fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
 - 页面展示统一关系事实源中的 OA、收入流水和销项发票项：rows 中 `oa`、`bankTransactions`、`invoiceRelations` 都携带 `relationCount`、`hasMultiple`、`detailMode` 和 `summaries`；同一 relation 下多项对象在对应栏显示 `+N`，其中 `N=relationCount-1` 表示除主展示对象外的额外项数，点击 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。销项发票栏多项时仍显示当前行的发票主信息和多张发票合计，避免只剩 `+N` 无合计。

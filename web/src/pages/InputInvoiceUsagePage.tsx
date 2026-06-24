@@ -54,6 +54,21 @@ const initialQuery: InputInvoiceUsageQuery = {
   detailTarget: null,
 };
 const READ_MODEL_REFRESH_RETRY_MS = 10000;
+const READ_MODEL_REFRESHING_STATUSES = new Set(["refreshing", "stale", "missing", "schema_mismatch"]);
+const READ_MODEL_NON_FRESH_STATUSES = new Set([...READ_MODEL_REFRESHING_STATUSES, "failed", "unavailable"]);
+
+function normalizeReadModelStatus(value: string | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function combineReadModelStatus(...statuses: Array<string | undefined>) {
+  const normalized = statuses.map(normalizeReadModelStatus).filter(Boolean);
+  if (normalized.some((status) => READ_MODEL_REFRESHING_STATUSES.has(status))) {
+    return "refreshing";
+  }
+  const nonFresh = normalized.find((status) => READ_MODEL_NON_FRESH_STATUSES.has(status));
+  return nonFresh ?? normalized[0] ?? "";
+}
 
 function isFilterArray(value: unknown): value is InputInvoiceUsageFilter[] {
   return Array.isArray(value) && value.every((item) => (
@@ -215,7 +230,7 @@ export default function InputInvoiceUsagePage() {
         setTotal(payload.pagination.total);
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
-        setReadModelStatus(payload.readModelStatus || optionsPayload.readModelStatus || "");
+        setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
         hasLoadedRef.current = true;
       })
       .catch((caught: unknown) => {
@@ -406,8 +421,9 @@ export default function InputInvoiceUsagePage() {
 
   const loadExportPreview = useCallback(() => fetchInputInvoiceUsageExportPreview(exportRequest), [exportRequest]);
   const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
-  const isReadModelRefreshing = readModelStatus === "refreshing";
-  const exportDisabled = Boolean(error) || isReadModelRefreshing;
+  const isReadModelNonFresh = READ_MODEL_NON_FRESH_STATUSES.has(readModelStatus);
+  const isReadModelRefreshing = READ_MODEL_REFRESHING_STATUSES.has(readModelStatus);
+  const exportDisabled = Boolean(error) || isReadModelNonFresh;
   const hasKeyword = keywordDraft.trim().length > 0 || query.keyword.trim().length > 0;
 
   const actions = useMemo(() => (
@@ -438,7 +454,7 @@ export default function InputInvoiceUsagePage() {
       </button>
     </PageToolbar>
   ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
-  const isEmpty = !loading && !refreshing && !error && !isReadModelRefreshing && rows.length === 0;
+  const isEmpty = !loading && !refreshing && !error && !isReadModelNonFresh && rows.length === 0;
 
   return (
     <>
@@ -499,13 +515,13 @@ export default function InputInvoiceUsagePage() {
               </div>
             ) : (
               <>
-                {isReadModelRefreshing ? (
-                  <StatePanel tone="loading" compact title="进项发票使用情况数据正在刷新">
-                    进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。
+                {isReadModelNonFresh ? (
+                  <StatePanel tone={isReadModelRefreshing ? "loading" : "warning"} compact title="进项发票使用情况数据正在刷新">
+                    进项发票使用情况读模型不是最新，完成后页面会自动重新加载。
                   </StatePanel>
                 ) : null}
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
-                {!isReadModelRefreshing ? (
+                {!isReadModelNonFresh ? (
                   <InputInvoiceUsageTable
                     rows={rows}
                     page={query.page}

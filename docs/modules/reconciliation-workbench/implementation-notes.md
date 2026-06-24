@@ -665,6 +665,16 @@
 - 验证命令：`python -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py -q`；`python -m pytest tests/test_workbench_v2_api.py -k "withdraw_link" tests/test_workbench_write_characterization.py -k "withdraw_link" tests/test_workbench_candidate_match_service.py -q`；`npm --prefix web test -- WorkbenchSelection.test.tsx WorkbenchSelectionModel.test.ts --run`；`npm --prefix web run build`。
 - 未测风险：未做真实浏览器/staging smoke；多 group 禁止目前依赖后端 preview/前端单 group button 规则，后续如开放批量选择需要补更专门的交互测试。
 
+## 2026-06-24 - T5 legacy contamination quarantine
+
+- 目标：审计会污染新模块 IO 边界的旧路径，优先确认是否有可安全删除的 route/service/read model/frontend API 入口；证据不足时只做 quarantine，不改业务行为。
+- 影响范围：`WorkbenchRowDetailApiRoutes.legacy_row_detail`、`BatchAccountingService.repair_legacy_case_id_collisions`、平台边界静态 guard、T5 handoff。
+- 关键决策：`GET /api/workbench/rows/{row_id}` 的旧 row detail fallback 仍是上一切片明确保留的本地兼容路径，且生产 PostgreSQL runtime 只允许 route query service 已有 in-memory record 时 fallback；本轮不删除。新增 guard 把该 link 限定为唯一 route-owner wiring，并继续禁止它获得 relation command、refresh gateway、dirty/outbox/readiness/cache/App Status 等副作用。`BatchAccountingService.repair_legacy_case_id_collisions` 的 CodeGraph caller 只命中测试，但它是财务关系修复行为，删除条件不足，本轮只记录为 test-observed compat repair surface。
+- 文档影响：更新本模块实施记录，并新增 `.planning/refactors/modular-io-boundaries/parallel/handoffs/T5-legacy-contamination.md`；长期业务/API 口径未变化。
+- 测试覆盖：新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_legacy_contamination_surfaces_stay_quarantined`，证明新 route owner 没有新增未分类旧内部 link、旧 row detail fallback 不具备写/queue/cache/App Status 副作用、batch accounting repair 没有 app/service active caller。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_contamination_surfaces_stay_quarantined -v`；`python3 -m py_compile tests/test_platform_runtime_boundary_guards.py`；`git diff --check`。
+- 未测风险：未跑完整 Workbench/Batch Accounting 回归；本轮无运行时行为变更。真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
+
 ## 2026-06-12 - server active relation repair command 写入口收敛
 
 - 目标：删除 `server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 对 `WorkbenchPairRelationService` 的直接写入，避免 Workbench payload build/repair 路径成为第二个 relation 写事实源。

@@ -29,6 +29,26 @@
 
 ## 历史记录
 
+## 2026-06-24 - Worker queue/App Status contract audit hardening
+
+- 目标：审计并加固 worker registry、durable queue、App Status registry 和 operation barrier 的合同守卫，确认不引入 Go Worker、不写生产 queue/readiness。
+- 影响范围：本地测试与模块文档；不改变 runtime worker loop、PostgreSQL queue schema、RabbitMQ transport、readiness 写入或生产状态。
+- 关键决策：非事务 refresh producer 继续由 `ReadModelRefreshGateway` 与 scope policy registry 保护；事务内 writer 保留同事务 dirty/outbox 写入，但必须由测试证明其输出 scope 仍符合共享 scope policy；App Status/worker registry 需要双向 parity，避免新增 read-model worker 漏进全局状态 plane。
+- 文档影响：同步 runtime-workers 测试矩阵，并新增 `.planning/refactors/modular-io-boundaries/parallel/handoffs/T3-worker-queue-app-status.md` 作为本轮审计交接记录。
+- 测试覆盖：新增 `tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_worker_read_model_registrations_are_visible_to_app_status_registry` 和 `tests/test_postgres_repositories_boundaries.py::test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts`。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试不连接真实 PostgreSQL/RabbitMQ/systemd，不证明真实 worker drain；生产运行仍以 `infra-smoke`、read model SLO smoke、write-operation audit 和 App Status 只读证据闭环。
+
+## 2026-06-24 - T7 Go admission evidence deferred
+
+- 目标：准备 Go/Fiber/Go Worker admission evidence，但不实现 Go、不改变 Python runtime 行为。
+- 影响范围：Go hot-path admission planning、Workbench matching compute evidence、runtime worker admission gates；不改变 worker registry、durable queue、dirty scope、readiness、RabbitMQ transport 或 Redis cache。
+- 关键决策：`workbench:matching-grouping-check` 属于 `11-GO-HOT-PATH-CARVE-OUT.md` P1-A candidate，可以被评估，但本轮 gate 失败，记录为 `go-candidate-deferred`。失败原因是缺少真实 p95/p99 performance evidence、Workbench active generation enqueue-to-fresh proof、shadow diff evidence 和 rollback switch proof。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-t7-admission-evidence.md` 和 T7 handoff；长期 runtime worker 事实源不变。
+- 测试覆盖：复跑 `tests.test_workbench_compute_evidence`，证明 collector read-only 且缺 evidence 时 fail closed；复跑 Workbench compute Python reference ownership 和 Go shadow admission guard。
+- 验证命令：`env -u FIN_OPS_POSTGRES_DATABASE_URL -u DATABASE_URL PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.workbench_compute_evidence --json` 返回 `configuration_missing`、`production_evidence_required=true`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_compute_evidence -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_reference_state_writes_stay_in_python_boundaries tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v`。
+- 未测风险：本地无 PostgreSQL URL，未证明真实 Workbench high-row performance、worker drain、query timing、shadow equivalence 或 operational rollback。Go/Fiber/Go Worker implementation 继续 blocked。
+
 ## 2026-06-22 - App Health active repair current-effective 聚合
 
 - 目标：修复 Workbench active repair 已经 pending/processing 时，App Health 仍把旧 generation consistency failure 提升成全局 `blocked` 的矛盾状态。

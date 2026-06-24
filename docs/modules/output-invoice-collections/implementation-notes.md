@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - rows/filter-options freshness 合并 fail-closed
+
+- 目标：审计前端 stale/refreshing/fresh 行为时，修复销项发票收款情况页只把 `refreshing` 识别为非 fresh 的缺口；当 rows 为 fresh 但 filter-options 返回 stale/missing/schema_mismatch/refreshing 时，页面不能显示普通空态或允许导出。
+- 影响范围：`OutputInvoiceCollectionsPage`、`OutputInvoiceCollectionsPage.test.tsx`、本模块测试矩阵和 T4 frontend freshness handoff；后端 API contract、read model worker、operation barrier contract 不变。
+- 关键决策：页面集中合并 rows 与 filter-options 的 `readModelStatus`，任何已知非 `fresh` 状态都阻断普通 empty/export 路径；`stale`、`missing`、`schema_mismatch` 和 `refreshing` 继续按刷新中诊断展示并沿用既有重试机制。
+- 文档影响：更新本实施记录、`tests.md` 和 T4 handoff。
+- 测试覆盖：新增 Vitest，证明 rows 空且 fresh、filter-options stale 时显示刷新诊断、不显示普通空态/表格空态，并禁用导出。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：本地 Vitest 不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 后恢复 fresh；真实 runtime drain 仍需 infra/staging smoke。
+
 ## 2026-06-24 - Local implementation closure accounting
 
 - 目标：完成 `read-models:output-invoice-collection-local-implementation-closure-audit`，确认销项收款 read model 本地实现支持是否还有阻塞下一试点的 P0/P1 缺口。

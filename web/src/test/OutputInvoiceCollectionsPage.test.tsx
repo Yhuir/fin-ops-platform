@@ -627,6 +627,34 @@ describe("Output invoice collections page", () => {
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
   });
 
+  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/output-invoice-collections/rows") {
+        return jsonResponse({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "fresh",
+          readModelStatus: "fresh",
+        });
+      }
+      if (url.pathname === "/api/output-invoice-collections/filter-options") {
+        return jsonResponse({ fields: [], read_model_status: "stale", readModelStatus: "stale" }, 202);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下没有销项发票收款记录。")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
+  });
+
   test("cleans up read model retry reload after route unmount", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

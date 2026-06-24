@@ -147,6 +147,14 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                     (definition.key, definition.scope_type),
                 )
 
+    def test_worker_read_model_registrations_are_visible_to_app_status_registry(self) -> None:
+        for event_type, (read_model_key, scope_type) in read_model_event_types().items():
+            with self.subTest(event_type=event_type):
+                self.assertIn(read_model_key, APP_STATUS_READ_MODEL_REGISTRY)
+                definition = APP_STATUS_READ_MODEL_REGISTRY[read_model_key]
+                self.assertEqual(definition.scope_type, scope_type)
+                self.assertEqual(definition.refresh_event_type, event_type)
+
     def test_worker_kind_inference_uses_registry_for_optional_workers(self) -> None:
         args = worker_app.build_parser().parse_args(["--enable-bank-account-balance-read-model-refresh"])
 

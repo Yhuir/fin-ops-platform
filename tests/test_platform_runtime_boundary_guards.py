@@ -3310,6 +3310,73 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_legacy_contamination_surfaces_stay_quarantined(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        routes_path = APP_ROOT / "routes_workbench.py"
+        routes_source = routes_path.read_text(encoding="utf-8")
+        routes_tree = _parse(routes_path)
+        row_detail_route_source = _class_source(routes_tree, routes_source, "WorkbenchRowDetailApiRoutes")
+        row_detail_builder_source = _function_source(server_tree, server_source, "_build_workbench_row_detail_api_routes")
+        batch_service_source = (SERVICES_ROOT / "batch_accounting_service.py").read_text(encoding="utf-8")
+        handoff_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/parallel/handoffs/T5-legacy-contamination.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        legacy_row_detail_call_count = server_source.count("legacy_row_detail=self._workbench_api_routes.get_row_detail")
+        if legacy_row_detail_call_count != 1:
+            violations.append(
+                "legacy row-detail fallback must have exactly one owner wiring through WorkbenchRowDetailApiRoutes"
+            )
+        if "legacy_row_detail=self._workbench_api_routes.get_row_detail" not in row_detail_builder_source:
+            violations.append("legacy row-detail fallback is not confined to the row-detail route builder")
+        if server_source.count("legacy_row_detail=") != 1:
+            violations.append("server.py gained another legacy_row_detail route wiring")
+        if routes_source.count("_legacy_route_fallback_allowed") != 2:
+            violations.append("row-detail fallback guard should have exactly one method and one call site")
+        for forbidden in (
+            "WorkbenchRelationCommandService",
+            "ReadModelRefreshGateway",
+            "enqueue_read_model",
+            "dirty_scope",
+            "outbox",
+            "readiness",
+            "AppStatus",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+        ):
+            if forbidden in row_detail_route_source:
+                violations.append(f"row-detail legacy fallback quarantine gained write/runtime side effect: {forbidden}")
+
+        if "def repair_legacy_case_id_collisions" not in batch_service_source:
+            violations.append("batch accounting legacy repair method is missing from quarantine inventory")
+        active_repair_callers: list[str] = []
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            if path == SERVICES_ROOT / "batch_accounting_service.py":
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "repair_legacy_case_id_collisions(" in source:
+                active_repair_callers.append(_relative(path))
+        if active_repair_callers:
+            violations.append(
+                "batch accounting legacy repair gained active app/service caller(s): "
+                + ", ".join(active_repair_callers)
+            )
+        for marker in (
+            "WorkbenchRowDetailApiRoutes.legacy_row_detail",
+            "BatchAccountingService.repair_legacy_case_id_collisions",
+            "CodeGraph caller evidence",
+            "Stop condition",
+        ):
+            if marker not in handoff_source:
+                violations.append(f"T5 legacy contamination handoff missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_group_detail_route_owner_audit_selects_extraction(self) -> None:
         queue_source = (
             REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"

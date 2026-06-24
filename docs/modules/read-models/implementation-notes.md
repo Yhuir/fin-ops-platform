@@ -29,6 +29,28 @@
 
 ## 历史记录
 
+## 2026-06-24 - T8 module IO contract reconciliation
+
+- 目标：按 T8 worker scope 补齐共享 read model 模块的输入、输出、事件、权限、public/internal surface、legacy status、read model refresh、force refresh、operation barrier 和 partitioned scoped incremental projection 合同。
+- 影响范围：`docs/modules/read-models/README.md`、`docs/modules/read-models/state-machine.md`、`docs/modules/read-models/tests.md`、本实施记录、`.planning/refactors/modular-io-boundaries/analysis/module-contract-read-models.md` 和 T8 handoff；不改 controller-only 文件和运行时代码。
+- 关键决策：以 `READ_MODEL_MANIFEST` 和现有 module docs 为合同事实源；不把每个页面模块重复维护一份易漂移 IO 表。页面模块继续维护业务字段/UI/导出/权限细节，共享 read-models 模块维护 refresh/freshness/barrier/legacy/public surface 合同。
+- 文档影响：补齐共享 IO 合同、force refresh/operation barrier 状态、七类测试决策和 worker handoff。
+- 测试覆盖：本轮 documentation/accounting only，不新增测试；适用回归由 manifest、gateway、barrier、registry、scope contract 和 module-specific SQL runtime tests 继续保护。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：没有本地 `PGSQL_URL` 或 staging DB；真实 PostgreSQL worker drain、App Status readiness、high-row performance、Browser smoke 和 production force-refresh runbook evidence 未在本轮执行。
+- 后续事项：若 T0/controller 后续提供具体 assigned-module 列表，应在对应页面模块按本共享合同补充更细的 API/DTO/UI/export/permission 行级合同。
+
+## 2026-06-24 - Read model contract inventory guard
+
+- 目标：关闭 read model 合同记录缺口，确保每个 App Status read model 都记录 `read_model_key`、`scope_type`、分区 key、scoped incremental target、full rebuild fallback、freshness proof、force refresh 合同和 operation barrier 合同。
+- 影响范围：`ReadModelManifestEntry`、14 个 `READ_MODEL_MANIFEST` entry、`tests/test_read_model_manifest.py`、`docs/modules/read-models/README.md`、read-models 测试矩阵和 modular IO analysis；不改 controller-only 文件，不声明模块或全局 closure。
+- 关键决策：manifest 是可执行合同事实源；中心模块 README 只镜像该 manifest 清单，页面模块继续维护业务/UI 细节，避免在 14 个页面模块重复维护易漂移表格。
+- 文档影响：新增 read model 合同清单和测试矩阵记录；长期事实源无需额外更新，因为本轮只补合同记录和 guard，不改变 runtime/readiness/worker 语义。
+- 测试覆盖：新增 manifest guard，防止未来 read model 漏登记分区、增量目标、全量重建 fallback 或 freshness proof。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v`。
+- 未测风险：真实 PostgreSQL、worker drain、App Status、operation barrier latency 和浏览器页面 smoke 不在本合同记录切片内；继续由各页面模块和 runtime smoke 证明。
+- 后续事项：若后续发现某个页面/领域 read model 的实际 worker/query 行为与 manifest 合同不一致，应先更新具体实现或合同，再同步本 README 表和 manifest test。
+
 ## 2026-06-24 - No-OA bank batch freshness/derived lifecycle boundary audit
 
 - 目标：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`，复核 no-OA 在 repository/persistence port 抽取后是否已有完整 freshness、force refresh、operation barrier、dirty/outbox、App Status/worker 和 derived lifecycle 本地闭环。

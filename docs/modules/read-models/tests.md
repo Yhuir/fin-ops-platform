@@ -30,6 +30,29 @@
 
 ## 场景覆盖清单
 
+## 2026-06-24 - T8 module IO contract reconciliation
+
+- 变更类型：documentation/accounting only；不改变 runtime、API shape、worker event、queue schema、权限、审计或前端行为。
+- 覆盖证据：`docs/modules/read-models/README.md` 明确 input/output/event/permission/public/internal/legacy/partitioned-scoped contracts；`docs/modules/read-models/state-machine.md` 明确 force refresh、dedupe、operation barrier 和 projection strategy 状态；`.planning/refactors/modular-io-boundaries/analysis/module-contract-read-models.md` 与 T8 handoff 记录 source limitations 和后续验收点。
+- 七类测试决策：
+  - Business core unit tests：不适用，本轮不改业务规则、金额、状态转换或分类逻辑。
+  - Service-layer tests：不新增；现有 `tests/test_read_model_manifest.py`、gateway/barrier/registry tests 是合同防漂移证据，本轮只同步文档。
+  - API contract tests：不适用，本轮不改 HTTP contract 或 response shape。
+  - Read model/cache/background job tests：适用但不新增；现有 manifest、refresh gateway、operation barrier、runtime worker registry、scope contract tests 覆盖所记录合同。
+  - Frontend component and interaction tests：不适用，本轮不改页面、operation overlay 或 API client 行为。
+  - End-to-end business-flow integration tests：不适用，本轮不改跨模块业务流；真实 worker/browser evidence 仍由各模块 smoke 负责。
+  - Existing feature regression tests：适用但不新增；`tests/test_read_model_manifest.py`、`tests/test_read_model_architecture_guards.py` 和 module-specific SQL runtime tests 继续保护旧行为。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：T8 handoff 文件此前不存在，且 `.planning/.../analysis/module-contract-*.md` 此前为空；本轮从 manifest、module docs 和 existing analysis names reconciliation，不连接真实 PostgreSQL、不验证 worker drain/App Status/high-row/browser evidence。
+
+## 2026-06-24 - Read model manifest contract inventory guard
+
+- 变更类型：manifest/documentation contract guard。
+- 覆盖证据：`ReadModelManifestEntry` 新增 `partition_key_contract`、`scoped_incremental_target`、`full_rebuild_fallback`、`freshness_proof_contract`；`docs/modules/read-models/README.md` 新增 14 个 App Status read model 的合同清单；`tests/test_read_model_manifest.py::ReadModelManifestTests.test_manifest_entries_record_partition_rebuild_and_freshness_contracts` 防止新增/修改 read model 时漏登记分区、增量目标、全量重建 fallback 和 freshness proof。
+- 七类测试决策：read model/cache/background job、existing feature regression 适用并覆盖；service-layer/API/frontend/E2E/business core 不适用，因为本轮不改变运行时代码、HTTP shape、UI 或业务状态机。
+- 验证结果：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest -v` 通过。
+- 未测风险：该 guard 只证明合同已记录并与 registry/worker/scope policy 基础 parity 同测；真实 PostgreSQL worker drain、生产 operation-to-fresh latency 和页面浏览器 smoke 仍由各模块/运行时 smoke 覆盖。
+
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 
 - 变更类型：narrow implementation slice。

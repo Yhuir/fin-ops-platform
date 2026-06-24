@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
@@ -17,6 +18,9 @@ from fin_ops_platform.services.runtime_worker_registry import (
     registration_by_instance_name,
 )
 from fin_ops_platform.tools.read_model_slo_smoke import PAGE_FIRST_SCREEN_SCOPE_KEYS
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReadModelManifestTests(unittest.TestCase):
@@ -95,6 +99,42 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertTrue(entry.repository_owner)
                 self.assertTrue(entry.permission_owner)
                 self.assertTrue(entry.test_owner.startswith("tests/"))
+
+    def test_manifest_entries_record_partition_rebuild_and_freshness_contracts(self) -> None:
+        required_contract_fields = (
+            "partition_key_contract",
+            "scoped_incremental_target",
+            "full_rebuild_fallback",
+            "freshness_proof_contract",
+        )
+
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                for field_name in required_contract_fields:
+                    value = getattr(entry, field_name)
+                    self.assertIsInstance(value, str)
+                    self.assertTrue(value.strip(), f"{entry.key} missing {field_name}")
+                    self.assertNotIn("TODO", value)
+
+                if entry.key == "bank_account_balance":
+                    self.assertIn("all scope only", entry.partition_key_contract)
+                    continue
+
+                if entry.all_scope_semantics == "fan_out_command":
+                    self.assertIn("fan-out", entry.partition_key_contract)
+                    self.assertIn("gateway force refresh", entry.full_rebuild_fallback)
+
+    def test_read_model_module_readme_records_manifest_contracts(self) -> None:
+        readme = (REPO_ROOT / "docs/modules/read-models/README.md").read_text(encoding="utf-8")
+
+        for entry in READ_MODEL_MANIFEST.values():
+            with self.subTest(read_model_key=entry.key):
+                self.assertIn(f"| `{entry.key}` | `{entry.scope_type}` |", readme)
+                self.assertIn(entry.partition_key_contract, readme)
+                self.assertIn(entry.scoped_incremental_target, readme)
+                self.assertIn(entry.full_rebuild_fallback, readme)
+                self.assertIn(entry.freshness_proof_contract, readme)
+                self.assertIn(f"`{entry.force_refresh_contract}` / `{entry.operation_barrier_contract}`", readme)
 
     def test_manifest_declares_operation_barrier_targets(self) -> None:
         for entry in READ_MODEL_MANIFEST.values():

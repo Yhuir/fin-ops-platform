@@ -42,6 +42,29 @@
 - `failed`：worker 或 rebuild 失败，readiness 记录 last error；App Status 可升级 busy/blocked。
 - `unavailable`：依赖、runtime snapshot 或 critical worker 不可用；App Status blocked，不得解释为 ready。
 
+## Refresh / Force Refresh 状态
+
+| 状态 | 来源 | 允许行为 | 禁止行为 |
+| --- | --- | --- | --- |
+| `validated` | `ReadModelScopePolicyRegistry` 已接受 scope | gateway 可生成 durable queue request 或返回 existing active refresh | 绕过 policy 直接写 dirty/outbox。 |
+| `deduped` | gateway 发现同 scope active refresh | API 可返回 `refreshing` 且 `refresh_enqueued=false` | 把去重解释为 fresh 或再次强制写入重复 outbox。 |
+| `queued` | `job.outbox_events` / `job.read_model_dirty_scopes` 已写入 | worker 可 claim；App Status / operation barrier 显示 refreshing | RabbitMQ publish success 被当作状态事实源。 |
+| `force_refresh_requested` | runbook/API/smoke 通过受控入口请求 | 受权限、scope validation、dedupe、audit 保护；返回 job/readiness proof | 页面任意触发 refresh all；不记录 actor/scope/reason。 |
+| `force_refresh_rejected` | 非法 scope、权限不足、缺少 contract 或 current-effective blocker 不可覆盖 | fail fast 并暴露诊断 | 自动降级到 broad all 或 live scan。 |
+| `barrier_fresh` | operation barrier 目标 scope current-effective fresh | 前端可释放操作 overlay 并重读/应用 projection | 跳过页面自身 fresh gate。 |
+| `barrier_refreshing` | 目标 scope pending/processing/deferred | 前端继续等待或提示后台同步中 | 显示操作失败，除非写 API 本身失败。 |
+| `barrier_blocked` | failed/unavailable/current uncovered failure | API 返回具体 read model/scope/reason | 伪装 fresh 或吞掉 blocker。 |
+
+## Projection 策略状态
+
+| 策略 | 适用 read model | 状态约束 |
+| --- | --- | --- |
+| active generation | `workbench` | building/failed generation 不对页面发布；`all` 聚合来自 active month shards。 |
+| partitioned scoped incremental | `bank_detail`、`search` 等 month shard read model | fan-out `all` 只投递子 scope；页面 fresh proof 来自真实 shard 或 parent aggregate proof。 |
+| all-only scoped projection | `bank_account_balance` | 只接受 `bank_account_balance:all`；month/account/active scope 必须在 gateway 前失败。 |
+| page-first-screen explicit scope | `pending_invoice` | 拒绝裸 `all`；首屏和筛选 scope 必须显式包含 direction/filter/month contract。 |
+| parent aggregate + shards | `cost_statistics` | legacy 裸 scope 只能由 scope gateway 归一化；parent aggregate 需要独立 readiness/source proof。 |
+
 依赖未 fresh 不是 fresh，也不是普通失败：当 downstream refresh handler 读取 source read model 时遇到 `*_read_model_not_fresh`，runtime worker 会短延迟 defer 该 outbox event，等待 source projection/readiness 真实收敛后再处理；readiness reporter 必须记录为 `refreshing` 并保留 last_error 诊断，不能写 `failed` blocker，也不得因为 defer 把页面标为已同步。Workbench `all` aggregate-only refresh 携带 `parent_scope_keys` 时同样适用：parent month shard 仍 pending/processing/failed 时返回 `workbench_read_model_not_fresh`，等待 parent active generation 收敛后再聚合。
 
 同一 scope 的 current-effective 状态必须合并后展示：如果历史 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 只能作为历史诊断，不能继续作为当前失败阻断页面或操作。App Health 聚合 Workbench active generation 诊断时也必须遵守这一点：`read_model_status=refreshing/rebuilding` 时，即使 `consistency_status=failed`，也只能展示 busy/rebuilding 和诊断字段，不能把 `workbench_read_model` 写成 unavailable dependency 或全局 blocked。
@@ -97,3 +120,4 @@
 | 2026-06-13 | 写操作 refresh metadata/action_name 透传 | `workbench_relation_withdraw`、`no_oa_bank_batch_withdraw` 可按具体动作审计跨页面 enqueue-to-fresh；不改变 freshness 事实源 | `PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_refresh_gateway.py tests/test_workbench_uow_contract.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_dirty_queue_wiring.py tests/test_write_operation_slo_audit.py tests/test_write_operation_scenario_discovery.py -q` |
 | 2026-06-12 | 补齐 repair manifest 与 current-effective failure 保留规则 | dry-run/apply 可审计区分历史已覆盖失败和当前未覆盖 blocker；禁止假同步 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract tests.test_platform_runtime_boundary_guards tests.test_runtime_queue_ops -v` |
 | 2026-06-11 | 补齐共享 read model 状态机 | 明确 fresh/missing/refreshing/stale/failed/unavailable、非法状态和恢复路径 | `bash scripts/verify.sh docs` |
+| 2026-06-24 | T8 module IO contract reconciliation | 补齐 refresh/force refresh、operation barrier、projection strategy 的共享状态合同；不改变运行时状态定义 | `bash scripts/verify.sh docs` |

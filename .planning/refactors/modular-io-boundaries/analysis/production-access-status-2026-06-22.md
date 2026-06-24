@@ -5,6 +5,8 @@
 
 **更新:** 2026-06-23 已完成 root 公钥安装，验证 `ssh finops-prod-root` 成功返回 `user=root uid=0 host=VM-0-6-opencloudos key_login=ok`。
 
+**更新:** 2026-06-24 T6 production read-only evidence pass confirmed root SSH still works and collected only non-secret runtime evidence. Public/local `/health` returned `ready` with runtime release and production guard consistency; `/health/ready` timed out and cannot be used as readiness convergence evidence in this pass. The active release was `main-bf4405fb-20260623194934`; the deployed release did not contain `workbench_compute_evidence.py`; `fin-ops-worker@workbench.service` was `activating/auto-restart`. Full details are in `../parallel/handoffs/T6-production-read-only-evidence.md`.
+
 ## 当前可用 SSH alias
 
 | Alias | Host | User | Key | 状态 |
@@ -41,6 +43,21 @@ user=root uid=0 host=VM-0-6-opencloudos key_login=ok
 ```
 
 root 公钥安装时发现 `/root/.ssh/authorized_keys` 带有 `immutable + append-only` 文件属性；已临时解除属性、追加公钥、恢复权限和 `+i +a` 属性，并通过 `sshd -t` 与 `systemctl reload sshd`。
+
+2026-06-24 T6 只读证据采集：
+
+```text
+ssh finops-prod-root identity: user=root uid=0 host=VM-0-6-opencloudos
+active release: /opt/fin-ops/releases/main-bf4405fb-20260623194934/src
+public /fin-ops-api/health: HTTP 200, status=ready
+local /health: HTTP 200, status=ready
+local /health/ready: timeout after 20s
+public /fin-ops-api/health/ready: timeout after 10s
+workbench compute collector in deployed release: absent
+fin-ops-worker@workbench.service: activating / auto-restart
+```
+
+本次未读取 env secret、未连接生产数据库、未写业务表、未改 queue/readiness、未重启或部署服务。
 
 ## 当前可以做的生产验证
 
