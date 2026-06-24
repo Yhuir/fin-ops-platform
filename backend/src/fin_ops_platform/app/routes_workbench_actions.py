@@ -133,3 +133,6 @@ class WorkbenchActionApiRoutes:
         request_id: str | None = None,
     ) -> Any:
         return self._write_facade_provider().confirm_personal_advance_repayment(payload, request_id=request_id)
+
+    def cancel_exception(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().cancel_exception(payload)

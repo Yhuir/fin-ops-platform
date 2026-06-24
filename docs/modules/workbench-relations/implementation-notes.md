@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench cancel-exception route owner extraction
+
+目标：把现代 `/api/workbench/actions/cancel-exception` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `cancel_exception(...)`。
+- `WorkbenchActionApiRoutes.cancel_exception(...)` 现在拥有 `WorkbenchWriteFacade.cancel_exception(...)` 调用。
+- `Application._handle_api_workbench_cancel_exception(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard 和 live-workbench month dispatch。
+- `Application._handle_live_workbench_cancel_exception(...)` 仍负责测试/内部 live helper 的 response mapping，并通过 route owner 调用 facade。
+- 新增静态 guard，确保 cancel-exception 不会重新直接调用 `WorkbenchWriteFacade.cancel_exception(...)`，同时确认 JSON/freshness/live dispatch/response mapping 仍保留。
+
+未改变：
+
+- ignore-row、unignore-row、exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link、cash special、update-bank-exception、OA-bank exception 和 personal advance repayment 都未迁移。
+- response shape、status code、auth、freshness guard、idempotency、cancel exception 规则、exception case 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-ignore-row-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_resolves_selected_rows_without_rebuilding_grouped_workbench tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_returns_processed_rows_to_open_state tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_keeps_live_rows_in_open_state_after_revert tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_cancel_exception_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench personal advance repayment route owner extraction
 
 目标：把现代 `/api/workbench/actions/confirm-personal-advance-repayment` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
