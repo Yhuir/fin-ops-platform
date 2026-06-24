@@ -59,3 +59,11 @@
 - 改动：`BankDetailsApplicationService._accounts_from_sql_read_model(...)` 只使用 `bank_account_balance_read_model_repository`；`BankDetailReadModelRepositoryPort` 删除 `list_bank_account_balances(...)`；新增 static guard 防止 fallback 回归。
 - 保持不变：缺少 account-balance SQL repository/table 时仍返回 refreshing 并 enqueue `bank_account_balance:all`；API shape、worker event、queue schema、余额计算、权限、审计和前端行为不变。
 - 下一步：`read-models:bank-account-balance-local-implementation-closure-audit`，确认是否只剩 production evidence defer。
+
+## 2026-06-24 - local implementation closure audit
+
+- 目标：复核账户余额 read model 在 repository port、projection save、refresh producer、derived lifecycle executor、all-only scope policy、worker handler、operation barrier 和 legacy fallback removal 后是否仍有本地 implementation gap。
+- 结论：未发现剩余本地 implementation gap；local support 转为 `production-evidence-deferred`，但不标记 full module closed。
+- 已 accounted：`BankAccountBalanceReadModelRepositoryPort`、`BankAccountBalanceReadModelRefreshProducer`、`BankAccountBalanceDerivedLifecycleExecutor`、`BankAccountBalanceReadModelRefreshService` all-only worker contract、runtime/backfill producer fan-out、`ReadModelRefreshGateway` all-only scope policy、operation barrier regressions 和 Bank Detail fallback guard。
+- 剩余：真实 PostgreSQL migration/table/readiness、worker drain、App Status runtime snapshot、high-row performance 和 Browser smoke evidence。
+- 下一步：进入 Go hot-path performance baseline/admission reconciliation；不直接开始 Go/Fiber/Go Worker 实现。

@@ -69,10 +69,16 @@
 - 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port`。
 - 覆盖：Bank Detail read model port 不再暴露 account-balance 读取；accounts SQL read path 必须走 account-balance port；缺表仍走 refreshing/enqueue。
 
+## 2026-06-24 - local implementation closure audit
+
+- 新增测试：无。本轮是 analysis/accounting slice。
+- 复用覆盖：repository port、projection save、refresh producer、derived lifecycle executor、all-only gateway scope policy、worker handler、backfill CLI、operation barrier、runtime bootstrap、manifest/worker registry 和 static guards。
+- 审计结论：未发现剩余本地 implementation gap；`bank_account_balance` local support 转为 `production-evidence-deferred`，但真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍未闭环。
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bank_account_balance_derived_lifecycle_executor tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier tests.test_runtime_worker_read_model_refresh_scopes tests.test_bankdetail_backfill_cli tests.test_runtime_bootstrap tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_refresh_producer_helpers_stay_out_of_application tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check
@@ -81,4 +87,4 @@ git diff --check
 ## 未测风险
 
 - 当前没有本地 `PGSQL_URL` 或 staging DB，真实 PostgreSQL worker drain、App Status readiness、high-row performance 和 Browser smoke evidence 仍需后续生产/环境验证。
-- 当前 worker/storage/gateway 只支持 `bank_account_balance:all`；dedicated operation barrier regression 和 Bank Detail fallback quarantine 已补齐；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍未验证。
+- 当前 worker/storage/gateway 只支持 `bank_account_balance:all`；本地 repository/producer/executor/scope/barrier/fallback 证据已 accounted；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍未验证。

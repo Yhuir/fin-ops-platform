@@ -40,6 +40,7 @@
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
 - `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。
 - dedicated `bank_account_balance:all` operation barrier regression 已补齐。
+- 本地实现支持已通过 closure audit accounted；未发现剩余本地 implementation gap。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
 
 ## 本目录文件

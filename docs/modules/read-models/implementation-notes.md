@@ -1350,3 +1350,11 @@
 - 改动：Bank Details accounts SQL read path 只使用 `BankAccountBalanceReadModelRepositoryPort`；`BankDetailReadModelRepositoryPort` 不再暴露 `list_bank_account_balances(...)`；static guard 防止 fallback 回归。
 - 保持不变：缺少 account-balance SQL repository/table 时仍返回 refreshing 并 enqueue；API、worker event、queue schema 和 frontend behavior 不变。
 - 下一步：`read-models:bank-account-balance-local-implementation-closure-audit`。
+
+## 2026-06-24 - bank account balance local implementation closure audit
+
+- 目标：复核 `bank_account_balance` 在 repository port、producer、executor、scope、barrier 和 fallback removal 后是否仍有本地 implementation gap。
+- 结论：未发现剩余本地 implementation gap；`bank_account_balance` local support 转为 `production-evidence-deferred`，但不标记 full module closed。
+- 已 accounted：explicit account-balance repository port、projection save port、all-only refresh producer、runtime/backfill producer fan-out、derived lifecycle executor、all-only gateway policy、worker handler、operation barrier regressions、runtime bootstrap refreshing behavior 和 Bank Detail fallback guard。
+- 剩余：真实 PostgreSQL/worker/App Status/high-row/browser evidence。
+- 下一步：`go-hot-path:performance-baseline-and-admission-reconciliation`，只做性能证据与准入门控 reconciliation，不直接开始 Go/Fiber/Go Worker 实现。
