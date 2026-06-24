@@ -306,18 +306,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:post-convergence-readiness-worker-db-aggregate-evidence-sweep`.
+Start with `production:workbench-matching-constructor-fix-deploy-and-convergence-runbook`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/planning-post-no-oa-production-convergence-next-boundary-selection-2026-06-25.md` and `analysis/production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-2026-06-25.md`.
-- Write a read-only production evidence file before SSH collection.
-- Collect non-secret read-only aggregate evidence: release identity, API/dispatcher/required worker status, `/health`, `/health/ready`, queue/dirty/readiness aggregates, no-OA exact scope and historical dead-letter classification.
-- Do not requeue, resolve, repair, deploy, restart, run worker replay, mutate readiness or print secrets in this boundary.
-- If aggregate evidence shows new active blockers, select the narrowest diagnosis boundary rather than broad cleanup.
+- Read `analysis/runtime-workers-workbench-matching-orchestrator-constructor-fix-2026-06-25.md` and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
+- Confirm row237 is committed and pushed to `origin/dev`.
+- Write a bounded production deploy/convergence runbook before any production mutation.
+- Deploy the fix with the repository deploy script from clean `dev`.
+- Post-check active release identity, `fin-ops-worker@workbench-matching.service` stability, `/health`, `/health/ready`, active dirty scopes, readiness aggregates, worker problem samples and workbench-matching logs.
+- Do not requeue, resolve, repair, run worker replay, mutate readiness or print secrets unless a separate explicit stop-gate analysis proves it is bounded and necessary.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

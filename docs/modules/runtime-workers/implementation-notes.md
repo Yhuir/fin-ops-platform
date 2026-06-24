@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Workbench matching worker constructor port wiring
+
+- 目标：修复生产 `fin-ops-worker@workbench-matching.service` 启动后反复重启的问题；生产日志显示 `WorkbenchMatchingOrchestrator.__init__()` 拒绝旧关键字 `pair_relation_service`。
+- 影响范围：`WorkbenchMatchingWorkerFactory.build_dirty_scope_worker(...)` 的构造 wiring；不改变 PostgreSQL durable queue、dirty scope、readiness、RabbitMQ transport、Workbench matching rules 或 read model projection 语义。
+- 关键决策：`WorkbenchMatchingOrchestrator` 的当前合同是 `relation_read_port: WorkbenchMatchingRelationReadPort`；runtime worker 继续从 `WorkbenchPairRelationService.from_snapshot(...)` 读取关系快照，但只通过 `WorkbenchMatchingRelationReadPort(pair_relation_service)` 暴露读端口给 matching orchestrator。`pair_relation_service` 仍用于 relation command service 的写命令边界。
+- 文档影响：同步本实施记录、runtime worker 测试矩阵和 refactor controller analysis；状态机定义不变。
+- 测试覆盖：扩展 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_workbench_matching_uses_relation_read_port_not_pair_service`，防止 runtime worker factory 再向 orchestrator 传 `pair_relation_service=`。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地验证不启动真实 systemd worker；生产 worker restart/convergence 需要后续独立 deploy/runbook 证明。
+- 后续事项：本修复提交后，选择单独的生产 deploy/convergence 边界，验证 `fin-ops-worker@workbench-matching.service` 不再 restart loop。
+
 ## 2026-06-24 - Worker queue/App Status contract audit hardening
 
 - 目标：审计并加固 worker registry、durable queue、App Status registry 和 operation barrier 的合同守卫，确认不引入 Go Worker、不写生产 queue/readiness。

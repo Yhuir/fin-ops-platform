@@ -1978,6 +1978,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 if forbidden in class_source:
                     violations.append(f"{class_name} keeps broad pair relation dependency {forbidden}")
 
+        runtime_path = SERVICES_ROOT / "runtime_worker_handlers.py"
+        runtime_source = runtime_path.read_text(encoding="utf-8")
+        runtime_tree = _parse(runtime_path)
+        factory_source = _class_source(runtime_tree, runtime_source, "WorkbenchMatchingWorkerFactory")
+        if "WorkbenchMatchingRelationReadPort" not in runtime_source:
+            violations.append("WorkbenchMatchingWorkerFactory does not import the matching relation read port")
+        if "matching_orchestrator=WorkbenchMatchingOrchestrator(" not in factory_source:
+            violations.append("WorkbenchMatchingWorkerFactory no longer constructs WorkbenchMatchingOrchestrator")
+        else:
+            orchestrator_call = factory_source.split("matching_orchestrator=WorkbenchMatchingOrchestrator(", 1)[1]
+            orchestrator_call = orchestrator_call.split("),\n            source_versions_provider", 1)[0]
+            if "relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service)" not in orchestrator_call:
+                violations.append("WorkbenchMatchingWorkerFactory does not pass WorkbenchMatchingRelationReadPort")
+            if "pair_relation_service=" in orchestrator_call:
+                violations.append("WorkbenchMatchingWorkerFactory passes stale pair_relation_service keyword to orchestrator")
+
         self.assertEqual(violations, [])
 
     def test_server_workbench_payload_relation_reads_use_payload_read_port(self) -> None:

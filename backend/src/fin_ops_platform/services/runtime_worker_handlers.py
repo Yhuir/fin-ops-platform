@@ -53,6 +53,7 @@ from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchM
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_relation_command_service import (
@@ -194,7 +195,7 @@ class WorkbenchMatchingWorkerFactory:
             dirty_queue=WorkbenchReconciliationDirtyQueue(repository=read_model_repository),
             matching_orchestrator=WorkbenchMatchingOrchestrator(
                 row_provider=row_provider.rows_for_scope,
-                pair_relation_service=pair_relation_service,
+                relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service),
                 candidate_match_service=WorkbenchCandidateMatchService.from_snapshot(state_store.load_workbench_candidate_matches()),
                 read_model_service=WorkbenchReadModelService.from_snapshot({}),
                 rules=WorkbenchMatchingRules(include_special_rules=False),

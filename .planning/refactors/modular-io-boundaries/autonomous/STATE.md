@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-pending`
+Current state: `production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-no-oa-production-convergence-next-boundary-selection` as `planning-closed` in `analysis/planning-post-no-oa-production-convergence-next-boundary-selection-2026-06-25.md`. T0 selected `production:post-convergence-readiness-worker-db-aggregate-evidence-sweep` as the next safe boundary so production evidence can be re-baselined after PostgreSQL restart, app/worker restart, no-OA deploy and exact event convergence. The next boundary is read-only only.
+Completed `runtime-workers:workbench-matching-orchestrator-constructor-fix` as `implementation-closed` in `analysis/runtime-workers-workbench-matching-orchestrator-constructor-fix-2026-06-25.md`. T0 fixed the runtime worker handler so `WorkbenchMatchingOrchestrator` receives `relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service)` instead of stale keyword `pair_relation_service`, added a regression guard, and verified locally. Production worker closure remains deferred until the fix is deployed and `fin-ops-worker@workbench-matching.service` convergence is proven. The next boundary is `production:workbench-matching-constructor-fix-deploy-and-convergence-runbook`.
 
 ## Closed Or Deferred Slices
 
