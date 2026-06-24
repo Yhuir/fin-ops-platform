@@ -19,6 +19,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
+from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text
@@ -43,7 +44,9 @@ class SearchPendingSqlProjectionBuilder:
         workbench_relation_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
-        self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        broad_read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._search_read_model_repository = SearchReadModelRepositoryPort(broad_read_model_repository)
+        self._read_model_repository = broad_read_model_repository
         self._pending_invoice_read_model_repository = (
             pending_invoice_read_model_repository
             or PendingInvoiceReadModelRepositoryPort(self._read_model_repository)
@@ -73,7 +76,7 @@ class SearchPendingSqlProjectionBuilder:
             raise ValueError("search SQL projection scope_key must be a month shard YYYY-MM.")
         rows = self._search_rows_for_month(normalized_scope)
         source_versions = self._search_source_versions()
-        self._read_model_repository.save_search_index_rows(
+        self._search_read_model_repository.save_search_index_rows(
             scope_key=normalized_scope,
             rows=rows,
             source_versions=source_versions,

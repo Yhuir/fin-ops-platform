@@ -385,6 +385,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(no_oa_bank_batch.permission_owner, "no_oa_bank_batch_api_session")
         self.assertEqual(search.test_owner, "tests/test_search_pending_sql_runtime.py")
         self.assertEqual(no_oa_bank_batch.test_owner, "tests/test_no_oa_bank_batch_application_service.py")
+        self.assertEqual(search.repository_owner, "SearchReadModelRepositoryPort")
         self.assertEqual(no_oa_bank_batch.repository_owner, "NoOaBankBatchReadModelRepositoryPort")
         self.assertEqual(required_search_ports, set(search.repository_port_contract))
         self.assertEqual(required_no_oa_ports, set(no_oa_bank_batch.repository_port_contract))

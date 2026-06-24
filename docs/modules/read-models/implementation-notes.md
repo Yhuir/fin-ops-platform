@@ -1177,6 +1177,13 @@
 - 文档影响：新增 `docs/modules/search/` 模块维护骨架；`bank_account_balance` 保留为后续候选。
 - 状态：`search` 仍是 `implementation-gap-open`；Go/Fiber/Go Worker admission 继续 blocked。
 
+## 2026-06-24 - search repository port extraction
+
+- 目标：收窄 `search` read model 的 SQL repository surface。
+- 改动：新增 `SearchReadModelRepositoryPort`，只暴露 manifest 登记的 `search_index(...)` 与 `save_search_index_rows(...)`；`PostgresStateStore.search_sql_read_repository` 和 `SearchPendingSqlProjectionBuilder` search save path 均走该 port；manifest owner 更新为 `SearchReadModelRepositoryPort`。
+- 非目标：不改 search ranking、API shape、worker event、scope policy、queue schema、Redis/cache、permissions、frontend behavior 或 Go/Fiber/Go Worker。
+- 下一步：审计 app-owned search fresh gate/source-version/enqueue/rebuild/invalidation helper。
+
 ## 2026-06-24 - pending invoice mutation freshness target contract
 
 - 目标：检查待找发票 mutation 后的页面 read model 同步语义，避免写成功后立即读旧 pending invoice rows。

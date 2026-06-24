@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-no-oa-bank-batch.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:search-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -139,6 +139,9 @@ Current state expected on start:
 - `no_oa_bank_batch` is selected as the eleventh non-Go read model implementation pilot because it has the highest remaining page-level stale-read, Workbench relation adjacency, public snapshot persistence and operation-barrier risk.
 - Target verification fixed a stale no-OA refresh-service constructor keyword: `NoOaBankBatchReadModelRefreshService` now passes `pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(...)` to match the current application service contract.
 - `search` is selected as the twelfth non-Go read model implementation pilot.
+- `SearchReadModelRepositoryPort` owns manifest-listed `search_index(...)` and `save_search_index_rows(...)`.
+- PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths use the narrow port.
+- Search remains implementation-gap-open because app-owned fresh gate/source-version/enqueue/rebuild/invalidation helpers still need audit/extraction.
 - `bank_account_balance` remains a later implementation-gap-open candidate.
 - No module is globally closed.
 - The no-OA refresh persistence boundary is implemented: `NoOaBankBatchReadModelPersistencePort` owns public snapshot persistence delegation for the worker refresh path, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
@@ -148,7 +151,7 @@ Current state expected on start:
 - The no-OA mutation persistence fallback quarantine is implemented: `NoOaBankBatchApplicationService.persist_mutation(...)` requires `save_no_oa_bank_batch_mutation(...)`, `ApplicationStateStore` exposes the same explicit boundary, and the service-layer broad state-store fallback is guarded from returning.
 - The no-OA first local closure audit found broad `Application._persist_state(...)` still serialized `no_oa_bank_batches`; the no-OA full-state snapshot quarantine is implemented and guarded.
 - The no-OA post-full-state local closure audit is complete: no remaining local implementation gap was found after deleting dead app-owned source-version/stale-reason helpers. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
-- The next pending boundary is read-models:search-repository-port-extraction.
+- The next pending boundary is read-models:search-freshness-helper-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -244,16 +247,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:search-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:search-freshness-helper-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:search-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-no-oa-bank-batch.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`, `docs/modules/search/README.md`, `docs/modules/search/state-machine.md`, `docs/modules/search/tests.md`, `docs/modules/search/implementation-notes.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`, `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`, `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`, `tests/test_search_pending_sql_runtime.py`, `tests/test_search_api.py`, and `tests/test_read_model_manifest.py`.
-- Use CodeGraph for `search_index`, `save_search_index_rows`, `SearchPendingSqlProjectionBuilder`, `_get_search_payload_from_sql_read_model`, and `_search_sql_read_repository` before editing.
-- Add a narrow `SearchReadModelRepositoryPort` exposing only manifest-listed `search_index(...)` and `save_search_index_rows(...)`.
-- Wire `/api/search` SQL read model access and `SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)` through the narrow port.
-- Preserve existing search ranking, query filters, group context, response shape, permission behavior, worker event names, scope policy, queue schema, Redis/cache behavior and frontend behavior.
-- Add or update tests proving the port does not expose unrelated read model methods and search behavior still reads/saves through the expected boundary.
-- Do not remove app-owned search helpers in this slice unless call graph proves they are unused after port wiring; helper quarantine should be a follow-up boundary.
+For read-models:search-freshness-helper-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-search-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-no-oa-bank-batch.md`, `docs/modules/search/README.md`, `docs/modules/search/state-machine.md`, `docs/modules/search/tests.md`, `docs/modules/search/implementation-notes.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`, `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`, `backend/src/fin_ops_platform/services/search_read_model_repository.py`, `tests/test_search_pending_sql_runtime.py`, and `tests/test_search_api.py`.
+- Use CodeGraph for `_get_search_payload_from_sql_read_model`, `_search_index_expected_source_versions`, `_enqueue_search_read_model_refresh`, `rebuild_search_index_scope`, `_build_search_index_rows_for_month`, and `_invalidate_search_read_model_scopes`.
+- Audit remaining app-owned search helper surfaces after repository port extraction.
+- Classify each helper as dependency assembly, removable, compat-only, or implementation gap.
+- If a concrete implementation gap is found, split and execute the first narrow extraction/quarantine boundary.
+- If only dependency assembly remains, record evidence without claiming global module closure.
 - Do not implement Go/Fiber/Go Worker.
 - Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior unless a verified gap requires it and tests are updated.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.

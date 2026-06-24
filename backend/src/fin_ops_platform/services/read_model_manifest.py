@@ -162,7 +162,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "save_search_index_rows",
         ),
         query_owner="Search read API",
-        repository_owner="PostgresReadModelRepository.search",
+        repository_owner="SearchReadModelRepositoryPort",
         permission_owner="search_api_session",
         test_owner="tests/test_search_pending_sql_runtime.py",
     ),

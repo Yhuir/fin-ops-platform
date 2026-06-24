@@ -22,6 +22,16 @@
 - `tests/test_workbench_relation_repository.py`
 - `tests/test_derived_data_lifecycle_service.py`
 
+## 2026-06-24 - repository port extraction
+
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchReadModelRepositoryPortTests::test_port_excludes_unrelated_read_model_methods`。
+- 覆盖：search port 只暴露 `search_index(...)` 和 `save_search_index_rows(...)`，不暴露 pending invoice、bank detail、no-OA 或 workbench relation 方法。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

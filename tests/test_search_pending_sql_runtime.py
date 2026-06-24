@@ -15,6 +15,7 @@ from fin_ops_platform.services.pending_invoice_service import (
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 
@@ -60,6 +61,22 @@ class UnderlyingPendingInvoiceReadModelRepository:
 
     def mark_pending_invoice_scope(self, **kwargs: object) -> None:
         self.calls.append(("mark_pending_invoice_scope", dict(kwargs)))
+
+
+class UnderlyingSearchReadModelRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def search_index(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("search_index", dict(kwargs)))
+        return {
+            "query": kwargs.get("q"),
+            "summary": {"total": 0, "oa": 0, "bank": 0, "invoice": 0},
+            "refresh_status": "fresh",
+        }
+
+    def save_search_index_rows(self, **kwargs: object) -> None:
+        self.calls.append(("save_search_index_rows", dict(kwargs)))
 
 
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
@@ -157,6 +174,37 @@ class PendingInvoiceReadModelRepositoryPortTests(unittest.TestCase):
                 "save_pending_invoice_rows",
                 "mark_pending_invoice_scope",
             ],
+        )
+
+
+class SearchReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        underlying = UnderlyingSearchReadModelRepository()
+        port = SearchReadModelRepositoryPort(underlying)
+
+        payload = port.search_index(
+            q="昆明",
+            scope="all",
+            month="2026-05",
+            project_name=None,
+            status=None,
+            limit=20,
+        )
+        port.save_search_index_rows(
+            scope_key="2026-05",
+            rows=[{"row_id": "txn-1"}],
+            source_versions={"search": "v1"},
+        )
+
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertFalse(hasattr(port, "save_pending_invoice_rows"))
+        self.assertFalse(hasattr(port, "list_bank_detail_transactions"))
+        self.assertFalse(hasattr(port, "list_no_oa_bank_batch_rows"))
+        self.assertFalse(hasattr(port, "list_workbench_relation_rows"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            ["search_index", "save_search_index_rows"],
         )
 
 

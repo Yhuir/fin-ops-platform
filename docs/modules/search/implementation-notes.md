@@ -8,3 +8,11 @@
 - 首切范围：新增 `SearchReadModelRepositoryPort`，只暴露 manifest 登记的 `search_index(...)` 与 `save_search_index_rows(...)`，并让 SQL read/projection paths 走窄 port。
 - 非目标：不改 search ranking、API shape、worker event、scope policy、queue schema、Redis/cache、permissions、frontend behavior、Go/Fiber 或 Go Worker。
 - 状态：`search` 仍是 `implementation-gap-open`；本记录不是 module closure。
+
+## 2026-06-24 - repository port extraction
+
+- 目标：为 `search` 建立窄 read model repository port，避免 SQL read/projection save 路径继续依赖 broad `PostgresReadModelRepository` surface。
+- 改动：新增 `SearchReadModelRepositoryPort`；`PostgresStateStore.search_sql_read_repository` 返回该 port；`SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)` 通过该 port 调用 `save_search_index_rows(...)`；manifest repository owner 更新为 `SearchReadModelRepositoryPort`。
+- 保持不变：`/api/search` response shape、fresh/stale/refreshing 语义、search ranking、group context、worker event、scope policy、queue schema、Redis/cache、permissions、frontend behavior 均不变。
+- 测试覆盖：`SearchReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 search SQL runtime、search API 和 read model manifest 测试。
+- 下一步：`read-models:search-freshness-helper-boundary-audit` 审计 app-owned fresh gate/source-version/enqueue/rebuild/invalidation helper，必要时拆第一条 extraction/quarantine boundary。

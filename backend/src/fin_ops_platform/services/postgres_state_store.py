@@ -37,6 +37,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_workbench_pair_relations,
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
@@ -146,6 +147,7 @@ class PostgresStateStore:
         self._tax_offset_read_model_repository = TaxOffsetReadModelRepositoryPort(self._read_model_repository)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
         self._pending_invoice_sql_read_repository = PendingInvoiceReadModelRepositoryPort(self._sql_read_model_repository)
+        self._search_sql_read_repository = SearchReadModelRepositoryPort(self._sql_read_model_repository)
         self._input_invoice_usage_sql_read_repository = InputInvoiceUsageReadModelRepositoryPort(self._sql_read_model_repository)
         self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
@@ -772,8 +774,8 @@ class PostgresStateStore:
         return self._turnover_ledger_sql_read_repository
 
     @property
-    def search_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
+    def search_sql_read_repository(self) -> SearchReadModelRepositoryPort:
+        return self._search_sql_read_repository
 
     @property
     def pending_invoice_sql_read_repository(self) -> PendingInvoiceReadModelRepositoryPort:
