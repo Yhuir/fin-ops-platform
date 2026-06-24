@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `unauthenticated-api-classification-auth-gated`
+Current state: `internal-api-contract-harness-design-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-unauthenticated-api-status-shape-classification-runbook` as `production-evidence-deferred` in `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`. T0 ran API-only `http_slo_probe --allow-unauthenticated`; all 38 default API probes returned 401 with low latency, proving public API surfaces are consistently auth-gated and unauthenticated probing cannot produce read-model response-shape closure evidence. `/health/ready` stayed ready before and after. No response bodies, payload rows, secrets, deploy, restart, requeue, repair, replay, DB write, queue/readiness mutation or closure claim occurred. The next boundary is `planning:post-unauthenticated-api-classification-next-boundary-selection`.
+Completed `planning:post-unauthenticated-api-classification-next-boundary-selection` as `planning-closed` in `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`. T0 reconciled Row259's 38/38 unauthenticated API 401 classification, rejected authenticated production HTTP retry, public browser data smoke, another unauthenticated route sweep and final closure as premature, and selected `planning:read-model-internal-api-contract-harness-design` as the next safe boundary. CodeGraph confirmed the backend is not Flask; existing evidence points to `Application`, route-owner classes and `Application.handle_request(...)` tests as the safest local contract seam. No production command, runtime mutation, code implementation or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:read-model-unauthenticated-api-status-shape-classification-runbook`
+`planning:post-unauthenticated-api-classification-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-unauthenticated-api-classification-next-boundary-selection`
+`planning:read-model-internal-api-contract-harness-design`

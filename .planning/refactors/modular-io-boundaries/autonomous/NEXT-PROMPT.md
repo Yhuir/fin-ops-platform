@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:read-model-unauthenticated-api-status-shape-classification-runbook`.
+Continue after `planning:post-unauthenticated-api-classification-next-boundary-selection`.
 
 ## Current State
 
@@ -34,12 +34,17 @@ Continue after `production:read-model-unauthenticated-api-status-shape-classific
   - public API surfaces are consistently auth-gated;
   - no response body or payload row was stored;
   - `/health/ready` stayed ready.
+- Row260 reconciled Row259 and selected an internal API contract harness design:
+  - authenticated production HTTP retry is still premature because no non-secret HTTP SLO auth config exists;
+  - public browser data smoke is still premature because API data routes are auth-gated;
+  - another unauthenticated route sweep would not add response-shape evidence;
+  - CodeGraph confirmed this backend is not Flask and existing local tests use `Application.handle_request(...)` / route-owner seams.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`planning:post-unauthenticated-api-classification-next-boundary-selection`
+`planning:read-model-internal-api-contract-harness-design`
 
 ## Required First Steps On Resume
 
@@ -58,10 +63,14 @@ Continue after `production:read-model-unauthenticated-api-status-shape-classific
 7. Read `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`.
 8. Read `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`.
 9. Read `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`.
-10. Reconcile Row259 and choose the next safe path for API/browser closure evidence: internal contract harness, non-secret auth provisioning design, or another bounded production/read-only evidence route.
+10. Read `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`.
+11. Design a local/internal API contract harness for read-model-heavy endpoints using existing `Application.handle_request(...)`, route-owner classes, auth/session test seams, fake/stub stores and sanitized response-shape assertions.
+12. Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers or route-owner classes.
 
 ## Stop Gates
 
 - Do not print/store secrets, DSNs, tokens, cookies, env values or sensitive payload rows.
 - Do not run production mutation, deploy, restart, requeue, repair, replay workers or mutate DB/queue/readiness state.
+- Do not implement a production auth bypass or print/store cookies, tokens, DSNs, env values or secrets.
+- Do not introduce a Flask test client; this backend uses `Application` plus `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not claim module/global closure from public page-shell smoke.
