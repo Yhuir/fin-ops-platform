@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: production:read-model-scope-contract-runtime-dry-run-classification.
-- Last status: production-controlled.
+- Last completed boundary: planning:post-scope-contract-runtime-classification-next-boundary-selection.
+- Last status: planning-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
@@ -78,7 +78,8 @@ Current state expected on start:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - `production:read-model-production-evidence-matrix-read-only-sweep` is complete in `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`: all App Status read-model readiness rows are fresh, all dirty scopes are done, read-model outbox events are done, no read-model dead letters remain, current workers have fresh heartbeats, read-model row-count/source-version tables are queryable, and Workbench high-row table counts are visible.
 - `production:read-model-scope-contract-runtime-dry-run-classification` is complete in `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`: `/health/ready` is ready on active API port `18001`, cost-statistics scope contract dry-run returned `ok=true` with `violation_count=0` and no current uncovered failures, invalid read-model scope dry-run returned `ok=true` with `invalid_scope_count=0`, and legacy `cost`/`tax` rows are historical `done` dirty scopes only.
-- The next pending boundary is `planning:post-scope-contract-runtime-classification-next-boundary-selection`.
+- `planning:post-scope-contract-runtime-classification-next-boundary-selection` is complete in `analysis/planning-post-scope-contract-runtime-classification-next-boundary-selection-2026-06-25.md`: final closure, production cleanup, immediate worker creation and Go admission were rejected as premature; the next boundary must map module closure evidence and file ownership first.
+- The next pending boundary is `planning:read-model-module-closure-evidence-ownership-map`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -208,7 +209,8 @@ Current state expected on start:
 - `planning:post-production-baseline-module-closure-wave-selection` is complete as a planning slice: it selected T0-only read-model production evidence matrixing before any worker wave or closure claim.
 - `production:read-model-production-evidence-matrix-read-only-sweep` is complete as a production-controlled slice: row245 collected a clean current runtime read-model matrix and identified historical legacy `cost`/`tax` done dirty-scope rows plus remaining browser/API/high-row/module-specific closure gaps.
 - `production:read-model-scope-contract-runtime-dry-run-classification` is complete as a production-controlled slice: row246 proved the scope-contract and invalid-scope dry-runs are clean and classified legacy `cost`/`tax` rows as historical `done` dirty scopes only, with no active outbox or readiness residue.
-- The next pending boundary is `planning:post-scope-contract-runtime-classification-next-boundary-selection`.
+- `planning:post-scope-contract-runtime-classification-next-boundary-selection` is complete as a planning slice: row247 selected an evidence/ownership map before any worker wave or closure claim.
+- The next pending boundary is `planning:read-model-module-closure-evidence-ownership-map`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -311,17 +313,17 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-scope-contract-runtime-classification-next-boundary-selection`.
+Start with `planning:read-model-module-closure-evidence-ownership-map`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`, `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`, `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/read-models/tests.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Use row245 and row246 as context: current read-model runtime health and scope-contract dry-run classification are clean, but browser/API/high-row smoke and module-specific closure audits remain open.
-- Reconcile remaining evidence gaps, map file ownership, and select exactly one next safe boundary, likely a module-specific production closure audit wave selection, bounded browser/API/high-row smoke planning, or targeted module closure audit.
-- Do not run production `--apply`, deploy, restart, requeue, repair, replay workers, mutate runtime state or create workers in this planning slice.
+- Read `analysis/planning-post-scope-contract-runtime-classification-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`, `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`, `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `docs/modules/README.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/read-models/tests.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Build a controller-owned evidence and file-ownership map for read-model-heavy modules: module key, route/API surface, local implementation evidence, row245/246 production evidence, remaining authenticated API/browser/high-row gaps, T0-vs-worker evidence source, file ownership and handoff paths.
+- Select exactly one next execution boundary after the map: a bounded worker wave with ownership, a T0-only production read-only/API/browser smoke planning slice, or a single targeted module closure audit.
+- Do not run production `--apply`, deploy, restart, requeue, repair, replay workers, mutate runtime state or create workers before the ownership map is written.
 - Do not claim module/global closure from row245 or row246 evidence alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 

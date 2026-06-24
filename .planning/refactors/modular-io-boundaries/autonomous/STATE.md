@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-scope-contract-runtime-classification-next-boundary-selection-pending`
+Current state: `read-model-module-closure-evidence-ownership-map-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-scope-contract-runtime-dry-run-classification` as `production-controlled` in `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`. T0 ran the production scope-contract checker in dry-run mode only: cost-statistics scope contract returned `ok=true`, `violation_count=0`, no covered historical failures and no current uncovered failures; invalid read-model scope dry-run returned `ok=true`, `invalid_scope_count=0`; legacy `cost`/`tax` rows are historical `done` dirty-scope rows only, with no non-done samples, no active outbox rows and no readiness rows. No `--apply`, mutation, requeue, repair, replay, restart or secret output occurred. The next boundary is `planning:post-scope-contract-runtime-classification-next-boundary-selection`; no global/module closure is claimed.
+Completed `planning:post-scope-contract-runtime-classification-next-boundary-selection` as `planning-closed` in `analysis/planning-post-scope-contract-runtime-classification-next-boundary-selection-2026-06-25.md`. T0 reconciled row245 clean production matrix and row246 clean scope-contract dry-run classification, rejected final closure, production cleanup, immediate worker creation and Go admission as premature, and selected `planning:read-model-module-closure-evidence-ownership-map` as the next boundary. No production command, worker thread or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
