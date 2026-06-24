@@ -1,29 +1,23 @@
 # Next Prompt
 
-Continue after `production:no-oa-bank-batch-category-source-version-mismatch-diagnosis`.
+Continue after `planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row277 deployed release `dev-pending-invoice-source-17d13466-20260625` at git commit `3329d8954a7219a1c21641392aaa3f5448ec20f5`.
-- Row277 production evidence closed pending invoice source-version convergence for `expense:all`:
-  - `/health/ready` was ready before and after deploy.
-  - One bounded `pending_invoice=expense:all` smoke event reached `event_status=done` and `dirty_status=done`.
-  - Sanitized no-enqueue metadata proved pending invoice rows/filter-options are `fresh`.
-  - Pending invoice source-version stale reasons are empty.
-- Row278 read-only no-OA diagnosis closed the specific `bank_transaction_category_snapshot_version_mismatch` from Row275:
-  - Active release stayed `dev-pending-invoice-source-17d13466-20260625`.
-  - `/health/ready` stayed `ready`.
-  - Probe scope `month=2026-06,bucket=unsubmitted` had row count `8`, unique source-version hash count `1`, row source-version hash `6d33251a850b453d`.
-  - Deployed expected category snapshot hash prefix was `b1533c3ad8c74afa`; actual no-OA row category snapshot hash prefix was also `b1533c3ad8c74afa`.
-  - `source_version_mismatch_reasons` was empty.
-  - Dirty/outbox/readiness evidence showed completed `no_oa_bank_batch:all` refreshes at `2026-06-25 05:02:09+08`, readiness `all/fresh`, and no recent dead letters.
-  - No production API endpoint call, payload-row output, secret output, refresh command, requeue, repair, direct DB mutation or readiness mutation occurred.
+- Row273 proved the T0 root SSH target OA applicant credential seam can run user-scope authenticated API metadata probes without printing/storing tokens, cookies, passwords, env values, response bodies or payload rows.
+- Row273 focused retry left exactly three user-scope API failures:
+  - `pending_invoices_rows`
+  - `pending_invoices_filter_options`
+  - `no_oa_bank_batches`
+- Row277 deployed release `dev-pending-invoice-source-17d13466-20260625` and proved pending invoice `expense:all` rows/filter-options fresh with no source-version stale reasons.
+- Row278 proved current no-OA `month=2026-06,bucket=unsubmitted` rows have no category source-version mismatch; expected and actual category snapshot hash prefix is `b1533c3ad8c74afa`, and `source_version_mismatch_reasons` is empty.
+- Row279 selected a focused production user-scope API metadata re-smoke as the next smallest closure step.
 - Module/global closure remains open.
 
 ## Next Boundary
 
-`planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection`
+`production:read-model-focused-user-scope-api-metadata-resmoke-runbook`
 
 ## Required First Steps On Resume
 
@@ -32,28 +26,38 @@ Continue after `production:no-oa-bank-batch-category-source-version-mismatch-dia
 3. Acquire the direct-dev write lease before editing:
    - `mkdir /tmp/fin-ops-dev-write.lock`
 4. Read:
+   - `analysis/planning-post-no-oa-category-source-version-diagnosis-next-boundary-selection-2026-06-25.md`
+   - `analysis/production-read-model-controlled-production-api-browser-runbook-2026-06-25.md`
    - `analysis/production-pending-invoice-source-version-contract-deploy-and-convergence-runbook-2026-06-25.md`
    - `analysis/production-no-oa-bank-batch-category-source-version-mismatch-diagnosis-2026-06-25.md`
-   - `analysis/production-read-model-controlled-production-api-browser-runbook-2026-06-25.md`
-   - `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`
-   - `autonomous/STATE.md`
-   - `autonomous/MODULE-QUEUE.md`
-5. Write a planning analysis file under `analysis/` before selecting the next executable boundary.
+   - `backend/src/fin_ops_platform/tools/http_slo_probe.py`
+   - `backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
+   - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
+5. Write a controlled production runbook/evidence file under `analysis/` before any production command.
 
-## Selection Scope
+## Required Runbook Shape
 
-Use Row277 and Row278 to reconcile the previously failing pending invoice/no-OA production API metadata gaps. The next boundary must be the smallest safe next step toward global modular IO closure, but must not claim module/global closure unless all required evidence is explicitly present.
+The Row280 runbook must:
 
-Candidate directions to evaluate:
-
-- repeat or focus a controlled user-scope authenticated production API metadata smoke only if current evidence justifies it and the command can avoid response bodies, payload rows and secret output;
-- select a browser/admin/write-flow evidence boundary if production API metadata is now clean enough to unblock it;
-- reconcile module-specific closure matrices and remaining gaps from worker wave 1 plus Row245/246/257/273/277/278 production evidence;
-- defer Go admission unless prerequisites are still explicitly satisfied, which they likely are not.
+- use the T0-only `ssh finops-prod-root` production gate;
+- discover the active release and verify `/health/ready` before and after;
+- source deployed env files without printing values;
+- reuse the Row273 remote Python in-process target OA applicant credential/login seam;
+- never print/store/copy bearer tokens, cookies, passwords, OA usernames, env values, DSNs, private keys, response bodies, payload rows or business identifiers;
+- first probe exactly:
+  - `pending_invoices_rows`
+  - `pending_invoices_filter_options`
+  - `no_oa_bank_batches`
+- if the focused set passes, optionally run all non-admin user-scope `DEFAULT_API_PROBES` once;
+- print only sanitized metadata such as status, HTTP status counts, read-model status counts, refresh-enqueued counts, p95/max latency and failed probe names;
+- collect pre/post dirty scopes, readiness, read-model outbox and dead-letter summaries;
+- record GET-triggered refresh enqueue side effects if they occur, but do not manually enqueue/requeue/repair/replay/mutate readiness/directly mutate DB rows.
 
 ## Stop Gates
 
-- Any command would print secrets, tokens, cookies, DSNs, passwords, private keys or business payload rows.
-- Any next boundary would require broad DB mutation, requeue, repair, manual mark-done, readiness mutation, worker replay, deploy, or API/body capture without a separate controlled runbook.
-- Do not broaden back into pending invoice or no-OA refresh/rebuild; Row277 and Row278 closed the current source-version mismatch slice.
-- Do not claim module/global closure from Row278 alone.
+- Stop before executing if the only available auth path would print/store/copy tokens, cookies, passwords or env secret values.
+- Stop before executing if `/health/ready` is not ready.
+- Stop before executing if precheck shows active dirty/outbox/dead-letter blockers unrelated to the selected probes.
+- Stop if the focused set fails; record sanitized failure evidence and do not retry blindly.
+- Do not run browser/admin/write probes in Row280.
+- Do not claim module/global closure from Row280 alone.

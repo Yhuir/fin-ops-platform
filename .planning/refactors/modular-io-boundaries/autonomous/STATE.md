@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-no-oa-category-source-version-diagnosis-next-boundary-selection-selected`
+Current state: `read-model-focused-user-scope-api-metadata-resmoke-runbook-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:no-oa-bank-batch-category-source-version-mismatch-diagnosis` as `production-diagnosis-closed` in `analysis/production-no-oa-bank-batch-category-source-version-mismatch-diagnosis-2026-06-25.md`. T0 used read-only root SSH/deployed PostgreSQL metadata only, confirmed `/health/ready` stayed ready, and proved current `month=2026-06,bucket=unsubmitted` no-OA rows match the deployed expected category snapshot source version with no stale reasons. The bounded rows have source-version hash `6d33251a850b453d`, category snapshot hash prefix `b1533c3ad8c74afa`, and actual category snapshot equals expected; dirty/outbox/readiness evidence shows completed `no_oa_bank_batch:all` refreshes at `2026-06-25 05:02:09+08`, readiness `all/fresh`, and no recent dead letters. No production API endpoint call, payload-row output, secret output, refresh command, requeue, repair, direct DB mutation or readiness mutation occurred. Module/global closure remains open; next boundary is `planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection`.
+Completed `planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection` as `planning-closed` in `analysis/planning-post-no-oa-category-source-version-diagnosis-next-boundary-selection-2026-06-25.md`. T0 reconciled Row273 remaining user-scope API failures with Row277 pending invoice convergence and Row278 no-OA category source-version diagnosis, rejected browser/admin/write evidence and Go admission as premature, and selected `production:read-model-focused-user-scope-api-metadata-resmoke-runbook` as the next smallest closure step. No production command, mutation or closure claim occurred in Row279. Module/global closure remains open.
 
 ## Closed Or Deferred Slices
 
