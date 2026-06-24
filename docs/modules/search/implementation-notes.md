@@ -56,3 +56,11 @@
 - 改动：`OAProjectionSyncService` 新增 `search_read_model_refresh_producer` 依赖；默认兼容构造 `SearchReadModelRefreshProducer`；生产 worker 装配显式传入 Search producer；`_mark_downstream_dirty(...)` 调用 producer `enqueue(...)`；静态 guard 防止直接 `enqueue_many("search", ...)` 回流。
 - 保持不变：OA sync target scopes、Workbench/OA pending payment/pending invoice fan-out、Search worker event、scope policy、queue schema、API shape、Redis/cache、权限和前端行为均不变。
 - 下一步：执行 `read-models:search-post-oa-projection-sync-local-implementation-closure-audit`。
+
+## 2026-06-24 - runtime import-state Search refresh producer boundary
+
+- 目标：让 runtime import-state 持久化后的 Search fan-out 也走统一 Search producer，避免高频 import-state path 继续保留 Search refresh enqueue 的第二套 owner。
+- 审计结论：post-OA-sync audit 发现 `_RuntimeWorkerDerivedLifecycle.persist_import_state(...)` 仍直接调用 generic `_enqueue_scopes("search", ..., reason="import_state_changed")`。该路径仍经过 `ReadModelRefreshGateway` 和 scope policy registry，但绕过了 `SearchReadModelRefreshProducer`。
+- 改动：`_RuntimeWorkerDerivedLifecycle` 新增可注入 `search_read_model_refresh_producer`，默认以现有 `ReadModelRefreshGateway` 构造 `SearchReadModelRefreshProducer`；`persist_import_state(...)` 的 Search fan-out 改为调用 producer；runtime worker scope test 覆盖 producer delegation；platform guard 防止 `_enqueue_scopes("search", ...)` 或 direct `enqueue_many("search", ...)` 回流。
+- 保持不变：import-state target scopes、Workbench/Workbench relation/invoice lifecycle/pending invoice/invoice usage/OA pending payment/bank detail/balance/cost/tax fan-out、Search worker event、scope policy、queue schema、API shape、Redis/cache、权限、审计和前端行为均不变。
+- 下一步：执行 `read-models:search-post-runtime-import-state-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence，或是否还有其他本地旧路径需要拆分。

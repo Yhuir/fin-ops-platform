@@ -34,6 +34,7 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.workbench_candidate_match_service import (
@@ -272,12 +273,17 @@ class _RuntimeWorkerDerivedLifecycle:
         state_store: Any,
         search_service: SearchService,
         workbench_source_versions_provider: Callable[[], dict[str, object]],
+        search_read_model_refresh_producer: Any | None = None,
     ) -> None:
         self._queue_repository = queue_repository
         self._state_store = state_store
         self._search_service = search_service
         self._lifecycle = DerivedDataLifecycleService()
         self._read_model_refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
+        self._search_read_model_refresh_producer = (
+            search_read_model_refresh_producer
+            or SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: self._read_model_refresh_gateway)
+        )
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
     def execute_event(
@@ -411,7 +417,7 @@ class _RuntimeWorkerDerivedLifecycle:
         )
         self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes("search", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._search_read_model_refresh_producer.enqueue(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes(
             "pending_invoice",
             _pending_invoice_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),

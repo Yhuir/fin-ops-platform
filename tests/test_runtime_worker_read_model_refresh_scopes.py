@@ -13,12 +13,18 @@ class QueueRecorder:
 
 
 class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
-    def _lifecycle(self, queue: QueueRecorder) -> _RuntimeWorkerDerivedLifecycle:
+    def _lifecycle(
+        self,
+        queue: QueueRecorder,
+        *,
+        search_read_model_refresh_producer: object | None = None,
+    ) -> _RuntimeWorkerDerivedLifecycle:
         return _RuntimeWorkerDerivedLifecycle(
             queue_repository=queue,
             state_store=SimpleNamespace(),
             search_service=SimpleNamespace(clear_cache=lambda: None),
             workbench_source_versions_provider=lambda: {},
+            search_read_model_refresh_producer=search_read_model_refresh_producer,
         )
 
     def test_worker_lifecycle_normalizes_cost_statistics_refresh_scopes(self) -> None:
@@ -47,6 +53,25 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         self.assertNotIn(("cost_statistics", "2026-04", "unit_test"), cost_refreshes)
         self.assertNotIn(("cost_statistics", "all", "unit_test"), cost_refreshes)
 
+    def test_import_state_search_refresh_uses_search_producer_boundary(self) -> None:
+        queue = QueueRecorder()
+        search_producer = FakeSearchRefreshProducer()
+        lifecycle = self._lifecycle(queue, search_read_model_refresh_producer=search_producer)
+        snapshot_service = SimpleNamespace(snapshot=lambda: {})
+
+        lifecycle.persist_import_state(
+            import_service=snapshot_service,
+            file_import_service=snapshot_service,
+            etc_service=snapshot_service,
+            etc_reconciliation_task_service=snapshot_service,
+            tax_certified_import_service=snapshot_service,
+            cost_statistics_scope_keys=["2026-03"],
+        )
+
+        self.assertEqual(search_producer.calls, [(["2026-03"], "import_state_changed")])
+        self.assertNotIn(("search", "2026-03", "import_state_changed"), queue.refreshes)
+        self.assertIn(("workbench_relation", "2026-03", "import_state_changed"), queue.refreshes)
+
     def test_worker_lifecycle_does_not_apply_cost_scope_rules_to_other_read_models(self) -> None:
         queue = QueueRecorder()
         lifecycle = self._lifecycle(queue)
@@ -65,6 +90,15 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
                 ("tax_offset", "all", "unit_test"),
             ],
         )
+
+
+class FakeSearchRefreshProducer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def enqueue(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> bool:
+        self.calls.append((list(scope_keys), reason))
+        return True
 
 
 if __name__ == "__main__":

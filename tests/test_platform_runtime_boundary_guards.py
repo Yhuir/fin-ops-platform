@@ -2098,6 +2098,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if 'enqueue_many("search"' in oa_projection_sync_source or "enqueue_many('search'" in oa_projection_sync_source:
             violations.append("OAProjectionSyncService still bypasses SearchReadModelRefreshProducer for search refresh")
 
+        runtime_worker_handlers_source = (SERVICES_ROOT / "runtime_worker_handlers.py").read_text(encoding="utf-8")
+        for bypass in (
+            '_enqueue_scopes("search"',
+            "_enqueue_scopes('search'",
+            'enqueue_many("search"',
+            "enqueue_many('search'",
+        ):
+            if bypass in runtime_worker_handlers_source:
+                violations.append("Runtime worker handlers still bypass SearchReadModelRefreshProducer for search refresh")
+                break
+
         self.assertEqual(violations, [])
 
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:

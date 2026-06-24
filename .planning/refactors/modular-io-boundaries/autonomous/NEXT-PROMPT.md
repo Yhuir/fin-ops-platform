@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:search-oa-projection-sync-refresh-producer-boundary-extraction` slice.
+Continue the autonomous modular IO refactor after the `read-models:search-runtime-import-state-refresh-producer-boundary-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:search-oa-projection-sync-refresh-producer-boundary-extraction`
+- Last completed boundary: `read-models:search-runtime-import-state-refresh-producer-boundary-extraction`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `search` is the twelfth non-Go read model pilot.
@@ -16,12 +16,13 @@ Continue the autonomous modular IO refactor after the `read-models:search-oa-pro
 - `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization.
 - Production PostgreSQL `/api/search` without a SQL repository fails closed instead of live scanning legacy/local state.
 - `OAProjectionSyncService` now routes Search downstream dirty fan-out through `SearchReadModelRefreshProducer` instead of direct `enqueue_many("search", ...)`.
-- `search` remains `implementation-gap-open` pending post-OA-sync local closure audit and real environment evidence accounting.
+- Runtime import-state Search fan-out now routes through `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`.
+- `search` remains `implementation-gap-open` pending post-runtime-import-state local closure audit and real environment evidence accounting.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:search-post-oa-projection-sync-local-implementation-closure-audit`
+`read-models:search-post-runtime-import-state-local-implementation-closure-audit`
 
 ## Required First Steps On Resume
 
@@ -32,6 +33,8 @@ Continue the autonomous modular IO refactor after the `read-models:search-oa-pro
 5. Read target evidence:
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-fail-closed-local-implementation-closure-audit.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-oa-projection-sync-refresh-producer-boundary-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-post-oa-projection-sync-local-implementation-closure-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-search-runtime-import-state-refresh-producer-boundary-extraction.md`
    - `docs/modules/search/README.md`
    - `docs/modules/search/state-machine.md`
    - `docs/modules/search/tests.md`
@@ -44,28 +47,31 @@ Continue the autonomous modular IO refactor after the `read-models:search-oa-pro
    - `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
    - `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`
    - `backend/src/fin_ops_platform/services/oa_projection_sync.py`
+   - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
    - `tests/test_search_pending_sql_runtime.py`
    - `tests/test_search_api.py`
    - `tests/test_runtime_worker_registry.py`
    - `tests/test_oa_projection_sync_service.py`
    - `tests/test_oa_projection_sql_runtime.py`
+   - `tests/test_runtime_worker_read_model_refresh_scopes.py`
+   - `tests/test_workbench_sql_runtime.py`
    - `tests/test_platform_runtime_boundary_guards.py`
 
 ## Boundary Scope
 
 Target:
 
-- Re-audit search after OA projection sync producer extraction.
+- Re-audit search after runtime import-state producer extraction.
 - Decide whether local implementation support can move to `production-evidence-deferred`, or whether another local implementation gap must be split first.
 - Do not mark `search` globally closed unless real PostgreSQL/worker/App Status/high-row/browser evidence is available and verified.
 
 Expected verification:
 
-- `PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v`
 - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
 - `bash scripts/verify.sh docs`
 - `git diff --check`
 
 ## Stop Condition
 
-Complete one verified search post-OA-sync local implementation closure audit or the first split implementation gap, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified search post-runtime-import-state local implementation closure audit or the first split implementation gap, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
