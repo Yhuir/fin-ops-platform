@@ -318,7 +318,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "list_no_oa_bank_batch_rows",
         ),
         query_owner="NoOaBankBatchApplicationService",
-        repository_owner="PostgresReadModelRepository.no_oa_bank_batch",
+        repository_owner="NoOaBankBatchReadModelRepositoryPort",
         permission_owner="no_oa_bank_batch_api_session",
         test_owner="tests/test_no_oa_bank_batch_application_service.py",
     ),

@@ -1941,6 +1941,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_list_read_model_uses_repository_port(self) -> None:
+        path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        list_source = _function_source(tree, source, "list_batches_payload")
+
+        violations: list[str] = []
+        if "NoOaBankBatchReadModelRepositoryPort" not in source:
+            violations.append("No-OA application service must import the read model repository port")
+        if "_no_oa_bank_batch_read_model_repository" not in list_source:
+            violations.append("No-OA list path must read through the dedicated no-OA read model repository port")
+        if "_workbench_sql_read_repository" in list_source:
+            violations.append("No-OA list path must not read through broad workbench_sql_read_repository")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

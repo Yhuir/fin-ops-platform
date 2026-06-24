@@ -379,7 +379,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             body=json.dumps({"expected_version": version, "selected_tag_codes": ["salary"]}),
             headers={"Content-Type": "application/json"},
         )
-        app._workbench_sql_read_repository = StaleNoOaReadRepository()
+        app._no_oa_bank_batch_sql_read_repository = StaleNoOaReadRepository()
 
         response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
         payload = json.loads(response.body)
@@ -407,7 +407,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                 return {"event_id": "queued"}
 
         app = build_application()
-        app._workbench_sql_read_repository = MissingNoOaReadRepository()
+        app._no_oa_bank_batch_sql_read_repository = MissingNoOaReadRepository()
         app._runtime_repositories = type(
             "RuntimeRepositories",
             (),

@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - No-OA bank batch read model repository port extraction
+
+- 目标：执行 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，把 no-OA list/query read path 从 broad `workbench_sql_read_repository` 收敛到专属 repository port。
+- 影响范围：`NoOaBankBatchReadModelRepositoryPort`、`NoOaBankBatchApplicationService`、`PostgresStateStore` SQL read wiring、`Application` no-OA route service wiring、read model manifest、no-OA tests、platform guard 和 modular IO state。
+- 关键决策：manifest `repository_owner` 更新为 `NoOaBankBatchReadModelRepositoryPort`；`PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)` 仍是 SQL owner，不复制 SQL。
+- 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 no-OA repository port isolation test、manifest owner assertion、no-OA list path static guard，并复跑 no-OA application/workbench integration。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-read-model-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；本轮不改变 API shape、worker event、queue、Redis/cache、权限、审计或前端行为。
+- 后续事项：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`；Go admission 继续 blocked。
+
 ## 2026-06-24 - No-OA bank batch refresh persistence boundary extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-refresh-persistence-boundary-extraction`，把 no-OA worker refresh 的 public snapshot persistence 从 broad state-store direct call 中抽离。

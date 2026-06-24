@@ -31,7 +31,17 @@
 - 保留语义：`public_snapshot()` 仍只保存公开生命周期，stale source-version event 仍 skip，月度 refresh 仍保留其它月份批次，refresh worker 仍不得 repair/persist Workbench relation。
 - 测试覆盖：新增 persistence port delegation test、refresh handler explicit persistence boundary test，并强化 no-OA refresh static guard，禁止 handler 直接出现 `save_no_oa_bank_batches`。
 - 验证限制：完整 `tests.test_platform_runtime_boundary_guards` 仍有两个无关 OA invoice / ETC repair guard 失败；本切片新增的 no-OA guard 目标测试已通过。
-- 后续事项：下一边界是 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，收敛 list/query 侧 broad `workbench_sql_read_repository` 注入。
+- 后续事项：list/query 侧 broad `workbench_sql_read_repository` 注入已由 `read-models:no-oa-bank-batch-read-model-repository-port-extraction` 收敛；下一边界审计 refresh enqueue、derived lifecycle、operation barrier、force refresh 和剩余 app-owned helper surfaces。
+
+## 2026-06-24 - Modular IO read model repository port extraction
+
+- 目标：把 no-OA list/query 侧从 broad `workbench_sql_read_repository.list_no_oa_bank_batch_rows(...)` 收敛到 no-OA 专属 read model repository port。
+- 影响范围：`NoOaBankBatchReadModelRepositoryPort`、`NoOaBankBatchApplicationService.list_batches_payload(...)`、`PostgresStateStore.no_oa_bank_batch_sql_read_repository`、`Application._no_oa_bank_batch_application_service(...)` wiring、read model manifest、no-OA application/workbench integration tests 和 platform boundary guard。
+- 关键决策：`NoOaBankBatchReadModelRepositoryPort` 是 no-OA list/query 的应用侧 repository owner；`PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)` 继续作为过渡期 SQL/table owner，不复制 SQL。
+- 保留语义：missing/stale/fresh/unavailable status、refresh enqueue、summary、pagination、public lifecycle filtering、API shape、权限、审计、worker event、queue schema、Redis/cache 和前端行为不变。
+- 旧路径分类：`list_batches_payload(...)` 不再读取 `_workbench_sql_read_repository`；旧 constructor 参数仅保留 compat adapter，会立即包装成 no-OA port，不能作为主 read path owner。
+- 测试覆盖：新增 no-OA repository port isolation test、manifest owner assertion 和 platform guard；route-level stale/missing integration tests 改为注入 `_no_oa_bank_batch_sql_read_repository`。
+- 下一步：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`，审计 refresh enqueue、derived lifecycle、operation barrier、force refresh、dirty/outbox 和剩余 app-owned helper surfaces。
 
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 

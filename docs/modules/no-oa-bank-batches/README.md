@@ -22,6 +22,7 @@
 - `web/src/features/noOaBankBatches/policy.ts`
 - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
+- `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_repository.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_tag_selection_service.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`

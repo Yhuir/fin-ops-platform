@@ -15,6 +15,7 @@ from fin_ops_platform.services.bank_detail_read_model_repository import BankDeta
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
+from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.output_invoice_collection_read_model_repository import OutputInvoiceCollectionReadModelRepositoryPort
@@ -148,6 +149,7 @@ class PostgresStateStore:
         self._input_invoice_usage_sql_read_repository = InputInvoiceUsageReadModelRepositoryPort(self._sql_read_model_repository)
         self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
+        self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
         self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
@@ -796,6 +798,10 @@ class PostgresStateStore:
     @property
     def oa_pending_payment_sql_read_repository(self) -> OaPendingPaymentReadModelRepositoryPort:
         return self._oa_pending_payment_sql_read_repository
+
+    @property
+    def no_oa_bank_batch_sql_read_repository(self) -> NoOaBankBatchReadModelRepositoryPort:
+        return self._no_oa_bank_batch_sql_read_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)

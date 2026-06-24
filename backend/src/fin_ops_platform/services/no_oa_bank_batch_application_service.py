@@ -18,6 +18,7 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
 )
+from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
@@ -96,6 +97,7 @@ class NoOaBankBatchApplicationService:
         workbench_read_model_service: WorkbenchReadModelService,
         state_store: Any | None,
         tag_selection_service: Any | None = None,
+        no_oa_bank_batch_read_model_repository: Any | None = None,
         workbench_sql_read_repository: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
@@ -115,7 +117,11 @@ class NoOaBankBatchApplicationService:
         self._pair_relation_snapshot_port = pair_relation_snapshot_port
         self._workbench_read_model_service = workbench_read_model_service
         self._state_store = state_store
-        self._workbench_sql_read_repository = workbench_sql_read_repository
+        self._no_oa_bank_batch_read_model_repository = no_oa_bank_batch_read_model_repository
+        if self._no_oa_bank_batch_read_model_repository is None and workbench_sql_read_repository is not None:
+            self._no_oa_bank_batch_read_model_repository = NoOaBankBatchReadModelRepositoryPort(
+                workbench_sql_read_repository
+            )
         self._workbench_matching_source_versions_provider = workbench_matching_source_versions_provider or (lambda: {})
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
@@ -142,7 +148,7 @@ class NoOaBankBatchApplicationService:
             "month": filters["month"],
             "account_key": filters["account_key"],
         }
-        list_read_model_batches = getattr(self._workbench_sql_read_repository, "list_no_oa_bank_batch_rows", None)
+        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
         if callable(list_read_model_batches):
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)

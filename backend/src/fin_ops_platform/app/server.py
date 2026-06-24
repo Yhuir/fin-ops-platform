@@ -817,6 +817,7 @@ class Application:
         self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
         self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
         self._oa_pending_payment_sql_read_repository = getattr(self._state_store, "oa_pending_payment_sql_read_repository", None)
+        self._no_oa_bank_batch_sql_read_repository = getattr(self._state_store, "no_oa_bank_batch_sql_read_repository", None)
         self._output_invoice_collection_lifecycle_repository = build_output_invoice_collection_lifecycle_repository(
             getattr(self._state_store, "_connection", None)
         )
@@ -12983,7 +12984,7 @@ class Application:
             workbench_read_model_service=self._workbench_read_model_service,
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
-            workbench_sql_read_repository=getattr(self, "_workbench_sql_read_repository", None),
+            no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
             workbench_matching_source_versions_provider=self._workbench_matching_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,

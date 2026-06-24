@@ -8,6 +8,7 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaPairRelationSnapshotPort,
 )
+from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -152,6 +153,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_command_service: object | None = None,
         no_oa_snapshot: dict[str, object] | None = None,
+        no_oa_bank_batch_read_model_repository: object | None = None,
         workbench_sql_read_repository: object | None = None,
     ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
         categories = no_oa_categories(rows)
@@ -191,9 +193,29 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             state_store=None,
             relation_facade=EmptyWorkbenchRelationFacade(),
             relation_command_service=command_service,
+            no_oa_bank_batch_read_model_repository=no_oa_bank_batch_read_model_repository,
             workbench_sql_read_repository=workbench_sql_read_repository,
         )
         return service, no_oa_service, command_service
+
+    def test_read_model_repository_port_excludes_unrelated_methods(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object] | None = None) -> list[dict[str, object]]:
+                self.calls.append(dict(filters or {}))
+                return [{"batch_id": "batch-1"}]
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> list[dict[str, object]]:
+                raise AssertionError("no-OA port must not expose pending invoice methods")
+
+        repository = Repository()
+        port = NoOaBankBatchReadModelRepositoryPort(repository)
+
+        self.assertEqual(port.list_no_oa_bank_batch_rows({"month": "2026-06"}), [{"batch_id": "batch-1"}])
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertEqual(repository.calls, [{"month": "2026-06"}])
 
     def test_submit_batch_delegates_relation_write_to_command_service(self) -> None:
         rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]
@@ -300,7 +322,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         service, _no_oa_service, _relation_command = self._application_service(
             rows=[],
             selected_tag_codes=["fee"],
-            workbench_sql_read_repository=repository,
+            no_oa_bank_batch_read_model_repository=repository,
         )
         repository.rows = [
             {
@@ -352,7 +374,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         service, _no_oa_service, _relation_command = self._application_service(
             rows=[],
             selected_tag_codes=["fee", "salary", "internal_transfer"],
-            workbench_sql_read_repository=repository,
+            no_oa_bank_batch_read_model_repository=repository,
         )
         source_versions = service.no_oa_bank_batch_source_versions()
         repository.rows = [

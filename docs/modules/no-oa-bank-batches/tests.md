@@ -18,6 +18,14 @@
 
 ## 现有测试入口
 
+## 2026-06-24 - Modular IO read model repository port extraction
+
+- 变更类型：narrow implementation slice。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_read_model_repository_port_excludes_unrelated_methods`、`tests/test_no_oa_bank_batch_workbench_integration.py::NoOaBankBatchWorkbenchIntegrationTests::test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh`、`tests/test_no_oa_bank_batch_workbench_integration.py::NoOaBankBatchWorkbenchIntegrationTests::test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path`、`tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_list_read_model_uses_repository_port`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；API contract 通过 route-level stale/missing integration 回归覆盖但未新增 response shape 测试；business core/frontend/E2E 不适用，因为没有改变生命周期规则、前端 barrier 或用户流程。
+- 验证结果：no-OA application/workbench integration、manifest 和 targeted platform guard 通过。
+- 下一边界建议目标测试：freshness/derived lifecycle audit 至少复跑 `tests.test_no_oa_bank_batch_application_service`、`tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_workbench_integration` 和 `tests.test_read_model_manifest`；若拆出实现 gap，再补对应 service/worker/static guard。
+
 ## 2026-06-24 - Modular IO refresh persistence boundary extraction
 
 - 变更类型：narrow implementation slice。

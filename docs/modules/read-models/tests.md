@@ -30,6 +30,14 @@
 
 ## 场景覆盖清单
 
+## 2026-06-24 - No-OA bank batch read model repository port extraction
+
+- 变更类型：narrow implementation slice。
+- 覆盖证据：`NoOaBankBatchReadModelRepositoryPort`、`NoOaBankBatchApplicationService.list_batches_payload(...)`、`PostgresStateStore.no_oa_bank_batch_sql_read_repository`、`READ_MODEL_MANIFEST["no_oa_bank_batch"].repository_owner`、no-OA application/workbench integration tests、read model manifest test 和 no-OA platform boundary guard。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；API contract 通过 route-level stale/missing regression 覆盖但未新增 response shape 测试；business core/frontend/E2E 不适用，因为本轮不改变生命周期、HTTP shape、frontend operation barrier 或用户流程。
+- 验证结果：目标 no-OA application/workbench integration、manifest 和 static guard 通过。
+- 下一验证重点：freshness/derived lifecycle audit 应复核 refresh gateway/scope policy、operation barrier、dirty/outbox、worker registry、App Status 和 remaining app-owned helper surfaces。
+
 ## 2026-06-24 - No-OA bank batch refresh persistence boundary extraction
 
 - 变更类型：narrow implementation slice。
