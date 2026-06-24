@@ -1,7 +1,7 @@
 # Production Read Model Full User Scope API Metadata Smoke After Turnover Fixes - 2026-06-25
 
 **Boundary:** `production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`
-**Status:** `runbook-prepared`
+**Status:** `production-controlled`
 **Module closure:** `not-module-closed`
 **Production mutation:** GET-only API smoke; GET fresh gates may enqueue read-model refresh if stale is found.
 **Active release expected:** `dev-turnover-source-version-persistence-20260625`
@@ -65,3 +65,49 @@ Repeat precheck and compare:
 ## Stop Criteria
 
 Stop if any probe fails, any unexpected aggregate dirty/outbox delta appears, `/health/ready` regresses, or read-model dead letters appear.
+
+## Production Evidence
+
+Executed by T0 through root SSH. No secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows, samples or business identifiers were printed.
+
+### Precheck
+
+- Active release: `dev-turnover-source-version-persistence-20260625`.
+- Active release commit: `8f525563e10972168014356ff410c4fc8456f377`.
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187061`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=202956`.
+- Read-model dead letters: none.
+- Recent turnover dirty aggregate: `done=4`, latest `2026-06-25 07:21:52.785154+08`.
+- Recent turnover outbox aggregate: `done=4`, latest `2026-06-25 07:21:52.790827+08`.
+- Recent no-OA dirty aggregate: `done=2`, latest `2026-06-25 06:33:15.75908+08`.
+- Recent no-OA outbox aggregate: `done=2`, latest `2026-06-25 06:33:15.765409+08`.
+
+### Full Non-admin User-scope API Smoke
+
+Ran all non-admin probes in `http_slo_probe.DEFAULT_API_PROBES` through the target OA applicant credential seam with `include_samples=false`.
+
+- Configured target credential count: `2`.
+- Session: `allowed=true`, `can_access_app=true`, `can_mutate_data=true`, `can_admin_access=false`, `access_tier=full_access`.
+- Probe count: `37`.
+- Status: `pass`.
+- Failed probes: `0`.
+- Non-fresh probes: `0`.
+- Probe-level refresh-enqueued probes: `0`.
+- Response bodies, payload rows and samples were not printed.
+
+### Postcheck
+
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187061`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=202956`.
+- Read-model dead letters: none.
+- Recent turnover dirty/outbox and no-OA dirty/outbox aggregates were unchanged from precheck.
+
+## Result
+
+The full non-admin user-scope API metadata smoke is production-controlled. All 37 probes passed, all reported read-model metadata was fresh/no-enqueue where applicable, and aggregate dirty/outbox totals did not increase. This closes the previous API aggregate no-enqueue gap from Row285 after the pending invoice, no-OA and turnover fixes.
+
+Browser, admin and write-flow production evidence remain out of scope for this boundary and still open for global closure.

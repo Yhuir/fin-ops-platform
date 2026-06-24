@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`.
+Continue after `production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`.
 
 ## Current State
 
@@ -45,38 +45,46 @@ Continue after `production:turnover-ledger-source-version-persistence-fix-deploy
   - after worker convergence, persisted top-level and first-row hash prefixes both matched expected `7c63fec7ba82c80c`, mismatch reasons were empty;
   - post-convergence focused grouped GET returned HTTP `200`, `read_model_status=fresh`, `refresh_enqueued=false`, elapsed `67.957ms`;
   - final aggregate postcheck stayed `/health/ready=ready`, dirty `done=187061`, readiness `fresh=498`, outbox `done=202956`, dead letters none, no additional turnover dirty/outbox delta after recheck.
+- Row292 full non-admin user-scope API smoke:
+  - ran 37 non-admin `http_slo_probe.DEFAULT_API_PROBES` through target OA applicant credentials;
+  - status `pass`;
+  - failed probes `0`;
+  - non-fresh probes `0`;
+  - refresh-enqueued probes `0`;
+  - pre/post aggregate dirty scopes `done=187061`, readiness `fresh=498`, read-model outbox `done=202956`, dead letters none;
+  - recent turnover/no-OA dirty/outbox aggregates unchanged.
 - Browser/admin/write probes and global/module closure remain open.
 
 ## Next Boundary
 
-`production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`
+`planning:post-full-user-api-smoke-browser-admin-write-evidence-selection`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row291 evidence if it is not already committed.
-3. Write a bounded production smoke runbook under `.planning/refactors/modular-io-boundaries/analysis/production-read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes-2026-06-25.md` before any production command.
-4. Precheck active release, `/health/ready`, dirty/readiness/outbox/dead-letter aggregates and recent turnover outbox/dirty baseline.
-5. Run all non-admin `http_slo_probe.DEFAULT_API_PROBES` through the existing target OA applicant credential seam with `include_samples=false`.
-6. Postcheck the same aggregate evidence and classify any dirty/outbox delta by event type/scope before deciding next boundary.
+2. Commit/push Row292 evidence if it is not already committed.
+3. Reconcile remaining global closure gaps:
+   - production browser evidence;
+   - admin-scope API evidence;
+   - write-flow evidence;
+   - any remaining module-specific high-row/worker/readiness gap not covered by Rows245/257/291/292.
+4. Select exactly one next bounded evidence boundary and write it to queue/state/next prompt.
+5. Do not execute browser/admin/write commands in this planning boundary.
 
-## Smoke Expectations
+## Selection Criteria
 
-- All non-admin user-scope probes should pass.
-- Probe-level read-model metadata should be fresh/no enqueue where applicable.
-- Aggregate dirty/outbox totals should not increase. If they do, classify exact event type/scope and stop before browser/admin/write probes.
+- Prefer the smallest production evidence boundary that materially advances global closure.
+- Browser/admin/write evidence must have a runbook before execution.
+- Use existing target OA applicant credential seam only for user-scope; admin evidence requires an explicit existing non-secret admin seam or must be deferred/classified.
 
 ## Required Verification
 
-- Runbook committed/pushed before smoke if it changes repository files.
-- Full user-scope API smoke recorded with sanitized metadata only.
-- Aggregate pre/post evidence recorded.
+- Planning analysis committed/pushed.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
-- Do not broaden into browser, admin or write probes in this boundary.
+- Do not run browser, admin or write probes in this planning boundary.
 - Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
-- Do not manually repair, direct-SQL mutate, mark readiness, refresh/replay or requeue outside a separate runbook.
-- Do not claim module/global closure from this full user-scope API smoke alone.
+- Do not claim module/global closure from selection alone.
