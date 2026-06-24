@@ -1,7 +1,7 @@
 # Production Read Model Authenticated Browser Page Smoke Runbook - 2026-06-25
 
 **Boundary:** `production:read-model-authenticated-browser-page-smoke-runbook`
-**Status:** `runbook-written`
+**Status:** `production-evidence-deferred`
 **Module closure:** `not-module-closed`
 **Production mutation:** read-only browser navigation only; no admin/write probes
 **Active release expected:** `dev-turnover-source-version-persistence-20260625`
@@ -75,8 +75,8 @@ with conn.connection() as connection:
         print("readiness", cur.fetchall())
         cur.execute("select status, count(*) from job.outbox_events where event_type like %s group by status order by status", ("%.read_model.refresh",))
         print("read_model_outbox", cur.fetchall())
-        cur.execute("select count(*) from job.outbox_events where status = 'dead_lettered' and event_type like %s", ("%.read_model.refresh",))
-        print("read_model_dead_letters", cur.fetchone()[0])
+        cur.execute("select count(*) as count from job.outbox_events where status = %s and event_type like %s", ("dead_lettered", "%.read_model.refresh"))
+        print("read_model_dead_letters", cur.fetchone()["count"])
 PY'
 ```
 
@@ -224,7 +224,73 @@ Repeat command 1 after the browser smoke. Compare counts with the precheck. If a
 
 ## Execution Evidence
 
-Pending. This runbook must be committed and pushed before production browser execution.
+The runbook was committed and pushed before production checks in commit `3089b284`.
+
+### Precheck
+
+Release and health:
+
+```text
+release_src=/opt/fin-ops/releases/dev-turnover-source-version-persistence-20260625/src
+release_name=dev-turnover-source-version-persistence-20260625
+git_commit=8f525563e10972168014356ff410c4fc8456f377
+{'status': 'ready'}
+```
+
+The first aggregate command had a shell quoting bug around the literal `dead_lettered` status. It failed read-only after printing the first three aggregate groups:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+```
+
+The corrected aggregate command first used tuple indexing against a dict row and failed read-only after the same three aggregate groups. The final corrected command used parameterized SQL and dict-field access:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+### Browser Harness Availability
+
+The deployed production release does not contain an executable Playwright harness or the route-shell spec:
+
+```text
+playwright_bin=missing
+production_route_shell_spec=missing
+```
+
+Per the stop gate, T0 did not install packages, download browser binaries, copy local tests, copy tokens, run local Playwright with a production token, run admin probes, run write-flow probes or execute any browser command.
+
+### Postcheck
+
+Health remained ready:
+
+```text
+{'status': 'ready'}
+```
+
+Aggregate postcheck was unchanged from precheck:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+## Result
+
+`production-evidence-deferred`.
+
+Authenticated production browser page smoke could not run because the deployed production source lacks both `web/node_modules/.bin/playwright` and `web/e2e/production-route-shell.spec.ts`. This is a browser harness availability gap, not an API/session/freshness failure. Production health, dirty scopes, readiness, read-model outbox and read-model dead letters stayed clean before and after. Browser/admin/write evidence remains open.
+
+Next boundary:
+
+`planning:post-authenticated-browser-harness-missing-next-boundary-selection`
 
 ## Seven Test Category Assessment
 

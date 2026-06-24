@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `authenticated-browser-page-smoke-runbook-written`
+Current state: `authenticated-browser-page-smoke-production-evidence-deferred`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Started `production:read-model-authenticated-browser-page-smoke-runbook` in `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`. The runbook is written and must be committed/pushed before execution. It uses only read-only production route navigation, logs in with the target OA applicant credential seam inside the remote production process, passes the token only as an in-memory Playwright subprocess environment variable, and requires pre/post health, dirty scope, readiness, outbox and dead-letter checks. Admin and write-flow probes remain out of scope.
+Completed `production:read-model-authenticated-browser-page-smoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`. T0 committed/pushed the runbook before execution, prechecked `/health/ready`, dirty scopes, readiness, read-model outbox and read-model dead letters clean, then stopped before browser execution because the deployed production release lacks both `web/node_modules/.bin/playwright` and `web/e2e/production-route-shell.spec.ts`. No package install, browser download, token copy, local Playwright, admin probe, write-flow probe or mutation occurred; postcheck stayed clean. Next boundary is `planning:post-authenticated-browser-harness-missing-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 

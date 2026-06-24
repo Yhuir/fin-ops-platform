@@ -1,63 +1,60 @@
 # Next Prompt
 
-Continue after `planning:post-full-user-api-smoke-browser-admin-write-evidence-selection`.
+Continue after `production:read-model-authenticated-browser-page-smoke-runbook`.
 
 ## Current State
 
 - Branch: `dev`.
 - Active production release is `dev-turnover-source-version-persistence-20260625` at git commit `8f525563e10972168014356ff410c4fc8456f377`.
-- Row292 full non-admin user-scope API smoke:
-  - ran all 37 non-admin `http_slo_probe.DEFAULT_API_PROBES` through target OA applicant credentials;
-  - status `pass`;
-  - failed probes `0`;
-  - non-fresh probes `0`;
-  - refresh-enqueued probes `0`;
-  - pre/post aggregate dirty scopes `done=187061`, readiness `fresh=498`, read-model outbox `done=202956`, dead letters none;
-  - recent turnover/no-OA dirty/outbox aggregates unchanged.
-- Row293 selection:
-  - reconciled that Row292 closes the prior non-admin API aggregate no-enqueue gap;
-  - rejected repeating user-scope API smoke because it does not address the next remaining evidence class;
-  - deferred admin-scope API smoke because the current proven target credential seam is non-admin and no non-secret admin seam has been proven;
-  - deferred controlled write-flow smoke because it needs a separate operation-specific runbook with rollback, idempotency, audit and read-model convergence gates;
-  - selected read-only authenticated production browser page smoke as the next lowest-risk evidence boundary.
+- Row292 full non-admin user-scope API smoke passed all 37 default non-admin probes with 0 failed, 0 non-fresh and 0 refresh-enqueued probes; pre/post dirty scopes, readiness, read-model outbox and dead letters were unchanged.
+- Row293 selected read-only authenticated production browser page smoke as the next lowest-risk evidence boundary; admin and write-flow evidence remain deferred.
+- Row294 wrote and committed the browser runbook before execution, then ran production prechecks:
+  - `/health/ready=ready`;
+  - dirty scopes `done=187061`;
+  - readiness `fresh=498`;
+  - read-model outbox `done=202956`;
+  - read-model dead letters `0`.
+- Row294 browser harness check found:
+  - `playwright_bin=missing`;
+  - `production_route_shell_spec=missing`.
+- Per runbook stop gate, no browser command ran. T0 did not install packages, download browser binaries, copy tokens, run local Playwright with production token, run admin probes, run write-flow probes, deploy, restart, requeue, repair, replay, mutate DB/readiness/dirty scopes or run `--apply`.
+- Row294 postcheck stayed clean:
+  - `/health/ready=ready`;
+  - dirty scopes `done=187061`;
+  - readiness `fresh=498`;
+  - read-model outbox `done=202956`;
+  - read-model dead letters `0`.
 - Browser/admin/write production evidence and global/module closure remain open.
 
 ## Next Boundary
 
-`production:read-model-authenticated-browser-page-smoke-runbook`
+`planning:post-authenticated-browser-harness-missing-next-boundary-selection`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row293 planning evidence if it is not already committed.
-3. Write a runbook before executing any browser command.
-4. Inspect the existing frontend routes, authentication/session test seams, Playwright/browser tooling and production credential seam enough to choose a safe implementation path.
-5. Do not run admin or write-flow probes in this boundary.
+2. Commit/push Row294 evidence if it is not already committed.
+3. Reconcile the harness gap:
+   - production deploy source currently excludes Playwright binary and e2e spec files;
+   - token-safe local Playwright remains forbidden unless a non-secret token/session seam is provided;
+   - production browser evidence cannot be claimed from Row294.
+4. Select exactly one next bounded boundary.
+5. Do not run production browser/admin/write commands in this planning boundary.
 
-## Runbook Requirements
+## Candidate Directions
 
-- Use read-only production browser navigation only.
-- Use the existing target OA applicant credential seam only if it can create a browser-authenticated session without printing/storing credentials, cookies, tokens, passwords, env values, response bodies or payload rows.
-- Collect sanitized evidence only: URL/page status, selected non-sensitive visible shell/readiness indicators, console/page errors, timings and high-level read-model status text where available.
-- Suggested page set should be small and mapped to Row264/Row292 read-model-heavy coverage, such as Workbench, Bank Details, Pending Invoices, Input Invoice Usage, Output Invoice Collections, Cost Statistics, Tax Offset, Turnover Ledger and No-OA Bank Batches.
-- Required pre/post production checks:
-  - `/health/ready`;
-  - dirty scope status counts;
-  - App Status readiness status counts;
-  - read-model outbox status counts;
-  - read-model dead-letter counts.
-- Stop on auth failure, unexpected admin scope, sensitive output risk, write prompt, download/export side effect, POST/PUT/PATCH/DELETE requirement, non-ready health, dirty/outbox/readiness/dead-letter regression or unexpected GET-triggered refresh enqueue.
+- Package or retain a production-safe read-only browser smoke harness in source/deploy, with no package install/download at execution time.
+- If packaging is too invasive for the current goal, select admin seam classification or write-flow planning as evidence accounting only.
+- Do not claim global/module closure until browser/admin/write evidence is either collected or explicitly classified with accepted stop gates.
 
 ## Required Verification
 
-- Commit/push runbook before production execution if the boundary proceeds to production browser smoke.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
 - Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
-- Do not execute admin probes.
-- Do not execute write-flow probes.
-- Do not claim module/global closure from browser smoke alone.
-- Do not deploy, restart, requeue, repair, replay, mutate DB/readiness/dirty scopes or run `--apply` unless a later explicit runbook selects that operation.
+- Do not execute production browser/admin/write probes in the planning slice.
+- Do not add deploy/package changes without first reading deploy docs and assessing docs impact.
+- Do not claim module/global closure from harness-missing evidence alone.
