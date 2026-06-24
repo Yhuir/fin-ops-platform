@@ -1,24 +1,24 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:cost-statistics-repository-port-extraction` slice.
+Continue the autonomous modular IO refactor after the `read-models:cost-statistics-refresh-freshness-operation-barrier-audit` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:cost-statistics-repository-port-extraction`
-- Last status: `implementation-closed`
+- Last completed boundary: `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `cost_statistics` is the ninth non-Go modular IO/read model pilot.
-- `CostStatisticsReadModelRepositoryPort` now owns the manifest-listed load/get/save read model boundary.
-- PostgreSQL state-store cost statistics SQL read wiring returns the port.
-- `CostStatisticsSqlProjectionBuilder` saves cost statistics read models through the port.
-- `cost_statistics` is still `implementation-gap-open`; repository port extraction is only the first local slice.
+- `CostStatisticsReadModelRepositoryPort` owns the manifest-listed load/get/save read model boundary.
+- Existing code/tests locally account for SQL fresh gate, production repository unavailable behavior, special cost scope normalization, parent aggregate proof, primary `cost-statistics` worker ownership and `cost-tax` compatibility worker classification.
+- `Application._derived_lifecycle_cost_statistics_executor(...)` still owns derived lifecycle invalidation, warmup-vs-refresh fallback, metadata propagation and `enqueued_jobs` accounting.
+- `cost_statistics` is still `implementation-gap-open`.
 - No Go hot-path candidate has passed admission.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:cost-statistics-refresh-freshness-operation-barrier-audit`
+`read-models:cost-statistics-derived-lifecycle-executor-port-extraction`
 
 ## Required First Steps On Resume
 
@@ -31,9 +31,8 @@ Continue the autonomous modular IO refactor after the `read-models:cost-statisti
    - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
 5. Read target planning evidence:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/modules/read-models/tests.md`
@@ -47,35 +46,34 @@ Continue the autonomous modular IO refactor after the `read-models:cost-statisti
 
 Target:
 
-- Audit cost statistics freshness and operation-barrier local support after repository port extraction.
-- Cover:
-  - SQL fresh gate and production repository unavailable behavior;
-  - `active:YYYY-MM` / `all:YYYY-MM` month shard semantics;
-  - `active:all` / `all:all` queryable parent aggregate proof;
-  - force refresh normalization and legacy naked scope quarantine;
-  - parent scope missing/stale shard behavior;
-  - operation barrier target registration and frontend write-after-read relevance;
-  - `cost-statistics` primary worker vs `cost-tax` compatibility worker;
-  - remaining app-owned helper/runtime/cache warmup surfaces;
-  - old live/cache fallback classification;
-  - permissions, audit, tests and docs evidence.
-- If a concrete local implementation gap is found, insert the next narrow implementation boundary before Go candidates.
-- If no local gap remains, record only real production evidence gaps and do not claim module closure unless full closure evidence exists.
+- Add a `CostStatisticsDerivedLifecycleExecutor` service.
+- Move the behavior currently owned by `Application._derived_lifecycle_cost_statistics_executor(...)` behind that executor:
+  - derive scope keys from lifecycle domain plan;
+  - preserve `pending_invoice_rules_changed` `persist_empty` behavior;
+  - call cost statistics runtime invalidation APIs;
+  - preserve `schedule_warmup=False` generic refresh fallback and metadata propagation;
+  - preserve `enqueued_jobs` accounting and return shape.
+- Keep `Application` as dependency assembly and a thin delegate only.
+- Add/update tests proving the old app-owned lifecycle executor logic cannot re-own the behavior.
+- Update planning state, queue, journal, next prompt, master prompt and affected module docs/tests.
 
 Forbidden:
 
 - Do not implement Go/Fiber/Go Worker.
 - Do not run Go admission while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior unless a concrete gap requires a tested narrow fix.
+- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior.
 - Do not depend on staging DB or local `PGSQL_URL`.
 - Do not perform production writes or read/print secrets.
 
 Expected verification:
 
-- Targeted static guard/cost statistics tests if evidence depends on executable behavior.
+- Targeted py_compile for changed backend/tests.
+- Targeted cost statistics derived lifecycle executor/static guard tests.
+- Relevant cost statistics SQL/runtime tests if behavior is touched.
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
 - `bash scripts/verify.sh docs`
 - `git diff --check`
 
 ## Stop Condition
 
-Complete one verified cost statistics freshness/barrier audit slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified cost statistics derived lifecycle executor extraction slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.

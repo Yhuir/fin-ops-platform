@@ -41,7 +41,7 @@
 
 ## 七类测试适用性
 
-2026-06-24 modular IO 更新：`read-models:next-pilot-selection-after-tax-offset` 已选择 `cost_statistics` 作为第九个非 Go read model 试点。`read-models:cost-statistics-repository-port-extraction` 已新增 `CostStatisticsReadModelRepositoryPort`，证明 cost statistics port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`，并让 projection save 与 SQL read wiring 使用该 port。下一边界是 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，继续审计 SQL fresh gate、parent aggregate、force refresh、operation barrier、compat worker 和 legacy/app-owned helper。
+2026-06-24 modular IO 更新：`read-models:next-pilot-selection-after-tax-offset` 已选择 `cost_statistics` 作为第九个非 Go read model 试点。`read-models:cost-statistics-repository-port-extraction` 已新增 `CostStatisticsReadModelRepositoryPort`，证明 cost statistics port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`，并让 projection save 与 SQL read wiring 使用该 port。`read-models:cost-statistics-refresh-freshness-operation-barrier-audit` 已确认 SQL fresh gate、parent aggregate、force refresh、App Status registry、primary `cost-statistics` worker 和 `cost-tax` compat lane 有本地证据，同时发现 `Application._derived_lifecycle_cost_statistics_executor(...)` 仍直接拥有 lifecycle invalidation/warmup-vs-refresh fallback 和 `enqueued_jobs` accounting。下一边界是 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`，必须新增/更新 derived lifecycle executor/static guard tests。
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |

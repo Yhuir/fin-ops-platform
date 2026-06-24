@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics freshness and barrier audit
+
+- 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，审计成本统计 fresh gate、force refresh、parent aggregate、operation barrier、compat worker 和 app-owned helper surface。
+- 影响范围：`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsReadModelRefreshService`、`CostStatisticsSqlProjectionBuilder`、`Application._derived_lifecycle_cost_statistics_executor(...)`、runtime worker/App Status/scope policy/read model tests、modular IO state；不改变运行时代码。
+- 关键决策：现有代码/测试已覆盖 SQL fresh gate、production SQL repository unavailable、scope normalize/validate、parent aggregate from materialized shards、parent waits for missing/stale shards、primary `cost-statistics` worker 与 `cost-tax` compat lane。审计发现本地 implementation gap：`Application._derived_lifecycle_cost_statistics_executor(...)` 仍拥有 cost statistics derived lifecycle invalidation、warmup-vs-refresh fallback 和 `enqueued_jobs` accounting。
+- 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only；下一轮必须新增/更新 derived lifecycle executor/static guard tests，并复跑 cost statistics runtime/read model tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；cost statistics derived lifecycle executor extraction 是下一条本地实现边界。
+- 后续事项：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics repository port extraction
 
 - 目标：执行 `read-models:cost-statistics-repository-port-extraction`，为成本统计建立窄 read model repository port。

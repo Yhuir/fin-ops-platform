@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO freshness and barrier audit
+
+- 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，复核 repository port 之后成本统计 freshness、operation barrier、parent aggregate、worker ownership 和 legacy/app-owned surface。
+- 影响范围：`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsReadModelRefreshService`、`CostStatisticsSqlProjectionBuilder`、`Application._derived_lifecycle_cost_statistics_executor(...)`、成本统计 tests/docs、modular IO state；不改变成本归因、项目范围、导出、API、UI、worker event、queue schema 或 Redis envelope。
+- 关键决策：SQL fresh gate、production repository unavailable fail-closed、force refresh scope normalization、parent aggregate proof、primary `cost-statistics` worker 和 `cost-tax` compatibility lane 均有本地证据；但 `Application._derived_lifecycle_cost_statistics_executor(...)` 仍直接编排成本统计 lifecycle invalidation、warmup/refresh fallback 和 `enqueued_jobs` accounting，必须先抽取为显式 executor，不能进入 Go summary-rollup admission。
+- 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现边界必须新增/更新 derived lifecycle executor/static guard tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 App Status/high-row/browser evidence 仍 deferred。
+- 后续事项：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO repository port extraction
 
 - 目标：执行 `read-models:cost-statistics-repository-port-extraction`，把成本统计 read model load/get/save surface 收窄到显式 repository port。
