@@ -483,6 +483,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_workbench_exception",
             "_handle_workbench_offline",
             "_handle_workbench_offset",
+            "_handle_legacy_workbench_exception_via_application",
         ):
             if _function_source(server_tree, server_source, old_handler):
                 violations.append(f"server.py still owns legacy Workbench action handler {old_handler}")
@@ -2395,14 +2396,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Legacy Workbench action route quarantine is not closed as implementation")
         if (
-            "| 193 | `server-py:legacy-workbench-exception-helper-dead-code-audit` | pending"
+            "| 193 | `server-py:legacy-workbench-exception-helper-dead-code-audit` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit the remaining legacy Workbench exception helper")
+            violations.append("Legacy Workbench exception helper audit is not closed as implementation")
+        if (
+            "| 194 | `server-py:modern-workbench-action-route-owner-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit modern Workbench action route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:legacy-workbench-exception-helper-dead-code-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at legacy Workbench exception helper audit")
+        if "`server-py:modern-workbench-action-route-owner-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at modern Workbench action route owner audit")
 
         self.assertEqual(violations, [])
 

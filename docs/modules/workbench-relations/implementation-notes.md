@@ -46,6 +46,27 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 python3 -m py_compile backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
 ```
 
+## 2026-06-24 - legacy Workbench exception helper dead-code removal
+
+目标：审计并清理 `server.py` 中的 `_handle_legacy_workbench_exception_via_application(...)`。
+
+结论与变更：
+
+- 全仓检索未发现该 helper 的 route、frontend、e2e 或 unittest caller。
+- 现代异常入口继续使用 `/api/workbench/exception/preview` 与 `/api/workbench/exception/apply`。
+- 删除 `_handle_legacy_workbench_exception_via_application(...)`。
+- 删除 `server.py` 中不再使用的 `WorkbenchExceptionApplicationConflict` import。
+- 扩展 legacy Workbench action quarantine guard，防止该 helper 回流。
+
+下一条边界：`server-py:modern-workbench-action-route-owner-audit`，审计现代 `/api/workbench/actions/*` 和 `/api/workbench/exception/*` wrapper 的 route owner 迁移顺序；不改变 API contract、权限、freshness guard、idempotency、relation 写语义或 read model refresh 行为。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_exception_preview_api_returns_backend_scenario_for_oa_bank_missing_invoice tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_exception_apply_api_creates_closed_case_and_pair_relation -v
+```
+
 ## 2026-06-24 - pending invoice pair service boundary audit
 
 目标：审计待找发票 query/application service 对 `pair_relation_service`、`relation_facade`、`relation_command_service` 的真实依赖，决定旧 pair service 注入应删除、隔离还是保留为兼容路径。

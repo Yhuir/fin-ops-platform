@@ -459,10 +459,7 @@ from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteRelationSpecialMetadataMutationPort,
     WorkbenchWriteResult,
 )
-from fin_ops_platform.services.workbench_exception_application_service import (
-    WorkbenchExceptionApplicationConflict,
-    WorkbenchExceptionApplicationService,
-)
+from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_rollback_restore_service import WorkbenchExceptionRollbackRestoreService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
@@ -14075,72 +14072,6 @@ class Application:
                 {"error": error_code, "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_legacy_workbench_exception_via_application(
-        self,
-        *,
-        month: str,
-        row_ids: list[str],
-        action_name: str,
-        invalid_error_code: str,
-        legacy_payload: dict[str, object],
-        response_message: str,
-    ) -> Response:
-        try:
-            normalized_row_ids = self._normalize_row_ids(row_ids)
-            preview = self._workbench_exception_application_service.preview(
-                {"month": month, "row_ids": normalized_row_ids}
-            )
-            result = self._apply_workbench_exception_application(
-                {
-                    "month": month,
-                    "row_ids": normalized_row_ids,
-                    "scenario_code": str(preview["scenario"]["scenario_code"]),
-                    "action_code": "manual_review",
-                    "payload": legacy_payload,
-                },
-                actor="system",
-                action_name=action_name,
-            )
-        except WorkbenchExceptionApplicationConflict as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": invalid_error_code, "message": str(exc)},
-            )
-
-        case_payload = result.get("case") if isinstance(result.get("case"), dict) else {}
-        case_id = str(case_payload.get("id") or "")
-        updated_rows = list(result.get("updated_rows") or [])
-        affected_row_ids = [
-            str(row_id)
-            for row_id in list(result.get("affected_row_ids") or normalized_row_ids)
-            if str(row_id).strip()
-        ]
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": action_name,
-                "month": month,
-                "affected_row_ids": affected_row_ids,
-                "updated_rows": updated_rows,
-                "exception_case_id": case_id,
-                "exception_case_ids": [case_id] if case_id else [],
-                "message": response_message,
-            },
-        )
 
     def _handle_live_workbench_confirm_link(
         self,
