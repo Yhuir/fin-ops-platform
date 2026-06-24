@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-shadow-read-rehearsal-deferred-primary-not-comparable`
+Current state: `workbench-high-row-query-plan-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-shadow-read-rehearsal-read-only-runbook` as `production-evidence-deferred` in `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`. T0 proved `/health/ready` stayed ready, the deployed shadow-read tool exists, the read-only guard can run under production runtime env without secret output, and reporting is redacted/hash based. The rehearsal did not prove read-model closure: direct shell lacked DB config; runtime env execution returned `gate_recommendation=BLOCKED` because current production `local_pickle` is not a comparable primary for PostgreSQL runtime, and `workbench_read_models` hit a PostgreSQL statement timeout. No payload rows, secrets, deploy, restart, requeue, repair, replay, DB write, queue/readiness mutation or closure claim occurred. The next boundary is `planning:post-shadow-read-rehearsal-next-boundary-selection`.
+Completed `planning:post-shadow-read-rehearsal-next-boundary-selection` as `planning-closed` in `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`. T0 reconciled Row255, rejected `local_pickle` parity retry, `postgres` vs `postgres`, authenticated API retry, browser smoke and worker waves as premature, and selected `production:workbench-read-model-high-row-query-plan-read-only-runbook` to directly investigate the Row255 PostgreSQL-side `workbench_read_models` statement timeout. No production command, runtime mutation, deploy, restart, requeue, repair, replay or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:read-model-shadow-read-rehearsal-read-only-runbook`
+`planning:post-shadow-read-rehearsal-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-shadow-read-rehearsal-next-boundary-selection`
+`production:workbench-read-model-high-row-query-plan-read-only-runbook`
