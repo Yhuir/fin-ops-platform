@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-pending`
+Current state: `planning-post-workbench-matching-production-convergence-next-boundary-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `runtime-workers:workbench-matching-orchestrator-constructor-fix` as `implementation-closed` in `analysis/runtime-workers-workbench-matching-orchestrator-constructor-fix-2026-06-25.md`. T0 fixed the runtime worker handler so `WorkbenchMatchingOrchestrator` receives `relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service)` instead of stale keyword `pair_relation_service`, added a regression guard, and verified locally. Production worker closure remains deferred until the fix is deployed and `fin-ops-worker@workbench-matching.service` convergence is proven. The next boundary is `production:workbench-matching-constructor-fix-deploy-and-convergence-runbook`.
+Completed `production:workbench-matching-constructor-fix-deploy-and-convergence-runbook` as `production-controlled` in `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`. T0 deployed release `dev-workbench-matching-port-20260625020818`, proved `fin-ops-worker@workbench-matching.service` stable with `NRestarts=0`, `/health` and `/health/ready` ready, dirty scopes all done, readiness all fresh, and no post-deploy constructor traceback. Historical dead-letter rows remain unchanged and no global/module closure is claimed. The next boundary is `planning:post-workbench-matching-production-convergence-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 
