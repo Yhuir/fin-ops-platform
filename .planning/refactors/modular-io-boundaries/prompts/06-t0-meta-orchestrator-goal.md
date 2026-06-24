@@ -112,7 +112,9 @@ Environment constraints:
 Controlled production gate:
 - `ssh finops-prod-root` is available for root SSH.
 - Treat root SSH as the sanctioned T0-only production evidence and controlled-operation path for this refactor because no staging database and no local PostgreSQL URL are available.
-- T0 may use root SSH for controlled production operations when local/contract verification is complete and the only missing evidence is production closure.
+- User authorization: T0 is authorized to perform all reasonable controlled production operations required to close the full modular IO refactor. Do not stop to ask the user for additional approval when the operation satisfies this gate.
+- T0 should use root SSH for controlled production operations when local/contract verification is complete and production evidence or production execution is required for closure.
+- Do not record `needs-human-production-gate` merely because a production operation is needed. Use this authorized controlled production gate first.
 - Root SSH is sufficient for production closure evidence when the evidence can be collected through non-secret commands, deployed-runtime tools, health/status endpoints, bounded canary/dry-run/no-op operations, or a reversible operation with cleanup and post-checks.
 - Root SSH is not sufficient when the task would require printing/storing secrets, broad or destructive production mutation, unbounded worker replay/queue consume, unclear business contract, or an operation with no proven rollback/cleanup path.
 - Workers may request this gate in their handoff, but workers must not execute it.
@@ -125,11 +127,12 @@ Controlled production gate:
   - post-checks;
   - why the operation is bounded, reversible or cleanup-safe;
   - why no secret output is required.
-- Prefer read-only checks, deployed application commands that use existing server configuration without printing secrets, dry-run, canary record, test tenant, no-op equivalent or read-only wrapper.
+- Reasonable controlled production operations may include non-secret read-only checks, deployed application commands that use existing server configuration without printing secrets, bounded health/status/log evidence collection, bounded read model refresh/rebuild for explicit scopes, bounded queue/requeue/worker-drain checks for explicit scopes, dry-run, canary record, test tenant, no-op equivalent, read-only wrapper, deploy/restart when required by the selected boundary, and reversible repair/apply commands for explicit scopes.
+- Prefer the least invasive operation that proves the required evidence.
 - Do not print or store secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
 - Do not perform broad DB mutation, unbounded worker replay, unbounded queue consume, destructive system/file operations or broad production data mutation.
-- Do not deploy, restart services, requeue jobs, mark scopes done, mutate readiness or run repair tools with `--apply` unless the selected boundary has passed the controlled production runbook gate and the action is explicitly bounded, reversible/cleanup-safe, has pre-checks/post-checks, and has no safer validation path.
-- If a safe canary/dry-run/rollback path cannot be proven, do not force production operation. Record `needs-human-production-gate` or `production-evidence-deferred` and continue another safe boundary.
+- Deploy, restart services, requeue jobs, mark explicit scopes done, mutate readiness for explicit scopes, or run repair tools with `--apply` only when the selected boundary has passed the controlled production runbook gate and the action is explicitly bounded, reversible/cleanup-safe, has pre-checks/post-checks, and has no safer validation path.
+- If a safe canary/dry-run/rollback/cleanup path cannot be proven, do not force production operation. Record `needs-human-production-gate` or `production-evidence-deferred` and continue another safe boundary.
 
 Controller-only files:
 - Only T0 may edit:
