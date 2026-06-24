@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `full-user-scope-api-smoke-production-controlled`
+Current state: `post-full-user-api-smoke-browser-boundary-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes` as `production-controlled` in `analysis/production-read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes-2026-06-25.md`. T0 ran all 37 non-admin user-scope default API probes through target OA applicant credentials; all passed with no non-fresh or refresh-enqueued probes, and aggregate dirty/outbox/readiness/dead-letter counts were unchanged. Browser/admin/write production evidence and global/module closure remain open. Next boundary is `planning:post-full-user-api-smoke-browser-admin-write-evidence-selection`.
+Completed `planning:post-full-user-api-smoke-browser-admin-write-evidence-selection` as `planning-closed` in `analysis/planning-post-full-user-api-smoke-browser-admin-write-evidence-selection-2026-06-25.md`. T0 reconciled Row292's production-controlled full non-admin user-scope API metadata smoke: all 37 probes passed with no non-fresh or refresh-enqueued probes and aggregate dirty/outbox/readiness/dead-letter counts unchanged. Browser/admin/write production evidence and global/module closure remain open. The next boundary is `production:read-model-authenticated-browser-page-smoke-runbook`, selected because read-only authenticated browser page evidence directly advances user-visible production closure with lower risk than admin or write-flow probes.
 
 ## Closed Or Deferred Slices
 
