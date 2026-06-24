@@ -345,6 +345,9 @@ from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntim
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.tax_offset_worker_rebuild_executor import TaxOffsetWorkerRebuildExecutor
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
+from fin_ops_platform.services.turnover_ledger_read_model_refresh_producer import (
+    TurnoverLedgerReadModelRefreshProducer,
+)
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
@@ -3389,8 +3392,8 @@ class Application:
         return TurnoverLedgerRelationExtraLegacyFallbackAdapterSet(
             routes=self._turnover_ledger_api_routes,
             persist_extra_best_effort=self._persist_turnover_ledger_extras_best_effort,
-            clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
-            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
+            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
         ).facade()
 
     def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerBankRowTagsLegacyFallbackFacade | None:
@@ -3724,8 +3727,8 @@ class Application:
     def _turnover_ledger_tag_selection_legacy_fallback_facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
         return TurnoverLedgerTagSelectionLegacyFallbackAdapterSet(
             app_settings_service=self._app_settings_service,
-            clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
-            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
+            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
         ).facade()
 
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
@@ -12843,19 +12846,6 @@ class Application:
         except (TypeError, ValueError):
             return None
 
-    def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return False
-        normalized_scope_keys = [
-            str(item).strip()
-            for item in list(scope_keys or [])
-            if str(item).strip() and (str(item).strip() == "all" or SEARCH_MONTH_RE.match(str(item).strip()))
-        ]
-        if not normalized_scope_keys:
-            normalized_scope_keys = ["all"]
-        return bool(refresh_gateway.enqueue_many("turnover_ledger", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
-
     def _enqueue_no_oa_bank_batch_read_model_refreshes(
         self,
         scope_keys: list[str],
@@ -13021,7 +13011,7 @@ class Application:
             suggestion_provider = latest if callable(latest) else None
         category_mutation_side_effects = BankDetailCategoryMutationSideEffectPort(
             enqueue_bank_detail_refresh=self._bank_detail_read_model_refresh_producer().enqueue,
-            enqueue_turnover_ledger_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+            enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             invalidate_workbench_after_category_mutation=getattr(
                 self,
                 "_invalidate_workbench_after_bank_transaction_categories",
@@ -13043,7 +13033,7 @@ class Application:
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
             invalidate_after_category_mutation=getattr(self, "_invalidate_workbench_after_bank_transaction_categories", lambda _affected_months: False),
             execute_derived_data_lifecycle_event=getattr(self, "_execute_derived_data_lifecycle_event", lambda *_args, **_kwargs: None),
-            clear_turnover_ledger_read_model=getattr(self, "_clear_turnover_ledger_read_model_best_effort", lambda: None),
+            clear_turnover_ledger_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
             clear_relation_tag_projection_cache=getattr(
                 getattr(self, "_bank_details_relation_tag_projection_service", None),
                 "clear_cache",
@@ -13051,11 +13041,7 @@ class Application:
             ),
             available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
             enqueue_bank_account_balance_refresh=getattr(self, "_enqueue_bank_account_balance_read_model_refresh", lambda **_kwargs: False),
-            enqueue_turnover_ledger_refresh=getattr(
-                self,
-                "_enqueue_turnover_ledger_read_model_refreshes",
-                lambda _scope_keys, **_kwargs: False,
-            ),
+            enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
             category_mutation_side_effects=category_mutation_side_effects,
         )
@@ -13067,6 +13053,12 @@ class Application:
         return BankDetailReadModelRefreshProducer(
             refresh_gateway_provider=self._read_model_refresh_gateway,
             redis_helper_provider=lambda: getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
+        )
+
+    def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
+        return TurnoverLedgerReadModelRefreshProducer(
+            refresh_gateway_provider=self._read_model_refresh_gateway,
+            read_repository_provider=lambda: getattr(self, "_turnover_ledger_sql_read_repository", None),
         )
 
     def _bank_detail_available_month_scope_provider(self) -> BankDetailAvailableMonthScopeProvider:
@@ -13830,19 +13822,9 @@ class Application:
         return TurnoverLedgerRelationMutationInvalidationLegacyAdapter(
             persist_relations=self._persist_turnover_relations_best_effort,
             invalidate_workbench_after_category_mutation=self._invalidate_workbench_after_bank_transaction_categories,
-            clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
-            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
+            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
         )
-
-    def _clear_turnover_ledger_read_model_best_effort(self) -> None:
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        clear_rows = getattr(repository, "clear_turnover_ledger_rows", None)
-        if not callable(clear_rows):
-            return
-        try:
-            clear_rows()
-        except Exception:
-            pass
 
     def _bank_transaction_category_affected_months(self, transaction_ids: list[str]) -> list[str]:
         months: set[str] = set()
@@ -13894,7 +13876,7 @@ class Application:
                 break
         self._search_service.clear_cache()
         self._bank_detail_read_model_refresh_producer().enqueue(["all"], reason="bank_transaction_tag_settings_changed")
-        self._enqueue_turnover_ledger_read_model_refreshes(
+        self._turnover_ledger_read_model_refresh_producer().enqueue(
             ["all"],
             reason="bank_transaction_tag_settings_changed",
         )

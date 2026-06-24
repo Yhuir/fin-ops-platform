@@ -586,7 +586,32 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if direct_job_writes:
             violations.append(f"bank detail refresh producer writes job queue tables directly: {direct_job_writes}")
 
+        turnover_producer_path = SERVICES_ROOT / "turnover_ledger_read_model_refresh_producer.py"
+        turnover_producer_source = turnover_producer_path.read_text(encoding="utf-8")
+        turnover_producer_tree = _parse(turnover_producer_path)
+        turnover_producer_class = _class_source(
+            turnover_producer_tree,
+            turnover_producer_source,
+            "TurnoverLedgerReadModelRefreshProducer",
+        )
+        for snippet in (
+            "def enqueue(",
+            "refresh_gateway = self._refresh_gateway_provider()",
+            'refresh_gateway.enqueue_many("turnover_ledger"',
+            "def clear_best_effort(",
+            "clear_turnover_ledger_rows",
+        ):
+            if snippet not in turnover_producer_class:
+                violations.append(f"turnover ledger refresh producer is missing boundary behavior {snippet}")
+        direct_job_writes = _sql_write_table_references(turnover_producer_class)
+        if direct_job_writes:
+            violations.append(f"turnover ledger refresh producer writes job queue tables directly: {direct_job_writes}")
+
         factory_source = _function_source(server_tree, server_source, "_bank_details_application_service")
+        if _function_source(server_tree, server_source, "_enqueue_turnover_ledger_read_model_refreshes"):
+            violations.append("server.py still owns removed turnover ledger refresh enqueue helper")
+        if _function_source(server_tree, server_source, "_clear_turnover_ledger_read_model_best_effort"):
+            violations.append("server.py still owns removed turnover ledger read model clear helper")
         if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
             violations.append("server.py still owns removed bank detail suggestion provider callback")
         if _function_source(server_tree, server_source, "_bank_detail_available_month_scope_keys"):
@@ -601,7 +626,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_bank_detail_read_model_refresh_producer",
             "_bank_detail_available_month_scope_provider",
             "_enqueue_bank_account_balance_read_model_refresh",
-            "_enqueue_turnover_ledger_read_model_refreshes",
+            "_turnover_ledger_read_model_refresh_producer",
         ):
             if retained_callback not in factory_source:
                 violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")

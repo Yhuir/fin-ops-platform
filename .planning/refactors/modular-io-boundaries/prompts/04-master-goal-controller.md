@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:turnover-ledger-refresh-freshness-operation-barrier-audit.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:turnover-ledger-refresh-producer-clear-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -134,9 +134,10 @@ Current state expected on start:
 - `turnover_ledger` is selected as the tenth non-Go read model implementation pilot because it has high user-visible stale grouped-ledger risk, direct Workbench/cost/search fan-out impact and a narrow manifest-listed repository-port first slice.
 - Turnover ledger repository port extraction is complete: `TurnoverLedgerReadModelRepositoryPort` owns manifest-listed list/save/clear methods, PostgreSQL state-store turnover read wiring returns the port, `TurnoverLedgerQueryService` app injection uses the turnover-specific port instead of the broad workbench SQL read repository, and worker projection save paths receive the port.
 - Turnover ledger freshness/barrier audit is analysis-closed: SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence exist, but app-owned clear/refresh helpers remain a local implementation gap.
+- Turnover ledger refresh producer/clear extraction is complete: `TurnoverLedgerReadModelRefreshProducer` owns non-transactional turnover refresh enqueue and best-effort clear, enqueue stays behind `ReadModelRefreshGateway`, and clear uses the turnover-specific read repository port instead of broad `_workbench_sql_read_repository`.
 - Remaining later non-Go read model candidates include `no_oa_bank_batch`, `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:turnover-ledger-refresh-producer-clear-port-extraction.
+- The next pending boundary is read-models:turnover-ledger-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -232,18 +233,17 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:turnover-ledger-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:turnover-ledger-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:turnover-ledger-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-cost-statistics.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/turnover-ledger/README.md`, `docs/modules/turnover-ledger/implementation-notes.md`, `docs/modules/turnover-ledger/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`, `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`, `tests/test_turnover_ledger_query_service.py`, `tests/test_turnover_ledger_read_model_refresh.py`, and `tests/test_read_model_manifest.py`.
-- Use CodeGraph for structural lookup before implementation.
-- Add a narrow `TurnoverLedgerReadModelRepositoryPort` exposing only `list_turnover_ledger_view`, `save_turnover_ledger_rows`, and `clear_turnover_ledger_rows`.
-- Wire `TurnoverLedgerQueryService` and `TurnoverLedgerSqlProjectionBuilder` read/save paths through the port, and return/use the port from PostgreSQL state-store or route/service read wiring where applicable.
-- Keep SQL table knowledge in `PostgresReadModelRepository`.
-- Add/update tests proving the port excludes unrelated read model methods and existing SQL runtime/freshness behavior remains unchanged.
+For read-models:turnover-ledger-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-producer-clear-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/turnover-ledger/README.md`, `docs/modules/turnover-ledger/implementation-notes.md`, `docs/modules/turnover-ledger/tests.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh_producer.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_repository.py`, `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`, `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/services/bank_details_application_service.py`, `tests/test_turnover_ledger_read_model_refresh_producer.py`, `tests/test_turnover_ledger_query_service.py`, `tests/test_turnover_ledger_api.py`, `tests/test_read_model_architecture_guards.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Use CodeGraph for structural lookup before declaring closure or selecting a follow-up implementation boundary.
+- Audit remaining `turnover_ledger` local implementation surfaces after repository port, freshness/barrier audit and refresh producer/clear extraction.
+- Classify remaining route/service/repository/read model/worker/frontend API paths as explicit boundary, dependency assembly, compat-only, removed, or implementation gap.
+- If no local implementation gap remains, move local support to `production-evidence-deferred` without claiming global module closure; if a concrete gap remains, queue exactly one next narrow boundary.
 - Do not change turnover business rules, grouped payload shape, manual closure semantics, Workbench relation command behavior, API shape, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning, frontend behavior, Go/Fiber or Go Worker status.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted turnover query/worker/port tests, app check, docs verification and diff checks.
+- Run targeted audit-driven tests, app check, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

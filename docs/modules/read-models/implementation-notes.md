@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Turnover ledger refresh producer and clear port extraction
+
+- 目标：执行 `read-models:turnover-ledger-refresh-producer-clear-port-extraction`，把外部往来台账 read model refresh/clear 行为从 `Application` helper 收敛到显式 producer 边界。
+- 影响范围：`TurnoverLedgerReadModelRefreshProducer`、`Application` turnover/bank-detail callback wiring、turnover API regression tests 和 platform boundary guard；不改变 turnover API shape、业务规则、worker event、queue schema、权限、审计或前端行为。
+- 关键决策：`TurnoverLedgerReadModelRefreshProducer.enqueue(...)` 继续通过 `ReadModelRefreshGateway` 和 `turnover_ledger` month/all scope policy 入队；`clear_best_effort()` 只通过 turnover-specific repository port 调用 `clear_turnover_ledger_rows()`，不再从 broad workbench SQL repository 清理 turnover rows。旧 app-owned enqueue/clear helper 已删除。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 read-models/turnover-ledger 实施记录与测试矩阵。
+- 测试覆盖：新增 `tests/test_turnover_ledger_read_model_refresh_producer.py`；更新 turnover API、bank auto-tag side-effect 和 platform boundary guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-producer-clear-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一步必须执行 `turnover_ledger` local implementation closure audit，不能直接宣称模块闭环。
+
 ## 2026-06-24 - Turnover ledger freshness and barrier audit
 
 - 目标：执行 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 fresh gate、force refresh、all scope、Workbench relation source-version、operation barrier 和旧链路污染风险。

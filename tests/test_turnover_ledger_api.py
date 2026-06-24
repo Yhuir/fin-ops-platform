@@ -862,6 +862,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request("GET", "/api/turnover-ledger/tag-selection")
             payload = json.loads(response.body)
@@ -1001,6 +1002,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
@@ -1119,6 +1121,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
             response = app.handle_request(
@@ -1807,6 +1810,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
             response = app.handle_request(
@@ -1842,6 +1846,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
             request_body = {
                 "expected_version": initial_payload["version"],
@@ -1952,6 +1957,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             app._turnover_ledger_bank_row_tags_write_facade = lambda: None  # type: ignore[method-assign]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
@@ -2079,6 +2085,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             saved_categories: list[dict[str, object]] = []
             saved_relations: list[dict[str, object]] = []
             call_order: list[str] = []
@@ -2142,6 +2149,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             app._turnover_ledger_bank_row_tags_write_facade = lambda: None  # type: ignore[method-assign]
             saved_categories: list[dict[str, object]] = []
             call_order: list[str] = []
@@ -2257,6 +2265,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             saved_categories: list[dict[str, object]] = []
             call_order: list[str] = []
             original_save_categories = app._state_store.save_bank_transaction_categories
@@ -2358,8 +2367,21 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
             app._persist_turnover_relations_best_effort = record_persist  # type: ignore[method-assign]
             app._invalidate_workbench_after_bank_transaction_categories = record_invalidate  # type: ignore[method-assign]
-            app._clear_turnover_ledger_read_model_best_effort = record_clear  # type: ignore[method-assign]
-            app._enqueue_turnover_ledger_read_model_refreshes = record_enqueue  # type: ignore[method-assign]
+            class Producer:
+                def clear_best_effort(self) -> None:
+                    record_clear()
+
+                def enqueue(
+                    self,
+                    scope_keys: list[str],
+                    *,
+                    reason: str,
+                    metadata: dict[str, object] | None = None,
+                ) -> bool:
+                    _ = metadata
+                    return record_enqueue(scope_keys, reason=reason)
+
+            app._turnover_ledger_read_model_refresh_producer = lambda: Producer()  # type: ignore[method-assign]
 
             app._after_turnover_relation_mutation(["2026-02", "2026-03"])
 
@@ -2381,6 +2403,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             def fail_save_turnover_relations(_snapshot: dict[str, object]) -> None:
                 raise RuntimeError("relation store unavailable")
@@ -2400,6 +2423,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app._after_turnover_relation_mutation(["2026-02", "2026-03"])
@@ -2420,6 +2444,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
                 raise AssertionError("legacy after-mutation helper should not run on postgres facade path")
@@ -2456,6 +2481,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             request_body = {
                 "idempotency_key": "bank-row-tags-idem-1",
                 "updates": [
@@ -2548,6 +2574,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -2588,6 +2615,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -2618,6 +2646,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -2887,6 +2916,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             get_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             put_response = app.handle_request(
@@ -3085,6 +3115,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             def fail_save_turnover_ledger_extras(_snapshot: dict[str, object]) -> None:
                 raise RuntimeError("extra store unavailable")
@@ -3119,6 +3150,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -3182,6 +3214,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             def record_persist(*, operation: str) -> None:
                 persist_operations.append(operation)
@@ -3246,6 +3279,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "PUT",
@@ -3270,8 +3304,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 raise AssertionError("legacy relation extra side effect should not run on facade path")
 
             app._persist_turnover_ledger_extras_best_effort = unexpected_legacy_side_effect  # type: ignore[method-assign]
-            app._clear_turnover_ledger_read_model_best_effort = unexpected_legacy_side_effect  # type: ignore[method-assign]
-            app._enqueue_turnover_ledger_read_model_refreshes = unexpected_legacy_side_effect  # type: ignore[method-assign]
+            app._turnover_ledger_read_model_refresh_producer = unexpected_legacy_side_effect  # type: ignore[method-assign]
 
             response = app.handle_request(
                 "PUT",
@@ -3593,6 +3626,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             denied = app.handle_request(
                 "POST",
@@ -3638,6 +3672,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             first_response = app.handle_request(
                 "POST",
@@ -3671,6 +3706,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             def fail_save_turnover_relations(_snapshot: dict[str, object]) -> None:
                 raise RuntimeError("relation store unavailable")
@@ -3732,6 +3768,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -3781,6 +3818,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             call_order: list[str] = []
             after_mutation_months: list[list[str]] = []
             original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
@@ -3836,6 +3874,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -3857,6 +3896,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -3918,6 +3958,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             confirmed_response = app.handle_request(
                 "POST",
                 "/api/turnover-ledger/relations/confirm",
@@ -4061,6 +4102,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             confirmed_response = app.handle_request(
                 "POST",
                 "/api/turnover-ledger/relations/confirm",
@@ -4117,6 +4159,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -4228,6 +4271,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             confirmed_response = app.handle_request(
                 "POST",
                 "/api/turnover-ledger/relations/confirm",
@@ -4265,6 +4309,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             confirmed_response = app.handle_request(
                 "POST",
                 "/api/turnover-ledger/relations/confirm",
@@ -4353,6 +4398,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
             confirmed_response = app.handle_request(
                 "POST",
                 "/api/turnover-ledger/relations/confirm",
@@ -4389,6 +4435,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -4434,6 +4481,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",

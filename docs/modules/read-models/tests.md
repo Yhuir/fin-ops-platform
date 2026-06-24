@@ -156,6 +156,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_gu
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_registry tests.test_read_model_slo_smoke tests.test_postgres_migrations tests.test_deploy_runtime_examples tests.test_runtime_redis -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_platform_runtime_boundary_guards -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_model_refresh_producer -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_lifecycle_derived_lifecycle_executor -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_bounds_all_scope_groups_page_query -v

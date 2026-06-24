@@ -84,6 +84,18 @@
 - 未新增测试，因为本轮不改运行时代码。
 - 审计发现下一轮必须补 producer/clear boundary 测试：`Application._enqueue_turnover_ledger_read_model_refreshes(...)` 与 `_clear_turnover_ledger_read_model_best_effort(...)` 不能继续作为 app-owned authoritative behavior，且 clear 不应再经 broad workbench SQL repository。
 
+## 2026-06-24 - refresh producer and clear port extraction test note
+
+`read-models:turnover-ledger-refresh-producer-clear-port-extraction` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改外部往来金额、分类、闭环、撤回或 extra 规则。
+- Service-layer tests：适用，新增 `tests/test_turnover_ledger_read_model_refresh_producer.py`，覆盖 scope normalization、gateway enqueue、gateway unavailable 和 turnover-specific repository clear best-effort。
+- API contract tests：默认不适用；API response shape、状态码和错误字段未变。已运行目标 turnover API 回归证明 tag-selection、relation-extra 和 relation mutation refresh 行为保持。
+- Read model/cache/background job tests：适用，复跑 `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py` 和 platform boundary guard。
+- Frontend component and interaction tests：不适用；没有前端代码或 operation overlay contract 变化。
+- End-to-end business-flow integration tests：不适用；本 slice 只迁移 refresh/clear producer 边界，未改变 confirm/withdraw/tag-selection 业务流。
+- Existing feature regression tests：适用，更新 `tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` 和 `tests/test_platform_runtime_boundary_guards.py`，防止旧 app-owned helper 返回并防止 clear 再走 broad workbench repository。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

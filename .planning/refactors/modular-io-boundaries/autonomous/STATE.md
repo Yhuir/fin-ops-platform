@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-turnover-ledger-refresh-freshness-operation-barrier-audit`
+Current state: `autonomous-continue-after-read-models-turnover-ledger-refresh-producer-clear-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` as analysis/accounting only. Turnover SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence exist, but app-owned clear/refresh helpers still contaminate the boundary. `turnover_ledger` remains implementation-gap-open. The next executable boundary is `read-models:turnover-ledger-refresh-producer-clear-port-extraction`. Go hot-path admission remains blocked.
+Completed `read-models:turnover-ledger-refresh-producer-clear-port-extraction` as an implementation slice. Turnover read model refresh enqueue now goes through `TurnoverLedgerReadModelRefreshProducer` and `ReadModelRefreshGateway`; best-effort clear now uses the turnover-specific read repository port instead of broad `_workbench_sql_read_repository`. `turnover_ledger` remains implementation-gap-open until local implementation closure audit confirms no remaining local gaps. The next executable boundary is `read-models:turnover-ledger-local-implementation-closure-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -177,6 +177,7 @@ Completed `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit
 - `read-models:next-pilot-selection-after-cost-statistics` -> `analysis-closed`
 - `read-models:turnover-ledger-repository-port-extraction` -> `implementation-closed`
 - `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` -> `analysis-closed`
+- `read-models:turnover-ledger-refresh-producer-clear-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -194,9 +195,9 @@ Completed `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit
 - `invoice_lifecycle` is now the seventh non-Go read model implementation pilot after the output collection local closure audit. Repository port extraction is implemented: facade lifecycle row lookups and SQL projection save/mark paths now use `InvoiceLifecycleReadModelRepositoryPort`, while lifecycle rules, payload shape, worker semantics and API behavior remain unchanged. Freshness/barrier audit is also closed as a regression guard: facade reads do not use queryable `all`, refresh service expands `all` to month shards, source-version checks run before/after rebuild, scope policy is month-or-all, App Status/worker/manifest contracts are registered, and exact-month operation barrier behavior is now covered. Derived lifecycle execution now uses `InvoiceLifecycleDerivedLifecycleExecutor` instead of an app-owned helper, preserving gateway-backed refresh enqueue metadata and response shape. Local implementation support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. Repository port extraction is implemented: `TaxOffsetReadModelRepositoryPort` exposes only manifest-listed load/get/save methods, state-store tax read/write wiring uses the port, the SQL read repository property returns the port over the optional read connection, and tax projection save paths go through the port. Freshness/barrier audit is also implemented: SQL fresh gate, force refresh scope policy, `all` fan-out/month shard proof, plan-save/certified-import operation barrier and legacy/app-owned wrappers are accounted for; OA attachment invoice evidence fallback now promotes formal invoice payloads with `invoice_type` and no `evidence_type`. Worker rebuild executor extraction moved compat worker rebuild/persist/fresh-cache publish behavior into `TaxOffsetWorkerRebuildExecutor` and made the app method a thin delegate. Derived lifecycle executor extraction moved read model invalidation and month-cache clearing behavior into `TaxOffsetDerivedLifecycleExecutor` and removed the app-owned helper methods. Cache warmup executor extraction moved optional warmup scheduling/job execution, read model upsert and snapshot persistence into `TaxOffsetCacheWarmupExecutor`; the remaining app helper is compat-only delegation. Full-state snapshot quarantine removed broad `Application._persist_state(...)` tax offset read model writes and kept explicit persistence callback ownership. Post-quarantine audit found no remaining local implementation gap, so `tax_offset` local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
 - `cost_statistics` is now the ninth non-Go read model implementation pilot. It was selected because it consumes Workbench relation, bank detail tags, import facts, ETC/no-OA/turnover/settings fan-out, owns special `active/all` scope grammar, and has a queryable parent aggregate that must be isolated before Go summary-rollup admission. Repository port extraction is implemented: manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models` are behind `CostStatisticsReadModelRepositoryPort`, PostgreSQL state-store cost SQL read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` uses it for projection save paths while preserving existing API, parent aggregate, worker and Redis behavior. Freshness/barrier audit is analysis-closed: SQL fresh gate, production repository unavailable behavior, force-refresh scope normalization, parent aggregate proof, primary/compat worker split and App Status registry are locally accounted for. Derived lifecycle executor extraction is implemented: `CostStatisticsDerivedLifecycleExecutor` now owns invalidation, `pending_invoice_rules_changed` persist-empty behavior, no-warmup refresh fallback metadata and enqueued-job accounting; `Application` only assembles runtime/gateway callbacks. Post-derived local closure audit found warmup/retry/rebuild app methods are compat-only delegates. Full-state snapshot quarantine is implemented: broad `_persist_state(...)` no longer writes `cost_statistics_read_models`, explicit runtime/query persistence remains, and startup compatibility load remains. Post-full-state local closure audit found no remaining local implementation gap, so local cost statistics support is accounted for, but the module remains not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `turnover_ledger` is now the tenth non-Go read model implementation pilot. Repository port extraction is implemented: `TurnoverLedgerReadModelRepositoryPort` exposes only manifest-listed `list_turnover_ledger_view`, `save_turnover_ledger_rows` and `clear_turnover_ledger_rows`; PostgreSQL state-store read wiring, `TurnoverLedgerQueryService` app injection and worker projection paths now use the narrow port; unrelated read model method exposure is guarded. Freshness/barrier audit found existing SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence, but app-owned refresh/clear helpers remain a local implementation gap.
+- `turnover_ledger` is now the tenth non-Go read model implementation pilot. Repository port extraction is implemented: `TurnoverLedgerReadModelRepositoryPort` exposes only manifest-listed `list_turnover_ledger_view`, `save_turnover_ledger_rows` and `clear_turnover_ledger_rows`; PostgreSQL state-store read wiring, `TurnoverLedgerQueryService` app injection and worker projection paths now use the narrow port; unrelated read model method exposure is guarded. Freshness/barrier audit found existing SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence. Refresh producer/clear extraction is implemented: app-owned turnover enqueue/clear helpers are removed, enqueue goes through `TurnoverLedgerReadModelRefreshProducer` and clear uses the turnover-specific repository port. Local closure audit remains open.
 - `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
-- The next pending boundary is `read-models:turnover-ledger-refresh-producer-clear-port-extraction`.
+- The next pending boundary is `read-models:turnover-ledger-local-implementation-closure-audit`.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -217,8 +218,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`
+`read-models:turnover-ledger-refresh-producer-clear-port-extraction`
 
 ## Next Prompt
 
-`read-models:turnover-ledger-refresh-producer-clear-port-extraction`
+`read-models:turnover-ledger-local-implementation-closure-audit`
