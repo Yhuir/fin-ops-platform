@@ -1,22 +1,25 @@
 # Next Prompt
 
-Continue after `production:read-model-authenticated-api-response-shape-smoke-runbook`.
+Continue after `production:read-model-public-page-shell-smoke-runbook`.
 
 ## Current State
 
 - Branch: `dev`
 - Authenticated API response-shape smoke is deferred because no non-secret HTTP SLO auth config exists in production env.
-- `/health/ready` remained ready.
-- Post-checks after the deferred smoke path:
-  - dirty scopes: `done=187007`
-  - read model readiness: `fresh=498`
-  - read-model outbox: `done=202898`
-- Browser/API/high-row smoke and module-specific closure audits remain open.
+- Public unauthenticated page-shell smoke completed against `https://www.yn-sourcing.com`.
+- Initial `http://127.0.0.1:18001` page-shell probe was classified as wrong-base operator evidence because the API listener returned 17/17 404 for `/fin-ops/*`.
+- Public base rerun passed:
+  - `probe_count=17`
+  - `failed_probe_count=0`
+  - all default `/fin-ops/*` page-shell paths returned 200
+  - `max_p95_ms=27.782`
+- `/health/ready` remained ready before and after.
+- Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`production:read-model-public-page-shell-smoke-runbook`
+`planning:post-public-page-shell-smoke-next-boundary-selection`
 
 ## Required First Steps On Resume
 
@@ -29,8 +32,9 @@ Continue after `production:read-model-authenticated-api-response-shape-smoke-run
    - `autonomous/STATE.md`
    - `autonomous/JOURNAL.md`
    - this prompt
-4. Write a bounded production public page-shell smoke runbook/evidence file before executing commands.
-5. Use `http_slo_probe --allow-unauthenticated --replace-default-probes` or an equivalent page-shell-only command. Do not run API probes without auth.
+4. Read `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`.
+5. Reconcile row252 auth-missing API defer and row253 public page-shell success.
+6. Select the next safe bounded evidence boundary for authenticated API, browser/hydration, high-row or module-specific closure gaps. Do not claim module/global closure from page-shell evidence alone.
 
 ## Stop Gates
 
