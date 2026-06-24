@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-grouped-metadata-fix-implemented`
+Current state: `turnover-ledger-grouped-metadata-deployed-visible-refresh`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `read-models:turnover-ledger-grouped-query-metadata-boundary-fix` as `implementation-closed` in `analysis/read-model-turnover-ledger-grouped-query-metadata-boundary-fix-2026-06-25.md`. T0 fixed grouped turnover ledger API conversion so SQL/read-model payload metadata survives `view=grouped`, added fresh/stale grouped API regressions, updated turnover ledger docs, and verified targeted plus broader turnover ledger suites. Full user-scope API, production deploy/re-smoke, browser/admin/write and global/module closure remain open. Next boundary is `production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`.
+Completed `production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke` as `production-controlled` in `analysis/production-turnover-ledger-grouped-metadata-fix-deploy-and-resmoke-2026-06-25.md`. T0 deployed the grouped metadata fix, proved focused grouped turnover GET now exposes top-level freshness/enqueue metadata, and classified the remaining visible stale reason as `turnover_relation_snapshot_version_mismatch`. The visible refresh converged done, health/readiness stayed clean and no read-model dead letters appeared. Full user-scope API, mismatch diagnosis, browser/admin/write and global/module closure remain open. Next boundary is `production:turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`read-models:turnover-ledger-grouped-query-metadata-boundary-fix`
+`production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`
 
 ## Next Prompt
 
-`production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`
+`production:turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis`

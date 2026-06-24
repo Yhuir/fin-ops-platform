@@ -1,7 +1,7 @@
 # Production Turnover Ledger Grouped Metadata Fix Deploy And Resmoke - 2026-06-25
 
 **Boundary:** `production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`
-**Status:** `runbook-prepared`
+**Status:** `production-controlled`
 **Module closure:** `not-module-closed`
 **Target branch:** `dev`
 **Target commit before deploy:** current `origin/dev` after this runbook is committed; record exact `RELEASE.json` git commit after deploy.
@@ -111,3 +111,72 @@ Rollback path for a failed deploy is the existing release rollback procedure thr
 ## Follow-up Decision
 
 Only after this focused probe and aggregate postcheck are understood should T0 decide whether to retry the full non-admin user-scope API smoke. Browser/admin/write evidence remains out of scope for this boundary.
+
+## Production Evidence
+
+Executed by T0 through root SSH after this runbook was committed. No secrets, tokens, cookies, passwords, response bodies, payload rows, grouped rows or business identifiers were printed.
+
+### Precheck
+
+- Active release before deploy: `dev-no-oa-source-version-480d2d0e-20260625`.
+- Active release commit before deploy: `d117b4519284db00c0fa88bdf7faaa938a5b1f69`.
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187059`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=202954`.
+- Read-model dead letters: none.
+- Turnover outbox recent aggregate: `done=562`, latest `2026-06-25 06:52:50.733073+08`.
+- Turnover dirty recent aggregate: `done=460`, latest `2026-06-25 06:52:50.729942+08`.
+
+### Deploy
+
+Command:
+
+```bash
+./scripts/deploy-oa.sh --release-name dev-turnover-grouped-metadata-20260625
+```
+
+Result:
+
+- Deploy exited `0`.
+- Frontend build completed with the existing minified CSS warnings.
+- Active release after deploy: `dev-turnover-grouped-metadata-20260625`.
+- Active `RELEASE.json`: `git_branch=dev`, `git_commit=2dbacf9f6054baabe7084fc87b87511a49bbdb95`.
+- App service, RabbitMQ dispatcher and all listed worker units were active during deploy-control status checks.
+
+### Focused Metadata Probe
+
+Focused authenticated user-scope probe:
+
+- Request: `GET /api/turnover-ledger?view=grouped&page=1&page_size=50`.
+- Configured target credential count: `2`.
+- Session: `allowed=true`, `can_access_app=true`, `can_mutate_data=true`, `can_admin_access=false`, `access_tier=full_access`.
+- HTTP status: `200`.
+- Elapsed: `110.729ms`.
+- `read_model_status=refreshing`.
+- `read_model_scope_key=all`.
+- `read_model_stale_reasons=["turnover_relation_snapshot_version_mismatch"]`.
+- `refresh_enqueued=true`.
+- `refresh_reason=source_version_mismatch`.
+- `cache_status=null`.
+- Top-level keys excluding `rows`/`groups`: `family_summaries`, `filters`, `pagination`, `read_model_scope_key`, `read_model_stale_reasons`, `read_model_status`, `refresh_enqueued`, `refresh_reason`, `source_versions`, `summary`.
+- Group count: `20`.
+- Pagination scalars: page `1`, page size `50`, total `20`.
+
+### Postcheck
+
+- Active release after deploy: `dev-turnover-grouped-metadata-20260625`.
+- Active `RELEASE.json`: `git_branch=dev`, `git_commit=2dbacf9f6054baabe7084fc87b87511a49bbdb95`.
+- `/health/ready`: `ready`.
+- Dirty scopes: `done=187060`.
+- App Status readiness: `fresh=498`.
+- Read-model outbox: `done=202955`.
+- Read-model dead letters: none.
+- Turnover outbox recent aggregate: `done=563`, latest `2026-06-25 07:07:13.851087+08`.
+- Turnover dirty recent aggregate: `done=461`, latest `2026-06-25 07:07:13.844547+08`.
+
+## Result
+
+The deployed grouped metadata fix works: the focused grouped turnover response now exposes top-level read-model metadata and no longer hides the GET-triggered enqueue. The boundary remains not-module-closed because the response also proved a separate production freshness issue, `turnover_relation_snapshot_version_mismatch`, which caused one visible `turnover_ledger:all` refresh. That refresh converged to `done`, health stayed ready, readiness stayed fresh and no read-model dead letters appeared.
+
+Next safe boundary: a read-only diagnosis of the turnover relation snapshot source-version mismatch before retrying full user-scope API smoke.
