@@ -69,10 +69,13 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: planning:parallel-orchestration-workflow.
+- Last completed boundary: planning:parallel-handoff-review-and-state-update.
 - Last status: planning-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
+- T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
+- `server-py:workbench-group-detail-route-owner-extraction` is now implementation-closed locally.
+- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
 - pending_invoice local implementation support is accounted for after repository port, freshness/barrier audit, scope policy filter allowlist and mutation freshness target work; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
@@ -197,7 +200,8 @@ Current state expected on start:
 - `server-py:workbench-row-detail-route-owner-extraction` is complete as an implementation slice: it moved row detail payload/fallback orchestration behind `WorkbenchRowDetailApiRoutes` while preserving response shape, fallback order, row override behavior and production PostgreSQL fallback blocking.
 - `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
 - `planning:parallel-orchestration-workflow` is complete as a planning slice: it defined controller/worker permissions, direct-dev write lease, worker file ownership, handoff format, final closure audit gate and 10 thread prompts. Worker prompts may auto-progress inside assigned workstreams, but controller owns global state and global closure.
-- The next pending boundary is `server-py:workbench-group-detail-route-owner-extraction`.
+- `planning:parallel-handoff-review-and-state-update` is complete as a planning slice: T0 consumed T1-T8 handoffs, integrated accepted worker evidence in `b60a343a`, accepted T6 as partial production-read-only evidence, and kept Go admission deferred from T7.
+- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -293,7 +297,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-group-detail-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
+Start with `planning:post-parallel-handoff-next-boundary-selection` unless planning-state reconciliation finds an inconsistency first.
+
+For `planning:post-parallel-handoff-next-boundary-selection`:
+- Review accepted handoff risks in `.planning/refactors/modular-io-boundaries/analysis/parallel-controller-handoff-review-2026-06-24.md`.
+- Decide the next safe boundary from current state, not stale queue assumptions.
+- Consider adjacent server route-owner work only if it stays outside controller-only files and has a narrow route owner target.
+- Consider production-readiness/runbook follow-up only if it can be read-only or pass the Controlled Production Gate in `12-PARALLEL-ORCHESTRATION.md`.
+- Keep Go/Fiber/Go Worker blocked unless real performance, freshness, shadow diff and rollback evidence are available.
+- Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the selected next boundary.
 
 Parallel execution:
 - If the user wants multiple Codex threads, do not paste this master prompt into every thread.

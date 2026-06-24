@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `planning:parallel-orchestration-workflow` as `planning-closed`. Parallel execution is now controller-led: worker threads may auto-progress inside assigned workstreams, but the controller owns global state, direct-dev integration, queue accounting and final closure. The next executable implementation boundary remains `server-py:workbench-group-detail-route-owner-extraction`.
+Completed `planning:parallel-handoff-review-and-state-update` as `planning-closed`. T0 accepted T1-T8 handoffs, integrated the accepted worker batch in commit `b60a343a`, updated queue accounting, and selected `planning:post-parallel-handoff-next-boundary-selection` as the next controller-owned boundary.
 
 ## Closed Or Deferred Slices
 
@@ -248,6 +248,15 @@ Completed `planning:parallel-orchestration-workflow` as `planning-closed`. Paral
 - `server-py:workbench-row-detail-route-owner-extraction` -> `implementation-closed`
 - `server-py:workbench-group-detail-route-owner-audit` -> `analysis-closed`
 - `planning:parallel-orchestration-workflow` -> `planning-closed`
+- `server-py:workbench-group-detail-route-owner-extraction` -> `implementation-closed`
+- `read-models:contract-inventory-guard` -> `contract-guard-closed`
+- `worker-queue:app-status-contract-hardening` -> `regression-guard-closed`
+- `frontend:invoice-usage-combined-freshness` -> `implementation-closed`
+- `legacy-contamination:row-detail-and-batch-repair-quarantine-guard` -> `static-guard-closed`
+- `production:read-only-evidence-sweep` -> `production-evidence-deferred`
+- `go-hot-path:t7-admission-evidence` -> `go-candidate-deferred`
+- `module-contracts:read-models-invoice-workbench-batch-runtime` -> `analysis-closed`
+- `planning:parallel-handoff-review-and-state-update` -> `planning-closed`
 
 ## Open Implementation Closure Work
 
@@ -269,8 +278,8 @@ Completed `planning:parallel-orchestration-workflow` as `planning-closed`. Paral
 - `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot and local implementation support is accounted for after repository/state-store audit, refresh persistence boundary extraction, read model repository port extraction, freshness/derived lifecycle audit, derived lifecycle executor extraction, mutation persistence fallback quarantine, local closure audit, full-state snapshot quarantine and post-full-state local closure audit. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. Refresh producer extraction is implemented: `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization. Production repository-unavailable fail-closed behavior is implemented. OA projection sync Search fan-out now uses `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`. Runtime import-state Search fan-out now also uses `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`. Search worker `search:all` shard fan-out now uses `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`. Post-all-scope local closure audit found no remaining local implementation gap, so Search local support is accounted for; the module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Repository port extraction is implemented: projection save and Bank Details accounts SQL read paths use `BankAccountBalanceReadModelRepositoryPort`, and manifest owner names the account-balance port. Refresh producer extraction is implemented: app/API/runtime/backfill refresh enqueue now uses `BankAccountBalanceReadModelRefreshProducer` and preserves all-only `bank_account_balance:all`. Derived lifecycle executor extraction is implemented: response assembly moved out of `Application` into `BankAccountBalanceDerivedLifecycleExecutor`. Scope policy is now all-only at the gateway, matching worker/storage behavior. Dedicated operation barrier regressions now cover dirty/readiness and outbox pending behavior. Bank Detail port compatibility fallback is removed. Local closure audit found no remaining local implementation gap, so local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- Parallel orchestration is now documented in `12-PARALLEL-ORCHESTRATION.md`, with thread prompts in `prompts/05-parallel-thread-prompts.md`.
-- The next pending boundary is `server-py:workbench-group-detail-route-owner-extraction`.
+- Parallel orchestration is now documented in `12-PARALLEL-ORCHESTRATION.md`, with thread prompts in `prompts/05-parallel-thread-prompts.md`. T0 consumed all T1-T8 handoffs currently present and integrated accepted worker evidence in `b60a343a`.
+- The next pending boundary is `planning:post-parallel-handoff-next-boundary-selection`.
 - Go hot-path implementation remains blocked. The Workbench compute reference IO, shadow forbidden-write and rollback contracts are documented and guarded locally, and a read-only evidence collector now exists locally. Real candidate-specific production/runtime evidence was explicitly deferred because the production release lacks the collector and deployed-runtime PostgreSQL read-only sampling could not connect. The autonomous flow returns to shared modular IO boundary governance.
 
 ## Deferred Modules
@@ -294,10 +303,12 @@ Completed `planning:parallel-orchestration-workflow` as `planning-closed`. Paral
 
 No Go candidate has passed admission. The global admission reconciliation, Workbench compute baseline contract, local reference-contract guards, read-only Workbench compute evidence collector and production evidence gate/defer slice are complete, but all implementation/admission candidates remain `blocked-by-prerequisite`. The post-evidence planning slice selected shared `server.py` residual handler ownership; the residual audit selected Workbench legacy action handler quarantine; that audit selected and closed legacy Workbench action route-module quarantine; the remaining legacy exception helper was removed as no-caller dead code; the modern Workbench action route-owner audit selected exception preview as the first narrow modern route-owner extraction; exception preview, exception apply, confirm-link preview/submit, mark-exception, cancel-link, withdraw-link preview/submit, cash special, update-bank-exception, OA-bank exception, personal advance repayment, cancel-exception, ignore-row and unignore-row mappings now live in `WorkbenchActionApiRoutes`. Final residual audit found no remaining app-owned direct WorkbenchWriteFacade action delegation in the audited surface.
 
+T7 reconfirmed Go admission remains deferred: local collector returns `configuration_missing`, and real Workbench compute p95/p99, active generation enqueue-to-fresh, executable shadow diff and rollback switch evidence remain missing.
+
 ## Last Prompt
 
-`planning:parallel-orchestration-workflow`
+`planning:parallel-handoff-review-and-state-update`
 
 ## Next Prompt
 
-`server-py:workbench-group-detail-route-owner-extraction`
+`planning:post-parallel-handoff-next-boundary-selection`
