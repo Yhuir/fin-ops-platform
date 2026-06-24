@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
 from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
+from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -67,7 +68,64 @@ class _UnderlyingBankAccountBalanceRepository:
         raise AssertionError("bank_account_balance port must not expose search repository methods")
 
 
+class _CaptureRefreshGateway:
+    def __init__(self, *, can_enqueue: bool = True) -> None:
+        self._can_enqueue = can_enqueue
+        self.calls: list[dict[str, object]] = []
+
+    def can_enqueue(self) -> bool:
+        return self._can_enqueue
+
+    def enqueue_many(
+        self,
+        scope_type: str,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[str]:
+        self.calls.append(
+            {
+                "scope_type": scope_type,
+                "scope_keys": list(scope_keys),
+                "reason": reason,
+                "metadata": metadata,
+            }
+        )
+        return list(scope_keys)
+
+
 class BankAccountBalanceProjectionTests(unittest.TestCase):
+    def test_refresh_producer_enqueues_all_scope_through_gateway(self) -> None:
+        gateway = _CaptureRefreshGateway()
+        producer = BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
+
+        enqueued = producer.enqueue_scope_keys(
+            ["2026-03", "all", "account:legacy"],
+            reason="unit_test",
+            metadata={"source": "test"},
+        )
+
+        self.assertEqual(enqueued, ["all"])
+        self.assertEqual(
+            gateway.calls,
+            [
+                {
+                    "scope_type": "bank_account_balance",
+                    "scope_keys": ["all"],
+                    "reason": "unit_test",
+                    "metadata": {"source": "test"},
+                }
+            ],
+        )
+
+    def test_refresh_producer_returns_false_when_gateway_unavailable(self) -> None:
+        gateway = _CaptureRefreshGateway(can_enqueue=False)
+        producer = BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
+
+        self.assertFalse(producer.enqueue_all(reason="unit_test"))
+        self.assertEqual(gateway.calls, [])
+
     def test_port_excludes_unrelated_read_model_methods(self) -> None:
         underlying = _UnderlyingBankAccountBalanceRepository()
         port = BankAccountBalanceReadModelRepositoryPort(underlying)

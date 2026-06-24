@@ -625,7 +625,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_bank_detail_auto_category_suggestion_provider",
             "_bank_detail_read_model_refresh_producer",
             "_bank_detail_available_month_scope_provider",
-            "_enqueue_bank_account_balance_read_model_refresh",
+            "_bank_account_balance_read_model_refresh_producer",
             "_turnover_ledger_read_model_refresh_producer",
         ):
             if retained_callback not in factory_source:
@@ -2114,6 +2114,47 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("SearchPendingReadModelRefreshService still bypasses SearchReadModelRefreshProducer for search fan-out")
         if "SearchReadModelRefreshProducer" not in search_pending_refresh_source:
             violations.append("SearchPendingReadModelRefreshService no longer uses SearchReadModelRefreshProducer")
+
+        self.assertEqual(violations, [])
+
+    def test_bank_account_balance_refresh_producer_helpers_stay_out_of_application(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+
+        violations: list[str] = []
+        if _function_source(tree, source, "_enqueue_bank_account_balance_read_model_refresh"):
+            violations.append("server.py still owns bank account balance refresh enqueue helper")
+
+        app_factory_source = _function_source(tree, source, "_bank_account_balance_read_model_refresh_producer")
+        if "BankAccountBalanceReadModelRefreshProducer" not in app_factory_source:
+            violations.append("Application no longer assembles BankAccountBalanceReadModelRefreshProducer")
+
+        service_source = (SERVICES_ROOT / "bank_account_balance_read_model_refresh_producer.py").read_text(encoding="utf-8")
+        if "class BankAccountBalanceReadModelRefreshProducer" not in service_source:
+            violations.append("BankAccountBalanceReadModelRefreshProducer is missing")
+        if 'enqueue_many(\n                "bank_account_balance"' not in service_source:
+            violations.append("BankAccountBalanceReadModelRefreshProducer no longer enqueues through the gateway")
+        if 'return ["all"]' not in service_source:
+            violations.append("BankAccountBalanceReadModelRefreshProducer no longer preserves the all-only contract")
+
+        for rel_path in (
+            "backend/src/fin_ops_platform/app/server.py",
+            "backend/src/fin_ops_platform/app/bank_account_balance_backfill.py",
+            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py",
+        ):
+            checked_source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+            for bypass in (
+                '_enqueue_scopes("bank_account_balance"',
+                "_enqueue_scopes('bank_account_balance'",
+                'enqueue_one("bank_account_balance"',
+                "enqueue_one('bank_account_balance'",
+                'enqueue_many("bank_account_balance"',
+                "enqueue_many('bank_account_balance'",
+            ):
+                if bypass in checked_source:
+                    violations.append(f"{rel_path} still bypasses BankAccountBalanceReadModelRefreshProducer")
+                    break
 
         self.assertEqual(violations, [])
 

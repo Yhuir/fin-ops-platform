@@ -344,6 +344,13 @@ git diff --check
 - 复用覆盖：`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_bankdetail_backfill_cli.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`。
 - 审计结论：`BankAccountBalanceReadModelRefreshProducer` 是下一条实现边界；后续必须补 producer/gateway boundary tests、all-only scope contract guard、dedicated operation barrier regression 和 compat fallback quarantine。
 
+## 2026-06-24 - bank account balance refresh producer extraction test note
+
+- 新增 producer tests：`tests/test_bank_account_balance_read_model.py::BankAccountBalanceProjectionTests::test_refresh_producer_enqueues_all_scope_through_gateway`、`test_refresh_producer_returns_false_when_gateway_unavailable`。
+- 新增 runtime worker tests：`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_import_state_bank_account_balance_refresh_uses_producer_boundary`、`test_lifecycle_bank_account_balance_refresh_uses_all_only_producer_boundary`。
+- 新增 static guard：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_refresh_producer_helpers_stay_out_of_application`。
+- 覆盖：account-balance refresh enqueue 不再由 app/runtime/backfill direct helper 持有，且所有路径保持 `bank_account_balance:all`。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

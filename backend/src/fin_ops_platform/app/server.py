@@ -77,6 +77,7 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.bank_detail_available_month_scope_provider import BankDetailAvailableMonthScopeProvider
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
@@ -13016,7 +13017,7 @@ class Application:
                 lambda: None,
             ),
             available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
-            enqueue_bank_account_balance_refresh=getattr(self, "_enqueue_bank_account_balance_read_model_refresh", lambda **_kwargs: False),
+            enqueue_bank_account_balance_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
             enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
             category_mutation_side_effects=category_mutation_side_effects,
@@ -13030,6 +13031,9 @@ class Application:
             refresh_gateway_provider=self._read_model_refresh_gateway,
             redis_helper_provider=lambda: getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
         )
+
+    def _bank_account_balance_read_model_refresh_producer(self) -> BankAccountBalanceReadModelRefreshProducer:
+        return BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
     def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
         return TurnoverLedgerReadModelRefreshProducer(
@@ -16148,7 +16152,7 @@ class Application:
         )
         if bank_detail_scope_keys:
             self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
-            self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
+            self._bank_account_balance_read_model_refresh_producer().enqueue_all(reason="import_state_changed")
         if invalidate_cost_statistics:
             if cost_statistics_scope_keys is None:
                 self._invalidate_cost_statistics_read_models()
@@ -16242,7 +16246,7 @@ class Application:
         )
         if bank_detail_scope_keys:
             self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
-            self._enqueue_bank_account_balance_read_model_refresh(reason="import_state_changed")
+            self._bank_account_balance_read_model_refresh_producer().enqueue_all(reason="import_state_changed")
         if invalidate_cost_statistics:
             self._invalidate_cost_statistics_read_model_scopes(
                 cost_statistics_scope_keys or ["all"],
@@ -19310,18 +19314,14 @@ class Application:
         )
 
     def _derived_lifecycle_bank_account_balance_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        enqueued = self._enqueue_bank_account_balance_read_model_refresh(reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_account_balance"))
+        enqueued = self._bank_account_balance_read_model_refresh_producer().enqueue_all(
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_account_balance")
+        )
         return {
             "deleted_counts": {"bank_account_balance_read_models": 0},
             "invalidated_scopes": ["all"],
             "enqueued_jobs": ["bank_account_balance.read_model.refresh"] if enqueued else [],
         }
-
-    def _enqueue_bank_account_balance_read_model_refresh(self, *, reason: str) -> bool:
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return False
-        return bool(refresh_gateway.enqueue_one("bank_account_balance", "all", reason=reason))
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         self._search_service.clear_cache()

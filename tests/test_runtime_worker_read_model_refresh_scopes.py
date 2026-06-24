@@ -18,6 +18,7 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         queue: QueueRecorder,
         *,
         search_read_model_refresh_producer: object | None = None,
+        bank_account_balance_read_model_refresh_producer: object | None = None,
     ) -> _RuntimeWorkerDerivedLifecycle:
         return _RuntimeWorkerDerivedLifecycle(
             queue_repository=queue,
@@ -25,6 +26,7 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
             search_service=SimpleNamespace(clear_cache=lambda: None),
             workbench_source_versions_provider=lambda: {},
             search_read_model_refresh_producer=search_read_model_refresh_producer,
+            bank_account_balance_read_model_refresh_producer=bank_account_balance_read_model_refresh_producer,
         )
 
     def test_worker_lifecycle_normalizes_cost_statistics_refresh_scopes(self) -> None:
@@ -72,6 +74,48 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         self.assertNotIn(("search", "2026-03", "import_state_changed"), queue.refreshes)
         self.assertIn(("workbench_relation", "2026-03", "import_state_changed"), queue.refreshes)
 
+    def test_import_state_bank_account_balance_refresh_uses_producer_boundary(self) -> None:
+        queue = QueueRecorder()
+        bank_account_balance_producer = FakeBankAccountBalanceRefreshProducer()
+        lifecycle = self._lifecycle(
+            queue,
+            bank_account_balance_read_model_refresh_producer=bank_account_balance_producer,
+        )
+        snapshot_service = SimpleNamespace(snapshot=lambda: {})
+
+        lifecycle.persist_import_state(
+            import_service=snapshot_service,
+            file_import_service=snapshot_service,
+            etc_service=snapshot_service,
+            etc_reconciliation_task_service=snapshot_service,
+            tax_certified_import_service=snapshot_service,
+            bank_detail_scope_keys=["2026-03"],
+        )
+
+        self.assertEqual(bank_account_balance_producer.calls, [(["all"], "import_state_changed")])
+        self.assertNotIn(("bank_account_balance", "all", "import_state_changed"), queue.refreshes)
+        self.assertIn(("bank_detail", "2026-03", "import_facts_changed"), queue.refreshes)
+
+    def test_lifecycle_bank_account_balance_refresh_uses_all_only_producer_boundary(self) -> None:
+        queue = QueueRecorder()
+        bank_account_balance_producer = FakeBankAccountBalanceRefreshProducer()
+        lifecycle = self._lifecycle(
+            queue,
+            bank_account_balance_read_model_refresh_producer=bank_account_balance_producer,
+        )
+
+        result = lifecycle.execute_event(
+            "bank_import_confirmed",
+            months=["2026-03"],
+            metadata={"reason": "unit_test"},
+        )
+
+        self.assertEqual(bank_account_balance_producer.calls, [(["2026-03", "all"], "unit_test")])
+        self.assertNotIn(("bank_account_balance", "2026-03", "unit_test"), queue.refreshes)
+        self.assertNotIn(("bank_account_balance", "all", "unit_test"), queue.refreshes)
+        self.assertIn("bank_account_balance.read_model.refresh", result["enqueued_jobs"])
+        self.assertIn("all", result["invalidated_scopes"])
+
     def test_worker_lifecycle_does_not_apply_cost_scope_rules_to_other_read_models(self) -> None:
         queue = QueueRecorder()
         lifecycle = self._lifecycle(queue)
@@ -99,6 +143,19 @@ class FakeSearchRefreshProducer:
     def enqueue(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> bool:
         self.calls.append((list(scope_keys), reason))
         return True
+
+
+class FakeBankAccountBalanceRefreshProducer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def enqueue_all(self, *, reason: str, **_kwargs: object) -> bool:
+        self.calls.append((["all"], reason))
+        return True
+
+    def enqueue_scope_keys(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> list[str]:
+        self.calls.append((list(scope_keys), reason))
+        return ["all"]
 
 
 if __name__ == "__main__":

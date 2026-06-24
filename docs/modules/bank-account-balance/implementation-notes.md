@@ -23,3 +23,11 @@
 - 结论：`Application._enqueue_bank_account_balance_read_model_refresh(...)` 仍是最高优先级本地 implementation gap；它虽然走 `ReadModelRefreshGateway`，但模块 IO 边界仍在 app 层。
 - 相关缺口：`Application._derived_lifecycle_bank_account_balance_executor(...)` 仍直接组装 invalidated scope 和 enqueued job；runtime import-state fan-out 仍使用 generic `_enqueue_scopes("bank_account_balance", ["all"])`；scope policy 接受 month/all 但 worker/storage 只接受 `all`；dedicated operation barrier regression 和 Bank Detail fallback quarantine 仍待补齐。
 - 决策：下一条边界为 `read-models:bank-account-balance-refresh-producer-extraction`。先抽 `BankAccountBalanceReadModelRefreshProducer`，保持 `bank_account_balance:all` all-only 语义，再处理 derived lifecycle、scope contract、operation barrier 和 fallback。
+
+## 2026-06-24 - refresh producer extraction
+
+- 目标：将 `bank_account_balance` 非事务 refresh enqueue 从 app/runtime generic helper 收敛到显式 producer。
+- 改动：新增 `BankAccountBalanceReadModelRefreshProducer`；Application import-state、Bank Details service injection、runtime import-state fan-out、runtime derived lifecycle fan-out 和 backfill enqueue 均改用 producer。
+- 边界决策：producer 永远 normalize 为 `["all"]`，保持当前 worker/storage all-only contract，不引入 month/account projection scope。
+- 保持不变：余额计算、account identity、latest balance、API shape、worker event、queue schema、权限、审计和前端行为。
+- 下一步：`read-models:bank-account-balance-derived-lifecycle-executor-extraction`，把 Application 中的 derived lifecycle response assembly 移入 dedicated executor。

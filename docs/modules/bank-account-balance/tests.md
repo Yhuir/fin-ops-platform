@@ -35,6 +35,15 @@
 - 复用覆盖：account-balance projection/repository port、Bank Details SQL runtime、backfill CLI、manifest 和 runtime worker registry tests。
 - 审计结论：下一条实现边界需要新增 `BankAccountBalanceReadModelRefreshProducer`；后续还需补 dedicated `bank_account_balance:all` operation barrier regression、all-only scope contract guard 和兼容 fallback 处理。
 
+## 2026-06-24 - refresh producer extraction
+
+- 新增：`tests/test_bank_account_balance_read_model.py::BankAccountBalanceProjectionTests::test_refresh_producer_enqueues_all_scope_through_gateway`。
+- 新增：`tests/test_bank_account_balance_read_model.py::BankAccountBalanceProjectionTests::test_refresh_producer_returns_false_when_gateway_unavailable`。
+- 新增：`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_import_state_bank_account_balance_refresh_uses_producer_boundary`。
+- 新增：`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_lifecycle_bank_account_balance_refresh_uses_all_only_producer_boundary`。
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_refresh_producer_helpers_stay_out_of_application`。
+- 覆盖：Application、Bank Details service injection、runtime import-state、runtime derived lifecycle 和 backfill enqueue 均走 `BankAccountBalanceReadModelRefreshProducer`，且 producer 保持 `bank_account_balance:all` all-only contract。
+
 ## 下一 slice 必跑建议
 
 ```bash

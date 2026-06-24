@@ -1315,3 +1315,10 @@
 - 目标：审计 `bank_account_balance` refresh enqueue、derived lifecycle、runtime import-state fan-out、all-only scope contract、operation barrier 和 Bank Detail fallback。
 - 结论：审计关闭为 `analysis-closed`，但模块仍为 `implementation-gap-open`。最高优先级实现缺口是 `Application._enqueue_bank_account_balance_read_model_refresh(...)` 仍拥有模块 refresh IO；下一条边界为 `read-models:bank-account-balance-refresh-producer-extraction`。
 - 后续：producer extraction 后继续处理 derived lifecycle executor、all-only scope contract、dedicated operation barrier regression 和 Bank Detail fallback quarantine。
+
+## 2026-06-24 - bank account balance refresh producer extraction
+
+- 目标：将账户余额 refresh enqueue 统一到 `BankAccountBalanceReadModelRefreshProducer`。
+- 改动：新增 producer，移除 `Application._enqueue_bank_account_balance_read_model_refresh(...)`，并让 Application import-state、Bank Details service injection、runtime import-state/derived lifecycle fan-out 和 backfill CLI enqueue 走 producer。
+- 边界决策：producer normalize 为 `bank_account_balance:all`，不引入 month/account scope。
+- 下一步：`read-models:bank-account-balance-derived-lifecycle-executor-extraction`。

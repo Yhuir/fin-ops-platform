@@ -16,6 +16,7 @@ from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -274,6 +275,7 @@ class _RuntimeWorkerDerivedLifecycle:
         search_service: SearchService,
         workbench_source_versions_provider: Callable[[], dict[str, object]],
         search_read_model_refresh_producer: Any | None = None,
+        bank_account_balance_read_model_refresh_producer: Any | None = None,
     ) -> None:
         self._queue_repository = queue_repository
         self._state_store = state_store
@@ -283,6 +285,10 @@ class _RuntimeWorkerDerivedLifecycle:
         self._search_read_model_refresh_producer = (
             search_read_model_refresh_producer
             or SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: self._read_model_refresh_gateway)
+        )
+        self._bank_account_balance_read_model_refresh_producer = (
+            bank_account_balance_read_model_refresh_producer
+            or BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=lambda: self._read_model_refresh_gateway)
         )
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
@@ -317,7 +323,7 @@ class _RuntimeWorkerDerivedLifecycle:
                 "tax_offset_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "tax_offset", reason),
                 "tax_offset_month_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
                 "pending_invoice_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "pending_invoice", reason),
-                "bank_account_balance_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_account_balance", reason),
+                "bank_account_balance_read_model": lambda domain_plan: self._enqueue_bank_account_balance_domain(domain_plan, reason),
                 "bank_detail_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_detail", reason),
                 "no_oa_bank_batch_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "no_oa_bank_batch", reason),
                 "search_cache": lambda domain_plan: self._clear_search_cache(domain_plan),
@@ -442,9 +448,20 @@ class _RuntimeWorkerDerivedLifecycle:
         self._enqueue_scopes("oa_pending_payment", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         if bank_detail_scope_keys:
             self._enqueue_scopes("bank_detail", bank_detail_scope_keys, reason="import_facts_changed")
-            self._enqueue_scopes("bank_account_balance", ["all"], reason="import_state_changed")
+            self._bank_account_balance_read_model_refresh_producer.enqueue_all(reason="import_state_changed")
         if invalidate_cost_statistics:
             self._enqueue_scopes("cost_statistics", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+
+    def _enqueue_bank_account_balance_domain(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
+        enqueued_scope_keys = self._bank_account_balance_read_model_refresh_producer.enqueue_scope_keys(
+            self._scope_keys(domain_plan) or ["all"],
+            reason=reason,
+        )
+        return {
+            "deleted_counts": {"bank_account_balance": 0},
+            "invalidated_scopes": enqueued_scope_keys,
+            "enqueued_jobs": ["bank_account_balance.read_model.refresh"] if enqueued_scope_keys else [],
+        }
 
     def _enqueue_domain(self, domain_plan: dict[str, object], scope_type: str, reason: str) -> dict[str, object]:
         scope_keys = self._scope_keys(domain_plan) or ["all"]
