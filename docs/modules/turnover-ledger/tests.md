@@ -124,6 +124,20 @@
 
 生产 Row286 已证明当前 release 的 grouped GET 可以隐藏 enqueue；本地修复后仍需要单独 deploy/re-smoke 边界验证生产 `turnover_ledger_grouped` response metadata 和 aggregate no-hidden-enqueue 行为。
 
+## 2026-06-25 - refresh source-version persistence contract fix test note
+
+`read-models:turnover-ledger-refresh-source-version-persistence-contract-fix` 修复了 turnover projection 在 `list_grouped_ledger()` 触发 `TurnoverRelationService.rebuild_from_bank_rows(...)` 内存重建后才捕获 source versions，导致 worker 持久化的 `turnover_relation_snapshot_version` 与 API fresh gate expected source versions 不一致的问题。
+
+- Business core unit tests：不适用；本 slice 不改外部往来分组、金额、标签、闭环、撤回或 extra 业务规则。
+- Service-layer tests：适用；新增 `tests/test_turnover_ledger_read_model_refresh.py::TurnoverLedgerReadModelRefreshServiceTests::test_projection_source_versions_are_captured_before_relation_rebuild_side_effects`，证明 projection 保存的 top-level 和 row-level `source_versions` 在 grouped ledger 内存重建副作用前捕获，和 API expected source version 合同对齐。
+- API contract tests：适用为回归；复跑 `tests/test_turnover_ledger_api.py`，证明 grouped metadata/API shape 不因 source-version 捕获时序变化而改变。
+- Read model/cache/background job tests：适用；复跑 `tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_facade.py`，保护 projection save、fresh/stale gateway 和 read facade 合同。
+- Frontend component and interaction tests：不适用；本 slice 不改前端展示、操作 overlay、API mapper 或交互。
+- End-to-end business-flow integration tests：不适用；本 slice 不改 confirm/withdraw/tag-selection/extra 写链路。
+- Existing feature regression tests：适用；`tests/test_turnover_ledger_api.py` 和 read facade/query service 全量回归继续保护旧 grouped shape、metadata、stale/missing 行为。
+
+生产 Row289 已证明 API/projection provider 当前 hash 一致，但 persisted row source_versions 仍旧；本地修复后必须单独 deploy/re-smoke，并用生产 focused grouped probe 证明 `read_model_status=fresh` 或明确分类剩余 enqueue。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

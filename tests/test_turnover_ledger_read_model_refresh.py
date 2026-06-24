@@ -161,6 +161,36 @@ class NonFreshLedgerService:
         raise RuntimeError("bank_detail_read_model_not_fresh")
 
 
+class MutatingGroupedLedgerService:
+    def __init__(self, mutate: object) -> None:
+        self._mutate = mutate
+
+    def list_grouped_ledger(self, *, page: int = 1, page_size: int = 200, **_kwargs: object) -> dict[str, object]:
+        if callable(self._mutate):
+            self._mutate()
+        if page > 1:
+            return {"groups": [], "pagination": {"page": page, "page_size": page_size, "total": 1}}
+        return {
+            "groups": [
+                {
+                    "group_id": "counterparty:personal:version",
+                    "counterparty_name": "version",
+                    "family": "personal",
+                    "family_label": "个人往来",
+                    "summary_row": {
+                        "row_kind": "summary",
+                        "relation_id": "rel-version",
+                        "bank_row_ids": ["bank-version-1"],
+                    },
+                    "flow_rows": [],
+                    "allocation_lots": [],
+                    "lot_rows": [],
+                }
+            ],
+            "pagination": {"page": page, "page_size": page_size, "total": 1},
+        }
+
+
 class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
     def test_projection_source_versions_include_bank_detail_source_versions(self) -> None:
         class CategoryProvider:
@@ -211,6 +241,31 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(row["flow_rows"][0]["category_label_path"], ["外部往来款收款", "收回借款", "个人往来"])
         self.assertEqual(row["flow_rows"][0]["bank_account_labels"], ["工行 2002"])
         self.assertEqual(row["flow_rows"][0]["repayment_remark"], "收回周转款 / 收款备注")
+
+    def test_projection_source_versions_are_captured_before_relation_rebuild_side_effects(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        relation_snapshot = {"turnover_relation_snapshot_version": "before-rebuild"}
+
+        def mutate_relation_snapshot() -> None:
+            relation_snapshot["turnover_relation_snapshot_version"] = "after-rebuild"
+
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=MutatingGroupedLedgerService(mutate_relation_snapshot),  # type: ignore[arg-type]
+            source_versions_provider=lambda: dict(relation_snapshot),
+        )
+
+        builder.rebuild_turnover_ledger_read_model_scope("all", source_version=14)
+
+        rows = list((repository.saved_payload or {}).get("rows") or [])
+        self.assertEqual(
+            (repository.saved_payload or {}).get("source_versions"),
+            {"turnover_relation_snapshot_version": "before-rebuild"},
+        )
+        self.assertEqual(
+            rows[0]["source_versions"],
+            {"turnover_relation_snapshot_version": "before-rebuild"},
+        )
 
     def test_projection_enriches_rows_with_fresh_workbench_relation_context(self) -> None:
         repository = FakeTurnoverReadRepository()

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-source-version-stale-after-refresh-diagnosed`
+Current state: `turnover-ledger-source-version-persistence-fix-implemented`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis` as `production-diagnosis-closed` in `analysis/production-turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis-2026-06-25.md`. T0 proved API expected source versions and SQL projection provider source versions agree, but persisted turnover read-model top-level and row-level source versions still carry an older `turnover_relation_snapshot_version` after the visible refresh reached done; App Status still reports fresh. Full user-scope API, local refresh persistence fix, browser/admin/write and global/module closure remain open. Next boundary is `read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`.
+Completed `read-models:turnover-ledger-refresh-source-version-persistence-contract-fix` as `implementation-closed` in `analysis/read-model-turnover-ledger-refresh-source-version-persistence-contract-fix-2026-06-25.md`. T0 moved turnover projection source-version capture before grouped row collection can trigger in-memory relation rebuild side effects, added a projection source-version capture regression, updated turnover docs and verified targeted/broader turnover suites. Full user-scope API, production deploy/re-smoke, browser/admin/write and global/module closure remain open. Next boundary is `production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis`
+`read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`
 
 ## Next Prompt
 
-`read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`
+`production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`

@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:turnover-ledger-relation-snapshot-source-version-mismatch-diagnosis`.
+Continue after `read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`.
 
 ## Current State
 
@@ -33,44 +33,45 @@ Continue after `production:turnover-ledger-relation-snapshot-source-version-mism
   - top-level and first-row mismatch reasons are both `turnover_relation_snapshot_version_mismatch`;
   - repository payload still says `read_model_status=fresh`;
   - App Status readiness remains `fresh=498`, dirty/outbox done and dead letters none.
+- Row290 local fix:
+  - `TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope(...)` now captures source versions before `_collect_rows(ledger_service)`;
+  - this prevents `TurnoverLedgerService.list_grouped_ledger()` / `rebuild_from_bank_rows(...)` in-memory relation rebuild side effects from changing the version persisted by the worker;
+  - new test `test_projection_source_versions_are_captured_before_relation_rebuild_side_effects`;
+  - verification passed: turnover refresh `9 passed`, turnover query/read-facade/API `148 passed`, `31 subtests passed`, compileall passed.
 - Browser/admin/write probes and global/module closure remain open.
 
 ## Next Boundary
 
-`read-models:turnover-ledger-refresh-source-version-persistence-contract-fix`
+`production:turnover-ledger-source-version-persistence-fix-deploy-and-convergence`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row289 evidence if it is not already committed.
-3. Read turnover ledger module docs before code edits:
-   - `docs/modules/turnover-ledger/README.md`;
-   - `docs/modules/turnover-ledger/tests.md`;
-   - `docs/modules/turnover-ledger/implementation-notes.md`.
-4. Inspect local code around:
-   - `TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope`;
-   - `TurnoverLedgerReadModelRepositoryPort.save_turnover_ledger_rows`;
-   - PostgreSQL turnover ledger repository save/list methods;
-   - worker handler/readiness marking for `turnover_ledger.read_model.refresh`;
-   - tests covering source-version persistence and App Status freshness.
-5. Implement the smallest fix so completed turnover refresh persists current source versions or cannot mark readiness fresh while persisted row source versions are stale.
+2. Commit/push Row290 implementation if it is not already committed.
+3. Write a bounded production deploy/convergence runbook under `.planning/refactors/modular-io-boundaries/analysis/production-turnover-ledger-source-version-persistence-fix-deploy-and-convergence-2026-06-25.md` before any production command.
+4. Precheck active release, `/health/ready`, dirty/readiness/outbox/dead-letter aggregates and current turnover persisted source-version mismatch.
+5. Deploy current `origin/dev` with the standard `./scripts/deploy-oa.sh --release-name ...` path.
+6. Run focused authenticated grouped turnover metadata re-smoke only.
+7. Run read-only persisted source-version comparison after the probe/refresh convergence.
 
-## Implementation Scope
+## Production Expectations
 
-- Preserve turnover ledger business grouping and API response shape.
-- Reuse the existing source-version provider, projection builder, repository port, read model gateway and worker/readiness boundaries.
-- Do not add broad fallback code or duplicate SQL ownership.
-- Add focused regression coverage for source-version persistence/freshness proof.
+- Focused grouped turnover response should expose metadata.
+- Expected clean result after deploy/convergence: HTTP 200, `read_model_status=fresh`, `refresh_enqueued=false`, no `turnover_relation_snapshot_version_mismatch`, and persisted top-level/row-level `turnover_relation_snapshot_version` hash matching API expected.
+- If a refresh is still enqueued, it must be visible and postcheck must classify convergence.
 
 ## Required Verification
 
-- Run targeted turnover projection/repository/worker tests relevant to the fix.
+- Runbook committed/pushed before deploy if it changes repository files.
+- Deployment release and git commit recorded.
+- Focused metadata probe and persisted source-version comparison recorded with sanitized metadata only.
+- Postcheck health/dirty/readiness/outbox/dead-letter evidence recorded.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
-- Commit/push local fix and select a separate deploy/convergence boundary.
 
 ## Stop Gates
 
-- Do not run production deploy or API smoke in this boundary.
-- Do not change turnover business semantics, grouping, manual closure/withdraw/tag-selection behavior or Workbench relation writes.
-- Do not claim module/global closure from local fix/tests alone.
+- Do not broaden into full user-scope API, browser, admin or write probes in this boundary.
+- Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
+- Do not manually repair, direct-SQL mutate, mark readiness or run broad refresh/replay outside the runbook.
+- Do not claim module/global closure from this deploy/convergence alone.

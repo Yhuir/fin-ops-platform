@@ -55,10 +55,10 @@ class TurnoverLedgerSqlProjectionBuilder:
             read_repository = built["read_repository"]
             workbench_relation_read_facade = workbench_relation_read_facade or built.get("workbench_relation_read_facade")
 
+        source_versions = dict(source_versions_provider())
         rows = self._collect_rows(ledger_service)
         if normalized_scope_key != "all":
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
-        source_versions = dict(source_versions_provider())
         rows = self._with_workbench_relation_context(
             rows,
             workbench_relation_read_facade=workbench_relation_read_facade,

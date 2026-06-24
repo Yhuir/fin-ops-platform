@@ -431,3 +431,11 @@ git diff --check
 - 决策：保持 grouped 业务 shape 不变，但 `_flat_payload_to_grouped(...)` 必须保留除 legacy `rows` 外的原顶层字段，再覆盖 grouped 相关字段。这样 fresh SQL payload 继续返回 grouped data，同时 stale/source-version mismatch payload 的 `refresh_enqueued` 可被 API smoke 和前端 stale 逻辑观测。
 - 测试：新增 grouped fresh/stale API 回归；stale grouped SQL read model 仍 enqueue `turnover_ledger:all`，但 response 不再隐藏 `refresh_enqueued=true` 和 `refresh_reason=source_version_mismatch`。
 - 非目标：本 slice 不改变 legacy local fallback、manual closure/withdraw/tag-selection/extra 写链路，不运行生产 deploy。生产复验需独立 runbook。
+
+## 2026-06-25 - refresh source-version capture before relation rebuild
+
+- 触发事实：生产 Row288 部署 grouped metadata fix 后，focused grouped GET 正确暴露 `read_model_status=refreshing`、`refresh_enqueued=true`、`refresh_reason=source_version_mismatch`，stale reason 为 `turnover_relation_snapshot_version_mismatch`；Row289 只读诊断进一步证明 API expected source versions 和 `TurnoverLedgerSqlProjectionBuilder` provider 当前 source versions 一致，但 persisted turnover read model 顶层/行级 source_versions 仍是旧 relation snapshot hash，且 App Status 仍 fresh。
+- 根因：`TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope(...)` 先调用 `_collect_rows(ledger_service)`；`TurnoverLedgerService.list_grouped_ledger()` / `list_ledger()` 会触发 `TurnoverRelationService.rebuild_from_bank_rows(...)` 并在内存里替换 relation snapshot。projection 随后才调用 `source_versions_provider()`，导致 worker 持久化的 `turnover_relation_snapshot_version` 描述的是内存重建后的 snapshot，而 API fresh gate expected source versions 描述的是进入查询前的持久化 snapshot。
+- 决策：projection 必须在 `_collect_rows(...)` 之前捕获 source_versions，之后仍允许 `_with_workbench_relation_context(...)` 追加 Workbench relation source_versions。这样 worker 保存的 top-level/row-level source_versions 与 API fresh gate 对齐，不改变 grouped rows 的业务生成逻辑。
+- 测试：新增 source-version 捕获时序回归，模拟 grouped ledger collection 改变 relation snapshot，断言保存的 payload 和 row `source_versions` 仍使用重建前版本。
+- 非目标：本 slice 不改变外部往来自动关系重建、manual closure/withdraw、Workbench relation 写入、grouped payload 业务字段、API metadata shape 或生产部署。
