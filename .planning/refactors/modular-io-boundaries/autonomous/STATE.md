@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-browser-ops-runner-design-selected`
+Current state: `production-route-shell-sanitized-output-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-write-flow-discovery-closure-selection` as `planning-closed` in `analysis/planning-post-write-flow-discovery-closure-selection-2026-06-25.md`. T0 reconciled Row292 API evidence, Row294/296 browser harness gap, Row297 admin seam gap and Row299 read-only write-flow discovery. Controlled write apply and admin probes remain blocked by approval/auth gates. The next safe owned boundary is `deployment:production-browser-smoke-ops-runner-design`, because browser production evidence can still be advanced by designing a dedicated runner without secrets, production mutation, app auth changes, package install/download on the app host or broad release-archive changes.
+Completed `deployment:production-browser-smoke-ops-runner-design` as `analysis-closed` in `analysis/deployment-production-browser-smoke-ops-runner-design-2026-06-25.md`. T0 designed a dedicated controlled browser runner path that keeps Playwright/browser runtime outside the normal app release and production app host, uses an in-memory token handoff contract, emits sanitized metadata only, and requires pre/post production health/read-model aggregate checks. The design found one pre-run contract gap: `web/e2e/production-route-shell.spec.ts` failure output can include page body `textSample`. Next boundary is `frontend:production-route-shell-sanitized-output-contract`.
 
 ## Closed Or Deferred Slices
 
