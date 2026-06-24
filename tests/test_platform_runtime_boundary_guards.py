@@ -3018,15 +3018,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             not in queue_source
         ):
             violations.append("Workbench unignore-row route owner extraction is not closed as implementation")
+        self.assertEqual(violations, [])
+
+    def test_modern_workbench_action_route_owner_post_extraction_audit_selects_withdraw_preview(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-post-extraction-audit.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
         if (
-            "| 209 | `server-py:modern-workbench-action-route-owner-post-extraction-audit` | pending"
+            "| 209 | `server-py:modern-workbench-action-route-owner-post-extraction-audit` | analysis-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit modern Workbench action route-owner closure")
+            violations.append("Workbench action route-owner post-extraction audit is not closed as analysis")
+        if (
+            "| 210 | `server-py:workbench-withdraw-link-preview-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench withdraw-link preview route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:modern-workbench-action-route-owner-post-extraction-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench action route-owner post-extraction audit")
+        if "`server-py:workbench-withdraw-link-preview-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench withdraw-link preview extraction")
+        if "preview_withdraw_link" not in analysis_source:
+            violations.append("Post-extraction audit does not record the remaining withdraw preview facade delegation")
 
         self.assertEqual(violations, [])
 
