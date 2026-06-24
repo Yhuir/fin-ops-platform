@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:legacy-workbench-exception-helper-dead-code-audit.
+- Last completed boundary: server-py:modern-workbench-action-route-owner-audit.
 - Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -172,7 +172,8 @@ Current state expected on start:
 - `server-py:workbench-legacy-action-handler-quarantine-audit` is complete as an analysis slice: old `/workbench/actions/*` routes were classified as test-observed compat paths backed by `ManualReconciliationService` and `LedgerService`, modern `/api/workbench/actions/*` wrappers were classified as `WorkbenchWriteFacade` delegates, and `server-py:legacy-workbench-action-route-module-quarantine` was selected as the next narrow implementation boundary.
 - `server-py:legacy-workbench-action-route-module-quarantine` is complete as an implementation slice: `LegacyWorkbenchActionRoutes` owns old `/workbench/actions/confirm|difference|exception|offline|offset` payload mapping and reconciliation/ledger calls, `Application` no longer defines the five old app-owned handlers, and modern `/api/workbench/actions/*` wrappers remain facade-backed.
 - `server-py:legacy-workbench-exception-helper-dead-code-audit` is complete as an implementation slice: no-caller `_handle_legacy_workbench_exception_via_application(...)` was removed, the unused conflict import was cleaned, and the legacy Workbench action quarantine guard prevents the helper from returning.
-- The next pending boundary is `server-py:modern-workbench-action-route-owner-audit`.
+- `server-py:modern-workbench-action-route-owner-audit` is complete as an analysis slice: modern `/api/workbench/actions/*` and `/api/workbench/exception/*` wrappers were classified by JSON/auth/freshness/timing responsibility, facade/application-service delegate, tests and target owner.
+- The next pending boundary is `server-py:workbench-exception-preview-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -268,14 +269,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:modern-workbench-action-route-owner-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-exception-preview-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:modern-workbench-action-route-owner-audit`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-legacy-workbench-exception-helper-dead-code-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-legacy-workbench-action-route-module-quarantine.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_v2_api.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Audit modern Workbench action wrappers still in `server.py`, including confirm/cancel/withdraw, exception preview/apply, cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore and unignore wrappers.
-- Classify each wrapper by HTTP/auth/freshness/timing responsibility, facade/application-service delegate, current tests, and target route owner.
-- Select exactly one next narrow implementation or follow-up audit boundary.
-- Do not move runtime code in this audit slice unless the target is smaller than the audit and fully covered.
+For `server-py:workbench-exception-preview-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_exception_application.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Move `/api/workbench/exception/preview` payload/error mapping behind an explicit modern Workbench action route owner.
+- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; `WorkbenchExceptionApplicationService.preview(payload)` remains the delegate; `KeyError` maps to `404` with `error=workbench_row_not_found`; `TypeError` and `ValueError` map to `400` with `error=invalid_workbench_exception_preview_request`; success maps to `200` with the preview payload.
+- Keep `Application` as HTTP dispatch and JSON body parser for this slice if that keeps the change narrower.
+- Add or update a static guard proving the preview endpoint is no longer implemented as an app-owned business/error-mapping wrapper once extracted.
+- Do not move `/api/workbench/exception/apply` in the same slice.
+- Do not move confirm/cancel/withdraw, cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, or unignore routes.
 - Do not change modern Workbench API response shapes, status codes, auth, freshness guard, idempotency, relation semantics, operation barrier behavior, read model refresh behavior or frontend behavior.
 - Do not change legacy `/workbench/actions/*` behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.

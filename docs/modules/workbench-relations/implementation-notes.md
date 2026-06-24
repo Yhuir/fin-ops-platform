@@ -1,5 +1,27 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - modern Workbench action route owner audit
+
+目标：审计现代 `/api/workbench/actions/*` 与 `/api/workbench/exception/*` wrapper 是否继续混在 `server.py` 中，以及下一步 route owner 拆分应该从哪里开始。
+
+结论：
+
+- 旧 `/workbench/actions/confirm|difference|exception|offline|offset` 已由 `LegacyWorkbenchActionRoutes` 显式隔离为 compat-only owner。
+- 现代 `/api/workbench/actions/*` wrapper 继续委托 `WorkbenchWriteFacade`，未回退到旧 `ManualReconciliationService` 链路。
+- `routes_workbench.py` 仍是 `WorkbenchActionService` 的旧薄封装，不适合作为现代 facade 写链路的直接承载点。
+- 现代 action route owner 应围绕 `WorkbenchWriteFacade`、`WorkbenchExceptionApplicationService`、freshness guard、auth context、request id 和 timing 语义逐步建立。
+- `_handle_api_workbench_cancel_exception(...)` 中存在一个无行为差异的 live-service 分支；它的两个分支都调用同一个 delegate，后续可作为小清理，但不应替代 route-owner 拆分主线。
+
+下一条边界：`server-py:workbench-exception-preview-route-owner-extraction`。先迁移 `/api/workbench/exception/preview` 的 preview/error mapping，因为它不涉及 freshness guard、auth、request timing、relation write、operation barrier 或 read model refresh。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - server.py Workbench legacy action handler quarantine audit
 
 目标：审计 `server.py` 中残留的 Workbench legacy action handler，判断哪些属于旧链路、哪些属于现代 facade/command 边界，避免旧代码污染新的 relation/read model 链路。

@@ -2401,14 +2401,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Legacy Workbench exception helper audit is not closed as implementation")
         if (
-            "| 194 | `server-py:modern-workbench-action-route-owner-audit` | pending"
+            "| 194 | `server-py:modern-workbench-action-route-owner-audit` | analysis-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit modern Workbench action route ownership")
+            violations.append("Modern Workbench action route-owner audit is not closed as analysis")
+        if (
+            "| 195 | `server-py:workbench-exception-preview-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench exception preview route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:modern-workbench-action-route-owner-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at modern Workbench action route owner audit")
+        if "`server-py:workbench-exception-preview-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench exception preview route owner extraction")
 
         self.assertEqual(violations, [])
 
