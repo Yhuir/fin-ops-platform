@@ -192,7 +192,7 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - 未新增测试：本轮不改运行时代码，复用 producer/query/refresh/API、manifest、runtime worker registry、operation barrier 和 platform boundary guard 作为证据。
 - 剩余风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred；该状态不是 module closed。
 
-下一 slice 已由 `read-models:next-pilot-selection-after-turnover-ledger` 选定为 `read-models:no-oa-bank-batch-repository-state-store-boundary-audit`；`search` 和 `bank_account_balance` 保持后续候选。
+后续已完成 no-OA 与 Search 试点推进；Search local support 现已 accounted 并转为 `production-evidence-deferred`。下一 slice 是 `read-models:next-pilot-selection-after-search`，需要从当前证据确认 `bank_account_balance` 是否为下一个非 Go read model pilot。
 
 ## 历史 bug 回归库
 
@@ -298,6 +298,19 @@ git diff --check
 - 新增 API/runtime regression：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_requires_sql_repository_in_production_without_live_scan`。
 - 覆盖：生产 PostgreSQL runtime 下 `/api/search` 缺少 SQL repository 时返回 unavailable、入队 search refresh，且不调用 legacy/local live scan。
 - 回归验证：search SQL runtime、search API、manifest、runtime worker registry、app check、docs verify 和 diff check。
+
+## 2026-06-24 - search upstream producer boundary test notes
+
+- OA projection sync fan-out：`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_search_refresh_uses_search_producer_boundary` 覆盖 `OAProjectionSyncService` 不再直接 `enqueue_many("search", ...)`。
+- Runtime import-state fan-out：`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_import_state_search_refresh_uses_search_producer_boundary` 覆盖 runtime worker handler 不再直接 `_enqueue_scopes("search", ...)`。
+- Search worker all-scope fan-out：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_refresh_handler_expands_search_all_through_search_producer_boundary` 覆盖 `search:all` shard fan-out 通过 `SearchReadModelRefreshProducer.enqueue_scope_keys(...)`。
+- Static guard：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 app、OA projection sync、runtime worker handlers 和 Search pending refresh service 重新绕过 Search producer。
+
+## 2026-06-24 - search post-all-scope local closure audit test note
+
+- 新增测试：无。本轮是 analysis/accounting slice，不改运行时代码或测试 contract。
+- 复用覆盖：Search repository port、query freshness service、refresh producer、production fail-closed、OA fan-out、runtime import-state fan-out、Search worker all-scope fan-out、manifest、registry 和 static guard 测试。
+- 结论：未发现剩余本地 implementation gap；Search local support 转为 `production-evidence-deferred`，但真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍未闭环。
 
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 

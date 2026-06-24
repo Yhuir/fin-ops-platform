@@ -72,3 +72,11 @@
 - 改动：`SearchReadModelRefreshProducer` 新增 `enqueue_scope_keys(...)`，保持原 `enqueue(...)` boolean contract；普通 scope normalization 保留 caller order；`SearchPendingReadModelRefreshService` 新增可注入 producer，并让 `search:all` shard fan-out 调用 producer；新增 service-layer test 和 static guard。
 - 保持不变：`search:all` 仍只作为 fan-out command；worker 仍从 projection builder 读取 shard list；`enqueued_scope_keys` 顺序、payload shape、dirty scope completion、pending invoice fan-out、Search API、worker event、queue schema、Redis/cache、权限、审计和前端行为均不变。
 - 下一步：执行 `read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence，或是否还有其他本地旧路径需要拆分。
+
+## 2026-06-24 - post-all-scope local closure audit
+
+- 目标：在 Search worker `search:all` fan-out 已收敛到 `SearchReadModelRefreshProducer` 后，重新审计是否仍有本地 implementation gap。
+- 审计结论：未发现剩余本地 implementation gap。Search local support 已覆盖 repository port、query freshness service、source-version provider、refresh producer、app rebuild/query/refresh helper removal、production repository-unavailable fail-closed、OA fan-out producer boundary、runtime import-state producer boundary 和 worker all-scope fan-out producer boundary。
+- 保留兼容：`Application._handle_api_search(...)` 只在非 production SQL read model runtime 下保留 `SearchService.search(...)` legacy/local fallback；生产 SQL runtime 缺 repository 时必须 fail closed。`search-pending` 仍是兼容 worker lane，不能成为新的 Search owner。
+- 状态：`search` 转为 `production-evidence-deferred`，但不是全局模块闭环。真实 PostgreSQL read repository、dirty/outbox drain、App Status readiness、high-row performance 和 browser/user-flow evidence 仍不可由本地环境证明。
+- 下一步：执行 `read-models:next-pilot-selection-after-search`，从当前代码和文档确认下一个非 Go read model pilot；Go/Fiber/Go Worker admission 继续 blocked。

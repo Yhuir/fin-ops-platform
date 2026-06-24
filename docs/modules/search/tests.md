@@ -108,6 +108,20 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_
 PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_into_month_shards tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_through_search_producer_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
 ```
 
+## 2026-06-24 - post-all-scope local closure audit
+
+- 新增测试：无。本 slice 是 analysis/accounting，没有改运行时代码或测试 contract。
+- 复用覆盖：Search repository port、query freshness service、refresh producer、production fail-closed、OA fan-out、runtime import-state fan-out、Search worker all-scope fan-out、manifest、registry 和 static guard 测试。
+- 结论：未发现剩余本地 implementation gap；Search local support 转为 `production-evidence-deferred`，不代表全局模块闭环。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 下一 slice 必跑建议
 
 ```bash
@@ -120,4 +134,4 @@ git diff --check
 ## 未测风险
 
 - 当前没有独立 Browser `/api/search` 页面入口；用户可见全局搜索 UI 若后续新增，必须补 Spec-first E2E。
-- 真实 PostgreSQL/RabbitMQ/worker drain、high-row search index performance 和 App Status readiness 仍需 staging/production evidence；本地测试不能替代。
+- 真实 PostgreSQL/RabbitMQ/worker drain、high-row search index performance、App Status readiness 和生产页面/用户流 smoke evidence 仍需 staging/production evidence；本地测试不能替代。
