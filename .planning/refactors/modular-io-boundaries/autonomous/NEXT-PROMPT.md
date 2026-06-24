@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:read-model-auth-preflight-and-api-smoke-runbook`.
+Continue after `planning:post-auth-preflight-next-boundary-selection`.
 
 ## Current State
 
@@ -21,31 +21,29 @@ Continue after `production:read-model-auth-preflight-and-api-smoke-runbook`.
 - Row269 confirmed production `/health/ready` ready and `http_slo_auth_configured=no`.
 - Row269 did not run authenticated API smoke because the stop gate fired.
 - Row269 post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
+- Row270 selected local/internal API contract harness broadening across `http_slo_probe.DEFAULT_API_PROBES` as the next executable evidence boundary while production auth remains absent.
 - Local deterministic browser evidence is not production browser/API/high-row/worker closure.
 - Authenticated production API/browser smoke, production high-row browser, worker drain and module/global closure remain open.
 
 ## Next Boundary
 
-`planning:post-auth-preflight-next-boundary-selection`
+`contract:read-model-default-api-probe-harness-broadening`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Fetch `origin` and verify local `HEAD == origin/dev`.
 3. Read:
+   - `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`
    - `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`
-   - `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`
-   - `analysis/browser-read-model-full-deterministic-e2e-smoke-runbook-2026-06-25.md`
-   - `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`
-   - `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`
-   - `docs/operations/monitoring.md`
+   - `tests/test_read_model_api_contract_harness.py`
+   - `backend/src/fin_ops_platform/tools/http_slo_probe.py`
+   - `tests/test_http_slo_probe.py`
    - `autonomous/MODULE-QUEUE.md`
    - `autonomous/STATE.md`
    - `autonomous/JOURNAL.md`
-4. Reconcile Row269 auth-missing classification and select the next smallest safe boundary:
-   - human gate package for production auth/write approval;
-   - broader local/internal API harness coverage while production auth remains unavailable;
-   - or another independent non-secret production evidence route.
+4. Broaden `tests/test_read_model_api_contract_harness.py` so local `Application.handle_request(...)` exercises `http_slo_probe.DEFAULT_API_PROBES` with default test auth, sanitized JSON/status assertions and explicit negative auth guard coverage.
+5. Run targeted verification: `PYTHONPATH=backend/src pytest -q tests/test_read_model_api_contract_harness.py`.
 
 ## Stop Gates
 

@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: read-model auth preflight and API smoke runbook.
+- Last completed controller step: post-auth preflight next-boundary selection.
 - Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
@@ -100,7 +100,8 @@ Current state expected on start:
 - `browser:read-model-full-deterministic-e2e-smoke-runbook` is complete in `analysis/browser-read-model-full-deterministic-e2e-smoke-runbook-2026-06-25.md`: the full deterministic Chromium smoke inventory passed with 175/175 tests in 7.6m and no product/spec/smoke membership change.
 - `planning:post-full-deterministic-e2e-smoke-next-boundary-selection` is complete in `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`: Row267 local smoke evidence was reconciled against remaining external-risk gaps and auth preflight plus metadata-only production API smoke was selected next.
 - `production:read-model-auth-preflight-and-api-smoke-runbook` is deferred in `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`: `/health/ready` was ready, but `http_slo_auth_configured=no`, so authenticated API smoke did not run; post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
-- The next pending boundary is `planning:post-auth-preflight-next-boundary-selection`.
+- `planning:post-auth-preflight-next-boundary-selection` is complete in `analysis/planning-post-auth-preflight-next-boundary-selection-2026-06-25.md`: Row269 auth-missing production preflight was reconciled and local/internal API contract harness broadening across `http_slo_probe.DEFAULT_API_PROBES` was selected next.
+- The next pending boundary is `contract:read-model-default-api-probe-harness-broadening`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
