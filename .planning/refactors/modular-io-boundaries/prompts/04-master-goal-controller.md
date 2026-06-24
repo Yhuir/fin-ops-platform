@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:workbench-cancel-link-route-owner-extraction.
+- Last completed boundary: server-py:workbench-withdraw-link-route-owner-extraction.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -179,7 +179,8 @@ Current state expected on start:
 - `server-py:workbench-confirm-link-submit-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/confirm-link` live facade delegation while `Application` keeps HTTP dispatch, JSON parsing, freshness guard, auth context, request timing and response serialization.
 - `server-py:workbench-mark-exception-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/mark-exception` facade delegation while `Application` keeps HTTP dispatch, JSON parsing, freshness guard and response serialization.
 - `server-py:workbench-cancel-link-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/cancel-link` live facade delegation while `Application` keeps HTTP dispatch, JSON parsing, freshness guard, auth context, request timing and response serialization.
-- The next pending boundary is `server-py:workbench-withdraw-link-route-owner-extraction`.
+- `server-py:workbench-withdraw-link-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/withdraw-link` facade delegation while `Application` keeps HTTP dispatch, JSON parsing, freshness guard, auth context and response serialization.
+- The next pending boundary is `server-py:workbench-cash-special-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -275,15 +276,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-withdraw-link-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-cash-special-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-withdraw-link-route-owner-extraction`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cancel-link-route-owner-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_v2_api.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Move `/api/workbench/actions/withdraw-link` live facade delegation behind `WorkbenchActionApiRoutes` without changing behavior.
-- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; freshness guard remains in `Application` unless a reviewed helper preserves it exactly; `request_id` forwarding remains unchanged; `WorkbenchWriteFacade.withdraw_link(...)` remains the delegate through the existing live helper semantics; response shape, idempotency, affected scopes, operation projection and operation barrier behavior remain unchanged.
-- Keep `Application` as HTTP dispatch, JSON body parser, freshness gate and response serializer for this slice if that keeps the change narrower.
-- Add or update a static guard proving withdraw-link live facade delegation is no longer app-owned once extracted.
-- Do not move cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, unignore, exception preview/apply, confirm-link preview/submit, mark-exception or cancel-link routes.
+For `server-py:workbench-cash-special-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-withdraw-link-route-owner-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Move cash special action facade delegation behind `WorkbenchActionApiRoutes` without changing behavior. Candidate endpoints are `/api/workbench/actions/confirm-cash-pass-through`, `/api/workbench/actions/confirm-cash-ticket-purchase`, and `/api/workbench/actions/cancel-cash-special`.
+- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; freshness guard remains in `Application` unless a reviewed helper preserves it exactly; `request_id` forwarding remains unchanged; existing `WorkbenchWriteFacade.confirm_cash_pass_through(...)`, `confirm_cash_ticket_purchase(...)`, and `cancel_cash_special(...)` remain the delegates through the route owner; response shape, idempotency, stale expected-relation conflict, metadata mutation, affected scopes, operation projection and operation barrier behavior remain unchanged.
+- If the three cash special endpoints are too broad for one safe slice, split row 202 into the first narrower cash special endpoint and update queue/state before implementation.
+- Add or update static guards proving cash special facade delegation is no longer app-owned once extracted.
+- Do not move bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, unignore, exception preview/apply, confirm-link preview/submit, mark-exception, cancel-link or withdraw-link routes.
 - Do not change modern Workbench API response shapes, status codes, auth, freshness guard, idempotency, relation semantics, operation barrier behavior, read model refresh behavior or frontend behavior.
 - Do not change legacy `/workbench/actions/*` behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.

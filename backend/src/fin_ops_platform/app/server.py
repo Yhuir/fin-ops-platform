@@ -12303,7 +12303,7 @@ class Application:
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, tenant_id = auth_context
-        result = self._workbench_write_facade().withdraw_link(
+        result = self._workbench_action_api_routes.withdraw_link(
             payload,
             request_id=request_id,
             actor_id=actor_id,
@@ -14098,7 +14098,7 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        result = self._workbench_write_facade().withdraw_link(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.withdraw_link(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_update_bank_exception(self, payload: dict[str, object]) -> Response:

@@ -683,6 +683,52 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_withdraw_link_delegation_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def withdraw_link",
+            ".withdraw_link(",
+            "request_id=request_id",
+            "actor_id=actor_id",
+            "tenant_id=tenant_id",
+        ):
+            if marker not in route_class:
+                violations.append(f"withdraw-link route owner is missing marker {marker}")
+
+        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_withdraw_link")
+        for marker in (
+            "_workbench_write_freshness_guard()",
+            "_workbench_write_auth_context(headers)",
+            "_workbench_action_api_routes.withdraw_link(",
+            "request_id=request_id",
+            "actor_id=actor_id",
+            "tenant_id=tenant_id",
+        ):
+            if marker not in wrapper_source:
+                violations.append(f"server.py withdraw-link wrapper no longer preserves marker {marker}")
+        if "_workbench_write_response(result)" not in wrapper_source:
+            violations.append("server.py withdraw-link wrapper no longer preserves write response mapping")
+        if "_workbench_write_facade().withdraw_link" in wrapper_source:
+            violations.append("server.py withdraw-link wrapper still calls the write facade directly")
+
+        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_withdraw_link")
+        if "_workbench_action_api_routes.withdraw_link(payload, request_id=request_id)" not in live_source:
+            violations.append("server.py withdraw-link live handler does not delegate to the route owner")
+        if "_workbench_write_response(result)" not in live_source:
+            violations.append("server.py withdraw-link live handler no longer preserves write response mapping")
+        if "_workbench_write_facade().withdraw_link" in live_source:
+            violations.append("server.py withdraw-link live handler still calls the write facade directly")
+
+        self.assertEqual(violations, [])
+
     def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -745,7 +791,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"legacy route owner bypasses quarantine via {forbidden}")
 
         for handler_name, facade_method in {
-            "_handle_live_workbench_withdraw_link": "withdraw_link",
             "_handle_live_workbench_update_bank_exception": "update_bank_exception",
             "_handle_live_workbench_oa_bank_exception": "oa_bank_exception",
             "_handle_live_workbench_confirm_personal_advance_repayment": "confirm_personal_advance_repayment",
@@ -2667,14 +2712,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench cancel-link route owner extraction is not closed as implementation")
         if (
-            "| 201 | `server-py:workbench-withdraw-link-route-owner-extraction` | pending"
+            "| 201 | `server-py:workbench-withdraw-link-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench withdraw-link route ownership")
+            violations.append("Workbench withdraw-link route owner extraction is not closed as implementation")
+        if (
+            "| 202 | `server-py:workbench-cash-special-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench cash special route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-withdraw-link-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench withdraw-link route owner extraction")
+        if "`server-py:workbench-cash-special-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench cash special route owner extraction")
 
         self.assertEqual(violations, [])
 

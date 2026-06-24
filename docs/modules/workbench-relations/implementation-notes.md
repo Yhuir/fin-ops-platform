@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench withdraw-link route owner extraction
+
+目标：把现代 `/api/workbench/actions/withdraw-link` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `withdraw_link(...)`。
+- `WorkbenchActionApiRoutes.withdraw_link(...)` 现在拥有 `WorkbenchWriteFacade.withdraw_link(...)` 调用和 `request_id` / `actor_id` / `tenant_id` 传递。
+- `Application._handle_api_workbench_withdraw_link(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard、auth context 和 `_workbench_write_response(...)`。
+- `Application._handle_live_workbench_withdraw_link(...)` 仍负责测试/内部 live helper 的 response mapping，并通过 route owner 调用 facade。
+- 新增静态 guard，确保 withdraw-link 不会重新直接调用 `WorkbenchWriteFacade.withdraw_link(...)`，同时确认 freshness/auth/request-id/response mapping 仍保留。
+
+未改变：
+
+- cash special、bank exception、OA-bank exception、personal advance、cancel exception、ignore/unignore、exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link 都未迁移。
+- response shape、status code、auth、freshness guard、request timing、idempotency、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-cash-special-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_withdraw_link_uses_uow_transaction_when_available tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_withdraw_link_invalidates_only_affected_scopes_without_global_all tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_withdraw_link_read_model_scheduling_failure_rolls_back_relation_withdraw tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_withdraw_link_restores_previous_relation_snapshot tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_withdraw_link_without_history_falls_back_to_cancelling_active_relation tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_withdraw_link_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench cancel-link route owner extraction
 
 目标：把现代 `/api/workbench/actions/cancel-link` 的 live facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。

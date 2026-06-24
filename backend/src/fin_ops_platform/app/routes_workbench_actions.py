@@ -80,3 +80,18 @@ class WorkbenchActionApiRoutes:
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
+
+    def withdraw_link(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().withdraw_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
