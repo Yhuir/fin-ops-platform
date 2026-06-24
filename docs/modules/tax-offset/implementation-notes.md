@@ -33,6 +33,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO read model pilot selection
+
+- 目标：把 `tax_offset` 纳入 modular IO/read model 下一轮非 Go 试点，先从 repository port extraction 做小步实现。
+- 影响范围：planning analysis、autonomous queue/state/next prompt、read-models/tax-offset 文档；本轮不改税金业务代码、SQL、API、worker、前端或生产状态。
+- 关键决策：`tax_offset` 直接依赖 `invoice_lifecycle` / certified import 事实，且计划保存、认证导入、发票导入和 Workbench relation fan-out 后如果 fresh gate 或 operation barrier 有缺口，用户会看到“其他页面更新了，税金页没同步”的典型 bug。第一条实现边界限定为 manifest-listed repository port：`load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`。
+- 文档影响：本记录同步 read-models 试点选择；下一轮实现后需按实际代码改动更新本模块测试矩阵和必要的长期事实源。
+- 测试覆盖：本轮 analysis-only；下一轮实现需要新增/更新 port guard，并复跑 tax offset SQL runtime、read model service/API 相关目标测试。
+- 验证命令：本轮使用 `bash scripts/verify.sh docs` 和 `git diff --check`；下一轮按实现范围追加后端 targeted tests。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+
 ## 2026-06-22 - 保存/认证导入写后等待 tax_offset operation barrier
 
 - 目标：修复税金抵扣计划保存和已认证发票导入成功后前端立即重新读取 `/api/tax-offset`，可能读到旧 `tax_offset` projection 的缺口。

@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:invoice-lifecycle-local-implementation-closure-audit.
-- Last status: production-evidence-deferred.
+- Last completed boundary: read-models:next-pilot-selection-after-invoice-lifecycle.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -109,8 +109,9 @@ Current state expected on start:
 - `InvoiceLifecycleDerivedLifecycleExecutor` now owns invoice lifecycle derived lifecycle refresh execution; `Application` only assembles the gateway-backed enqueue callback.
 - `Application._derived_lifecycle_invoice_lifecycle_executor(...)` is removed and guarded from returning.
 - invoice_lifecycle local implementation support is accounted for after repository port, freshness/barrier and derived lifecycle executor slices, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- tax_offset is selected as the eighth non-Go read model implementation pilot because it directly consumes invoice lifecycle/certification state, has high stale-read risk after plan save/certified import/import fan-out, and has a narrow repository-port first slice.
 - No module is globally closed.
-- The next pending boundary is read-models:next-pilot-selection-after-invoice-lifecycle.
+- The next pending boundary is read-models:tax-offset-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -206,20 +207,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-invoice-lifecycle unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:tax-offset-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-invoice-lifecycle:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/06-PILOT-SELECTION.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, and `docs/modules/read-models/tests.md`.
+For read-models:tax-offset-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-invoice-lifecycle.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, and `docs/modules/tax-offset/tests.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Select the next non-Go modular IO/read model pilot from remaining implementation-gap-open modules.
+- Add a narrow tax offset read model repository port for manifest-listed `load_tax_offset_read_models`, `get_tax_offset_view`, and `save_tax_offset_read_models`.
+- Wire tax offset SQL read/query/projection paths that currently depend on broad `PostgresReadModelRepository` behavior through the narrow port.
+- Keep `PostgresReadModelRepository` as the SQL/table owner during this transition.
+- Preserve API shape, tax calculation rules, plan save behavior, certified import behavior, source-version semantics, worker event semantics, frontend behavior and production state.
+- Add or update tests proving the tax offset port does not expose unrelated read model methods.
 - Do not select Go hot-path admission while modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Compare remaining candidates using stale-read/cross-page risk, user-visible bug frequency, IO boundary readiness, legacy contamination risk, testability without local `PGSQL_URL`, and scope size.
-- Produce/update an analysis file documenting the candidate comparison and selected next boundary.
-- Insert the selected next implementation boundary before blocked Go candidates in MODULE-QUEUE.md.
-- Update STATE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification and diff checks; runtime tests are not required for selection-only analysis unless runtime code changes.
+- Produce/update an analysis file documenting previous state, implementation, legacy/pollution classification, state-machine impact, seven-category test applicability and verification.
+- Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
+- Run targeted tax offset tests, app wiring check if needed, docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to the selected next implementation boundary if verification passes.
+- Continue to the next selected boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.

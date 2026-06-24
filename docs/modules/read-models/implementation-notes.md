@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset selected as next modular IO read model pilot
+
+- 目标：执行 `read-models:next-pilot-selection-after-invoice-lifecycle`，在 `invoice_lifecycle` 本地支持 accounted 后选择下一个非 Go read model 试点。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models/tax-offset 实施记录和测试矩阵；不改运行时代码、SQL、API shape、read model schema、worker 或前端。
+- 关键决策：选择 `tax_offset`。它直接消费 invoice lifecycle/certification 状态，plan save、certified import、发票导入和 Workbench relation fan-out 都可能造成用户可见 stale-read；第一条实现边界足够窄，只需围绕 manifest-listed `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models` 建立 repository port。
+- 文档影响：新增 modular IO selection analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis-only slice，无运行时代码变化；下一轮实现必须覆盖 tax offset repository port 不暴露无关 read model 方法，并复跑 tax offset SQL runtime/read model/API 目标测试。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:tax-offset-repository-port-extraction`。
+
 ## 2026-06-24 - Invoice lifecycle local implementation closure accounting
 
 - 目标：执行 `read-models:invoice-lifecycle-local-implementation-closure-audit`，确认 `invoice_lifecycle` 在本地可验证范围内是否还有必须先修的实现缺口。

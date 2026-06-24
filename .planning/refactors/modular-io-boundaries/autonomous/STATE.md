@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-invoice-lifecycle-local-implementation-closure-audit`
+Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-invoice-lifecycle`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:invoice-lifecycle-local-implementation-closure-audit`. Local `invoice_lifecycle` implementation support is accounted for after repository port, freshness/barrier and derived lifecycle executor slices, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred, so the module is not globally closed. The next executable boundary is `read-models:next-pilot-selection-after-invoice-lifecycle`. Go hot-path admission remains blocked.
+Completed `read-models:next-pilot-selection-after-invoice-lifecycle`. `tax_offset` is selected as the next non-Go modular IO/read model pilot because it directly consumes the now-accounted invoice lifecycle/certification boundary, has high user-visible stale-read risk, and has a narrow repository-port first slice. The next executable boundary is `read-models:tax-offset-repository-port-extraction`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -156,6 +156,7 @@ Completed `read-models:invoice-lifecycle-local-implementation-closure-audit`. Lo
 - `read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit` -> `regression-guard-closed`
 - `read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction` -> `implementation-closed`
 - `read-models:invoice-lifecycle-local-implementation-closure-audit` -> `production-evidence-deferred`
+- `read-models:next-pilot-selection-after-invoice-lifecycle` -> `analysis-closed`
 
 ## Open Implementation Closure Work
 
@@ -171,7 +172,8 @@ Completed `read-models:invoice-lifecycle-local-implementation-closure-audit`. Lo
 - `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`. A follow-up production fail-closed gap was fixed: relation detail no longer live-rebuilds in production SQL runtime when the SQL read repository is unavailable. Local implementation support is now accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `output_invoice_collection` is now the sixth non-Go read model implementation pilot after the input usage local closure audit. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `OutputInvoiceCollectionReadModelRepositoryPort`. Freshness/force-refresh/operation-barrier/helper audit is implemented: mutation responses expose affected read model scope keys and operation barrier targets, frontend write-after-read flows prefer concrete month targets over fan-out-only `all`, `output_invoice_collection:all` remains a fan-out control scope, and unused app-level output projection helpers were removed from `Application`. Relation detail production fail-closed support is implemented: missing SQL detail repository returns refreshing/enqueue instead of live rebuild. Local closure accounting is now complete enough to defer only real PostgreSQL/worker/App Status/high-row/browser evidence; the module remains not globally closed.
 - `invoice_lifecycle` is now the seventh non-Go read model implementation pilot after the output collection local closure audit. Repository port extraction is implemented: facade lifecycle row lookups and SQL projection save/mark paths now use `InvoiceLifecycleReadModelRepositoryPort`, while lifecycle rules, payload shape, worker semantics and API behavior remain unchanged. Freshness/barrier audit is also closed as a regression guard: facade reads do not use queryable `all`, refresh service expands `all` to month shards, source-version checks run before/after rebuild, scope policy is month-or-all, App Status/worker/manifest contracts are registered, and exact-month operation barrier behavior is now covered. Derived lifecycle execution now uses `InvoiceLifecycleDerivedLifecycleExecutor` instead of an app-owned helper, preserving gateway-backed refresh enqueue metadata and response shape. Local implementation support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- The next pending boundary is `read-models:next-pilot-selection-after-invoice-lifecycle`, which must choose the next non-Go modular IO/read model pilot from remaining implementation-gap-open modules before any Go admission.
+- `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. It was selected because it directly depends on invoice lifecycle/certification state, plan save and certified import writes can otherwise show stale page data, and the first slice can be kept to a narrow repository port around manifest-listed load/get/save methods. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
+- The next pending boundary is `read-models:tax-offset-repository-port-extraction`, which must add a narrow tax offset read model repository port before any freshness/barrier/legacy audit or Go admission.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -190,8 +192,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:invoice-lifecycle-local-implementation-closure-audit`
+`read-models:next-pilot-selection-after-invoice-lifecycle`
 
 ## Next Prompt
 
-`read-models:next-pilot-selection-after-invoice-lifecycle`
+`read-models:tax-offset-repository-port-extraction`

@@ -48,6 +48,8 @@ Spec-first Browser e2e 审计入口：
 
 ## 七类测试适用性
 
+2026-06-24 modular IO 更新：`tax_offset` 已被选为下一轮非 Go read model 试点。下一条 `read-models:tax-offset-repository-port-extraction` 必须至少新增/更新 repository port guard，证明 tax offset port 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，并按影响范围复跑 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_read_model_service.py`、`tests/test_tax_offset_api.py` 中的目标测试。
+
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_tax_offset_service.py`、`tests/test_tax_certified_import_service.py` | 覆盖税额试算、已认证锁定、计划内/外拆分、唯一键匹配、真实导入行归一化。 |
