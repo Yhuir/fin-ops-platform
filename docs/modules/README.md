@@ -28,6 +28,7 @@
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `tax-offset/README.md` |
 | `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `cost-statistics/README.md` |
 | `bank-details` | 银行明细 | 页面模块 | `/bank-details` | `bank-details/README.md` |
+| `bank-account-balance` | 银行账户余额 | 资源/API 模块 | `/api/bank-details/accounts` | `bank-account-balance/README.md` |
 | `pending-invoices` | 待找发票 | 页面模块 | `/pending-invoices` | `pending-invoices/README.md` |
 | `input-invoice-usage` | 进项发票使用情况 | 页面模块 | `/input-invoice-usage` | `input-invoice-usage/README.md` |
 | `oa-pending-payments` | OA待付款核对 | 页面模块 | `/oa-pending-payments` | `oa-pending-payments/README.md` |

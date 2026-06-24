@@ -1292,3 +1292,12 @@
 - 理由：`turnover_ledger` 是用户可见的写邻近页面 read model；tag-selection、extra、manual closure confirm/withdraw 会影响 Workbench relation、Workbench、成本统计和搜索。旧 grouped payload 被误判 fresh 时，最容易复现“这个页面更新了，另一个页面没有同步”的问题。
 - 首切范围：新增 `TurnoverLedgerReadModelRepositoryPort`，只暴露 manifest 登记的 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`，并让 query/projection 路径使用窄 port。暂不改变业务规则、grouped payload、manual closure、Workbench relation command、API shape、worker event、queue、Redis/cache、权限、审计、前端或 Go/Fiber/Go Worker。
 - 状态：Go/Fiber/Go Worker admission 继续 blocked；`no_oa_bank_batch`、`search`、`bank_account_balance` 仍为后续 implementation-gap-open 候选。
+
+## 2026-06-24 - bank account balance selected as next modular IO read model pilot
+
+- 目标：在 Search local support 转为 `production-evidence-deferred` 后，选择下一个非 Go read model pilot。
+- 决策：选择 `bank_account_balance`，下一条边界为 `read-models:bank-account-balance-repository-port-extraction`。
+- 理由：`bank_account_balance` 是剩余已知 read model 候选，服务 Bank Details accounts，参与银行导入 write-operation SLO，并且必须与 `bank_detail` rows 保持余额金额/readiness 独立。
+- 首切范围：新增 `BankAccountBalanceReadModelRepositoryPort`，只暴露 manifest 登记的 `bank_account_balance_scope_summary(...)`、`list_bank_account_balances(...)` 和 `save_bank_account_balances(...)`，并让 projection save 与 Bank Details accounts SQL read path 使用该 port。
+- 关键风险：当前 worker/storage 只接受 `bank_account_balance:all`，而 scope policy 仍允许 month/all；后续不能直接引入 month/account scope，必须先做 scope contract 设计。
+- 状态：Go/Fiber/Go Worker admission 继续 blocked；`bank_account_balance` 为 `implementation-gap-open`。
