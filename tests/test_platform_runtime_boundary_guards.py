@@ -2197,6 +2197,100 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_compute_reference_state_writes_stay_in_python_boundaries(self) -> None:
+        worker_source = (SERVICES_ROOT / "workbench_matching_dirty_scope_worker.py").read_text(encoding="utf-8")
+        orchestrator_source = (SERVICES_ROOT / "workbench_matching_orchestrator.py").read_text(encoding="utf-8")
+        engine_source = (SERVICES_ROOT / "workbench_reconciliation_engine.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        for marker in (
+            "claim_due_scopes(",
+            "mark_stale_completed_scopes",
+            "complete(",
+            "fail(",
+            "record_worker_heartbeat",
+        ):
+            if marker not in worker_source:
+                violations.append(f"Workbench matching dirty worker no longer owns state marker {marker}")
+
+        for marker in (
+            "_candidate_match_service.upsert_candidate",
+            "mark_scope_processed",
+            "_invalidate_read_models(scope_month)",
+            "WorkbenchReconciliationEngine",
+            "_relation_read_port",
+        ):
+            if marker not in orchestrator_source:
+                violations.append(f"Workbench matching orchestrator no longer owns reference marker {marker}")
+
+        for marker in (
+            "expire_stale(",
+            "expire_missing_for_scope",
+            "upsert_decisions",
+            "confirm_relation(",
+            "consume_by_row_ids",
+        ):
+            if marker not in engine_source:
+                violations.append(f"Workbench reconciliation engine no longer owns decision/relation marker {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_compute_go_shadow_admission_remains_guarded(self) -> None:
+        analysis_source = (
+            REPO_ROOT
+            / ".planning"
+            / "refactors"
+            / "modular-io-boundaries"
+            / "analysis"
+            / "go-hot-path-workbench-compute-performance-baseline-contract.md"
+        ).read_text(encoding="utf-8")
+        queue_source = (
+            REPO_ROOT
+            / ".planning"
+            / "refactors"
+            / "modular-io-boundaries"
+            / "autonomous"
+            / "MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT
+            / ".planning"
+            / "refactors"
+            / "modular-io-boundaries"
+            / "autonomous"
+            / "NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        for marker in (
+            "Forbidden Writes In Go Shadow Mode",
+            "Claim, ack, complete, fail or requeue `job.workbench_matching_dirty_scopes`",
+            "Write `job.outbox_events` or `job.read_model_dirty_scopes`",
+            "Publish or retire Workbench active generations",
+            "Write or mutate `app.workbench_pair_relations`",
+            "canonical key should include scope month, row-id set, row-type set, rule code/match domain/status and source-version signature",
+            "`go-hot-path:workbench-compute-admission` cannot become the next pending boundary yet",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench Go shadow contract is missing marker: {marker}")
+
+        if (
+            "| 182 | `go-hot-path:workbench-compute-python-reference-contract-guards` | static-guard-closed"
+            not in queue_source
+        ):
+            violations.append("Workbench compute reference-contract guard is not closed as a static guard")
+        if (
+            "| 183 | `go-hot-path:workbench-compute-performance-evidence-collector-contract` | pending"
+            not in queue_source
+        ):
+            violations.append("Workbench compute performance evidence collector is not the pending queue item")
+        if "| 184 | `go-hot-path:workbench-compute-admission` | blocked-by-prerequisite" not in queue_source:
+            violations.append("Workbench compute admission is no longer blocked behind guard prerequisites")
+        if "Do not implement Go, Go Fiber or Go Worker in this slice." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during the current slice")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

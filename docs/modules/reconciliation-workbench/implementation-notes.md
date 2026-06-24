@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Workbench compute Python reference 守卫
+
+- 目标：在 Go admission 前增加本地可执行守卫，锁定 Workbench compute 的 Python reference 状态写边界和 Go shadow forbidden-write 合同。
+- 影响范围：`tests/test_platform_runtime_boundary_guards.py`、Go hot-path planning state；不改变 Workbench runtime、matching 规则、active generation、relation command、API 或前端行为。
+- 关键决策：Python dirty worker/orchestrator/engine 仍是权威状态写边界；shadow compute 只能比较非权威输出，不能 claim/ack/complete/fail dirty scope，不能写 outbox/readiness/Redis/active generation/candidate/decision/relation/audit。`go-hot-path:workbench-compute-admission` 继续 blocked。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-python-reference-contract-guards.md`，并更新 autonomous state/queue/next prompt。
+- 测试覆盖：新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_compute_reference_state_writes_stay_in_python_boundaries` 和 `test_workbench_compute_go_shadow_admission_remains_guarded`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_reference_state_writes_stay_in_python_boundaries tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded tests.test_workbench_matching_dirty_scope_worker tests.test_workbench_matching_orchestrator tests.test_workbench_reconciliation_engine -v`。
+- 未测风险：本 slice 仍不采集真实 PostgreSQL/worker/App Status/high-row/browser/CPU/内存性能证据；下一步应补 read-only evidence collector contract/tooling。
+- 后续事项：执行 `go-hot-path:workbench-compute-performance-evidence-collector-contract`，先补性能证据采集合同，再考虑 admission review。
+
 ## 2026-06-24 - Go hot path Workbench compute 准入合同
 
 - 目标：在任何 Go/Fiber/Go Worker 实现前，先定义 `workbench:matching-grouping-check` 的 Python reference IO、性能基线、shadow-run、rollback 和 forbidden-write 合同。

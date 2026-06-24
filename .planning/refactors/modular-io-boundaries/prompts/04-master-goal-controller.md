@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: go-hot-path:workbench-compute-performance-baseline-contract.
-- Last status: planning-closed.
+- Last completed boundary: go-hot-path:workbench-compute-python-reference-contract-guards.
+- Last status: static-guard-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -164,8 +164,9 @@ Current state expected on start:
 - The no-OA post-full-state local closure audit is complete: no remaining local implementation gap was found after deleting dead app-owned source-version/stale-reason helpers. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
 - `go-hot-path:performance-baseline-and-admission-reconciliation` is complete as a planning slice: current local read model support is accounted for or explicitly deferred, but no Go/Fiber/Go Worker candidate has passed admission.
 - `go-hot-path:workbench-compute-performance-baseline-contract` is complete as a planning slice: Workbench compute Python reference IO, candidate input/output, state/events/read model dependencies, permissions/audit assumptions, shadow forbidden writes, minimum performance evidence and rollback gates are documented.
-- The next pending boundary is `go-hot-path:workbench-compute-python-reference-contract-guards`.
-- Go/Fiber/Go Worker implementation remains blocked until local executable reference-contract guards, candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
+- `go-hot-path:workbench-compute-python-reference-contract-guards` is complete as a static guard slice: local tests now guard Workbench compute Python reference state-write ownership and Go shadow/admission forbidden-write queue prerequisites.
+- The next pending boundary is `go-hot-path:workbench-compute-performance-evidence-collector-contract`.
+- Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
 - analysis-closed closes only analysis/inventory work.
@@ -260,19 +261,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `go-hot-path:workbench-compute-python-reference-contract-guards` unless planning-state reconciliation finds an inconsistency first.
+Start with `go-hot-path:workbench-compute-performance-evidence-collector-contract` unless planning-state reconciliation finds an inconsistency first.
 
-For `go-hot-path:workbench-compute-python-reference-contract-guards`:
-- Read `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-performance-baseline-and-admission-reconciliation.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/operations/runtime-worker-governance.md`, and relevant Workbench matching/grouping/check code and tests.
-- Add or tighten local tests/guards that freeze the Workbench compute reference IO and shadow-forbidden-write contract.
-- Prefer existing Workbench matching/orchestrator/dirty worker/amount check tests and `tests/test_platform_runtime_boundary_guards.py` before adding new abstractions.
-- Guard that `workbench:matching-grouping-check` authoritative state writes remain owned by Python worker/orchestrator/repositories/command services, not by shadow compute.
-- Guard or document the canonical shadow diff artifact shape: input scope, source-version signature, canonicalized candidate/decision rows, summary counts, forbidden-write proof and comparison status.
-- Keep `go-hot-path:workbench-compute-admission` blocked unless all local guard prerequisites and evidence requirements are satisfied.
+For `go-hot-path:workbench-compute-performance-evidence-collector-contract`:
+- Read `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-performance-baseline-and-admission-reconciliation.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-python-reference-contract-guards.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/operations/runtime-worker-governance.md`, existing SLO/performance tools, and runtime queue / Workbench dirty scope code if tooling is added.
+- Define or add a read-only evidence collection contract/tooling path for Workbench compute performance.
+- Required evidence fields include worker p95/p99 duration, claimed/processed/failed/stale-completed scope counts, row counts, candidate/decision counts, dirty-scope lag, heartbeat, query timing where available and active generation enqueue-to-fresh p95/p99 after matching invalidation.
+- Reuse existing SLO tooling conventions and fail-closed semantics before adding a new tool.
+- If a tool is added, it must be read-only by default and unit-tested with fake connections/data.
+- Do not perform production writes.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
-- Do not change Python runtime behavior unless a minimal test-only seam is unavoidable and justified.
+- Do not change canonical Python runtime behavior.
+- Keep `go-hot-path:workbench-compute-admission` blocked unless performance evidence and shadow prerequisites are satisfied.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification, diff checks, and targeted Workbench tests required by the guard slice.
+- Run docs verification, diff checks, and targeted SLO/tooling tests required by the evidence collector slice.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 
