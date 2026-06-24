@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Go hot path Workbench compute 准入合同
+
+- 目标：在任何 Go/Fiber/Go Worker 实现前，先定义 `workbench:matching-grouping-check` 的 Python reference IO、性能基线、shadow-run、rollback 和 forbidden-write 合同。
+- 影响范围：规划和准入合同；不改变 Workbench runtime、matching 规则、active generation、relation command、API 或前端行为。
+- 关键决策：Workbench compute 当前不是单一纯函数。生产参考边界包括 `WorkbenchMatchingDirtyScopeWorker.run_once()`、`WorkbenchMatchingOrchestrator.run(...)`、`WorkbenchMatchingRules.generate_candidates(...)`、`WorkbenchFreeMatchingEngine.generate_decisions(...)`、`WorkbenchReconciliationEngine.run_scope(...)` 和 `WorkbenchAmountCheckService.check(...)`。Go shadow 只能使用同一输入生成非权威输出，禁止 claim/ack/complete/fail dirty scope，禁止写 outbox/readiness/Redis/active generation/candidate/decision/relation/audit。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`，并更新 autonomous state/queue/next prompt。模块状态定义不变；Go admission 仍 blocked。
+- 测试覆盖：本 slice 不改运行时代码；以现有 Workbench matching/orchestrator/dirty worker/amount check/SLO 测试作为证据。下一 slice 应增加或收紧 reference-contract guard。
+- 验证命令：本 slice 最终验证记录在提交说明和 autonomous journal。
+- 未测风险：未连接真实 PostgreSQL、未采集生产 high-row matching p95/p99、CPU/内存、dirty-scope lag、shadow diff 或真实 authenticated HTTP SLO；这些都是 Go admission 前置证据，不是本 planning slice 的完成条件。
+- 后续事项：执行 `go-hot-path:workbench-compute-python-reference-contract-guards`，先冻结本地 reference IO 和 shadow forbidden-write 合同，再决定是否允许 admission review。
+
 ## 2026-06-23 - Amount-check query contract 守卫
 
 - 目标：锁定关联预览金额核对的输入优先级，防止新 read/query payload 已有 `reconciliation_amount` 时，被旧 `detail_fields.明细金额合计` fallback 反向覆盖。

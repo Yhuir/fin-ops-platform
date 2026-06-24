@@ -8,9 +8,9 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-go-hot-path-performance-baseline-and-admission-reconciliation`
+Current state: `autonomous-continue-after-go-hot-path-workbench-compute-performance-baseline-contract`
 
-Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
+Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
 Queue semantics state: `slice-status-corrected`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `go-hot-path:performance-baseline-and-admission-reconciliation`. No Go/Fiber/Go Worker candidate has enough evidence to start implementation. The next executable boundary is `go-hot-path:workbench-compute-performance-baseline-contract`; this is still a planning/admission-contract slice, not Go implementation.
+Completed `go-hot-path:workbench-compute-performance-baseline-contract`. No Go/Fiber/Go Worker candidate has enough evidence to start implementation. The next executable boundary is `go-hot-path:workbench-compute-python-reference-contract-guards`; this is a local guard/evidence slice, not Go implementation.
 
 ## Closed Or Deferred Slices
 
@@ -215,6 +215,7 @@ Completed `go-hot-path:performance-baseline-and-admission-reconciliation`. No Go
 - `read-models:bank-account-balance-bank-detail-fallback-quarantine` -> `implementation-closed`
 - `read-models:bank-account-balance-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `go-hot-path:performance-baseline-and-admission-reconciliation` -> `planning-closed`
+- `go-hot-path:workbench-compute-performance-baseline-contract` -> `planning-closed`
 
 ## Open Implementation Closure Work
 
@@ -236,8 +237,8 @@ Completed `go-hot-path:performance-baseline-and-admission-reconciliation`. No Go
 - `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot and local implementation support is accounted for after repository/state-store audit, refresh persistence boundary extraction, read model repository port extraction, freshness/derived lifecycle audit, derived lifecycle executor extraction, mutation persistence fallback quarantine, local closure audit, full-state snapshot quarantine and post-full-state local closure audit. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. Refresh producer extraction is implemented: `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization. Production repository-unavailable fail-closed behavior is implemented. OA projection sync Search fan-out now uses `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`. Runtime import-state Search fan-out now also uses `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`. Search worker `search:all` shard fan-out now uses `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`. Post-all-scope local closure audit found no remaining local implementation gap, so Search local support is accounted for; the module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Repository port extraction is implemented: projection save and Bank Details accounts SQL read paths use `BankAccountBalanceReadModelRepositoryPort`, and manifest owner names the account-balance port. Refresh producer extraction is implemented: app/API/runtime/backfill refresh enqueue now uses `BankAccountBalanceReadModelRefreshProducer` and preserves all-only `bank_account_balance:all`. Derived lifecycle executor extraction is implemented: response assembly moved out of `Application` into `BankAccountBalanceDerivedLifecycleExecutor`. Scope policy is now all-only at the gateway, matching worker/storage behavior. Dedicated operation barrier regressions now cover dirty/readiness and outbox pending behavior. Bank Detail port compatibility fallback is removed. Local closure audit found no remaining local implementation gap, so local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- The next pending boundary is `go-hot-path:workbench-compute-performance-baseline-contract`.
-- Go hot-path implementation remains blocked. The global reconciliation found that local read model support is accounted for or explicitly deferred, but candidate-specific performance evidence, stable Python reference IO, shadow-run comparison and rollback gates still need to be documented before admission can start.
+- The next pending boundary is `go-hot-path:workbench-compute-python-reference-contract-guards`.
+- Go hot-path implementation remains blocked. The Workbench compute reference IO, shadow forbidden-write and rollback contracts are documented, but local executable guards/harness planning and real candidate-specific performance evidence still need to be completed before admission can start.
 
 ## Deferred Modules
 
@@ -257,12 +258,12 @@ Completed `go-hot-path:performance-baseline-and-admission-reconciliation`. No Go
 
 ## Go Candidate Status
 
-No Go candidate has passed admission. The global admission reconciliation is complete, but all implementation/admission candidates remain `blocked-by-prerequisite`. The next slice must define Workbench compute-specific performance baseline evidence, Python reference IO, shadow-run and rollback contracts before `workbench:matching-grouping-check` can enter admission review.
+No Go candidate has passed admission. The global admission reconciliation and Workbench compute baseline contract are complete, but all implementation/admission candidates remain `blocked-by-prerequisite`. The next slice must add or tighten local Workbench compute reference-contract guards and define the non-authoritative shadow evidence artifact before `workbench:matching-grouping-check` can enter admission review.
 
 ## Last Prompt
 
-`go-hot-path:performance-baseline-and-admission-reconciliation`
+`go-hot-path:workbench-compute-performance-baseline-contract`
 
 ## Next Prompt
 
-`go-hot-path:workbench-compute-performance-baseline-contract`
+`go-hot-path:workbench-compute-python-reference-contract-guards`
