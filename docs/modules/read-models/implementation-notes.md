@@ -1168,6 +1168,15 @@
 - 非目标：不改业务筛选语义、API shape、SQL projection、worker expansion 或 UI。Projection 级 filter 校验仍作为 defense-in-depth。
 - 后续事项：继续审/补 pending invoice mutation freshness target contract。
 
+## 2026-06-24 - search selected as next modular IO read model pilot
+
+- 目标：在 `no_oa_bank_batch` 本地支持 accounted 后，从剩余非 Go read model 候选中选择下一试点。
+- 决策：选择 `search`，下一条边界为 `read-models:search-repository-port-extraction`。
+- 理由：`search` 的 stale index 会影响 Workbench、bank、invoice、pending invoice、invoice lifecycle、tax/cost/import fan-out 和用户跳转上下文；当前 query/source-version/enqueue/rebuild/invalidation helper 仍主要在 `Application`，比 `bank_account_balance` 的 Bank Details 支撑型缺口更高风险。
+- 首切范围：新增 `SearchReadModelRepositoryPort`，只暴露 manifest 登记的 `search_index(...)` 与 `save_search_index_rows(...)`，并让 SQL read/projection paths 走窄 port。
+- 文档影响：新增 `docs/modules/search/` 模块维护骨架；`bank_account_balance` 保留为后续候选。
+- 状态：`search` 仍是 `implementation-gap-open`；Go/Fiber/Go Worker admission 继续 blocked。
+
 ## 2026-06-24 - pending invoice mutation freshness target contract
 
 - 目标：检查待找发票 mutation 后的页面 read model 同步语义，避免写成功后立即读旧 pending invoice rows。
