@@ -4,8 +4,8 @@
 **Status:** `runbook-prepared`
 **Module closure:** `not-module-closed`
 **Target branch:** `dev`
-**Target commit before deploy:** `57aacc004d3d8fcdf9d0c00a463d3e15d35965d9`
-**Planned release name:** `dev-turnover-grouped-metadata-57aacc00-20260625`
+**Target commit before deploy:** current `origin/dev` after this runbook is committed; record exact `RELEASE.json` git commit after deploy.
+**Planned release name:** `dev-turnover-grouped-metadata-20260625`
 **Previous production release:** `dev-no-oa-source-version-480d2d0e-20260625`
 
 ## Goal
@@ -21,7 +21,7 @@ The probe must prove top-level read-model metadata is now observable, or explici
 Allowed:
 
 - read-only production prechecks and postchecks;
-- one deploy through `./scripts/deploy-oa.sh --release-name dev-turnover-grouped-metadata-57aacc00-20260625`;
+- one deploy through `./scripts/deploy-oa.sh --release-name dev-turnover-grouped-metadata-20260625`;
 - one focused authenticated user-scope metadata probe through the existing target OA applicant credential seam;
 - recording sanitized metadata and aggregate counts only.
 
@@ -49,13 +49,13 @@ Before deploy, collect sanitized evidence:
 Run:
 
 ```bash
-./scripts/deploy-oa.sh --release-name dev-turnover-grouped-metadata-57aacc00-20260625
+./scripts/deploy-oa.sh --release-name dev-turnover-grouped-metadata-20260625
 ```
 
 Expected:
 
 - deploy exits `0`;
-- active release `RELEASE.json` points at commit `57aacc004d3d8fcdf9d0c00a463d3e15d35965d9`;
+- active release `RELEASE.json` points at the committed `origin/dev` deployment commit that includes `a16ab9863ba2c2335457b2598a5a970489658bec`;
 - services return ready after deploy.
 
 ## Focused Resmoke Plan
