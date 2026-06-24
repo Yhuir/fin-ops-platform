@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-high-row-query-plan-collected`
+Current state: `unauthenticated-api-status-shape-classification-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:workbench-read-model-high-row-query-plan-read-only-runbook` as `production-controlled` in `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`. T0 collected read-only PostgreSQL aggregate/index/EXPLAIN evidence with `/health/ready` ready before and after. Current active Workbench generations are bounded (`active` metadata rows 3491, largest active scope 1624 rows) while physical historical tables remain large (`workbench_rows=654911`, `workbench_group_rows=729629`). Representative active page-like queries use generation/scope indexes and EXPLAIN completed after correcting a runbook alias bug. No payload rows, secrets, DB writes, queue/readiness mutation, deploy, restart, requeue, repair, replay or closure claim occurred. The next boundary is `planning:post-workbench-high-row-query-plan-next-boundary-selection`.
+Completed `planning:post-workbench-high-row-query-plan-next-boundary-selection` as `planning-closed` in `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`. T0 reconciled Row257, rejected final closure, authenticated HTTP retry, browser data smoke and new in-process harness work as premature, and selected `production:read-model-unauthenticated-api-status-shape-classification-runbook` using existing `http_slo_probe` API probes with `--allow-unauthenticated`. This next evidence is classification only and does not prove authenticated API closure. No production command, runtime mutation, deploy, restart, requeue, repair, replay or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:workbench-read-model-high-row-query-plan-read-only-runbook`
+`planning:post-workbench-high-row-query-plan-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-workbench-high-row-query-plan-next-boundary-selection`
+`production:read-model-unauthenticated-api-status-shape-classification-runbook`

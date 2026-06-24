@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `production:workbench-read-model-high-row-query-plan-read-only-runbook`.
+Continue after `planning:post-workbench-high-row-query-plan-next-boundary-selection`.
 
 ## Current State
 
@@ -28,12 +28,13 @@ Continue after `production:workbench-read-model-high-row-query-plan-read-only-ru
   - physical historical tables remain large: `workbench_rows=654911`, `workbench_group_rows=729629`;
   - representative active page-like queries use generation/scope indexes and corrected EXPLAIN completed;
   - no payload rows or mutations were used.
+- Row258 selected unauthenticated API status/shape classification with existing `http_slo_probe` as the next safe evidence boundary. This will not prove authenticated API closure.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`planning:post-workbench-high-row-query-plan-next-boundary-selection`
+`production:read-model-unauthenticated-api-status-shape-classification-runbook`
 
 ## Required First Steps On Resume
 
@@ -50,8 +51,9 @@ Continue after `production:workbench-read-model-high-row-query-plan-read-only-ru
 5. Read `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`.
 6. Read `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`.
 7. Read `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`.
-8. Reconcile Row257 and select the next safe boundary for remaining authenticated API, browser/hydration, operation-barrier, high-row or module-specific closure gaps.
-9. Do not retry broad load-all shadow parity or claim Workbench closure from PostgreSQL EXPLAIN evidence alone.
+8. Read `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`.
+9. Write a bounded production runbook before any production command.
+10. Use `http_slo_probe` API probes with `--allow-unauthenticated`, no response body storage, and classify statuses/content/read-model metadata only. Do not claim authenticated API closure.
 
 ## Stop Gates
 
