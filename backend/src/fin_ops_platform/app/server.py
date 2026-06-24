@@ -12398,9 +12398,6 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_cancel_exception(payload)
         return self._handle_live_workbench_cancel_exception(payload)
 
     def _handle_api_workbench_ignore_row(self, body: str | None) -> Response:

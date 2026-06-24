@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench cancel-exception live dispatch no-op cleanup
+
+目标：清理 `/api/workbench/actions/cancel-exception` wrapper 中两个分支都调用同一 helper 的 no-op `has_rows_for_month(...)` 分支。
+
+变更：
+
+- `Application._handle_api_workbench_cancel_exception(...)` 删除 redundant `month` 变量和 `self._live_workbench_service.has_rows_for_month(month)` 分支。
+- wrapper 仍负责 JSON body parse 和 Workbench 写入 freshness guard。
+- wrapper 仍调用 `_handle_live_workbench_cancel_exception(payload)`，后者通过 `WorkbenchActionApiRoutes.cancel_exception(...)` 调用 facade 并保持 `_workbench_write_response(...)`。
+- 静态 guard 现在禁止 reintroduce 该 no-op branch。
+
+未改变：
+
+- cancel-exception response shape、status code、freshness guard、idempotency、exception case 规则、operation barrier、read model refresh 和前端行为未改变。
+- 其它 Workbench action route 在本 slice 未触碰。
+
+下一条边界：`server-py:modern-workbench-action-route-owner-local-closure-audit`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_resolves_selected_rows_without_rebuilding_grouped_workbench tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_returns_processed_rows_to_open_state tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_cancel_exception_keeps_live_rows_in_open_state_after_revert tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_cancel_exception_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_modern_workbench_action_route_owner_final_residual_audit_selects_cancel_exception_cleanup tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Modern Workbench action route-owner final residual audit
 
 目标：在 withdraw-link preview 抽离后，复查现代 Workbench action route-owner 是否仍有 `Application` 直接调用 `WorkbenchWriteFacade` 的残留。

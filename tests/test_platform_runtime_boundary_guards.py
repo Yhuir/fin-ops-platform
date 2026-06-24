@@ -944,11 +944,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "_load_json_body(body)",
             "_workbench_write_freshness_guard()",
-            "_live_workbench_service.has_rows_for_month(month)",
             "_handle_live_workbench_cancel_exception(payload)",
         ):
             if marker not in wrapper_source:
                 violations.append(f"server.py cancel-exception wrapper no longer preserves marker {marker}")
+        if "_live_workbench_service.has_rows_for_month(month)" in wrapper_source:
+            violations.append("server.py cancel-exception wrapper still contains the no-op live service branch")
         if "_workbench_write_facade().cancel_exception" in wrapper_source:
             violations.append("server.py cancel-exception wrapper still calls the write facade directly")
 
@@ -3104,9 +3105,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         queue_source = (
             REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
         ).read_text(encoding="utf-8")
-        next_prompt_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
-        ).read_text(encoding="utf-8")
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-final-residual-audit.md"
@@ -3119,16 +3117,44 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Final Workbench action route-owner residual audit is not closed as analysis")
         if (
-            "| 212 | `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup` | pending"
+            "| 212 | `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`"
             not in queue_source
         ):
-            violations.append("Next pending slice should clean up cancel-exception no-op live dispatch")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
-            violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at cancel-exception no-op cleanup")
+            violations.append("Final residual audit no longer records cancel-exception no-op cleanup as follow-up")
         if "_workbench_write_facade()." not in analysis_source:
             violations.append("Final residual audit does not record direct facade search evidence")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_cancel_exception_noop_cleanup_updates_queue(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cancel-exception-live-dispatch-noop-cleanup.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if (
+            "| 212 | `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup` | implementation-closed"
+            not in queue_source
+        ):
+            violations.append("Workbench cancel-exception no-op cleanup is not closed as implementation")
+        if (
+            "| 213 | `server-py:modern-workbench-action-route-owner-local-closure-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit modern Workbench action route-owner local closure")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during the current slice")
+        if "`server-py:modern-workbench-action-route-owner-local-closure-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at route-owner local closure audit")
+        if "has_rows_for_month" not in analysis_source:
+            violations.append("Cancel-exception cleanup analysis does not record removed no-op branch")
 
         self.assertEqual(violations, [])
 
