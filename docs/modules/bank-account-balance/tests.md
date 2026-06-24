@@ -44,10 +44,16 @@
 - 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_refresh_producer_helpers_stay_out_of_application`。
 - 覆盖：Application、Bank Details service injection、runtime import-state、runtime derived lifecycle 和 backfill enqueue 均走 `BankAccountBalanceReadModelRefreshProducer`，且 producer 保持 `bank_account_balance:all` all-only contract。
 
+## 2026-06-24 - derived lifecycle executor extraction
+
+- 新增：`tests/test_bank_account_balance_derived_lifecycle_executor.py`。
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary`。
+- 覆盖：`BankAccountBalanceDerivedLifecycleExecutor` 保持 `deleted_counts`、`invalidated_scopes=["all"]` 和 enqueue 成功/失败的 `enqueued_jobs` payload shape，且 Application 不再拥有旧 helper。
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_read_model_slo_smoke -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_bank_account_balance_read_model tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_refresh_producer_helpers_stay_out_of_application tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check

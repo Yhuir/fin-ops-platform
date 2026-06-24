@@ -1322,3 +1322,10 @@
 - 改动：新增 producer，移除 `Application._enqueue_bank_account_balance_read_model_refresh(...)`，并让 Application import-state、Bank Details service injection、runtime import-state/derived lifecycle fan-out 和 backfill CLI enqueue 走 producer。
 - 边界决策：producer normalize 为 `bank_account_balance:all`，不引入 month/account scope。
 - 下一步：`read-models:bank-account-balance-derived-lifecycle-executor-extraction`。
+
+## 2026-06-24 - bank account balance derived lifecycle executor extraction
+
+- 目标：将账户余额 derived lifecycle response assembly 从 Application 移入 explicit executor。
+- 改动：新增 `BankAccountBalanceDerivedLifecycleExecutor`，registry 改为 executor `.execute`，删除 app-owned helper。
+- 保持不变：all-only invalidated scope 和 enqueued-job payload shape。
+- 下一步：`read-models:bank-account-balance-all-only-scope-contract`。

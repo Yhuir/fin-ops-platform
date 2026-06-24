@@ -2004,6 +2004,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        executor_path = SERVICES_ROOT / "bank_account_balance_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        removed_helper = "_derived_lifecycle_bank_account_balance_executor"
+        if _function_source(server_tree, server_source, removed_helper):
+            violations.append(f"server.py still owns removed bank account balance derived lifecycle helper {removed_helper}")
+        if "BankAccountBalanceDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not assemble BankAccountBalanceDerivedLifecycleExecutor")
+        if '"bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit bank account balance executor")
+        if "class BankAccountBalanceDerivedLifecycleExecutor" not in executor_source:
+            violations.append("BankAccountBalanceDerivedLifecycleExecutor is missing")
+        if "bank_account_balance.read_model.refresh" not in executor_source or '"invalidated_scopes": ["all"]' not in executor_source:
+            violations.append("BankAccountBalanceDerivedLifecycleExecutor does not preserve all-only payload shape")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_source_version_helpers_stay_out_of_application(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

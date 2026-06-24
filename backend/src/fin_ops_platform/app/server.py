@@ -77,6 +77,7 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_account_balance_derived_lifecycle_executor import BankAccountBalanceDerivedLifecycleExecutor
 from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.bank_detail_available_month_scope_provider import BankDetailAvailableMonthScopeProvider
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
@@ -19141,7 +19142,7 @@ class Application:
                 "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
                 "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
-                "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
+                "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
                 "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
                 "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
@@ -19313,15 +19314,10 @@ class Application:
             enqueue_refresh=self._enqueue_no_oa_bank_batch_read_model_refreshes,
         )
 
-    def _derived_lifecycle_bank_account_balance_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        enqueued = self._bank_account_balance_read_model_refresh_producer().enqueue_all(
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_account_balance")
+    def _bank_account_balance_derived_lifecycle_executor(self) -> BankAccountBalanceDerivedLifecycleExecutor:
+        return BankAccountBalanceDerivedLifecycleExecutor(
+            enqueue_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
         )
-        return {
-            "deleted_counts": {"bank_account_balance_read_models": 0},
-            "invalidated_scopes": ["all"],
-            "enqueued_jobs": ["bank_account_balance.read_model.refresh"] if enqueued else [],
-        }
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         self._search_service.clear_cache()

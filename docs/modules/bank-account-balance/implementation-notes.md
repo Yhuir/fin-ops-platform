@@ -31,3 +31,10 @@
 - 边界决策：producer 永远 normalize 为 `["all"]`，保持当前 worker/storage all-only contract，不引入 month/account projection scope。
 - 保持不变：余额计算、account identity、latest balance、API shape、worker event、queue schema、权限、审计和前端行为。
 - 下一步：`read-models:bank-account-balance-derived-lifecycle-executor-extraction`，把 Application 中的 derived lifecycle response assembly 移入 dedicated executor。
+
+## 2026-06-24 - derived lifecycle executor extraction
+
+- 目标：把账户余额 derived lifecycle response assembly 移出 Application。
+- 改动：新增 `BankAccountBalanceDerivedLifecycleExecutor`；derived lifecycle registry 改为 `self._bank_account_balance_derived_lifecycle_executor().execute`；旧 `_derived_lifecycle_bank_account_balance_executor(...)` 删除。
+- 保持不变：`deleted_counts={"bank_account_balance_read_models": 0}`、`invalidated_scopes=["all"]`、enqueue 成功时返回 `bank_account_balance.read_model.refresh`。
+- 下一步：`read-models:bank-account-balance-all-only-scope-contract`，收敛 gateway scope policy 与 worker/storage all-only contract 的不一致。
