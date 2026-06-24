@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: go-hot-path:workbench-compute-production-evidence-gate.
-- Last status: production-evidence-deferred.
+- Last completed boundary: planning:post-workbench-compute-evidence-gate-next-boundary-selection.
+- Last status: planning-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -167,7 +167,8 @@ Current state expected on start:
 - `go-hot-path:workbench-compute-python-reference-contract-guards` is complete as a static guard slice: local tests now guard Workbench compute Python reference state-write ownership and Go shadow/admission forbidden-write queue prerequisites.
 - `go-hot-path:workbench-compute-performance-evidence-collector-contract` is complete as an implementation slice: read-only `workbench_compute_evidence` tooling now reports matching duration p95/p99, scope samples, worker heartbeat, candidate/decision counts, active generation row counts, matching-originated enqueue-to-fresh, query timing/EXPLAIN and structured configuration-missing/partial evidence status.
 - `go-hot-path:workbench-compute-production-evidence-gate` is complete as a production-evidence-deferred slice: local collector execution returned structured `configuration_missing`; production SSH confirmed active workers but the deployed release lacks the collector, and a deployed-runtime read-only PostgreSQL sampling attempt could not connect. Real candidate-specific Workbench compute evidence remains unavailable.
-- The next pending boundary is `planning:post-workbench-compute-evidence-gate-next-boundary-selection`.
+- `planning:post-workbench-compute-evidence-gate-next-boundary-selection` is complete as a planning slice: Go admission rows were skipped because performance evidence, shadow diff and rollback proof are still missing, and `server-py:residual-route-handler-boundary-audit` was selected as the next non-Go shared-boundary audit.
+- The next pending boundary is `server-py:residual-route-handler-boundary-audit`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -263,18 +264,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-workbench-compute-evidence-gate-next-boundary-selection` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:residual-route-handler-boundary-audit` unless planning-state reconciliation finds an inconsistency first.
 
-For `planning:post-workbench-compute-evidence-gate-next-boundary-selection`:
-- Read `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `.planning/refactors/modular-io-boundaries/README.md`, `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`, `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-production-evidence-gate.md`, `autonomous/MODULE-QUEUE.md`, `autonomous/STATE.md`, `autonomous/JOURNAL.md`, and `docs/modules/README.md`.
-- Reconcile the roadmap and queue after the Workbench compute production evidence gate was deferred.
-- Select the next safe non-blocked boundary from the existing modular IO roadmap.
-- Do not select any Go admission row while candidate-specific evidence, shadow-run proof and rollback gates remain missing.
-- If the next useful boundary is not already represented in `MODULE-QUEUE.md`, insert one narrow planning or implementation slice with a concrete boundary name, status `pending`, and clear module-closure semantics.
-- Prefer remaining modular IO/read model/worker boundary hardening over Go implementation while Go admission gates are blocked.
+For `server-py:residual-route-handler-boundary-audit`:
+- Read `.planning/refactors/modular-io-boundaries/01-CURRENT-STATE-AUDIT.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/05-IMPACT-AND-TEST-GATES.md`, `.planning/refactors/modular-io-boundaries/analysis/planning-post-workbench-compute-evidence-gate-next-boundary-selection.md`, `docs/app-architecture/runtime-and-ownership.md`, `docs/modules/README.md`, `backend/src/fin_ops_platform/app/server.py`, existing `backend/src/fin_ops_platform/app/routes_*.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Audit residual `server.py` route/handler/helper surfaces after prior route module work.
+- Classify residual surfaces by likely module owner, current caller evidence, route/http mapping vs dependency assembly vs business logic, read/write/read-model/worker side-effect risk, legacy contamination risk, and deletion/extraction readiness.
+- Identify exactly one next narrow implementation or follow-up audit boundary.
+- Prefer a boundary that reduces old route/service contamination without changing business behavior.
+- Do not move, delete or rewrite runtime code in this audit slice.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
-- Do not change canonical Python runtime behavior in this planning slice.
+- Do not change canonical Python runtime behavior in this audit slice.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
 - Run docs verification and diff checks.
 - Commit and push to origin/dev.

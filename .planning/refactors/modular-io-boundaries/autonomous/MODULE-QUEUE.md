@@ -200,7 +200,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 186 | `go-hot-path:workbench-read-model-builder-admission` | blocked-by-prerequisite | go-admission-not-started | Admission review only for active generation / scoped incremental Go Worker candidate after read model implementation contracts are stable. |
 | 187 | `go-hot-path:import-parser-admission` | blocked-by-prerequisite | go-admission-not-started | Admission review only for parse/normalize/preview Go Processor candidate after import IO contract and performance evidence are available. |
 | 188 | `go-hot-path:cost-summary-rollup-admission` | blocked-by-prerequisite | go-admission-not-started | Admission review only for summary/rollup candidate after cost read model implementation contract is stable. |
-| 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | pending | not-applicable | Select the next safe non-blocked boundary from the current roadmap and queue after Workbench compute production evidence was deferred and all Go admission rows remain blocked. Do not implement Go in this planning slice. |
+| 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | planning-closed | not-applicable | Selected `server-py:residual-route-handler-boundary-audit` as the next safe non-Go boundary after Workbench compute production evidence was deferred and all Go admission rows remained blocked. No runtime behavior changed. |
+| 190 | `server-py:residual-route-handler-boundary-audit` | pending | implementation-gap-open | Audit residual `server.py` route/handler/helper surfaces after prior route module work, classify owners/callers/legacy contamination risk, and select one narrow follow-up boundary. Do not move or delete code in this audit slice. |
 
 ## Status Values
 

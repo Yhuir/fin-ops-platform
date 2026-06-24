@@ -2292,14 +2292,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "| 185 | `go-hot-path:workbench-compute-admission` | blocked-by-prerequisite" not in queue_source:
             violations.append("Workbench compute admission is no longer blocked behind production evidence prerequisites")
         if (
-            "| 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | pending"
+            "| 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | planning-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should select the next safe non-Go boundary after evidence defer")
+            violations.append("Post-evidence boundary selection slice is not closed")
+        if (
+            "| 190 | `server-py:residual-route-handler-boundary-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit residual server.py handler boundaries")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`planning:post-workbench-compute-evidence-gate-next-boundary-selection`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at post-evidence boundary selection")
+        if "`server-py:residual-route-handler-boundary-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at residual server.py handler audit")
 
         self.assertEqual(violations, [])
 
