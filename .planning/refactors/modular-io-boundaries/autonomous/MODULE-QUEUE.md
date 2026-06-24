@@ -201,7 +201,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 187 | `go-hot-path:import-parser-admission` | blocked-by-prerequisite | go-admission-not-started | Admission review only for parse/normalize/preview Go Processor candidate after import IO contract and performance evidence are available. |
 | 188 | `go-hot-path:cost-summary-rollup-admission` | blocked-by-prerequisite | go-admission-not-started | Admission review only for summary/rollup candidate after cost read model implementation contract is stable. |
 | 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | planning-closed | not-applicable | Selected `server-py:residual-route-handler-boundary-audit` as the next safe non-Go boundary after Workbench compute production evidence was deferred and all Go admission rows remained blocked. No runtime behavior changed. |
-| 190 | `server-py:residual-route-handler-boundary-audit` | pending | implementation-gap-open | Audit residual `server.py` route/handler/helper surfaces after prior route module work, classify owners/callers/legacy contamination risk, and select one narrow follow-up boundary. Do not move or delete code in this audit slice. |
+| 190 | `server-py:residual-route-handler-boundary-audit` | analysis-closed | implementation-gap-open | Audited residual `server.py` handler/helper surfaces, found Workbench as the largest residual owner group, and selected Workbench legacy action handler quarantine audit as the next narrow boundary. No runtime code changed. |
+| 191 | `server-py:workbench-legacy-action-handler-quarantine-audit` | pending | implementation-gap-open | Audit Workbench legacy action handlers in `server.py`, including older reconciliation-service handlers and live Workbench write wrappers, classify them as removed, route-owned delegate, compat-only or blocked before any code movement. |
 
 ## Status Values
 

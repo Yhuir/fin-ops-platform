@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: planning:post-workbench-compute-evidence-gate-next-boundary-selection.
-- Last status: planning-closed.
+- Last completed boundary: server-py:residual-route-handler-boundary-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -168,7 +168,8 @@ Current state expected on start:
 - `go-hot-path:workbench-compute-performance-evidence-collector-contract` is complete as an implementation slice: read-only `workbench_compute_evidence` tooling now reports matching duration p95/p99, scope samples, worker heartbeat, candidate/decision counts, active generation row counts, matching-originated enqueue-to-fresh, query timing/EXPLAIN and structured configuration-missing/partial evidence status.
 - `go-hot-path:workbench-compute-production-evidence-gate` is complete as a production-evidence-deferred slice: local collector execution returned structured `configuration_missing`; production SSH confirmed active workers but the deployed release lacks the collector, and a deployed-runtime read-only PostgreSQL sampling attempt could not connect. Real candidate-specific Workbench compute evidence remains unavailable.
 - `planning:post-workbench-compute-evidence-gate-next-boundary-selection` is complete as a planning slice: Go admission rows were skipped because performance evidence, shadow diff and rollback proof are still missing, and `server-py:residual-route-handler-boundary-audit` was selected as the next non-Go shared-boundary audit.
-- The next pending boundary is `server-py:residual-route-handler-boundary-audit`.
+- `server-py:residual-route-handler-boundary-audit` is complete as an analysis slice: residual `server.py` handler/helper surfaces were classified, Workbench was identified as the largest residual owner group, and `server-py:workbench-legacy-action-handler-quarantine-audit` was selected as the next narrow audit.
+- The next pending boundary is `server-py:workbench-legacy-action-handler-quarantine-audit`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -264,14 +265,14 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:residual-route-handler-boundary-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-legacy-action-handler-quarantine-audit` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:residual-route-handler-boundary-audit`:
-- Read `.planning/refactors/modular-io-boundaries/01-CURRENT-STATE-AUDIT.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/05-IMPACT-AND-TEST-GATES.md`, `.planning/refactors/modular-io-boundaries/analysis/planning-post-workbench-compute-evidence-gate-next-boundary-selection.md`, `docs/app-architecture/runtime-and-ownership.md`, `docs/modules/README.md`, `backend/src/fin_ops_platform/app/server.py`, existing `backend/src/fin_ops_platform/app/routes_*.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Audit residual `server.py` route/handler/helper surfaces after prior route module work.
-- Classify residual surfaces by likely module owner, current caller evidence, route/http mapping vs dependency assembly vs business logic, read/write/read-model/worker side-effect risk, legacy contamination risk, and deletion/extraction readiness.
-- Identify exactly one next narrow implementation or follow-up audit boundary.
-- Prefer a boundary that reduces old route/service contamination without changing business behavior.
+For `server-py:workbench-legacy-action-handler-quarantine-audit`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-residual-route-handler-boundary-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Audit Workbench legacy action handlers in `server.py` before any code movement.
+- Target functions include `_handle_workbench_confirm`, `_handle_workbench_difference`, `_handle_workbench_exception`, `_handle_workbench_offline`, `_handle_workbench_offset`, `_handle_legacy_workbench_exception_via_application`, `_handle_live_workbench_confirm_link`, `_handle_live_workbench_cancel_link`, `_handle_live_workbench_withdraw_link`, `_handle_live_workbench_mark_exception`, `_handle_live_workbench_update_bank_exception`, `_handle_live_workbench_oa_bank_exception`, `_handle_live_workbench_confirm_personal_advance_repayment`, `_handle_live_workbench_cancel_exception`, `_handle_workbench_ignore_row_payload`, and `_handle_workbench_unignore_row_payload`.
+- Classify current route dispatch callers, canonical writes, read model/worker side effects, `WorkbenchWriteFacade` vs old reconciliation/ledger service delegation, current tests, and target state per handler group.
+- Select exactly one next narrow implementation or follow-up audit boundary.
 - Do not move, delete or rewrite runtime code in this audit slice.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
