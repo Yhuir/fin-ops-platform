@@ -20,6 +20,7 @@ from fin_ops_platform.services.search_query_freshness_service import (
     SearchIndexSourceVersionsProvider,
     SearchQueryFreshnessService,
 )
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 
@@ -34,6 +35,25 @@ class QueueRecorder:
 
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
         self.completed.append((tenant_id, scope_type, scope_key))
+
+
+class SearchRefreshGatewayRecorder:
+    def __init__(self) -> None:
+        self.refreshes: list[tuple[str, str, str]] = []
+
+    def can_enqueue(self) -> bool:
+        return True
+
+    def enqueue_many(
+        self,
+        scope_type: str,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[str]:
+        self.refreshes.extend((scope_type, scope_key, reason) for scope_key in scope_keys)
+        return list(scope_keys)
 
 
 class UnderlyingPendingInvoiceReadModelRepository:
@@ -341,6 +361,49 @@ class SearchQueryFreshnessServiceTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "stale")
         self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("search", "2026-05", "api_source_versions_stale")])
+
+
+class SearchReadModelRefreshProducerTests(unittest.TestCase):
+    def test_enqueue_uses_gateway_and_normalizes_search_scopes(self) -> None:
+        gateway = SearchRefreshGatewayRecorder()
+        producer = SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
+
+        enqueued = producer.enqueue(
+            ["", "2026-05", "bad", "all", "2026-05"],
+            reason="workbench_scope_invalidated",
+            metadata={"action_name": "confirm_link"},
+        )
+
+        self.assertTrue(enqueued)
+        self.assertEqual(
+            gateway.refreshes,
+            [
+                ("search", "2026-05", "workbench_scope_invalidated"),
+                ("search", "all", "workbench_scope_invalidated"),
+            ],
+        )
+
+    def test_invalidate_maps_month_scope_inputs_or_all_fallback(self) -> None:
+        gateway = SearchRefreshGatewayRecorder()
+        producer = SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
+
+        producer.invalidate(["2026-05", "2026-06", "ignored"], reason="import_state_changed")
+        producer.invalidate(["project-only"], reason="settings_update")
+
+        self.assertEqual(
+            gateway.refreshes,
+            [
+                ("search", "2026-05", "import_state_changed"),
+                ("search", "2026-06", "import_state_changed"),
+                ("search", "all", "settings_update"),
+            ],
+        )
+
+    def test_enqueue_returns_false_when_gateway_unavailable(self) -> None:
+        gateway = type("Gateway", (), {"can_enqueue": lambda self: False})()
+        producer = SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: gateway)
+
+        self.assertFalse(producer.enqueue(["2026-05"], reason="api_miss"))
 
 
 class SearchPendingConnection:

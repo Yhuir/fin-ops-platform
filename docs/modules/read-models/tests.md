@@ -286,6 +286,13 @@ git diff --check
 - 覆盖：search SQL miss/fresh/source-version mismatch payload assembly、refresh enqueue reason、source-version proof ownership，以及 `Application` 不再拥有 query freshness helper。
 - 回归验证：search SQL runtime、search API、manifest、runtime worker registry、app check、docs verify 和 diff check。
 
+## 2026-06-24 - search refresh producer and invalidation extraction test note
+
+- 新增 service-layer tests：`tests/test_search_pending_sql_runtime.py::SearchReadModelRefreshProducerTests`。
+- 新增 architecture guard：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application`。
+- 覆盖：search refresh enqueue gateway boundary、month/all scope normalization、invalidation fallback 和 `Application` 不再拥有 search refresh producer/invalidation helper。
+- 回归验证：search SQL runtime、search API、manifest、runtime worker registry、app check、docs verify 和 diff check。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

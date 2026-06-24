@@ -2071,6 +2071,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_search_refresh_producer_helpers_stay_out_of_application(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+
+        violations: list[str] = []
+        for removed_helper in (
+            "_enqueue_search_read_model_refresh",
+            "_invalidate_search_read_model_scopes",
+        ):
+            if _function_source(tree, source, removed_helper):
+                violations.append(f"server.py still owns removed search refresh helper {removed_helper}")
+
+        app_factory_source = _function_source(tree, source, "_search_read_model_refresh_producer")
+        if "SearchReadModelRefreshProducer" not in app_factory_source:
+            violations.append("Application no longer assembles SearchReadModelRefreshProducer")
+
+        service_source = (SERVICES_ROOT / "search_read_model_refresh_producer.py").read_text(encoding="utf-8")
+        if "class SearchReadModelRefreshProducer" not in service_source:
+            violations.append("SearchReadModelRefreshProducer is missing")
+        if 'enqueue_many(\n                "search"' not in service_source:
+            violations.append("SearchReadModelRefreshProducer no longer enqueues search scopes through the gateway")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

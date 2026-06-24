@@ -32,3 +32,11 @@
 - 保持不变：search API response shape、status code 行为、SQL miss enqueue reason、source-version stale reasons、search ranking、group context、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
 - 测试覆盖：新增 service-layer tests 覆盖 SQL miss/fresh/source-version mismatch；新增 platform guard 防止 app-owned query freshness helper 回到 `server.py`；复跑 search API/runtime/manifest 相关测试。
 - 下一步：审计并拆分 `Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)`，决定抽取 search refresh producer/invalidation service 还是保留 compat-only wrapper。
+
+## 2026-06-24 - refresh producer and invalidation extraction
+
+- 目标：把 search refresh enqueue 和 invalidation scope normalization 从 `Application` 移到显式 producer。
+- 审计结论：`Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 都只是 gateway-backed producer / scope normalization helper，适合抽到 search read model producer。
+- 改动：新增 `SearchReadModelRefreshProducer`；删除旧 app-owned refresh/invalidation helper；`SearchQueryFreshnessService`、settings update、import-state invalidation、Workbench invalidation 和 derived lifecycle search cache invalidation 改为调用 producer。
+- 保持不变：refresh 仍通过 `ReadModelRefreshGateway`，scope type 仍为 `search`，reason/metadata 透传保持不变；search API、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
+- 下一步：执行 `read-models:search-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence defer，还是仍有本地 implementation gap。

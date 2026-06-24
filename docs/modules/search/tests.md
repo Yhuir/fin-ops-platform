@@ -53,6 +53,17 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_query_freshness_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchQueryFreshnessServiceTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
 ```
 
+## 2026-06-24 - refresh producer and invalidation extraction
+
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchReadModelRefreshProducerTests`。
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application`。
+- 覆盖：search refresh producer 通过 gateway enqueue、month/all scope 归一化、invalidation 月份/`all` fallback、gateway unavailable 返回 false；`server.py` 不再拥有 search refresh/invalidation helper。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

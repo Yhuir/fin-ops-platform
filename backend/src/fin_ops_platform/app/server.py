@@ -328,6 +328,7 @@ from fin_ops_platform.services.search_query_freshness_service import (
     SearchIndexSourceVersionsProvider,
     SearchQueryFreshnessService,
 )
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
@@ -4848,20 +4849,11 @@ class Application:
         return SearchQueryFreshnessService(
             read_repository=getattr(self, "_search_sql_read_repository", None),
             source_versions_provider=source_versions_provider.expected_source_versions,
-            enqueue_refresh=self._enqueue_search_read_model_refresh,
+            enqueue_refresh=self._search_read_model_refresh_producer().enqueue_one,
         )
 
-    def _enqueue_search_read_model_refresh(
-        self,
-        scope_key: str,
-        *,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> bool:
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return False
-        return bool(refresh_gateway.enqueue_one("search", scope_key, reason=reason, metadata=metadata))
+    def _search_read_model_refresh_producer(self) -> SearchReadModelRefreshProducer:
+        return SearchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
     def _handle_api_etc_import(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         return self._json_response(
@@ -10937,7 +10929,7 @@ class Application:
                 operation="invalidate_read_models_after_settings_update",
             )
         self._search_service.clear_cache()
-        self._invalidate_search_read_model_scopes(["all"], reason="settings_update")
+        self._search_read_model_refresh_producer().invalidate(["all"], reason="settings_update")
         if updated_payload.get("oa_invoice_offset") != previous_oa_invoice_offset:
             self._mark_workbench_matching_dirty_scopes(
                 self._workbench_query_service.list_available_months(),
@@ -16104,7 +16096,10 @@ class Application:
     ) -> None:
         self._search_service.clear_cache()
         self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
-        self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._search_read_model_refresh_producer().invalidate(
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+        )
         self._invalidate_pending_invoice_read_model_scopes(reason="import_state_changed")
         input_scope_keys = input_invoice_usage_scope_keys
         if input_scope_keys is None:
@@ -16193,7 +16188,10 @@ class Application:
             cost_statistics_scope_keys or ["all"],
             reason="import_state_changed",
         )
-        self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._search_read_model_refresh_producer().invalidate(
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+        )
         self._invalidate_pending_invoice_read_model_scopes(
             scope_keys=self._import_state_pending_invoice_scope_keys(cost_statistics_scope_keys),
             reason="import_state_changed",
@@ -19307,8 +19305,11 @@ class Application:
         self._search_service.clear_cache()
         reason = str(domain_plan.get("reason") or "derived_lifecycle_search")
         metadata = self._read_model_refresh_metadata(domain_plan)
-        for scope_key in self._domain_plan_scope_keys(domain_plan) or ["all"]:
-            self._enqueue_search_read_model_refresh(scope_key, reason=reason, metadata=metadata)
+        self._search_read_model_refresh_producer().enqueue(
+            self._domain_plan_scope_keys(domain_plan) or ["all"],
+            reason=reason,
+            metadata=metadata,
+        )
         return {
             "deleted_counts": {"search_cache": 1},
             "invalidated_scopes": self._domain_plan_scope_keys(domain_plan),
@@ -19468,7 +19469,7 @@ class Application:
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
             )
-            self._invalidate_search_read_model_scopes(
+            self._search_read_model_refresh_producer().invalidate(
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
                 metadata=metadata,
@@ -19480,23 +19481,6 @@ class Application:
                 metadata=metadata,
             )
         return expanded_scope_keys
-
-    def _invalidate_search_read_model_scopes(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> None:
-        months = {
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        }
-        if not months and any(str(scope_key).strip() == "all" for scope_key in list(scope_keys or [])):
-            months.add("all")
-        for scope_key in sorted(months or {"all"}):
-            self._enqueue_search_read_model_refresh(scope_key, reason=reason, metadata=metadata)
 
     @staticmethod
     def _pending_invoice_read_model_scope_keys() -> list[str]:

@@ -51,6 +51,17 @@
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
 - 后续事项：执行 `read-models:search-refresh-producer-invalidation-boundary-audit`。
 
+## 2026-06-24 - Search refresh producer and invalidation extraction
+
+- 目标：执行 `read-models:search-refresh-producer-invalidation-boundary-audit` 与 `read-models:search-refresh-producer-invalidation-service-extraction`，将 search refresh enqueue 和 invalidation scope normalization 从 `Application` 收敛到显式 producer。
+- 影响范围：`SearchReadModelRefreshProducer`、`Application._search_query_freshness_service(...)`、settings/import/workbench/derived lifecycle search invalidation call sites、search runtime/API tests、platform guard、modular IO state 和 search/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
+- 关键决策：`SearchReadModelRefreshProducer` 拥有 search scope normalization、invalidation target selection 和 gateway-backed enqueue；`Application` 只组装 producer dependency。
+- 文档影响：新增 audit 和 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 search/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 `SearchReadModelRefreshProducerTests` 和 platform guard，防止 search refresh producer/invalidation helper 回到 `server.py`；复跑 search API/runtime/manifest 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-search-refresh-producer-invalidation-service-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:search-local-implementation-closure-audit`。
+
 ## 2026-06-24 - No-OA bank batch derived lifecycle executor extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，将 no-OA derived lifecycle target/enqueue behavior 从 `Application` 收敛到显式 executor。
