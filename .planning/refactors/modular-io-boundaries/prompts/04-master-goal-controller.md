@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: prompt-generation and thread-creation for `planning:read-model-module-closure-worker-wave-1-prompts`.
-- Last status: in-progress; worker handoffs are not accepted yet.
+- Last completed controller step: monitor and accept read-model module closure worker wave 1.
+- Last status: worker wave 1 accepted as local evidence/gap maps; browser/API/high-row smoke remains open.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
@@ -80,8 +80,8 @@ Current state expected on start:
 - `production:read-model-scope-contract-runtime-dry-run-classification` is complete in `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`: `/health/ready` is ready on active API port `18001`, cost-statistics scope contract dry-run returned `ok=true` with `violation_count=0` and no current uncovered failures, invalid read-model scope dry-run returned `ok=true` with `invalid_scope_count=0`, and legacy `cost`/`tax` rows are historical `done` dirty scopes only.
 - `planning:post-scope-contract-runtime-classification-next-boundary-selection` is complete in `analysis/planning-post-scope-contract-runtime-classification-next-boundary-selection-2026-06-25.md`: final closure, production cleanup, immediate worker creation and Go admission were rejected as premature; the next boundary had to map module closure evidence and file ownership first.
 - `planning:read-model-module-closure-evidence-ownership-map` is complete in `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`: row248 mapped read-model-heavy modules to route/API surfaces, local docs/test owners, row245/246 production facts, remaining authenticated API/browser/high-row gaps and four worker ownership/handoff scopes. No worker thread, production command, runtime mutation or closure claim occurred.
-- `planning:read-model-module-closure-worker-wave-1-prompts` has written `analysis/read-model-module-closure-worker-wave-1-prompts-2026-06-25.md`, committed prompt generation in `71ef441d`, and created four local project worker threads: W1 `019efb08-6669-7eb1-b5a2-166639ce50af`, W2 `019efb08-8ff0-74a1-b0c9-300f39c96f73`, W3 `019efb08-b871-7e00-9c36-8b621210d64b`, W4 `019efb08-e2a8-7722-8acd-452cd9629269`.
-- The next pending boundary is `planning:read-model-module-closure-worker-wave-1-monitor-and-accept`.
+- `planning:read-model-module-closure-worker-wave-1-prompts` and `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` are complete. T0 accepted W1 `bf03ba98`, W2 `82eb8919`, W3 `cfc495f1` and W4 `525818ba` as local evidence/gap maps only in `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`.
+- The next pending boundary is `planning:read-model-authenticated-api-browser-smoke-runbook-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -213,8 +213,8 @@ Current state expected on start:
 - `production:read-model-scope-contract-runtime-dry-run-classification` is complete as a production-controlled slice: row246 proved the scope-contract and invalid-scope dry-runs are clean and classified legacy `cost`/`tax` rows as historical `done` dirty scopes only, with no active outbox or readiness residue.
 - `planning:post-scope-contract-runtime-classification-next-boundary-selection` is complete as a planning slice: row247 selected an evidence/ownership map before any worker wave or closure claim.
 - `planning:read-model-module-closure-evidence-ownership-map` is complete as a planning slice: row248 produced the controller-owned evidence/ownership map and selected a prompt-generation boundary for a four-worker read-model closure evidence wave.
-- `planning:read-model-module-closure-worker-wave-1-prompts` has created four worker threads and remains open until T0 monitors final answers and accepts/rejects handoffs.
-- The next pending boundary is `planning:read-model-module-closure-worker-wave-1-monitor-and-accept`.
+- `planning:read-model-module-closure-worker-wave-1-prompts` created four worker threads, and `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` accepted their handoffs as local evidence/gap maps only. Browser/API/high-row smoke and module-specific closure audits remain open.
+- The next pending boundary is `planning:read-model-authenticated-api-browser-smoke-runbook-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -317,16 +317,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:read-model-module-closure-worker-wave-1-monitor-and-accept`.
+Start with `planning:read-model-authenticated-api-browser-smoke-runbook-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/read-model-module-closure-worker-wave-1-prompts-2026-06-25.md`, `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`, `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`, `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`, `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Use `read_thread` to monitor W1-W4, then read each final answer and assigned handoff file before accepting or rejecting evidence.
-- Pull any worker commits only with a clean tree and `git pull --ff-only origin dev`; inspect diffs and verify no controller-only files were touched.
+- Read `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`, `analysis/read-model-module-closure-worker-wave-1-prompts-2026-06-25.md`, `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`, `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`, `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`, `analysis/commit-backed-state-reconciliation-2026-06-25.md`, the four accepted handoff files, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Convert the accepted worker gap maps into a bounded controller-owned authenticated API/browser/high-row smoke runbook selection.
+- Keep this next slice planning-only unless a separate runbook proves non-secret read-only execution is safe.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state in this planning slice.
 - Do not claim module/global closure from row245, row246, row248 or worker handoffs alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.

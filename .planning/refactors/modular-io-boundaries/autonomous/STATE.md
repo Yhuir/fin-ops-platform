@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-module-closure-worker-wave-1-monitoring-pending`
+Current state: `read-model-module-closure-worker-wave-1-accepted`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed the prompt-generation and thread-creation part of `planning:read-model-module-closure-worker-wave-1-prompts` in `analysis/read-model-module-closure-worker-wave-1-prompts-2026-06-25.md`. T0 created four local project worker threads for Workbench/relations/turnover, invoice/OA family, bank/pending/no-OA/search, and cost/tax evidence mapping. Row249 remains open for monitoring and handoff acceptance; no worker result has been accepted yet, no production command or runtime mutation occurred, and no module/global closure is claimed. The next boundary is `planning:read-model-module-closure-worker-wave-1-monitor-and-accept`.
+Completed `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` in `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`. T0 read W1-W4 final answers, inspected worker commits, verified no controller-only files were touched, and accepted four handoffs as local evidence/gap maps only: W1 `bf03ba98`, W2 `82eb8919`, W3 `cfc495f1`, W4 `525818ba`. No production command or runtime mutation occurred, and no module/global closure is claimed. The next boundary is `planning:read-model-authenticated-api-browser-smoke-runbook-selection`.
 
 ## Closed Or Deferred Slices
 
