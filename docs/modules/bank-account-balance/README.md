@@ -20,7 +20,7 @@
 - `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`：账户余额 read model repository port。
 - `backend/src/fin_ops_platform/services/bank_account_balance_read_model_refresh.py`：`bank_account_balance.read_model.refresh` worker handler。
 - `backend/src/fin_ops_platform/services/bank_details_application_service.py`：Bank Details accounts API 的 query/freshness 映射。
-- `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`：当前过渡期仍暴露 `list_bank_account_balances(...)`。
+- `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`：Bank Detail read model repository port；不得暴露账户余额 read model 读取方法。
 - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`：当前 SQL table owner，包含 scope summary、list 和 save 方法。
 - `backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`：backfill/enqueue/worker-drain CLI。
 - `backend/src/fin_ops_platform/services/read_model_manifest.py`：`bank_account_balance` read model manifest contract。
@@ -35,7 +35,7 @@
 ## 当前缺口
 
 - Projection save path 已通过 `BankAccountBalanceReadModelRepositoryPort.save_bank_account_balances(...)` 写入。
-- Bank Details accounts SQL read path 已优先通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 仍作为过渡兼容 fallback，后续必须审计移除或加固为 compat-only。
+- Bank Details accounts SQL read path 已通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort` 不再暴露 `list_bank_account_balances(...)`。
 - Refresh producer 已通过 `BankAccountBalanceReadModelRefreshProducer` 收敛；Application、Bank Details service injection、runtime import-state fan-out、runtime derived lifecycle fan-out 和 backfill enqueue 均走该 producer。
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
 - `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。

@@ -628,7 +628,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             "txn-1",
         )
         self.assertEqual(port.list_bank_detail_accounts(date_from=None, date_to=None)["accounts"][0]["account_key"], "icbc:6386")
-        self.assertEqual(port.list_bank_account_balances(date_from=None, date_to=None)["balance_read_model_status"], "fresh")
+        self.assertFalse(hasattr(port, "list_bank_account_balances"))
         self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
         self.assertEqual(
             [name for name, _payload in underlying.calls],
@@ -637,7 +637,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                 "bank_detail_scope_summary",
                 "list_bank_detail_transactions",
                 "list_bank_detail_accounts",
-                "list_bank_account_balances",
             ],
         )
 

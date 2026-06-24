@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:bank-account-balance-derived-lifecycle-executor-extraction.
+- Last completed boundary: read-models:bank-account-balance-bank-detail-fallback-quarantine.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -153,7 +153,7 @@ Current state expected on start:
 - Search worker `search:all` shard fan-out now routes through `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`.
 - Search local implementation support is accounted for after repository port, query freshness service, refresh producer, production repository-unavailable fail-closed behavior, OA projection sync producer boundary, runtime import-state producer boundary and all-scope worker fan-out producer boundary. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `bank_account_balance` is selected as the thirteenth non-Go read model pilot. Repository port extraction is implemented: `BankAccountBalanceReadModelRepositoryPort` owns manifest-listed scope summary/list/save methods; projection save and Bank Details accounts SQL read paths use the explicit account-balance port.
-- `bank_account_balance` refresh/freshness/operation-barrier audit is analysis-closed. Refresh producer extraction is implemented: `BankAccountBalanceReadModelRefreshProducer` owns gateway-backed all-only refresh enqueue, and Application, Bank Details service injection, runtime import-state fan-out, runtime derived lifecycle fan-out and backfill enqueue route through it. Derived lifecycle executor extraction is implemented: `BankAccountBalanceDerivedLifecycleExecutor` owns response assembly. All-only scope policy is implemented at the gateway. Dedicated operation barrier regression is covered. `BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` compatibility fallback remains implementation work.
+- `bank_account_balance` refresh/freshness/operation-barrier audit is analysis-closed. Refresh producer extraction is implemented: `BankAccountBalanceReadModelRefreshProducer` owns gateway-backed all-only refresh enqueue, and Application, Bank Details service injection, runtime import-state fan-out, runtime derived lifecycle fan-out and backfill enqueue route through it. Derived lifecycle executor extraction is implemented: `BankAccountBalanceDerivedLifecycleExecutor` owns response assembly. All-only scope policy is implemented at the gateway. Dedicated operation barrier regression is covered. Bank Detail port account-balance compatibility fallback is removed.
 - No module is globally closed.
 - The no-OA refresh persistence boundary is implemented: `NoOaBankBatchReadModelPersistencePort` owns public snapshot persistence delegation for the worker refresh path, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
 - The no-OA read model repository port boundary is implemented: `NoOaBankBatchReadModelRepositoryPort` owns no-OA list/query read model repository access, `PostgresStateStore.no_oa_bank_batch_sql_read_repository` exposes the port, and `NoOaBankBatchApplicationService.list_batches_payload(...)` no longer reads through broad `workbench_sql_read_repository`.
@@ -162,7 +162,7 @@ Current state expected on start:
 - The no-OA mutation persistence fallback quarantine is implemented: `NoOaBankBatchApplicationService.persist_mutation(...)` requires `save_no_oa_bank_batch_mutation(...)`, `ApplicationStateStore` exposes the same explicit boundary, and the service-layer broad state-store fallback is guarded from returning.
 - The no-OA first local closure audit found broad `Application._persist_state(...)` still serialized `no_oa_bank_batches`; the no-OA full-state snapshot quarantine is implemented and guarded.
 - The no-OA post-full-state local closure audit is complete: no remaining local implementation gap was found after deleting dead app-owned source-version/stale-reason helpers. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
-- The next pending boundary is read-models:bank-account-balance-bank-detail-fallback-quarantine.
+- The next pending boundary is read-models:bank-account-balance-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -258,13 +258,13 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:bank-account-balance-bank-detail-fallback-quarantine unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:bank-account-balance-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:bank-account-balance-bank-detail-fallback-quarantine:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-account-balance-operation-barrier-regression.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-account-balance-repository-port-extraction.md`, `docs/modules/bank-account-balance/README.md`, `docs/modules/bank-account-balance/state-machine.md`, `docs/modules/bank-account-balance/tests.md`, `docs/modules/bank-account-balance/implementation-notes.md`, `backend/src/fin_ops_platform/services/bank_details_application_service.py`, `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`, `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`, `tests/test_bank_details_sql_runtime.py`, `tests/test_bank_account_balance_read_model.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Classify `BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` as removable or compat-only.
-- Prefer removal if current app/service/test wiring proves explicit `BankAccountBalanceReadModelRepositoryPort` is always available for normal Bank Details accounts reads.
-- If it must stay, document owner/caller/deletion condition and add a guard that it cannot become the normal account-balance owner.
+For read-models:bank-account-balance-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-account-balance-bank-detail-fallback-quarantine.md`, `docs/modules/bank-account-balance/README.md`, `docs/modules/bank-account-balance/state-machine.md`, `docs/modules/bank-account-balance/tests.md`, `docs/modules/bank-account-balance/implementation-notes.md`, `backend/src/fin_ops_platform/services/bank_details_application_service.py`, `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`, `backend/src/fin_ops_platform/services/bank_account_balance_read_model_refresh.py`, `backend/src/fin_ops_platform/services/bank_account_balance_read_model_refresh_producer.py`, `backend/src/fin_ops_platform/services/bank_account_balance_projection.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `tests/test_bank_details_sql_runtime.py`, `tests/test_bank_account_balance_read_model.py`, `tests/test_read_model_refresh_gateway.py`, `tests/test_operation_freshness_barrier.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Re-audit account-balance routes, service, repository port, projection save, refresh producer, worker handler, scope policy, operation barrier and docs/tests.
+- If no local implementation gaps remain, move local support to `production-evidence-deferred` without claiming module closure.
+- If a local gap remains, insert the next narrow implementation boundary before Go candidates.
 - Do not introduce month/account scoped projection.
 - Do not change `bank_account_balance:all` as the only publish scope.
 - Do not mark any module globally closed unless real PostgreSQL/worker/App Status/high-row/browser evidence is available and verified.

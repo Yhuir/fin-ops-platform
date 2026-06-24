@@ -394,7 +394,7 @@ class BankDetailsApplicationService:
         )
 
     def _accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
-        repository = self._bank_account_balance_read_model_repository or self._bank_detail_sql_read_repository
+        repository = self._bank_account_balance_read_model_repository
         if repository is None:
             enqueued = self._enqueue_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
             return self._accounts_refreshing_payload(

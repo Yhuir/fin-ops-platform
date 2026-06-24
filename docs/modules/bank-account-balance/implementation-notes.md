@@ -52,3 +52,10 @@
 - 改动：新增 `OperationFreshnessBarrierService` 测试，覆盖 dirty/readiness refreshing、outbox pending 和 unrelated read model outbox 不阻塞账户余额目标。
 - 保持不变：未改生产服务代码；API、worker event、queue schema、余额计算、权限、审计和前端行为不变。
 - 下一步：`read-models:bank-account-balance-bank-detail-fallback-quarantine`，处理 Bank Detail port 的 account-balance compatibility fallback。
+
+## 2026-06-24 - Bank Detail fallback quarantine
+
+- 目标：移除 Bank Details accounts 通过 Bank Detail read model port 读取 account-balance payload 的过渡 fallback。
+- 改动：`BankDetailsApplicationService._accounts_from_sql_read_model(...)` 只使用 `bank_account_balance_read_model_repository`；`BankDetailReadModelRepositoryPort` 删除 `list_bank_account_balances(...)`；新增 static guard 防止 fallback 回归。
+- 保持不变：缺少 account-balance SQL repository/table 时仍返回 refreshing 并 enqueue `bank_account_balance:all`；API shape、worker event、queue schema、余额计算、权限、审计和前端行为不变。
+- 下一步：`read-models:bank-account-balance-local-implementation-closure-audit`，确认是否只剩 production evidence defer。

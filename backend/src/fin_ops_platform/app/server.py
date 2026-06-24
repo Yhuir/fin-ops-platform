@@ -12977,12 +12977,16 @@ class Application:
     def _bank_details_application_service(self) -> BankDetailsApplicationService:
         suggestion_provider = self.__dict__.get("_bank_detail_auto_category_suggestion_provider")
         if suggestion_provider is None:
-            suggestion_provider = BankDetailAutoCategorySuggestionProvider(
-                import_service=self._import_service,
-                bank_details_service=self._bank_details_service,
-                bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
-                serialize_value=self._serialize_value,
-            ).latest
+            import_service = getattr(self, "_import_service", None)
+            bank_details_service = getattr(self, "_bank_details_service", None)
+            auto_category_service = getattr(self, "_bank_transaction_auto_category_service", None)
+            if import_service is not None and bank_details_service is not None and auto_category_service is not None:
+                suggestion_provider = BankDetailAutoCategorySuggestionProvider(
+                    import_service=import_service,
+                    bank_details_service=bank_details_service,
+                    bank_transaction_auto_category_service=auto_category_service,
+                    serialize_value=self._serialize_value,
+                ).latest
         elif not callable(suggestion_provider):
             latest = getattr(suggestion_provider, "latest", None)
             suggestion_provider = latest if callable(latest) else None
@@ -13017,7 +13021,11 @@ class Application:
                 "clear_cache",
                 lambda: None,
             ),
-            available_month_scope_keys_provider=self._bank_detail_available_month_scope_provider().scope_keys,
+            available_month_scope_keys_provider=(
+                self._bank_detail_available_month_scope_provider().scope_keys
+                if hasattr(self, "_import_service")
+                else lambda: []
+            ),
             enqueue_bank_account_balance_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
             enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,

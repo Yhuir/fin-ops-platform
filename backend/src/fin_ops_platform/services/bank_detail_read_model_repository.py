@@ -53,7 +53,3 @@ class BankDetailReadModelRepositoryPort:
     def list_bank_detail_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object] | None:
         payload = self._repository.list_bank_detail_accounts(date_from=date_from, date_to=date_to)
         return dict(payload) if isinstance(payload, dict) else None
-
-    def list_bank_account_balances(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object] | None:
-        payload = self._repository.list_bank_account_balances(date_from=date_from, date_to=date_to)
-        return dict(payload) if isinstance(payload, dict) else None

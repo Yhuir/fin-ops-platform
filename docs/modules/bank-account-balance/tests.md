@@ -62,10 +62,17 @@
 - 新增：`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_other_read_model_outbox_pending_does_not_block_bank_account_balance_all_target`。
 - 覆盖：`bank_account_balance:all` dirty/readiness 和 outbox pending 都会阻止 accounts freshness target 被误判为 fresh，且无关 read model outbox 不影响账户余额目标。
 
+## 2026-06-24 - Bank Detail fallback quarantine
+
+- 更新：`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_bank_detail_read_model_port_excludes_unrelated_read_model_methods`。
+- 更新：`tests/test_runtime_bootstrap.py::RuntimeBootstrapTests::test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing`。
+- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port`。
+- 覆盖：Bank Detail read model port 不再暴露 account-balance 读取；accounts SQL read path 必须走 account-balance port；缺表仍走 refreshing/enqueue。
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_platform_runtime_boundary_guards -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check
@@ -74,4 +81,4 @@ git diff --check
 ## 未测风险
 
 - 当前没有本地 `PGSQL_URL` 或 staging DB，真实 PostgreSQL worker drain、App Status readiness、high-row performance 和 Browser smoke evidence 仍需后续生产/环境验证。
-- 当前 worker/storage/gateway 只支持 `bank_account_balance:all`；dedicated operation barrier regression 已补齐，但 Bank Detail fallback quarantine 仍需后续闭环。
+- 当前 worker/storage/gateway 只支持 `bank_account_balance:all`；dedicated operation barrier regression 和 Bank Detail fallback quarantine 已补齐；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍未验证。

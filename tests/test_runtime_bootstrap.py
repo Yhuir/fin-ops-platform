@@ -277,7 +277,8 @@ class RuntimeBootstrapTests(unittest.TestCase):
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        app._bank_detail_sql_read_repository = MissingBankAccountBalanceRepository()
+        app._bank_detail_sql_read_repository = object()
+        app._bank_account_balance_sql_read_repository = MissingBankAccountBalanceRepository()
         queue = RuntimeBootstrapQueue()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._bank_details_service = type(

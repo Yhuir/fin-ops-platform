@@ -1343,3 +1343,10 @@
 - 改动：新增 `OperationFreshnessBarrierService` 测试，覆盖 `bank_account_balance:all` dirty/readiness refreshing、outbox pending 和 unrelated outbox 不阻塞。
 - 保持不变：生产服务代码、API、worker event、queue schema、projection 和 frontend behavior 不变。
 - 下一步：`read-models:bank-account-balance-bank-detail-fallback-quarantine`。
+
+## 2026-06-24 - bank account balance Bank Detail fallback quarantine
+
+- 目标：移除 account-balance read model 通过 Bank Detail read model port 的过渡 fallback。
+- 改动：Bank Details accounts SQL read path 只使用 `BankAccountBalanceReadModelRepositoryPort`；`BankDetailReadModelRepositoryPort` 不再暴露 `list_bank_account_balances(...)`；static guard 防止 fallback 回归。
+- 保持不变：缺少 account-balance SQL repository/table 时仍返回 refreshing 并 enqueue；API、worker event、queue schema 和 frontend behavior 不变。
+- 下一步：`read-models:bank-account-balance-local-implementation-closure-audit`。

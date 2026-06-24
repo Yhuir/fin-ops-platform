@@ -2026,6 +2026,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port(self) -> None:
+        bank_detail_port_source = (SERVICES_ROOT / "bank_detail_read_model_repository.py").read_text(encoding="utf-8")
+        service_path = SERVICES_ROOT / "bank_details_application_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        accounts_source = _function_source(service_tree, service_source, "_accounts_from_sql_read_model")
+
+        violations: list[str] = []
+        if "def list_bank_account_balances" in bank_detail_port_source:
+            violations.append("BankDetailReadModelRepositoryPort still exposes bank account balance read model access")
+        if "self._bank_account_balance_read_model_repository or self._bank_detail_sql_read_repository" in accounts_source:
+            violations.append("Bank Details accounts SQL read path still falls back to Bank Detail repository port")
+        if "_bank_detail_sql_read_repository" in accounts_source and "api_sql_repository_unavailable" not in accounts_source:
+            violations.append("Bank Details accounts path has an unclassified Bank Detail repository reference")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_source_version_helpers_stay_out_of_application(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
