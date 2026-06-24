@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Input invoice usage repository port extraction
+
+- 目标：执行 `read-models:input-invoice-usage-repository-port-extraction`，为进项发票使用 read model 建立窄 repository port。
+- 影响范围：`InputInvoiceUsageReadModelRepositoryPort`、`PostgresStateStore.input_invoice_usage_sql_read_repository`、`InvoiceUsageCollectionSqlProjectionBuilder` input usage save/mark/prune wiring、runtime worker builder wiring和 invoice usage collection SQL runtime tests。
+- 关键决策：`list_input_invoice_usage_scope_shards(...)` 是 source-fact 月份枚举，不属于 manifest repository port contract；保留在 projection builder fan-out 边界。repository port 只暴露 rows/detail/save/mark/prune。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/input-invoice-usage 实施记录和测试矩阵；状态机定义不变。
+- 测试覆盖：新增 `InputInvoiceUsageReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 input usage API/projection/freshness 相关目标回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；input usage freshness/barrier/helper audit 仍是下一步。
+
 ## 2026-06-24 - Input invoice usage next pilot selection
 
 - 目标：执行 `read-models:next-pilot-selection-after-oa-pending-payment`，在 OA 待付款本地实现支持 accounted 后选择下一个非 Go read model 试点。

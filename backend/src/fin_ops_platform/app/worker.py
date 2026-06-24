@@ -39,6 +39,7 @@ from fin_ops_platform.services.invoice_usage_collection_read_model_refresh impor
     InvoiceUsageCollectionReadModelRefreshService,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
+from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
 from fin_ops_platform.services.invoice_lifecycle_read_model_refresh import (
     INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE,
     InvoiceLifecycleReadModelRefreshService,
@@ -459,6 +460,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             workbench_relation_read_facade=workbench_relation_read_facade,
             payment_status_repository=oa_payment_status_repository,
             oa_source_adapter=_oa_payment_source_adapter(),
+            input_invoice_usage_read_model_repository=(
+                InputInvoiceUsageReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
             oa_pending_payment_read_model_repository=(
                 OaPendingPaymentReadModelRepositoryPort(read_model_repository)
                 if read_model_repository is not None

@@ -20,6 +20,7 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PENDING
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
@@ -690,6 +691,76 @@ class OaPendingRelationCleanupConnection(EmptyTransactionConnection):
                     claim["status"] = "released"
                     claim["released_by"] = actor
                     claim["release_reason"] = reason
+
+
+class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Underlying:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, object]] = []
+
+            def list_input_invoice_usage_rows(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("list_input_invoice_usage_rows", dict(kwargs)))
+                return {"rows": [{"id": "input-1"}], "refresh_status": "fresh"}
+
+            def save_input_invoice_usage_rows(self, **kwargs: object) -> None:
+                self.calls.append(("save_input_invoice_usage_rows", dict(kwargs)))
+
+            def mark_input_invoice_usage_scope(self, **kwargs: object) -> None:
+                self.calls.append(("mark_input_invoice_usage_scope", dict(kwargs)))
+
+            def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+                self.calls.append(("prune_input_invoice_usage_scope_shards", list(current_scope_keys)))
+
+            def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object]:
+                self.calls.append(("get_input_invoice_usage_row_by_row_id", row_id))
+                return {"row": {"id": row_id}, "refresh_status": "fresh"}
+
+            def list_output_invoice_collection_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("input invoice usage port must not expose output collection reads")
+
+            def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("input invoice usage port must not expose OA pending payment reads")
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("input invoice usage port must not expose pending invoice reads")
+
+        underlying = Underlying()
+        port = InputInvoiceUsageReadModelRepositoryPort(underlying)
+
+        self.assertEqual(
+            port.list_input_invoice_usage_rows(month="2026-05", page=1, page_size=50)["rows"][0]["id"],
+            "input-1",
+        )
+        self.assertEqual(
+            port.get_input_invoice_usage_row_by_row_id("input-1")["row"]["id"],
+            "input-1",
+        )
+        port.save_input_invoice_usage_rows(
+            scope_key="2026-05",
+            rows=[{"id": "input-1"}],
+            source_versions={"schema": "v1"},
+        )
+        port.mark_input_invoice_usage_scope(
+            scope_key="2026-05",
+            row_count=1,
+            source_versions={"schema": "v1"},
+        )
+        port.prune_input_invoice_usage_scope_shards(["2026-05"])
+
+        self.assertFalse(hasattr(port, "list_output_invoice_collection_rows"))
+        self.assertFalse(hasattr(port, "list_oa_pending_payment_rows"))
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "list_input_invoice_usage_rows",
+                "get_input_invoice_usage_row_by_row_id",
+                "save_input_invoice_usage_rows",
+                "mark_input_invoice_usage_scope",
+                "prune_input_invoice_usage_scope_shards",
+            ],
+        )
 
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
@@ -1642,6 +1713,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._oa_projection_repository = EmptyOAProjectionRepository()
         builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         builder._oa_projection_repository = type(
@@ -1686,6 +1758,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = StaticOAProjectionRepository([
             self._oa("oa-cross-month", "杨丽萍", "75799.00")
@@ -1897,6 +1970,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         builder.mark_input_invoice_usage_scope_empty("2026-05")
@@ -1911,6 +1985,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         builder.prune_input_invoice_usage_scope_shards(["2026-06"])

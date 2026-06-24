@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Read model repository port extraction
+
+- 目标：执行 `read-models:input-invoice-usage-repository-port-extraction`，把进项发票使用 SQL read model rows/detail/save/mark/prune 收敛到窄 repository port。
+- 影响范围：`InputInvoiceUsageReadModelRepositoryPort`、PostgreSQL state-store read repository wiring、`InvoiceUsageCollectionSqlProjectionBuilder` input usage projection save/mark/prune wiring、runtime worker builder wiring和目标测试。
+- 关键决策：`list_input_invoice_usage_scope_shards(...)` 继续作为 source-fact 月份枚举保留在 projection builder，不纳入 repository port；本轮不改 OA reverse、支付规则、页面 UI、read model schema 或 worker event。
+- 文档影响：同步 read-models 实施记录、测试矩阵和 modular IO autonomous state。
+- 测试覆盖：新增 port guard 证明 output/OA/pending read model 方法不会通过 input usage port 暴露；复跑 relation details/export 和 invoice usage collection SQL runtime 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser 证据仍未执行；下一步需审计 freshness/force-refresh/operation barrier 和保留 app-level helper 分类。
+
 ## 2026-06-24 - Selected as next read model modular IO pilot
 
 - 目标：记录 modular IO 自动推进选择 `input_invoice_usage` 作为 OA 待付款后的下一个非 Go read model 试点。

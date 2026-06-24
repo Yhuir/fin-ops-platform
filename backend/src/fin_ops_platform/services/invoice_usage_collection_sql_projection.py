@@ -4,6 +4,7 @@ from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     PostgresInputInvoiceUsagePaymentRulesStateStore,
@@ -42,11 +43,16 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
         oa_source_adapter: Any | None = None,
+        input_invoice_usage_read_model_repository: Any | None = None,
         oa_pending_payment_read_model_repository: Any | None = None,
     ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = PostgresReadModelRepository(connection)
+        self._input_invoice_usage_read_model_repository = (
+            input_invoice_usage_read_model_repository
+            or InputInvoiceUsageReadModelRepositoryPort(self._read_repository)
+        )
         self._oa_pending_payment_read_model_repository = (
             oa_pending_payment_read_model_repository
             or OaPendingPaymentReadModelRepositoryPort(self._read_repository)
@@ -65,7 +71,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.INPUT)
 
     def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._read_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
+        self._input_invoice_usage_read_model_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
 
     def list_output_invoice_collection_scope_shards(self, scope_key: str) -> list[str]:
         return self._list_invoice_month_shards(scope_key=scope_key, invoice_type=InvoiceType.OUTPUT)
@@ -111,7 +117,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
-        self._read_repository.save_input_invoice_usage_rows(
+        self._input_invoice_usage_read_model_repository.save_input_invoice_usage_rows(
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
@@ -191,7 +197,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         }
 
     def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
-        self._read_repository.mark_input_invoice_usage_scope(
+        self._input_invoice_usage_read_model_repository.mark_input_invoice_usage_scope(
             scope_key=scope_key,
             row_count=0,
             source_versions=input_invoice_usage_source_versions(

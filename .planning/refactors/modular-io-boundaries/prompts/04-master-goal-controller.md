@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-oa-pending-payment.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:input-invoice-usage-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -86,8 +86,10 @@ Current state expected on start:
 - input_invoice_usage shares the invoice-usage-collection worker/projection family with oa_pending_payment and output_invoice_collection.
 - input_invoice_usage production rows, filter/export helpers and relation details must not live-scan fallback when SQL read model runtime is required.
 - input_invoice_usage:all remains fan-out control scope; all-query freshness proof must come from concrete month rows/scopes and active dirty/outbox state.
+- `InputInvoiceUsageReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
+- `list_input_invoice_usage_scope_shards(...)` remains outside the repository port as source-fact month enumeration.
 - No module is globally closed.
-- The next pending boundary is read-models:input-invoice-usage-repository-port-extraction.
+- The next pending boundary is read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -183,24 +185,21 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:input-invoice-usage-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:input-invoice-usage-repository-port-extraction:
-- Read `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/input-invoice-usage/state-machine.md`, `docs/modules/input-invoice-usage/tests.md`, and `docs/modules/input-invoice-usage/implementation-notes.md`.
-- Read `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/input_invoice_usage_service.py`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `tests/test_input_invoice_usage_api.py`, and `tests/test_invoice_usage_collection_sql_runtime.py`.
+For read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/input-invoice-usage/state-machine.md`, `docs/modules/input-invoice-usage/tests.md`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_repository.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `backend/src/fin_ops_platform/services/operation_freshness_barrier.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, and `tests/test_input_invoice_usage_api.py`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Add a narrow `InputInvoiceUsageReadModelRepositoryPort`.
-- Expose only manifest-listed input usage read-model methods: `list_input_invoice_usage_rows`, `save_input_invoice_usage_rows`, `mark_input_invoice_usage_scope`, `prune_input_invoice_usage_scope_shards`, and `get_input_invoice_usage_row_by_row_id`.
-- Decide during implementation whether `list_input_invoice_usage_scope_shards` belongs in the same port or a projection-only helper port, based on current worker fan-out call sites.
-- Wire PostgreSQL state-store input usage read repository and the input-usage portions of `InvoiceUsageCollectionSqlProjectionBuilder` through the narrow port where they currently pass the broad read model repository.
-- Add or update tests proving unrelated read model repository methods are not exposed through the port.
-- Preserve rows/filter-options/export/detail response shape, `read_model_status`, stale reasons, source-version proof, `all` fan-out/month shard behavior, payment-status rule source version behavior and relation-detail payload shape.
+- Audit `input_invoice_usage` fresh gate, force refresh, `all` fan-out/month proof, source-version proof and operation barrier behavior after repository port extraction.
+- Classify retained app-level input usage read model helpers as removed, compat-only, route/service dependency assembly, gateway-backed wrappers, source-fact providers, or implementation gaps.
+- Prefer analysis-only if behavior is already covered; implement only a narrow fix if the audit finds a concrete gap.
+- Do not claim local closure/defer until retained helper classifications and freshness/barrier evidence are explicit.
 - Do not change OA reverse draft creation, OA credential/token flows, Workbench relation command behavior, payment status business rules, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
 - Do not declare input_invoice_usage or any module globally closed.
 - Do not implement Go/Fiber/Go Worker.
 - Produce/update an analysis/accounting file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
-- Run targeted input usage API/projection tests, docs verification and diff checks.
+- Run targeted tests if runtime behavior changes; otherwise run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next safe boundary if verification passes.
 
