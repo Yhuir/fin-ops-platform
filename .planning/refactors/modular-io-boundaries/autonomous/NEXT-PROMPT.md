@@ -1,29 +1,41 @@
 # Next Prompt
 
-Continue after `production:read-model-focused-user-scope-api-metadata-resmoke-runbook`.
+Continue after `production:no-oa-bank-batches-api-stale-read-only-diagnosis`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row280 reused the Row273 in-process target OA applicant credential seam without printing or storing credentials/tokens.
-- Focused user-scope API metadata re-smoke results:
-  - `pending_invoices_rows`: pass, HTTP `200`, `read_model_status=fresh`, `refresh_enqueued_count=0`, p95 `660.208ms`.
-  - `pending_invoices_filter_options`: pass, HTTP `200`, `read_model_status=fresh`, `refresh_enqueued_count=0`, p95 `129.211ms`.
-  - `no_oa_bank_batches`: fail, HTTP `200`, `read_model_status=stale`, `refresh_enqueued_count=1`, p95 `143.406ms`.
-- Row280 obeyed the stop gate and did not run full non-admin user-scope probes because the focused set failed.
-- Row280 postcheck:
-  - `/health/ready`: ready.
-  - dirty scopes: all `done`.
-  - readiness: all `fresh`.
-  - read-model outbox: all `done`.
-  - read-model dead letters: none.
-  - recent no-OA dirty/outbox from the GET-triggered refresh: `done`.
-- Row278 previously proved the bounded no-OA row category snapshot matched the deployed expected category snapshot and `source_version_mismatch_reasons` was empty against the safely reconstructed base contract.
+- Row281 used only read-only root SSH/deployed PostgreSQL metadata. It did not call production API endpoints, print payload rows, print secrets, enqueue/requeue/refresh/rebuild/repair/replay, deploy, restart or mutate DB/readiness/queue state.
+- Row281 initially hit several read-only compatibility issues before final evidence:
+  - `PostgresStateStore` required deployed `data_dir`.
+  - deployed `default_data_dir` import path is `fin_ops_platform.services.state_store`.
+  - deployed `AppSettingsService` requires `project_costing_service`, so final diagnosis used `PostgresStateStore.load_app_settings()` plus deployed constants.
+  - `read_model.app_status_readiness` uses `scope_type`, not `domain`.
+  - simplified pair-relation snapshot reconstruction was rejected; final evidence used `WorkbenchPairRelationService.from_snapshot(store.load_workbench_pair_relations()).snapshot()` to match `NoOaPairRelationSnapshotPort.snapshot_version()`.
+- Final Row281 evidence:
+  - Probe scope: `month=2026-06`, `bucket=unsubmitted`.
+  - Summary scope row count: `8`.
+  - Detail scope row count: `8`.
+  - Status distribution: `draft/unsubmitted=8`.
+  - Detail row source-version hash: `36cab6e37ef9aede`.
+  - Exact base expected hash: `12a6a240c94fcc71`.
+  - Optional-detail expected hash: `36cab6e37ef9aede`.
+  - Optional `bank_detail_source_versions` hash: `0673e51b28166cb9`.
+  - Optional `workbench_relation_source_versions` hash: `18ffe677bd6f1aa2`.
+  - Exact expected `pair_relation_snapshot_version` prefix: `d35b81698abdd031`.
+  - Base expected mismatch: `0` rows across summary/detail/combined API comparison.
+  - Optional-detail expected mismatch: `0` rows across summary/detail/combined API comparison.
+  - Dirty `no_oa_bank_batch:all`: `done`, latest `2026-06-25 06:11:30.097589+08`.
+  - Outbox `no_oa_bank_batch.read_model.refresh` last 24h: `done`, count `3`, latest `2026-06-25 06:11:30.105523+08`.
+  - App Status readiness `no_oa_bank_batch:all`: `fresh`, latest `2026-06-25 06:11:30.101741+08`.
+  - Dead letters in last 7d: none.
+- Row280's `no_oa_bank_batches` API stale result is classified as stale persisted rows before its GET-triggered refresh, now cleared by the completed refresh.
+- No code fix, repair, rebuild, requeue or manual refresh is justified from Row281 evidence.
 - Module/global closure remains open.
 
 ## Next Boundary
 
-`production:no-oa-bank-batches-api-stale-read-only-diagnosis`
+`production:no-oa-bank-batches-focused-api-freshness-recheck`
 
 ## Required First Steps On Resume
 
@@ -32,30 +44,30 @@ Continue after `production:read-model-focused-user-scope-api-metadata-resmoke-ru
 3. Acquire the direct-dev write lease before editing:
    - `mkdir /tmp/fin-ops-dev-write.lock`
 4. Read:
+   - `analysis/production-no-oa-bank-batches-api-stale-read-only-diagnosis-2026-06-25.md`
    - `analysis/production-read-model-focused-user-scope-api-metadata-resmoke-runbook-2026-06-25.md`
-   - `analysis/production-no-oa-bank-batch-category-source-version-mismatch-diagnosis-2026-06-25.md`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`
-   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
-   - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
+   - `backend/src/fin_ops_platform/tools/http_slo_probe.py`
    - `docs/modules/no-oa-bank-batches/README.md`
    - `docs/modules/no-oa-bank-batches/tests.md`
-5. Write a read-only diagnosis runbook/evidence file under `analysis/` before any production command.
+5. Write a bounded runbook/evidence file under `analysis/` before any production API command.
 
-## Diagnosis Scope
+## Recheck Scope
 
-Diagnose why user-scope `GET /api/no-oa-bank-batches?month=2026-06&bucket=unsubmitted&page=1&page_size=200` still reports `read_model_status=stale` after:
+Run a focused authenticated production API metadata recheck for `no_oa_bank_batches` only, reusing the Row280 in-process target OA applicant credential seam without printing/storing credentials, tokens, cookies, env values, response bodies or payload rows.
 
-- Row278 showed category source-version parity for the bounded row set;
-- Row280's GET-triggered no-OA refresh converged to done;
-- App Status readiness remains fresh and dirty/outbox/dead-letter aggregates are clean.
+Target expectation:
 
-The diagnosis should be read-only first and should avoid production API calls. It should compare deployed API expected source versions against bounded row source versions, including optional downstream keys if the deployed request path can include them, and inspect the freshness/status/dirty/outbox/readiness metadata needed to classify the stale reason.
+- `no_oa_bank_batches` returns HTTP `200`;
+- `read_model_status=fresh`;
+- `refresh_enqueued_count=0`;
+- p95 remains under the existing API smoke target;
+- no full user-scope, browser, admin or write probes run unless this focused no-OA recheck passes cleanly.
 
 ## Stop Gates
 
-- Do not call production API endpoints in the diagnosis boundary.
-- Do not print payload rows, batch ids, transaction ids, account names, counterparties, tokens, cookies, passwords, DSNs, env secret values or private keys.
-- Do not enqueue/requeue/refresh/repair/rebuild/replay/deploy/restart/manually mark readiness/directly mutate DB rows.
-- Stop if exact expected source-version construction would require broad `Application` startup or guessing unknown contracts.
-- Do not claim module/global closure from this diagnosis alone.
+- Stop if `/health/ready` is unavailable or not ready.
+- Stop if no safe target OA applicant auth path is available without printing/storing secrets.
+- Stop if focused `no_oa_bank_batches` still reports `stale`, `missing`, `refreshing`, `schema_mismatch`, `failed` or any refresh enqueue.
+- Stop if pre/post dirty/outbox/readiness/dead-letter checks are not clean.
+- Do not run browser/admin/write probes in this boundary.
+- Do not claim module/global closure from this focused API recheck alone.

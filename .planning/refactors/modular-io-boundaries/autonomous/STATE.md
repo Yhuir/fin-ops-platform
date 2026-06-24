@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batches-api-stale-read-only-diagnosis-selected`
+Current state: `no-oa-bank-batches-focused-api-freshness-recheck-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-focused-user-scope-api-metadata-resmoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-focused-user-scope-api-metadata-resmoke-runbook-2026-06-25.md`. T0 reused the Row273 in-process target OA applicant credential seam without printing credentials/tokens, ran the focused user-scope API metadata probe, and proved both pending invoice probes now pass fresh under the 1s target. `no_oa_bank_batches` still reports HTTP 200 with `read_model_status=stale` and triggered one bounded GET refresh enqueue; postcheck showed `/health/ready` ready, dirty scopes done, readiness fresh, read-model outbox done, no dead letters, and the no-OA refresh done. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-api-stale-read-only-diagnosis`.
+Completed `production:no-oa-bank-batches-api-stale-read-only-diagnosis` as `production-diagnosis-closed` in `analysis/production-no-oa-bank-batches-api-stale-read-only-diagnosis-2026-06-25.md`. T0 used only read-only root SSH/deployed PostgreSQL metadata and no production API call. After Row280's GET-triggered refresh, current `month=2026-06,bucket=unsubmitted` no-OA rows have 0 source-version mismatches against both the exact deployed base expected contract and the optional downstream-key contract; dirty/outbox/readiness are done/fresh and no read-model dead letters exist. Row280's no-OA stale result is classified as stale persisted rows before the GET-triggered refresh, not a current source-version contract drift. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-focused-api-freshness-recheck`.
 
 ## Closed Or Deferred Slices
 
