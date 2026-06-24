@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-module-closure-worker-wave-1-accepted`
+Current state: `read-model-authenticated-api-smoke-runbook-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` in `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`. T0 read W1-W4 final answers, inspected worker commits, verified no controller-only files were touched, and accepted four handoffs as local evidence/gap maps only: W1 `bf03ba98`, W2 `82eb8919`, W3 `cfc495f1`, W4 `525818ba`. No production command or runtime mutation occurred, and no module/global closure is claimed. The next boundary is `planning:read-model-authenticated-api-browser-smoke-runbook-selection`.
+Completed `planning:read-model-authenticated-api-browser-smoke-runbook-selection` in `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`. T0 selected `production:read-model-authenticated-api-response-shape-smoke-runbook` as the next safe boundary and deferred browser smoke until a non-secret authentication/harness path is proven. No production command or runtime mutation occurred, and no module/global closure is claimed.
 
 ## Closed Or Deferred Slices
 
