@@ -227,3 +227,4 @@ This file records autonomous execution events.
 ## 2026-06-25
 
 - Prepared `planning:commit-backed-state-reconciliation` as the next mandatory controller boundary after user challenged state-file accuracy. Future T0 runs must compute completion percentages from actual git commits/diffs/tests, classify stale state-file claims, update `STATE.md` / `MODULE-QUEUE.md` / `JOURNAL.md` / `NEXT-PROMPT.md` from commit evidence, and only then select the next implementation or worker wave. This entry does not claim a new real completion percentage.
+- Strengthened the primary T0 Meta Orchestrator prompt so T0 and all generated workers must report user-facing results in Simplified Chinese, and every worker prompt must include a bounded GSD workflow: preflight, full analysis, plan, narrow implementation, verification, self-review, handoff and Chinese final report. This does not change the next executable boundary.
