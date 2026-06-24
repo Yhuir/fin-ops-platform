@@ -1,5 +1,28 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Modern Workbench action route-owner final residual audit
+
+目标：在 withdraw-link preview 抽离后，复查现代 Workbench action route-owner 是否仍有 `Application` 直接调用 `WorkbenchWriteFacade` 的残留。
+
+结论：
+
+- 当前审计面内未发现 `Application`、`routes_workbench_actions.py` 或 `routes_legacy_workbench_actions.py` 继续直接调用 `_workbench_write_facade().*` 的现代 action delegation。
+- `WorkbenchActionApiRoutes` 已拥有 exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link preview/submit、cash special、update-bank-exception、OA-bank exception、personal advance repayment、cancel-exception、ignore-row 和 unignore-row 的现代 action delegation。
+- `Application` 仍保留 HTTP dispatch、JSON parse、freshness guard、auth/request context、request timing 和 response serialization 等 HTTP 层职责。
+- 下一条边界选择为 `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`，清理 cancel-exception wrapper 中两个分支都调用同一 helper 的 no-op branch。
+
+未改变：
+
+- 本轮仅审计和更新状态机，不改 runtime 行为、response shape、status code、auth、freshness guard、operation barrier、read model refresh、前端行为或 legacy route 行为。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_modern_workbench_action_route_owner_final_residual_audit_selects_cancel_exception_cleanup tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_withdraw_link_preview_route_owner_extraction_updates_queue tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench withdraw-link preview route owner extraction
 
 目标：把现代 `/api/workbench/actions/withdraw-link/preview` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。

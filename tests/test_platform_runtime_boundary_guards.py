@@ -3079,9 +3079,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         queue_source = (
             REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
         ).read_text(encoding="utf-8")
-        next_prompt_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
-        ).read_text(encoding="utf-8")
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-withdraw-link-preview-route-owner-extraction.md"
@@ -3094,16 +3091,44 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench withdraw-link preview route owner extraction is not closed as implementation")
         if (
-            "| 211 | `server-py:modern-workbench-action-route-owner-final-residual-audit` | pending"
+            "| 211 | `server-py:modern-workbench-action-route-owner-final-residual-audit`"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit final modern Workbench action route-owner residuals")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
-            violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:modern-workbench-action-route-owner-final-residual-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at final route-owner residual audit")
+            violations.append("Withdraw preview extraction no longer records final residual audit as follow-up")
         if "preview_withdraw_link" not in analysis_source:
             violations.append("Withdraw preview extraction analysis does not record preview facade delegation")
+
+        self.assertEqual(violations, [])
+
+    def test_modern_workbench_action_route_owner_final_residual_audit_selects_cancel_exception_cleanup(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-final-residual-audit.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if (
+            "| 211 | `server-py:modern-workbench-action-route-owner-final-residual-audit` | analysis-closed"
+            not in queue_source
+        ):
+            violations.append("Final Workbench action route-owner residual audit is not closed as analysis")
+        if (
+            "| 212 | `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should clean up cancel-exception no-op live dispatch")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during the current slice")
+        if "`server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at cancel-exception no-op cleanup")
+        if "_workbench_write_facade()." not in analysis_source:
+            violations.append("Final residual audit does not record direct facade search evidence")
 
         self.assertEqual(violations, [])
 

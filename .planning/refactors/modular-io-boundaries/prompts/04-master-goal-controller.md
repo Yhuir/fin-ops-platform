@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:workbench-withdraw-link-preview-route-owner-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: server-py:modern-workbench-action-route-owner-final-residual-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -189,7 +189,8 @@ Current state expected on start:
 - `server-py:workbench-unignore-row-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/unignore-row` facade delegation while `Application` keeps HTTP dispatch, JSON parsing, freshness guard and response serialization.
 - `server-py:modern-workbench-action-route-owner-post-extraction-audit` is complete as an analysis slice: it found one remaining modern Workbench action preview gap, `Application._handle_api_workbench_withdraw_link_preview(...)` directly delegating to `WorkbenchWriteFacade.preview_withdraw_link(...)`.
 - `server-py:workbench-withdraw-link-preview-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/withdraw-link/preview` facade delegation while `Application` keeps HTTP dispatch, JSON parsing and response serialization.
-- The next pending boundary is `server-py:modern-workbench-action-route-owner-final-residual-audit`.
+- `server-py:modern-workbench-action-route-owner-final-residual-audit` is complete as an analysis slice: it found no remaining app-owned direct `WorkbenchWriteFacade` action delegation in the audited modern Workbench action surface.
+- The next pending boundary is `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -285,15 +286,14 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:modern-workbench-action-route-owner-final-residual-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:modern-workbench-action-route-owner-final-residual-audit`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-withdraw-link-preview-route-owner-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-post-extraction-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Re-audit modern Workbench action route-owner extraction after withdraw-link preview closure.
-- Verify whether any app-owned direct `WorkbenchWriteFacade` action delegation remains in `Application`.
-- Verify `Application` still owns only acceptable HTTP concerns for these routes: dispatch, JSON parsing, freshness guard, auth/request context where already present, request timing where already present and response serialization.
-- Select the next bounded server ownership slice from current evidence.
-- Do not change runtime behavior, move new routes, remove wrappers, remove the cancel-exception live-service no-op branch, or alter response shapes in this audit slice unless a clear guard/documentation fix is required for state consistency.
+For `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-final-residual-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cancel-exception-route-owner-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Remove the no-op `has_rows_for_month(month)` branch in `Application._handle_api_workbench_cancel_exception(...)`, where both branches currently call `_handle_live_workbench_cancel_exception(payload)`.
+- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; Workbench write freshness guard remains in `Application`; existing `_handle_live_workbench_cancel_exception(payload)` response mapping remains unchanged; response shape, conflict behavior, affected scopes, operation projection and operation barrier behavior remain unchanged.
+- Add or update a static guard proving the no-op branch is removed and cancel-exception still delegates through the route owner.
+- Do not move or alter other Workbench action routes.
 - Do not change modern Workbench API response shapes, status codes, auth, freshness guard, idempotency, relation semantics, operation barrier behavior, read model refresh behavior or frontend behavior.
 - Do not change legacy `/workbench/actions/*` behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
