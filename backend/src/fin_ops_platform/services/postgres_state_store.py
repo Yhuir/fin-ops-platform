@@ -38,6 +38,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
+from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
@@ -148,6 +149,7 @@ class PostgresStateStore:
         self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
+        self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
@@ -762,6 +764,10 @@ class PostgresStateStore:
     @property
     def tax_offset_sql_read_repository(self) -> TaxOffsetReadModelRepositoryPort:
         return self._tax_offset_sql_read_repository
+
+    @property
+    def turnover_ledger_sql_read_repository(self) -> TurnoverLedgerReadModelRepositoryPort:
+        return self._turnover_ledger_sql_read_repository
 
     @property
     def search_sql_read_repository(self) -> PostgresReadModelRepository:

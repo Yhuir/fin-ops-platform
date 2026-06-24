@@ -89,6 +89,7 @@ from fin_ops_platform.services.pending_invoice_read_model_repository import Pend
 from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
+from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
@@ -414,6 +415,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.enable_turnover_ledger_read_model_refresh:
         projection_builder = TurnoverLedgerSqlProjectionBuilder(
             connection=connection,
+            read_repository=(
+                TurnoverLedgerReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
             workbench_relation_read_facade=workbench_relation_read_facade,
         )

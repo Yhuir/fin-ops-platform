@@ -17,6 +17,15 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-24 - Read model repository port extraction
+
+- 目标：执行 modular IO slice `read-models:turnover-ledger-repository-port-extraction`，让外部往来台账 read model 的查询和 projection 保存通过窄 repository port。
+- 影响范围：`TurnoverLedgerReadModelRepositoryPort`、PostgreSQL state-store turnover read wiring、`TurnoverLedgerQueryService` 注入、worker projection builder 注入和 query service tests；不改变外部往来 grouped payload、闭环、撤回、标签、extra、导出、权限或前端行为。
+- 关键决策：port 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`。`PostgresReadModelRepository` 继续是 SQL/table owner；`Application` 不再把 turnover query service 接到 broad workbench SQL read repository。
+- 测试覆盖：新增 port guard，证明 cost/tax/search/no-OA/bank-detail 等无关 read model 方法不会通过 turnover port 暴露；复跑 turnover query/refresh 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-repository-port-extraction.md`。
+- 未测风险：本 slice 不证明 fresh gate、force refresh、operation barrier、生产 worker drain 或真实 PostgreSQL SLO；下一轮必须执行 turnover freshness/barrier/legacy contamination audit。
+
 ## 2026-06-22 - 外部往来闭环关联台三栏分区纠偏
 
 - 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域的问题。

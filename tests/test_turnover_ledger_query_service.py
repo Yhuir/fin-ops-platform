@@ -7,6 +7,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     _turnover_ledger_summary,
 )
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
+from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 
 
 class FakeQueue:
@@ -153,6 +154,87 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "expected"})
         self.assertEqual(payload["rows"][0]["source_versions"], {"turnover_ledger_schema_version": "expected"})
         self.assertEqual(queue.enqueued, [])
+
+
+class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("list_turnover_ledger_view", dict(kwargs)))
+                return {"rows": [{"relation_id": "turnover-1"}]}
+
+            def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
+                self.calls.append(
+                    (
+                        "save_turnover_ledger_rows",
+                        {"payload": dict(payload), "scope_key": scope_key},
+                    )
+                )
+
+            def clear_turnover_ledger_rows(self) -> None:
+                self.calls.append(("clear_turnover_ledger_rows", {}))
+
+            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("cost statistics should not be exposed through turnover port")
+
+            def get_tax_offset_view(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("tax offset should not be exposed through turnover port")
+
+            def search_index(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("search should not be exposed through turnover port")
+
+            def list_no_oa_bank_batch_rows(self, **_kwargs: object) -> list[dict[str, object]]:
+                raise AssertionError("no-OA should not be exposed through turnover port")
+
+            def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("bank detail should not be exposed through turnover port")
+
+        repository = Repository()
+        port = TurnoverLedgerReadModelRepositoryPort(repository)
+
+        self.assertEqual(
+            port.list_turnover_ledger_view(
+                family="personal",
+                direction="income",
+                status="suggested",
+                page=2,
+                page_size=25,
+                scope_key="all",
+            ),
+            {"rows": [{"relation_id": "turnover-1"}]},
+        )
+        port.save_turnover_ledger_rows({"rows": []}, scope_key="all")
+        port.clear_turnover_ledger_rows()
+
+        self.assertFalse(hasattr(port, "get_cost_statistics_view"))
+        self.assertFalse(hasattr(port, "get_tax_offset_view"))
+        self.assertFalse(hasattr(port, "search_index"))
+        self.assertFalse(hasattr(port, "list_no_oa_bank_batch_rows"))
+        self.assertFalse(hasattr(port, "list_bank_detail_transactions"))
+        self.assertEqual(
+            repository.calls,
+            [
+                (
+                    "list_turnover_ledger_view",
+                    {
+                        "family": "personal",
+                        "direction": "income",
+                        "status": "suggested",
+                        "page": 2,
+                        "page_size": 25,
+                        "scope_key": "all",
+                    },
+                ),
+                (
+                    "save_turnover_ledger_rows",
+                    {"payload": {"rows": []}, "scope_key": "all"},
+                ),
+                ("clear_turnover_ledger_rows", {}),
+            ],
+        )
 
 
 if __name__ == "__main__":

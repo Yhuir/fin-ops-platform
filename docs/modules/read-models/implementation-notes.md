@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Turnover ledger repository port extraction
+
+- 目标：执行 `read-models:turnover-ledger-repository-port-extraction`，为外部往来台账 read model 建立窄 repository port。
+- 影响范围：`TurnoverLedgerReadModelRepositoryPort`、`PostgresStateStore.turnover_ledger_sql_read_repository`、`TurnoverLedgerQueryService` app wiring、`TurnoverLedgerSqlProjectionBuilder` worker wiring、turnover query service tests 和 modular IO state；不改变 turnover business/API/UI/worker event/queue/Redis 合同。
+- 关键决策：新增 port 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows` 和 `clear_turnover_ledger_rows`。SQL/table knowledge 继续留在 `PostgresReadModelRepository`；production query/projection 消费侧通过窄 port 隔离，不再把 turnover query injection 接到 broad workbench SQL read repository。
+- 文档影响：新增 repository port extraction analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/turnover-ledger 实施记录和测试矩阵。
+- 测试覆盖：新增 `TurnoverLedgerReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 turnover query 和 refresh 目标回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一轮必须审计 turnover fresh gate、force refresh、all fan-out/query proof、Workbench relation source-version proof、operation barrier targets 和 legacy contamination。
+- 后续事项：执行 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics post-full-state local closure audit
 
 - 目标：执行 `read-models:cost-statistics-post-full-state-local-implementation-closure-audit`，复核成本统计是否已能进入 production evidence defer。

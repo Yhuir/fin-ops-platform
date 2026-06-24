@@ -806,6 +806,7 @@ class Application:
         self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
         self._cost_statistics_sql_read_repository = getattr(self._state_store, "cost_statistics_sql_read_repository", None)
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
+        self._turnover_ledger_sql_read_repository = getattr(self._state_store, "turnover_ledger_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
         self._bank_detail_sql_read_repository = getattr(self._state_store, "bank_detail_sql_read_repository", None)
@@ -1126,7 +1127,7 @@ class Application:
             selected_tag_codes_provider=self._app_settings_service.turnover_ledger_selected_tag_codes,
         )
         self._turnover_ledger_query_service = TurnoverLedgerQueryService(
-            read_repository=getattr(self, "_workbench_sql_read_repository", None),
+            read_repository=getattr(self, "_turnover_ledger_sql_read_repository", None),
             refresh_queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             source_versions_provider=self._turnover_ledger_source_versions,
             legacy_payload_builder=self._turnover_ledger_service.list_ledger,

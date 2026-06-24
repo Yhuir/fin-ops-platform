@@ -89,15 +89,17 @@
 | 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、各业务 integration tests | 写入 -> dirty scope -> worker/readiness -> 页面/API 的关键路径 | 完整导入到 worker 投影端到端不在本模块集中覆盖 | P2 | 生产 worker drain 和历史数据需 dry-run/smoke |
 | 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | runtime 边界不被绕过；service 不 import HTTP/auth；producer 不绕过 gateway；旧非法 scope 可检测/清理 | 无 P0 缺口 | P1 | 新增 producer 时必须同步边界守卫 |
 
-## 2026-06-24 - turnover ledger next pilot test note
+## 2026-06-24 - turnover ledger repository port test note
 
-`read-models:next-pilot-selection-after-cost-statistics` 已选择 `turnover_ledger` 作为第十个非 Go read model 实现试点。下一实现 slice `read-models:turnover-ledger-repository-port-extraction` 必须至少覆盖：
+`read-models:turnover-ledger-repository-port-extraction` 已完成。测试覆盖如下：
 
-- Service-layer tests：新增或扩展 turnover repository port guard，证明 `TurnoverLedgerReadModelRepositoryPort` 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`。
-- Read model/cache/background job tests：继续运行 `tests/test_turnover_ledger_query_service.py` 和 `tests/test_turnover_ledger_read_model_refresh.py`，确保 fresh/stale/missing、projection save 和 worker complete dirty scope 行为不变。
+- Service-layer tests：新增 turnover repository port guard，证明 `TurnoverLedgerReadModelRepositoryPort` 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`。
+- Read model/cache/background job tests：已运行 `tests/test_turnover_ledger_query_service.py` 和 `tests/test_turnover_ledger_read_model_refresh.py`，确保 fresh/stale/missing、projection save 和 worker complete dirty scope 行为不变。
 - Existing feature regression tests：保持 manifest/architecture guard 不允许 turnover port 暴露 cost/tax/search/no-OA/bank detail 等无关 read model 方法。
 
-Business core、API contract、frontend interaction 和 E2E tests 在 repository-port 首切中默认不新增；若实现中改变 grouped payload、manual closure、API shape、operation barrier、权限或前端行为，必须重新判定并补对应测试。
+Business core、API contract、frontend interaction 和 E2E tests 在 repository-port 首切中未新增，因为本 slice 不改变 grouped payload、manual closure、API shape、operation barrier、权限或前端行为。
+
+下一 slice 是 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，必须审计 fresh gate、force refresh、all fan-out/query proof、Workbench relation source-version proof、operation barrier targets、legacy read contamination 和 app-owned helper 分类。
 
 ## 历史 bug 回归库
 
