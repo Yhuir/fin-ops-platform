@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench withdraw-link preview route owner extraction
+
+目标：把现代 `/api/workbench/actions/withdraw-link/preview` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `withdraw_link_preview(...)`。
+- `WorkbenchActionApiRoutes.withdraw_link_preview(...)` 现在拥有 `WorkbenchWriteFacade.preview_withdraw_link(...)` 调用。
+- `Application._handle_api_workbench_withdraw_link_preview(...)` 仍负责 JSON body parse 和 `_workbench_write_response(...)`。
+- 新增静态 guard，确保 withdraw-link preview 不会重新直接调用 `WorkbenchWriteFacade.preview_withdraw_link(...)`，同时确认 JSON/response mapping 仍保留。
+
+未改变：
+
+- withdraw-link submit、confirm/cancel routes、exception routes、cash special routes、bank exception routes、personal advance、cancel-exception、ignore-row、unignore-row 和 cancel-exception live-service no-op branch 在本 slice 未触碰。
+- response shape、status code、auth、freshness guard、idempotency、preview id/version 语义、operation type、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:modern-workbench-action-route-owner-final-residual-audit`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_withdraw_link_preview_splits_reconciliation_decision_without_active_relation tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_withdraw_link_preview_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_withdraw_link_preview_route_owner_extraction_updates_queue tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_modern_workbench_action_route_owner_post_extraction_audit_selects_withdraw_preview tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Modern Workbench action route-owner post-extraction audit
 
 目标：在 ignore-row / unignore-row 抽离后，审计现代 Workbench action route-owner 是否仍有 `Application` 直接调用 `WorkbenchWriteFacade` 的残留。

@@ -96,6 +96,9 @@ class WorkbenchActionApiRoutes:
             tenant_id=tenant_id,
         )
 
+    def withdraw_link_preview(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().preview_withdraw_link(payload)
+
     def confirm_cash_pass_through(
         self,
         payload: dict[str, Any],

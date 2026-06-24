@@ -12283,7 +12283,7 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        result = self._workbench_write_facade().preview_withdraw_link(payload)
+        result = self._workbench_action_api_routes.withdraw_link_preview(payload)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_withdraw_link(

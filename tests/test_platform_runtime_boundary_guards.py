@@ -729,6 +729,36 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_withdraw_link_preview_delegation_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def withdraw_link_preview",
+            ".preview_withdraw_link(",
+        ):
+            if marker not in route_class:
+                violations.append(f"withdraw-link preview route owner is missing marker {marker}")
+
+        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_withdraw_link_preview")
+        for marker in (
+            "_load_json_body(body)",
+            "_workbench_action_api_routes.withdraw_link_preview(payload)",
+            "_workbench_write_response(result)",
+        ):
+            if marker not in wrapper_source:
+                violations.append(f"server.py withdraw-link preview wrapper no longer preserves marker {marker}")
+        if "_workbench_write_facade().preview_withdraw_link" in wrapper_source:
+            violations.append("server.py withdraw-link preview wrapper still calls the write facade directly")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_cash_special_delegation_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -3024,9 +3054,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         queue_source = (
             REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
         ).read_text(encoding="utf-8")
-        next_prompt_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
-        ).read_text(encoding="utf-8")
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-post-extraction-audit.md"
@@ -3039,16 +3066,44 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench action route-owner post-extraction audit is not closed as analysis")
         if (
-            "| 210 | `server-py:workbench-withdraw-link-preview-route-owner-extraction` | pending"
+            "| 210 | `server-py:workbench-withdraw-link-preview-route-owner-extraction`"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench withdraw-link preview route ownership")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
-            violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-withdraw-link-preview-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench withdraw-link preview extraction")
+            violations.append("Post-extraction audit no longer records Workbench withdraw-link preview as follow-up")
         if "preview_withdraw_link" not in analysis_source:
             violations.append("Post-extraction audit does not record the remaining withdraw preview facade delegation")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_withdraw_link_preview_route_owner_extraction_updates_queue(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-withdraw-link-preview-route-owner-extraction.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if (
+            "| 210 | `server-py:workbench-withdraw-link-preview-route-owner-extraction` | implementation-closed"
+            not in queue_source
+        ):
+            violations.append("Workbench withdraw-link preview route owner extraction is not closed as implementation")
+        if (
+            "| 211 | `server-py:modern-workbench-action-route-owner-final-residual-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit final modern Workbench action route-owner residuals")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during the current slice")
+        if "`server-py:modern-workbench-action-route-owner-final-residual-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at final route-owner residual audit")
+        if "preview_withdraw_link" not in analysis_source:
+            violations.append("Withdraw preview extraction analysis does not record preview facade delegation")
 
         self.assertEqual(violations, [])
 
