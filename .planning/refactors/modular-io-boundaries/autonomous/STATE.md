@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-full-user-api-smoke-browser-boundary-selected`
+Current state: `authenticated-browser-page-smoke-runbook-written`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-full-user-api-smoke-browser-admin-write-evidence-selection` as `planning-closed` in `analysis/planning-post-full-user-api-smoke-browser-admin-write-evidence-selection-2026-06-25.md`. T0 reconciled Row292's production-controlled full non-admin user-scope API metadata smoke: all 37 probes passed with no non-fresh or refresh-enqueued probes and aggregate dirty/outbox/readiness/dead-letter counts unchanged. Browser/admin/write production evidence and global/module closure remain open. The next boundary is `production:read-model-authenticated-browser-page-smoke-runbook`, selected because read-only authenticated browser page evidence directly advances user-visible production closure with lower risk than admin or write-flow probes.
+Started `production:read-model-authenticated-browser-page-smoke-runbook` in `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`. The runbook is written and must be committed/pushed before execution. It uses only read-only production route navigation, logs in with the target OA applicant credential seam inside the remote production process, passes the token only as an in-memory Playwright subprocess environment variable, and requires pre/post health, dirty scope, readiness, outbox and dead-letter checks. Admin and write-flow probes remain out of scope.
 
 ## Closed Or Deferred Slices
 
