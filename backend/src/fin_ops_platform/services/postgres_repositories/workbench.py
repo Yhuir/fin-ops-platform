@@ -66,11 +66,21 @@ class PostgresWorkbenchRepository:
                     (batch_ids,),
                 )
                 connection.execute(
+                    """
+                    delete from app.no_oa_bank_batch_events
+                    where no_oa_bank_batch_id in (
+                        select id from app.no_oa_bank_batches where not (batch_id = any(%s))
+                    )
+                    """,
+                    (batch_ids,),
+                )
+                connection.execute(
                     "delete from app.no_oa_bank_batches where not (batch_id = any(%s))",
                     (batch_ids,),
                 )
             else:
                 connection.execute("delete from read_model.no_oa_bank_batch_rows")
+                connection.execute("delete from app.no_oa_bank_batch_events")
                 connection.execute("delete from app.no_oa_bank_batches")
             for batch_id, payload in batch_items:
                 connection.execute(

@@ -1,37 +1,35 @@
 # Next Prompt
 
-Continue after the `production:app-worker-controlled-restart-readiness-runbook` slice.
+Continue after the `read-models:no-oa-bank-batch-event-fk-delete-order-fix` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `production:app-worker-controlled-restart-readiness-runbook`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `read-models:no-oa-bank-batch-event-fk-delete-order-fix`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - Parallel orchestration is controller-led.
-- Worker prompts may auto-progress inside assigned workstreams, but they do not own global state or global closure.
 - Controller-only files are defined in `12-PARALLEL-ORCHESTRATION.md`.
 - No product module has `Module Closure = closed`; production evidence closure and Go admission remain incomplete.
 - Commit-backed reconciliation report: `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
-- Boundary selection report: `analysis/planning-post-parallel-handoff-next-boundary-selection-2026-06-25.md`.
-- Production readiness evidence file: `analysis/production-readiness-worker-status-controlled-read-only-2026-06-25.md`.
-- PostgreSQL shared-memory evidence file: `analysis/production-postgres-shared-memory-read-only-diagnosis-2026-06-25.md`.
-- PostgreSQL controlled restart evidence file: `analysis/production-postgres-controlled-restart-runbook-2026-06-25.md`.
 - App/dispatcher/worker controlled restart evidence file: `analysis/production-app-worker-controlled-restart-readiness-runbook-2026-06-25.md`.
-- PostgreSQL shared-memory recovery was proven by `/dev/shm/PostgreSQL.*` objects and active PostgreSQL post-checks.
-- T0 restarted `fin-ops.service`, `fin-ops-rabbitmq-dispatcher.service` and 20 explicit `fin-ops-worker@*.service` units once.
-- All selected runtime units returned `active/running` with `NRestarts=0`.
-- `/health/ready` recovered from timeout and returned `status=ready` in `2.816792s` immediately after restart and `0.600410s` on stability recheck.
-- Sampled post-restart logs showed no new `PoolTimeout`, missing shared-memory, `FATAL`, `Main process exited` or `Failed with result` lines after `2026-06-25T01:36:03+08:00`.
-- Remaining production blocker: one stale `no_oa_bank_batch:all` dirty scope and one dead-lettered `no_oa_bank_batch.read_model.refresh` event with an FK violation:
-  - `queue_backlog={'dead_lettered': 1}`
-  - `dirty_scopes={'done': 187006, 'pending': 1}`
-  - `failed_jobs=1`
-  - `stale_dirty_scope_count=1`
+- No-OA production dead-letter read-only diagnosis file: `analysis/production-no-oa-bank-batch-dead-letter-read-only-diagnosis-2026-06-25.md`.
+- No-OA FK delete-order local fix file: `analysis/read-model-no-oa-bank-batch-event-fk-delete-order-fix-2026-06-25.md`.
+- Production read-only diagnosis proved:
+  - `/health/ready` is reachable and returns `status=ready`;
+  - `no_oa_bank_batch:all` dirty scope remains pending at source version `35430`;
+  - `read_model.app_status_readiness` for `no_oa_bank_batch:all` is failed;
+  - 14 all-scope `no_oa_bank_batch.read_model.refresh` events dead-lettered on `app.no_oa_bank_batch_events_no_oa_bank_batch_id_fkey`;
+  - the failed referenced `superseded` batch still exists and has 6 event rows.
+- Local implementation fix:
+  - `PostgresWorkbenchRepository.save_no_oa_bank_batches(...)` now deletes events for removed batches before deleting removed no-OA batch rows;
+  - empty snapshot replacement deletes events before batches;
+  - repository boundary regressions and no-OA refresh tests pass.
+- Production still runs release `main-bf4405fb-20260623194934`, so the local fix is not yet production evidence.
 
 ## Next Boundary
 
-`production:no-oa-bank-batch-dead-letter-read-only-diagnosis`
+`production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook`
 
 ## Options
 
@@ -39,32 +37,26 @@ Recommended autonomous continuation:
 
 - Use `prompts/06-t0-meta-orchestrator-goal.md`.
 - Start exactly one T0 `/goal` thread.
-- T0 will execute `production:no-oa-bank-batch-dead-letter-read-only-diagnosis`.
-- T0 must collect non-secret read-only production evidence only.
-- Do not requeue, mark done, delete rows, repair FK data, run worker replay, mutate readiness, deploy, restart services again or print secrets in this boundary.
-- Do not create worker threads for this boundary; production evidence and controlled production gates are controller-owned.
-- If the read-only diagnosis proves a safe exact-scope cleanup/requeue is required, create a later controlled production runbook boundary before any mutation.
+- T0 must write a controlled production deploy/convergence runbook before any production deploy, requeue, repair, readiness mutation or worker replay.
+- The runbook must include exact release/deploy command, pre/post checks, stop gates, rollback/cleanup posture, no-secret posture, and exact no-OA convergence verification.
+- Prefer the existing production deploy entrypoint `./scripts/deploy-oa.sh` if the runbook proves it is the current repository-supported release path.
+- If queue convergence requires mutation after deploy, use the narrowest exact-scope operation and prove why it is safe before executing it.
+- Do not perform broad DB mutation, broad queue replay, manual mark-done, arbitrary repair, unbounded worker consume/replay or secret output.
+- Do not create worker threads for this production boundary; production deploy/convergence gate is controller-owned.
 
 Single-thread fallback:
 
 - Use `prompts/04-master-goal-controller.md`.
-- Start with `production:no-oa-bank-batch-dead-letter-read-only-diagnosis`.
-
-Manual parallel fallback:
-
-- Read `12-PARALLEL-ORCHESTRATION.md`.
-- Manual T1-T9 startup is deprecated for unattended runs. Prefer T0-created worker threads from `06-t0-meta-orchestrator-goal.md`.
-- Do not start workers for this production diagnosis unless T0 first converts it into a non-production code/docs/test boundary.
+- Start with `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook`.
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Pull `origin/dev` with `--ff-only` when the working tree is clean; if local branch config reports multiple branches, use `git fetch origin` and verify `HEAD == origin/dev`.
-3. Merge `origin/main` into `dev` only if conflict-free.
-4. Read `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `analysis/production-app-worker-controlled-restart-readiness-runbook-2026-06-25.md`, `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, this prompt, and `12-PARALLEL-ORCHESTRATION.md`.
-5. Use the completed commit-backed audit as the progress baseline; do not recalculate from memory or raw row counts alone.
-6. For the selected boundary, write or update a read-only diagnosis evidence file before using SSH for production evidence. Include exact commands, no-secret posture, stop gates, observed blocker shape and proposed next boundary.
+3. Read `analysis/production-no-oa-bank-batch-dead-letter-read-only-diagnosis-2026-06-25.md`, `analysis/read-model-no-oa-bank-batch-event-fk-delete-order-fix-2026-06-25.md`, `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, this prompt, `12-PARALLEL-ORCHESTRATION.md`, `docs/operations/runtime-worker-governance.md`, `deploy/oa/README.md`, and `scripts/deploy-oa.sh`.
+4. Use the completed commit-backed audit as the progress baseline; do not recalculate from memory or raw row counts alone.
+5. Write the controlled production deploy/convergence runbook before SSH production mutation. Include the exact no-OA post-deploy proof: `/health/ready`, selected systemd units, `job.outbox_events`, `job.read_model_dirty_scopes`, `read_model.app_status_readiness`, and no new dead-letter/error logs.
 
 ## Stop Condition
 
-Proceed only through either the single-thread controller or the controller-led parallel workflow. Do not run several master controllers against `dev` without the controller/worker permissions and write lease from `12-PARALLEL-ORCHESTRATION.md`.
+Proceed only through the T0 controller workflow. Do not run several master controllers against `dev` without the controller/worker permissions and write lease from `12-PARALLEL-ORCHESTRATION.md`.

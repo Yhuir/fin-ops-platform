@@ -198,6 +198,59 @@ def test_workbench_category_replaces_events_and_category_in_one_transaction() ->
     assert "insert into app.bank_transaction_categories" in executed_sql[2]
 
 
+def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_no_oa_bank_batches(
+        {
+            "batches": {
+                "retained-batch": {
+                    "batch_id": "retained-batch",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 2,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-1"],
+                    "total_amount": "10.00",
+                }
+            },
+            "audit_log": [{"batch_id": "retained-batch", "operation": "submitted"}],
+        }
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    read_model_delete_index = next(
+        index for index, sql in enumerate(executed_sql) if "delete from read_model.no_oa_bank_batch_rows" in sql
+    )
+    removed_events_delete_index = next(
+        index
+        for index, sql in enumerate(executed_sql)
+        if "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in sql
+    )
+    removed_batches_delete_index = next(
+        index for index, sql in enumerate(executed_sql) if "delete from app.no_oa_bank_batches where not" in sql
+    )
+
+    assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
+    assert connection.executed[removed_events_delete_index][1] == (["retained-batch"],)
+    assert connection.executed[removed_batches_delete_index][1] == (["retained-batch"],)
+
+
+def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_no_oa_bank_batches({"batches": {}, "audit_log": []})
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    events_delete_index = next(index for index, sql in enumerate(executed_sql) if sql == "delete from app.no_oa_bank_batch_events")
+    batches_delete_index = next(index for index, sql in enumerate(executed_sql) if sql == "delete from app.no_oa_bank_batches")
+
+    assert events_delete_index < batches_delete_index
+
+
 def test_workbench_category_confirmation_uses_confirmation_fact_table() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)

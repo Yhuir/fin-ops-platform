@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-no-oa-bank-batch-dead-letter-read-only-diagnosis-pending`
+Current state: `production-no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:app-worker-controlled-restart-readiness-runbook` as `production-evidence-deferred` in `analysis/production-app-worker-controlled-restart-readiness-runbook-2026-06-25.md`. T0 executed one bounded restart of `fin-ops.service`, `fin-ops-rabbitmq-dispatcher.service` and 20 explicit `fin-ops-worker@*.service` units without reading secrets or mutating DB/queue/readiness/business data. All selected units returned active/running with `NRestarts=0`, `/health/ready` returned ready, and no new PoolTimeout/shared-memory errors appeared in sampled post-restart logs. The remaining production blocker is one stale `no_oa_bank_batch:all` dirty scope and one dead-lettered `no_oa_bank_batch.read_model.refresh` event with an FK violation. The next T0-only boundary is `production:no-oa-bank-batch-dead-letter-read-only-diagnosis`.
+Completed `read-models:no-oa-bank-batch-event-fk-delete-order-fix` as `implementation-closed` in `analysis/read-model-no-oa-bank-batch-event-fk-delete-order-fix-2026-06-25.md`. T0 first completed `production:no-oa-bank-batch-dead-letter-read-only-diagnosis` and proved the remaining production blocker is a no-OA public snapshot delete-order bug: all-scope refresh events dead-letter on the FK from `app.no_oa_bank_batch_events.no_oa_bank_batch_id` to a superseded batch row. The local fix deletes event rows for removed no-OA batches before deleting removed batch rows and adds repository boundary regressions. Production closure remains deferred until deploy/convergence proof. The next T0-only boundary is `production:no-oa-bank-batch-fk-fix-deploy-and-convergence-runbook`.
 
 ## Closed Or Deferred Slices
 

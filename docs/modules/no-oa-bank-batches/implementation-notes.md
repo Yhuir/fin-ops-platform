@@ -537,3 +537,34 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py 
   - Frontend component and interaction tests：本次未改前端。
   - End-to-end business-flow integration tests：适用，通过 no-OA workbench integration 回归保护 no-OA/Workbench relation 事实。
   - Existing feature regression tests：适用，通过 runtime worker/readiness/gateway/App Status/no-OA 回归保护旧链路。
+
+## 2026-06-25 - no-OA public snapshot FK 删除顺序修复
+
+- 目标：修复生产 `no_oa_bank_batch.read_model.refresh` dead-letter。生产只读诊断显示 `no_oa_bank_batch:all` dirty scope pending，readiness failed，14 个 all-scope refresh event 因 `app.no_oa_bank_batch_events_no_oa_bank_batch_id_fkey` dead-letter；失败 UUID 对应一个 `superseded` 批次，仍有 6 条 event row 引用。
+- 根因：`PostgresWorkbenchRepository.save_no_oa_bank_batches(...)` 在替换 public snapshot 时，先删除缺席于新 snapshot 的 `app.no_oa_bank_batches`，再替换 event rows；当旧 `superseded/conflict/stale` 批次被清理但仍有 `app.no_oa_bank_batch_events.no_oa_bank_batch_id` 引用时，PostgreSQL 正确阻止删除。
+- 决策：
+  - 非空 snapshot：先删除将被移除批次的 `app.no_oa_bank_batch_events`，再删除对应 `app.no_oa_bank_batches`。
+  - 空 snapshot：先清空 `app.no_oa_bank_batch_events`，再清空 `app.no_oa_bank_batches`。
+  - 保留现有 retained batch upsert 与 `_replace_no_oa_bank_batch_events(...)` 行为；不改变业务状态、API shape、worker event、queue/readiness、relation command 或前端行为。
+- 验收测试：
+  - `test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches`
+  - `test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches`
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src pytest tests/test_postgres_repositories_boundaries.py -q
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/workbench.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_read_model_refresh -v
+bash scripts/verify.sh docs
+git diff --check
+```
+
+- 七类测试覆盖：
+  - Business core unit tests：不适用；未改批次状态机、分类或提交/撤回规则。
+  - Service-layer tests：适用；repository boundary tests 锁定持久化顺序，read model refresh tests 覆盖 worker 调用路径。
+  - API contract tests：不适用；HTTP contract 未变。
+  - Read model/cache/background job tests：适用；生产故障路径是 worker refresh 持久化 public snapshot。
+  - Frontend component and interaction tests：不适用；前端未变。
+  - End-to-end business-flow integration tests：本地未新增；当前无 staging DB / local `PGSQL_URL`，生产收敛需后续受控 runbook。
+  - Existing feature regression tests：适用；复跑 repository boundary 与 no-OA refresh 回归。
+- 剩余风险：修复尚未部署；生产仍有 `no_oa_bank_batch:all` pending dirty scope、dead-lettered refresh event 和 failed readiness，需后续受控部署/收敛验证后才能声明生产闭环。
