@@ -12388,7 +12388,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().confirm_personal_advance_repayment(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_cancel_exception(self, body: str | None) -> Response:
@@ -14115,7 +14115,7 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        result = self._workbench_write_facade().confirm_personal_advance_repayment(payload, request_id=request_id)
+        result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_cancel_exception(self, payload: dict[str, object]) -> Response:

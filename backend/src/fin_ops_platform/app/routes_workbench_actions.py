@@ -125,3 +125,11 @@ class WorkbenchActionApiRoutes:
 
     def oa_bank_exception(self, payload: dict[str, Any]) -> Any:
         return self._write_facade_provider().oa_bank_exception(payload)
+
+    def confirm_personal_advance_repayment(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().confirm_personal_advance_repayment(payload, request_id=request_id)

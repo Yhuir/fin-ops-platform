@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench personal advance repayment route owner extraction
+
+目标：把现代 `/api/workbench/actions/confirm-personal-advance-repayment` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `confirm_personal_advance_repayment(...)`。
+- `WorkbenchActionApiRoutes.confirm_personal_advance_repayment(...)` 现在拥有 `WorkbenchWriteFacade.confirm_personal_advance_repayment(...)` 调用和 `request_id` 传递。
+- `Application._handle_api_workbench_confirm_personal_advance_repayment(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard 和 `_workbench_write_response(...)`。
+- `Application._handle_live_workbench_confirm_personal_advance_repayment(...)` 仍负责测试/内部 live helper 的 response mapping，并通过 route owner 调用 facade。
+- 新增静态 guard，确保 personal advance repayment 不会重新直接调用 `WorkbenchWriteFacade.confirm_personal_advance_repayment(...)`，同时确认 JSON/freshness/request-id/response mapping 仍保留。
+
+未改变：
+
+- cancel exception、ignore/unignore、exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link、cash special、update-bank-exception 和 OA-bank exception 都未迁移。
+- response shape、status code、auth、freshness guard、idempotency、personal advance settlement 规则、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-cancel-exception-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_personal_advance_repayment_returns_not_found_after_first_settlement_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_stale_personal_advance_after_exception_returns_not_found_and_preserves_exception tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_personal_advance_persistence_failure_rolls_back_exception_case_and_relation tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_personal_advance_scheduling_failure_propagates_after_case_and_relation_are_mutated tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_rejects_unbalanced_amounts tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_personal_advance_repayment_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench OA-bank exception route owner extraction
 
 目标：把现代 `/api/workbench/actions/oa-bank-exception` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
