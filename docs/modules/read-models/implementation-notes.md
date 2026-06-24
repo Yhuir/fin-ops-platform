@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics post-derived local closure audit
+
+- 目标：执行 `read-models:cost-statistics-post-derived-local-implementation-closure-audit`，复核成本统计是否已能进入 production evidence defer。
+- 影响范围：`Application._persist_state(...)`、cost statistics runtime delegates、worker registry、modular IO state；不改变运行时代码。
+- 关键决策：derived lifecycle、repository port、fresh gate、parent aggregate、primary worker 和 runtime warmup/rebuild owners 已有本地证据；但 broad `_persist_state(...)` 仍序列化 `cost_statistics_read_models`，会继续污染旧全状态 snapshot 路径，因此不能进入 local closure defer。
+- 文档影响：新增 post-derived local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现边界必须新增/更新 broad full-state snapshot quarantine guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-derived-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；`cost_statistics` 仍 implementation-gap-open。
+- 后续事项：执行 `read-models:cost-statistics-full-state-read-model-snapshot-quarantine`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics derived lifecycle executor extraction
 
 - 目标：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`，将成本统计 derived lifecycle executor 从 `Application` 拆到显式 service。

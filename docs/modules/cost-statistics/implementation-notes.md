@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO post-derived local closure audit
+
+- 目标：执行 `read-models:cost-statistics-post-derived-local-implementation-closure-audit`，在 repository port、freshness/barrier 和 derived lifecycle executor extraction 后重新审计成本统计本地实现闭环。
+- 影响范围：`Application._persist_state(...)`、cost statistics warmup/retry/rebuild app delegates、`CostStatisticsRuntimeService`、worker registry、modular IO state；不改变运行时代码。
+- 关键决策：warmup/retry/rebuild app 方法均为 `CostStatisticsRuntimeService` 的 compat-only delegate，`cost-tax` 仍是 manifest/registry 记录的 compat lane；但 broad `Application._persist_state(...)` 仍把 `cost_statistics_read_models` 写入旧全状态 snapshot，属于本地 implementation gap。
+- 文档影响：新增 post-derived local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现边界必须新增/更新 static guard，防止 broad `_persist_state(...)` 再写 `cost_statistics_read_models`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-derived-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
+- 后续事项：执行 `read-models:cost-statistics-full-state-read-model-snapshot-quarantine`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO derived lifecycle executor extraction
 
 - 目标：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`，把成本统计 derived lifecycle invalidation、warmup-vs-refresh fallback、metadata propagation 和 `enqueued_jobs` accounting 从 `Application` 移到显式 service 边界。
