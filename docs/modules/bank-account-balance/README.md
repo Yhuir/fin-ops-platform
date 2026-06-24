@@ -39,7 +39,7 @@
 - Refresh producer 已通过 `BankAccountBalanceReadModelRefreshProducer` 收敛；Application、Bank Details service injection、runtime import-state fan-out、runtime derived lifecycle fan-out 和 backfill enqueue 均走该 producer。
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
 - `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。
-- dedicated `bank_account_balance:all` operation barrier regression 尚未补齐。
+- dedicated `bank_account_balance:all` operation barrier regression 已补齐。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
 
 ## 本目录文件

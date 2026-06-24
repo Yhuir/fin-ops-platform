@@ -109,6 +109,108 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         self.assertFalse(payload["fresh"])
         self.assertEqual(payload["refreshing_targets"][0]["reason"], "refresh outbox pending")
 
+    def test_bank_account_balance_all_dirty_scope_keeps_accounts_target_refreshing(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "bank_account_balance": {
+                        "status": "refreshing",
+                        "scopes": [
+                            {
+                                "scope_type": "bank_account_balance",
+                                "scope_key": "all",
+                                "status": "refreshing",
+                                "updated_at": "2026-06-24T10:00:01+00:00",
+                            }
+                        ],
+                    },
+                    "bank_detail": {
+                        "status": "fresh",
+                        "scopes": [{"scope_type": "bank_detail", "scope_key": "2026-03", "status": "fresh"}],
+                    },
+                },
+                "outbox_statuses": {},
+                "worker_statuses": {"bank-account-balance": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("bank_account_balance")])
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertFalse(payload["fresh"])
+        self.assertEqual(payload["refreshing_targets"][0]["scope_type"], "bank_account_balance")
+        self.assertEqual(payload["refreshing_targets"][0]["scope_key"], "all")
+        self.assertEqual(payload["refreshing_targets"][0]["worker_status"], "running")
+
+    def test_bank_account_balance_all_outbox_pending_keeps_accounts_target_refreshing(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "bank_account_balance": {
+                        "status": "fresh",
+                        "scopes": [
+                            {
+                                "scope_type": "bank_account_balance",
+                                "scope_key": "all",
+                                "status": "fresh",
+                                "updated_at": "2026-06-24T10:00:01+00:00",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {
+                    "bank_account_balance.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [
+                            {"scope_type": "bank_account_balance", "scope_key": "all", "status": "pending"}
+                        ],
+                    },
+                    "bank_detail.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [{"scope_type": "bank_detail", "scope_key": "2026-03", "status": "pending"}],
+                    },
+                },
+                "worker_statuses": {"bank-account-balance": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("bank_account_balance")])
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertFalse(payload["fresh"])
+        self.assertEqual(payload["refreshing_targets"][0]["reason"], "refresh outbox pending")
+        self.assertEqual(payload["refreshing_targets"][0]["scope_type"], "bank_account_balance")
+        self.assertEqual(payload["refreshing_targets"][0]["scope_key"], "all")
+
+    def test_other_read_model_outbox_pending_does_not_block_bank_account_balance_all_target(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "bank_account_balance": {
+                        "status": "fresh",
+                        "scopes": [
+                            {"scope_type": "bank_account_balance", "scope_key": "all", "status": "fresh"}
+                        ],
+                    }
+                },
+                "outbox_statuses": {
+                    "bank_detail.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [{"scope_type": "bank_detail", "scope_key": "2026-03", "status": "pending"}],
+                    }
+                },
+                "worker_statuses": {"bank-account-balance": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("bank_account_balance")])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertTrue(payload["fresh"])
+        self.assertEqual(payload["targets"][0]["scope_type"], "bank_account_balance")
+        self.assertEqual(payload["targets"][0]["scope_key"], "all")
+        self.assertNotIn("reason", payload["targets"][0])
+
     def test_other_scope_outbox_pending_does_not_block_fresh_target_scope(self) -> None:
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {

@@ -45,3 +45,10 @@
 - 改动：`DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY["bank_account_balance"]` 改为 all-only policy；`ReadModelRefreshGateway` 现在在 durable enqueue 前拒绝 `2026-03`、`account:*`、`active:*` 等非 `all` scope。
 - 保持不变：producer 仍 normalize 为 `["all"]`；不引入 month/account projection shard；API、worker event、queue schema、余额计算、权限、审计和前端行为不变。
 - 下一步：`read-models:bank-account-balance-operation-barrier-regression`，补齐 `bank_account_balance:all` operation barrier 回归。
+
+## 2026-06-24 - operation barrier regression
+
+- 目标：补齐 `bank_account_balance:all` 写后读同步 barrier 回归，避免 accounts 页面在账户余额 read model 仍 pending/refreshing 时被误判 synced。
+- 改动：新增 `OperationFreshnessBarrierService` 测试，覆盖 dirty/readiness refreshing、outbox pending 和 unrelated read model outbox 不阻塞账户余额目标。
+- 保持不变：未改生产服务代码；API、worker event、queue schema、余额计算、权限、审计和前端行为不变。
+- 下一步：`read-models:bank-account-balance-bank-detail-fallback-quarantine`，处理 Bank Detail port 的 account-balance compatibility fallback。

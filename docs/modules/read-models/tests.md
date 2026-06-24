@@ -362,6 +362,11 @@ git diff --check
 - 新增 gateway/scope-policy test：`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_account_balance_policy_accepts_only_all_scope`。
 - 覆盖：gateway 只允许 `bank_account_balance:all` 入 durable queue，拒绝 month/account/active scope。
 
+## 2026-06-24 - bank account balance operation barrier regression test note
+
+- 新增 operation barrier tests：`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_bank_account_balance_all_dirty_scope_keeps_accounts_target_refreshing`、`test_bank_account_balance_all_outbox_pending_keeps_accounts_target_refreshing`、`test_other_read_model_outbox_pending_does_not_block_bank_account_balance_all_target`。
+- 覆盖：账户余额 `all` scope 仍 pending/refreshing 时，accounts freshness target 不能被误判 fresh。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

@@ -55,10 +55,17 @@
 - 新增：`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_account_balance_policy_accepts_only_all_scope`。
 - 覆盖：`ReadModelRefreshGateway` 对 `bank_account_balance` 只接受 `all`，拒绝 month/account/active scope，且拒绝发生在 durable enqueue 前。
 
+## 2026-06-24 - operation barrier regression
+
+- 新增：`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_bank_account_balance_all_dirty_scope_keeps_accounts_target_refreshing`。
+- 新增：`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_bank_account_balance_all_outbox_pending_keeps_accounts_target_refreshing`。
+- 新增：`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_other_read_model_outbox_pending_does_not_block_bank_account_balance_all_target`。
+- 覆盖：`bank_account_balance:all` dirty/readiness 和 outbox pending 都会阻止 accounts freshness target 被误判为 fresh，且无关 read model outbox 不影响账户余额目标。
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_read_model_refresh_gateway -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_platform_runtime_boundary_guards -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check
@@ -67,4 +74,4 @@ git diff --check
 ## 未测风险
 
 - 当前没有本地 `PGSQL_URL` 或 staging DB，真实 PostgreSQL worker drain、App Status readiness、high-row performance 和 Browser smoke evidence 仍需后续生产/环境验证。
-- 当前 worker/storage 只支持 `bank_account_balance:all`；gateway 已拒绝非 all scope，但 dedicated operation barrier regression 和 Bank Detail fallback quarantine 仍需后续闭环。
+- 当前 worker/storage/gateway 只支持 `bank_account_balance:all`；dedicated operation barrier regression 已补齐，但 Bank Detail fallback quarantine 仍需后续闭环。

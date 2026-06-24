@@ -1336,3 +1336,10 @@
 - 改动：`DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY["bank_account_balance"]` 改为 all-only policy；gateway 现在拒绝 month/account/active scope，不让无效 refresh 进入 durable queue。
 - 保持不变：producer 继续 normalize 为 `["all"]`；不引入 month/account projection；API、worker event、queue schema 和 frontend behavior 不变。
 - 下一步：`read-models:bank-account-balance-operation-barrier-regression`。
+
+## 2026-06-24 - bank account balance operation barrier regression
+
+- 目标：补齐账户余额 read model 写后读同步 barrier 回归。
+- 改动：新增 `OperationFreshnessBarrierService` 测试，覆盖 `bank_account_balance:all` dirty/readiness refreshing、outbox pending 和 unrelated outbox 不阻塞。
+- 保持不变：生产服务代码、API、worker event、queue schema、projection 和 frontend behavior 不变。
+- 下一步：`read-models:bank-account-balance-bank-detail-fallback-quarantine`。
