@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset repository port extraction
+
+- 目标：执行 `read-models:tax-offset-repository-port-extraction`，为 `tax_offset` read model 建立窄 repository port。
+- 影响范围：`TaxOffsetReadModelRepositoryPort`、`PostgresStateStore` tax offset read/write wiring、`TaxOffsetSqlProjectionBuilder` tax save path、tax offset SQL runtime/state-store tests 和 modular IO state。
+- 关键决策：`TaxOffsetReadModelRepositoryPort` 只暴露 manifest-listed `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`；`PostgresReadModelRepository` 继续作为 SQL/table owner，业务/read model projection 消费侧通过窄 port 隔离。未改变 tax calculation、certified import、plan save、API shape、worker event、Redis 或前端行为。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；共享 read model 状态机定义不变。
+- 测试覆盖：新增 `TaxOffsetReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods` 和 `test_projection_builder_saves_tax_scope_through_tax_port`；更新 `PostgresStateStoreTests.test_read_model_repositories_use_optional_read_connection`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:tax-offset-refresh-freshness-operation-barrier-audit`。
+
 ## 2026-06-24 - Tax offset selected as next modular IO read model pilot
 
 - 目标：执行 `read-models:next-pilot-selection-after-invoice-lifecycle`，在 `invoice_lifecycle` 本地支持 accounted 后选择下一个非 Go read model 试点。

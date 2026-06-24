@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-invoice-lifecycle.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:tax-offset-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -110,8 +110,12 @@ Current state expected on start:
 - `Application._derived_lifecycle_invoice_lifecycle_executor(...)` is removed and guarded from returning.
 - invoice_lifecycle local implementation support is accounted for after repository port, freshness/barrier and derived lifecycle executor slices, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - tax_offset is selected as the eighth non-Go read model implementation pilot because it directly consumes invoice lifecycle/certification state, has high stale-read risk after plan save/certified import/import fan-out, and has a narrow repository-port first slice.
+- `TaxOffsetReadModelRepositoryPort` now exposes only `load_tax_offset_read_models`, `get_tax_offset_view`, and `save_tax_offset_read_models`.
+- PostgreSQL state-store tax read/write wiring uses `TaxOffsetReadModelRepositoryPort`, and `PostgresStateStore.tax_offset_sql_read_repository` returns the port over the optional SQL read connection.
+- `TaxOffsetSqlProjectionBuilder` saves rebuilt month scopes through the narrow tax offset port.
+- A broader tax API OA attachment invoice regression failure was observed outside the repository-port boundary and is recorded in `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`.
 - No module is globally closed.
-- The next pending boundary is read-models:tax-offset-repository-port-extraction.
+- The next pending boundary is read-models:tax-offset-refresh-freshness-operation-barrier-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -207,18 +211,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:tax-offset-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:tax-offset-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:tax-offset-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-invoice-lifecycle.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, and `docs/modules/tax-offset/tests.md`.
+For read-models:tax-offset-refresh-freshness-operation-barrier-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-invoice-lifecycle.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Add a narrow tax offset read model repository port for manifest-listed `load_tax_offset_read_models`, `get_tax_offset_view`, and `save_tax_offset_read_models`.
-- Wire tax offset SQL read/query/projection paths that currently depend on broad `PostgresReadModelRepository` behavior through the narrow port.
-- Keep `PostgresReadModelRepository` as the SQL/table owner during this transition.
-- Preserve API shape, tax calculation rules, plan save behavior, certified import behavior, source-version semantics, worker event semantics, frontend behavior and production state.
-- Add or update tests proving the tax offset port does not expose unrelated read model methods.
+- Audit tax offset freshness/fresh gate behavior for SQL view miss, stale source/schema, refreshing, failed/unavailable and Redis cache eligibility.
+- Audit force refresh contract and scope normalization for `tax_offset`, including month-only query scope and fan-out-only `all`.
+- Audit all fan-out/month proof in `TaxOffsetReadModelRefreshService`, runtime worker dispatch and dirty/outbox/readiness semantics.
+- Audit operation barrier behavior for plan save and certified import/write-after-read flows.
+- Classify touched legacy/live/app-owned paths as removed, quarantined, compat-only or blocked-by-human-gate.
+- Specifically check whether the broader tax API OA attachment invoice regression failure is pre-existing, already covered by a different path, or a real local gap to split into a narrow follow-up.
 - Do not select Go hot-path admission while modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Produce/update an analysis file documenting previous state, implementation, legacy/pollution classification, state-machine impact, seven-category test applicability and verification.
+- Produce/update an analysis file documenting previous state, audit findings, implementation or split decision, legacy/pollution classification, state-machine impact, seven-category test applicability and verification.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
 - Run targeted tax offset tests, app wiring check if needed, docs verification and diff checks.
 - Commit and push to origin/dev.

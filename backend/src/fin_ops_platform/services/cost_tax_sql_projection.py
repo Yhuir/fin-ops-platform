@@ -24,6 +24,7 @@ from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
     TaxOffsetReadModelService,
 )
+from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
@@ -379,10 +380,14 @@ class TaxOffsetSqlProjectionBuilder:
         *,
         connection: Any,
         read_model_repository: PostgresReadModelRepository | None = None,
+        tax_offset_read_model_repository: Any | None = None,
         redis_helper: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._tax_offset_read_model_repository = tax_offset_read_model_repository or TaxOffsetReadModelRepositoryPort(
+            self._read_model_repository
+        )
         self._redis_helper = redis_helper
 
     def list_tax_offset_scope_shards(self, scope_key: str) -> list[str]:
@@ -423,7 +428,7 @@ class TaxOffsetSqlProjectionBuilder:
             cache_status="ready",
         )
         warmed_scope_key = str(read_model["scope_key"])
-        self._read_model_repository.save_tax_offset_read_models(
+        self._tax_offset_read_model_repository.save_tax_offset_read_models(
             service.snapshot_scope_keys([warmed_scope_key]),
             changed_scope_keys={warmed_scope_key},
         )

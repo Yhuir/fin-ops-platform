@@ -5,8 +5,10 @@ from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.cost_tax_sql_projection import TaxOffsetSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 
@@ -100,6 +102,61 @@ class FailingRedisRecorder(RedisRecorder):
     def delete(self, key: str) -> bool:
         self.deletes.append(key)
         raise TimeoutError("redis timeout")
+
+
+class TaxOffsetReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Underlying:
+            def load_tax_offset_read_models(self) -> dict[str, object]:
+                return {"read_models": {}}
+
+            def get_tax_offset_view(self, *, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "payload": {}}
+
+            def save_tax_offset_read_models(
+                self,
+                _snapshot: dict[str, object],
+                *,
+                changed_scope_keys: set[str] | None = None,
+            ) -> None:
+                _ = changed_scope_keys
+
+            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("Tax offset port must not expose cost statistics reads.")
+
+            def list_turnover_ledger_view(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("Tax offset port must not expose turnover ledger reads.")
+
+        port = TaxOffsetReadModelRepositoryPort(Underlying())
+
+        self.assertEqual(port.load_tax_offset_read_models(), {"read_models": {}})
+        self.assertEqual(port.get_tax_offset_view(scope_key="2026-05")["scope_key"], "2026-05")
+        self.assertFalse(hasattr(port, "get_cost_statistics_view"))
+        self.assertFalse(hasattr(port, "list_turnover_ledger_view"))
+
+    def test_projection_builder_saves_tax_scope_through_tax_port(self) -> None:
+        saved: list[tuple[dict[str, object], set[str] | None]] = []
+
+        class TaxPort:
+            def save_tax_offset_read_models(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_scope_keys: set[str] | None = None,
+            ) -> None:
+                saved.append((snapshot, changed_scope_keys))
+
+        builder = object.__new__(TaxOffsetSqlProjectionBuilder)
+        builder._tax_offset_read_model_repository = TaxPort()
+        builder._build_tax_payload = lambda month: tax_payload(month)
+        builder._source_versions = lambda: {"tax_source": "v1"}
+        builder._set_redis_json = lambda *_args, **_kwargs: True
+
+        result = builder.rebuild_tax_offset_read_model_scope("2026-05")
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(saved[0][1], {"2026-05"})
+        self.assertIn("2026-05", saved[0][0]["read_models"])
 
 
 class TaxOffsetReadConnection:

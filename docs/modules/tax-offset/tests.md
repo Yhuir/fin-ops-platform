@@ -48,7 +48,7 @@ Spec-first Browser e2e 审计入口：
 
 ## 七类测试适用性
 
-2026-06-24 modular IO 更新：`tax_offset` 已被选为下一轮非 Go read model 试点。下一条 `read-models:tax-offset-repository-port-extraction` 必须至少新增/更新 repository port guard，证明 tax offset port 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，并按影响范围复跑 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_read_model_service.py`、`tests/test_tax_offset_api.py` 中的目标测试。
+2026-06-24 modular IO 更新：`read-models:tax-offset-repository-port-extraction` 已新增/更新 repository port guard，证明 tax offset port 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，并复跑 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_read_model_service.py`、`tests/test_postgres_state_store.py` 和 read model manifest 目标测试。下一条 `read-models:tax-offset-refresh-freshness-operation-barrier-audit` 必须审计 freshness、force refresh、all fan-out/month proof、operation barrier、legacy/live fallback 和 app-owned helper contamination；其中更宽的 OA 附件发票 API 回归失败已记录为待判定风险。
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |

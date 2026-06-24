@@ -33,6 +33,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO tax offset repository port extraction
+
+- 目标：执行 `read-models:tax-offset-repository-port-extraction`，把税金抵扣 read model load/get/save 消费侧收敛到窄 repository port。
+- 影响范围：`TaxOffsetReadModelRepositoryPort`、`PostgresStateStore.tax_offset_sql_read_repository`、state-store tax read/write delegate、`TaxOffsetSqlProjectionBuilder` save path、tax offset SQL runtime/state-store tests；不改变税金试算、认证导入、计划保存、API shape、worker event、Redis 或前端行为。
+- 关键决策：`PostgresReadModelRepository` 继续是 SQL/table owner；`TaxOffsetReadModelRepositoryPort` 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，防止成本统计、外部往来台账或其他 read model 方法污染税金链路。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：新增 port isolation 和 projection save-through-port 测试，更新 Postgres state-store optional read connection 断言，复跑 tax offset SQL runtime/read model service/state-store/manifest/app check。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`。
+- 未测风险：一个更宽的 OA 附件发票 API 回归 `TaxOffsetApiTests.test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` 当前失败，已记录到 modular IO analysis，下一条 freshness/barrier/legacy audit 需要判断其是否为既有失败或拆出窄修复。真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+
 ## 2026-06-24 - Modular IO read model pilot selection
 
 - 目标：把 `tax_offset` 纳入 modular IO/read model 下一轮非 Go 试点，先从 repository port extraction 做小步实现。

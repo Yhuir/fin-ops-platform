@@ -36,6 +36,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
+from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
@@ -138,11 +139,13 @@ class PostgresStateStore:
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
+        self._tax_offset_read_model_repository = TaxOffsetReadModelRepositoryPort(self._read_model_repository)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
         self._pending_invoice_sql_read_repository = PendingInvoiceReadModelRepositoryPort(self._sql_read_model_repository)
         self._input_invoice_usage_sql_read_repository = InputInvoiceUsageReadModelRepositoryPort(self._sql_read_model_repository)
         self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
+        self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
@@ -716,13 +719,16 @@ class PostgresStateStore:
         self._save_snapshot("cost_statistics_read_models", snapshot)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
-        snapshot = self._read_model_repository.load_tax_offset_read_models()
+        snapshot = self._tax_offset_read_model_repository.load_tax_offset_read_models()
         if snapshot:
             return snapshot
         return {}
 
     def save_tax_offset_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        self._read_model_repository.save_tax_offset_read_models(snapshot, changed_scope_keys=changed_scope_keys)
+        self._tax_offset_read_model_repository.save_tax_offset_read_models(
+            snapshot,
+            changed_scope_keys=changed_scope_keys,
+        )
         self._save_snapshot("tax_offset_read_models", snapshot)
 
     @property
@@ -752,8 +758,8 @@ class PostgresStateStore:
         return self._sql_read_model_repository
 
     @property
-    def tax_offset_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
+    def tax_offset_sql_read_repository(self) -> TaxOffsetReadModelRepositoryPort:
+        return self._tax_offset_sql_read_repository
 
     @property
     def search_sql_read_repository(self) -> PostgresReadModelRepository:
