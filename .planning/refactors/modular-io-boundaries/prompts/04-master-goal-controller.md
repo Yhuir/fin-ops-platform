@@ -127,8 +127,9 @@ Current state expected on start:
 - `cost_statistics` is selected as the ninth non-Go read model implementation pilot because it has high cross-page stale-read risk, special `active/all` scope grammar, queryable parent aggregate semantics, an old `cost-tax` compatibility worker lane and a narrow repository-port first slice.
 - Cost statistics repository port extraction is complete: `CostStatisticsReadModelRepositoryPort` owns manifest-listed load/get/save, PostgreSQL state-store cost read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` saves through it.
 - Cost statistics freshness/barrier audit is analysis-closed: SQL fresh gate, production repository unavailable behavior, scope policy normalization, parent aggregate proof, primary/compat worker split and App Status registry are locally accounted for, but `Application._derived_lifecycle_cost_statistics_executor(...)` still owns derived lifecycle invalidation/warmup-vs-refresh fallback and enqueued-job accounting.
+- Cost statistics derived lifecycle executor extraction is complete: `CostStatisticsDerivedLifecycleExecutor` owns invalidation, `pending_invoice_rules_changed` persist-empty behavior, no-warmup refresh fallback metadata and enqueued-job accounting; `Application._derived_lifecycle_cost_statistics_executor(...)` is removed and guarded from returning.
 - No module is globally closed.
-- The next pending boundary is read-models:cost-statistics-derived-lifecycle-executor-port-extraction.
+- The next pending boundary is read-models:cost-statistics-post-derived-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -224,18 +225,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:cost-statistics-derived-lifecycle-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:cost-statistics-post-derived-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:cost-statistics-derived-lifecycle-executor-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, `docs/modules/cost-statistics/state-machine.md`, and `docs/modules/cost-statistics/tests.md`.
+For read-models:cost-statistics-post-derived-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, `docs/modules/cost-statistics/state-machine.md`, and `docs/modules/cost-statistics/tests.md`.
 - Use CodeGraph for structural lookup before implementation decisions.
-- Add `CostStatisticsDerivedLifecycleExecutor` and move the behavior currently owned by `Application._derived_lifecycle_cost_statistics_executor(...)` behind it: scope-key extraction, `pending_invoice_rules_changed` persist-empty behavior, cost statistics runtime invalidation calls, `schedule_warmup=False` generic refresh fallback, metadata propagation, `enqueued_jobs` accounting and return shape.
-- Keep `Application` as dependency assembly plus a thin delegate only.
-- Add or update tests proving the old app-owned derived lifecycle logic cannot re-own the behavior.
-- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior.
+- Re-audit cost statistics local implementation closure after repository port, freshness/barrier and derived lifecycle executor extraction.
+- Classify remaining warmup/retry wrappers, `rebuild_cost_statistics_read_model_scope(...)`, broad `_persist_state(...)` `cost_statistics_read_models` snapshot behavior, `cost-tax` compatibility worker and any remaining direct cache/readiness/dirty/outbox helper path.
+- If a concrete local implementation gap remains, insert the next narrow implementation boundary before Go candidates.
+- If no local gap remains, record real production evidence gaps and do not claim module closure unless full closure evidence exists.
 - Do not implement Go/Fiber/Go Worker while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted py_compile, cost statistics derived lifecycle/static guard tests, relevant cost statistics runtime tests, app check, docs verification and diff checks.
+- Run targeted static guard/cost statistics tests if evidence depends on executable behavior, plus app check, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

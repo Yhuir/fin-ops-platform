@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO derived lifecycle executor extraction
+
+- 目标：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`，把成本统计 derived lifecycle invalidation、warmup-vs-refresh fallback、metadata propagation 和 `enqueued_jobs` accounting 从 `Application` 移到显式 service 边界。
+- 影响范围：新增 `CostStatisticsDerivedLifecycleExecutor`，调整 `Application` lifecycle registry 和 executor factory，新增 executor unit tests/static guard；不改变成本归因、项目范围、导出、parent aggregate、API、UI、worker event、queue schema 或 Redis envelope。
+- 关键决策：`Application._derived_lifecycle_cost_statistics_executor(...)` 已删除并由 guard 防回归；`Application._cost_statistics_derived_lifecycle_executor(...)` 仅组装 `CostStatisticsRuntimeService`、gateway-backed generic refresh callback 和 `ReadModelRefreshGateway.can_enqueue()` callback。
+- 测试覆盖：新增 `tests/test_cost_statistics_derived_lifecycle_executor.py`，覆盖 explicit/all/empty scopes、`pending_invoice_rules_changed` `persist_empty=False`、no-warmup fallback metadata 和 job accounting；`tests/test_platform_runtime_boundary_guards.py` 新增 explicit executor boundary guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；warmup/retry wrappers、`Application.rebuild_cost_statistics_read_model_scope(...)` 和 broad `_persist_state(...)` 成本统计 snapshot 仍需下一条 local closure audit 分类。
+- 后续事项：执行 `read-models:cost-statistics-post-derived-local-implementation-closure-audit`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO freshness and barrier audit
 
 - 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，复核 repository port 之后成本统计 freshness、operation barrier、parent aggregate、worker ownership 和 legacy/app-owned surface。

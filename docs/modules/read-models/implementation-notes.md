@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics derived lifecycle executor extraction
+
+- 目标：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`，将成本统计 derived lifecycle executor 从 `Application` 拆到显式 service。
+- 影响范围：新增 `CostStatisticsDerivedLifecycleExecutor`、调整 `Application` lifecycle registry/factory、增加 executor unit tests 和 platform runtime boundary guard；不改变成本统计 API/read model/worker/cache 语义。
+- 关键决策：成本统计 derived lifecycle 现在由 service 拥有 scope extraction、`pending_invoice_rules_changed` `persist_empty=False`、runtime invalidation、no-warmup generic refresh fallback、metadata propagation 和 `enqueued_jobs` accounting；`Application._derived_lifecycle_cost_statistics_executor(...)` 已删除。
+- 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 cost/read-model tests notes。
+- 测试覆盖：新增 `tests/test_cost_statistics_derived_lifecycle_executor.py`；新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_cost_statistics_derived_lifecycle_uses_explicit_executor_boundary`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一轮必须重新审计 cost statistics local closure。
+- 后续事项：执行 `read-models:cost-statistics-post-derived-local-implementation-closure-audit`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics freshness and barrier audit
 
 - 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，审计成本统计 fresh gate、force refresh、parent aggregate、operation barrier、compat worker 和 app-owned helper surface。

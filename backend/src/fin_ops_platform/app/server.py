@@ -109,6 +109,9 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
+from fin_ops_platform.services.cost_statistics_derived_lifecycle_executor import (
+    CostStatisticsDerivedLifecycleExecutor,
+)
 from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsQueryService
 from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
@@ -19264,7 +19267,7 @@ class Application:
                 "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
                 "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
                 "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
-                "cost_statistics_read_model": lambda domain_plan: self._derived_lifecycle_cost_statistics_executor(
+                "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
                     domain_plan,
                     schedule_warmup=schedule_cost_warmup,
                 ),
@@ -19379,52 +19382,6 @@ class Application:
             "invalidated_scopes": dirty_months,
         }
 
-    def _derived_lifecycle_cost_statistics_executor(
-        self,
-        domain_plan: dict[str, object],
-        *,
-        schedule_warmup: bool,
-    ) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")
-        persist_empty = reason != "pending_invoice_rules_changed"
-        if "all" in scope_keys:
-            deleted_scope_keys = self._invalidate_cost_statistics_read_models(
-                schedule_warmup=schedule_warmup,
-                persist_empty=persist_empty,
-            )
-        else:
-            deleted_scope_keys = self._invalidate_cost_statistics_read_model_scopes(
-                scope_keys,
-                reason=reason,
-                schedule_warmup=schedule_warmup,
-                persist_empty=persist_empty,
-            )
-        enqueued_jobs: list[str] = []
-        if not schedule_warmup:
-            target_scope_keys = ["all"] if "all" in scope_keys else scope_keys
-            enqueued = self._enqueue_generic_read_model_refreshes(
-                "cost_statistics",
-                target_scope_keys or ["all"],
-                reason=reason,
-                metadata=self._read_model_refresh_metadata(domain_plan),
-            )
-            if enqueued:
-                enqueued_jobs.append("cost_statistics.read_model.refresh")
-            if not deleted_scope_keys:
-                deleted_scope_keys = list(target_scope_keys or ["all"])
-        elif schedule_warmup:
-            enqueued_jobs.append(
-                "cost_statistics.read_model.refresh"
-                if self._read_model_refresh_gateway().can_enqueue()
-                else "cost_statistics_cache_warmup"
-            )
-        return {
-            "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
-            "invalidated_scopes": deleted_scope_keys,
-            "enqueued_jobs": enqueued_jobs,
-        }
-
     def _derived_lifecycle_pending_invoice_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         metadata = self._domain_plan_metadata(domain_plan)
         metadata_scope_keys = metadata.get("pending_invoice_scope_keys")
@@ -19465,6 +19422,17 @@ class Application:
                 scope_keys,
                 **kwargs,
             ),
+        )
+
+    def _cost_statistics_derived_lifecycle_executor(self) -> CostStatisticsDerivedLifecycleExecutor:
+        return CostStatisticsDerivedLifecycleExecutor(
+            runtime_service=self._cost_statistics_runtime(),
+            enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
+                "cost_statistics",
+                scope_keys,
+                **kwargs,
+            ),
+            can_enqueue_refresh=lambda: self._read_model_refresh_gateway().can_enqueue(),
         )
 
     def _tax_offset_derived_lifecycle_executor(self) -> TaxOffsetDerivedLifecycleExecutor:

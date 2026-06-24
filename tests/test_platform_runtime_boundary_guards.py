@@ -699,6 +699,38 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_cost_statistics_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        executor_path = SERVICES_ROOT / "cost_statistics_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
+        violations: list[str] = []
+
+        removed_helper = "_derived_lifecycle_cost_statistics_executor"
+        if _function_source(server_tree, server_source, removed_helper):
+            violations.append(f"server.py still owns removed cost statistics lifecycle executor {removed_helper}")
+        if "CostStatisticsDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not build the explicit cost statistics lifecycle executor")
+        if '"cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit cost statistics executor")
+        if "class CostStatisticsDerivedLifecycleExecutor" not in executor_source:
+            violations.append("cost statistics lifecycle executor service is missing")
+        for snippet in (
+            "def execute(",
+            'reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")',
+            'persist_empty = reason != "pending_invoice_rules_changed"',
+            "runtime_service: CostStatisticsRuntimeService",
+            '"deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)}',
+            '"enqueued_jobs": enqueued_jobs',
+            '"cost_statistics.read_model.refresh"',
+            '"cost_statistics_cache_warmup"',
+        ):
+            if snippet not in executor_source:
+                violations.append(f"cost statistics lifecycle executor is missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_tax_offset_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
