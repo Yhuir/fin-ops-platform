@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Read model modular IO next pilot selection
+
+- 目标：把 `output_invoice_collection` 登记为 input usage 之后的第六个非 Go read model 实现试点。
+- 影响范围：本模块实施记录和 modular IO planning state；不改运行时代码、API shape、read model schema、worker、lifecycle/receipt/red-blue 写链路或前端行为。
+- 关键决策：下一条实现边界只做 repository port extraction：新增 `OutputInvoiceCollectionReadModelRepositoryPort`，把 PostgreSQL state-store output read repository 和 `InvoiceUsageCollectionSqlProjectionBuilder` 的 output save/mark/prune 路径收敛到窄 port。freshness/helper audit、legacy helper removal、生命周期写链路和 Go admission 后续单独处理。
+- 文档影响：与 `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md` 对齐；模块状态机定义不变。
+- 测试覆盖：本轮为 analysis-only slice，无新增运行时测试；下一实现 slice 需要覆盖 repository port 不暴露无关 read model 方法、projection save/mark/prune 和既有 rows/filter/export/detail 回归。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：未连接真实 PostgreSQL/worker/App Status/high-row/browser；本记录不声明 output invoice collection 模块闭环。
+
 ## 2026-06-20 - collection reminder mutation 暂时失败重试恢复
 
 - 目标：补齐销项收款状态保存成功后，`collection-reminder` 暂时失败的本地 `NETWORK-RECOVERY` Browser 负面链路，避免页面提前关闭 drawer、刷新 rows、伪装 `待冲红`，或重试时重复提交已保存的 status payload 触发 expectedVersion/重复写风险。

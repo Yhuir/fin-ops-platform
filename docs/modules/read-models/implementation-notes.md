@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Output invoice collection next pilot selection
+
+- 目标：执行 `read-models:next-pilot-selection-after-input-invoice-usage`，在进项发票使用本地实现支持 accounted 后选择下一个非 Go read model 试点。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models 和 output-invoice-collections 实施记录；不改运行时代码、API shape、read model schema、worker 或前端。
+- 关键决策：选择 `output_invoice_collection`。它是 invoice-usage-collection 页面族里剩余的高风险 read model，涉及 rows/filter/export/detail、lifecycle overlay、receipt facts、红蓝票关系和跨页面同步；第一条实现边界是 `read-models:output-invoice-collection-repository-port-extraction`。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；共享 read model 状态机定义不变。
+- 测试覆盖：本轮是 analysis-only slice，无运行时代码变化；下一轮实现必须覆盖 output repository port 不暴露无关 read model 方法、projection save/mark/prune、rows/filter/export/detail fresh gate 和 existing feature regression。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：未连接真实 PostgreSQL/worker/App Status/high-row/browser；本轮只选择下一试点，不证明 `output_invoice_collection` 闭环。
+
 ## 2026-06-24 - Input invoice usage local implementation closure accounting
 
 - 目标：执行 `read-models:input-invoice-usage-local-implementation-closure-audit`，确认进项发票使用 read model 本地实现支持是否可进入 production evidence defer。
