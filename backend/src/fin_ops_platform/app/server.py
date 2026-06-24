@@ -49,6 +49,7 @@ from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
+from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
@@ -1261,6 +1262,10 @@ class Application:
             self._workbench_query_service,
             self._workbench_action_service,
         )
+        self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(
+            reconciliation_service=self._reconciliation_service,
+            ledger_service=self._ledger_service,
+        )
         if isinstance(source_oa_adapter, MongoOAAdapter):
             source_oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
@@ -2401,15 +2406,15 @@ class Application:
             month = query.get("month", [None])[0]
             return self._handle_workbench(month)
         if method == "POST" and route_path == "/workbench/actions/confirm":
-            return self._handle_workbench_confirm(body)
+            return self._handle_legacy_workbench_action("confirm", body)
         if method == "POST" and route_path == "/workbench/actions/difference":
-            return self._handle_workbench_difference(body)
+            return self._handle_legacy_workbench_action("difference", body)
         if method == "POST" and route_path == "/workbench/actions/exception":
-            return self._handle_workbench_exception(body)
+            return self._handle_legacy_workbench_action("exception", body)
         if method == "POST" and route_path == "/workbench/actions/offline":
-            return self._handle_workbench_offline(body)
+            return self._handle_legacy_workbench_action("offline", body)
         if method == "POST" and route_path == "/workbench/actions/offset":
-            return self._handle_workbench_offset(body)
+            return self._handle_legacy_workbench_action("offset", body)
         if method == "GET" and route_path == "/integrations/oa":
             return self._handle_oa_dashboard()
         if method == "POST" and route_path == "/integrations/oa/sync":
@@ -14211,225 +14216,20 @@ class Application:
         result = self._workbench_write_facade().unignore_row(payload)
         return self._workbench_write_response(result)
 
-    def _handle_workbench_confirm(self, body: str | bytes | None) -> Response:
+    def _handle_legacy_workbench_action(self, action: str, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-
-        try:
-            actor_id = str(payload["actor_id"])
-            invoice_ids = list(payload["invoice_ids"])
-            transaction_ids = list(payload["transaction_ids"])
-        except (KeyError, TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_confirm_request",
-                    "message": "actor_id, invoice_ids and transaction_ids are required.",
-                },
-            )
-
-        try:
-            case = self._reconciliation_service.confirm_manual_reconciliation(
-                actor_id=actor_id,
-                invoice_ids=invoice_ids,
-                transaction_ids=transaction_ids,
-                oa_ids=list(payload.get("oa_ids", [])),
-                source_result_id=payload.get("source_result_id"),
-                remark=payload.get("remark"),
-                amount=payload.get("amount"),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "reconciliation_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_confirm_request", "message": str(exc)},
-            )
-        ledgers = self._ledger_service.sync_from_case(case)
-        return self._json_response(HTTPStatus.OK, {"case": case, "ledgers": ledgers})
-
-    def _handle_workbench_difference(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        try:
-            actor_id = str(payload["actor_id"])
-            invoice_ids = list(payload["invoice_ids"])
-            transaction_ids = list(payload["transaction_ids"])
-            difference_reason = str(payload["difference_reason"])
-        except (KeyError, TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_difference_request",
-                    "message": "actor_id, invoice_ids, transaction_ids and difference_reason are required.",
-                },
-            )
-
-        try:
-            case = self._reconciliation_service.confirm_difference_reconciliation(
-                actor_id=actor_id,
-                invoice_ids=invoice_ids,
-                transaction_ids=transaction_ids,
-                difference_reason=difference_reason,
-                difference_note=payload.get("difference_note"),
-                oa_ids=list(payload.get("oa_ids", [])),
-                source_result_id=payload.get("source_result_id"),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "reconciliation_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_difference_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"case": case})
-
-    def _handle_workbench_exception(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        try:
-            actor_id = str(payload["actor_id"])
-            biz_side = str(payload["biz_side"])
-            exception_code = str(payload["exception_code"])
-            invoice_ids = list(payload.get("invoice_ids", []))
-            transaction_ids = list(payload.get("transaction_ids", []))
-        except (KeyError, TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_exception_request",
-                    "message": "actor_id, biz_side and exception_code are required.",
-                },
-            )
-
-        try:
-            case, record = self._reconciliation_service.record_exception(
-                actor_id=actor_id,
-                biz_side=biz_side,
-                exception_code=exception_code,
-                invoice_ids=invoice_ids,
-                transaction_ids=transaction_ids,
-                oa_ids=list(payload.get("oa_ids", [])),
-                resolution_action=payload.get("resolution_action"),
-                note=payload.get("note"),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "reconciliation_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_exception_request", "message": str(exc)},
-            )
-        ledgers = self._ledger_service.sync_from_case(case, exception_record=record)
-        return self._json_response(
-            HTTPStatus.OK,
-            {"case": case, "exception_record": record, "ledgers": ledgers},
-        )
-
-    def _handle_workbench_offline(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        try:
-            actor_id = str(payload["actor_id"])
-            biz_side = str(payload["biz_side"])
-            amount = payload["amount"]
-            payment_method = str(payload["payment_method"])
-            occurred_on = str(payload["occurred_on"])
-            invoice_ids = list(payload.get("invoice_ids", []))
-            transaction_ids = list(payload.get("transaction_ids", []))
-        except (KeyError, TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_offline_request",
-                    "message": "actor_id, biz_side, amount, payment_method and occurred_on are required.",
-                },
-            )
-
-        try:
-            case, record = self._reconciliation_service.record_offline_reconciliation(
-                actor_id=actor_id,
-                biz_side=biz_side,
-                invoice_ids=invoice_ids,
-                transaction_ids=transaction_ids,
-                oa_ids=list(payload.get("oa_ids", [])),
-                amount=amount,
-                payment_method=payment_method,
-                occurred_on=occurred_on,
-                note=payload.get("note"),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "reconciliation_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_offline_request", "message": str(exc)},
-            )
-        ledgers = self._ledger_service.sync_from_case(case)
-        return self._json_response(
-            HTTPStatus.OK,
-            {"case": case, "offline_record": record, "ledgers": ledgers},
-        )
-
-    def _handle_workbench_offset(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        try:
-            actor_id = str(payload["actor_id"])
-            receivable_invoice_ids = list(payload["receivable_invoice_ids"])
-            payable_invoice_ids = list(payload["payable_invoice_ids"])
-            reason = str(payload["reason"])
-        except (KeyError, TypeError, ValueError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_offset_request",
-                    "message": "actor_id, receivable_invoice_ids, payable_invoice_ids and reason are required.",
-                },
-            )
-
-        try:
-            case, offset_note = self._reconciliation_service.record_offset_reconciliation(
-                actor_id=actor_id,
-                receivable_invoice_ids=receivable_invoice_ids,
-                payable_invoice_ids=payable_invoice_ids,
-                reason=reason,
-                note=payload.get("note"),
-                amount=payload.get("amount"),
-                oa_ids=list(payload.get("oa_ids", [])),
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "reconciliation_object_not_found", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_offset_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"case": case, "offset_note": offset_note})
+        routes = self._legacy_workbench_action_routes
+        handlers = {
+            "confirm": routes.confirm,
+            "difference": routes.difference,
+            "exception": routes.exception,
+            "offline": routes.offline,
+            "offset": routes.offset,
+        }
+        status_code, result = handlers[action](payload)
+        return self._json_response(status_code, result)
 
     def _handle_oa_dashboard(self) -> Response:
         postgres_dashboard = self._postgres_oa_projection_dashboard()

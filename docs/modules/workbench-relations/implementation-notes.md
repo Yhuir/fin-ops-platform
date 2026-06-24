@@ -20,6 +20,32 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - legacy Workbench action route module quarantine
+
+目标：把旧 `/workbench/actions/confirm|difference|exception|offline|offset` 从 `server.py` 大类中隔离出来，避免旧 reconciliation/ledger 链路继续混在现代 `/api/workbench/actions/*` relation/read model 链路附近。
+
+变更：
+
+- 新增 `LegacyWorkbenchActionRoutes`，作为旧 `/workbench/actions/*` 的 compat-only route owner。
+- 旧 payload 校验、`ManualReconciliationService` 调用和 `LedgerReminderService.sync_from_case(...)` 行为迁入 legacy route owner。
+- `Application` 只保留 `_handle_legacy_workbench_action(...)`，负责 JSON body 解析和 HTTP response 映射。
+- 删除 `Application._handle_workbench_confirm(...)`、`_handle_workbench_difference(...)`、`_handle_workbench_exception(...)`、`_handle_workbench_offline(...)`、`_handle_workbench_offset(...)`。
+- 新增 static guard，防止旧 handler 回流到 `server.py`，并证明现代 `/api/workbench/actions/*` wrapper 仍委托 `WorkbenchWriteFacade`。
+
+决策：
+
+- 本次是 quarantine，不是删除。`tests/test_ledger_api.py` 仍通过旧 `/workbench/actions/confirm` 和 `/workbench/actions/exception` 覆盖 ledger/reminder 行为。
+- 旧 endpoint 后续删除需要先提供等价 ledger/follow-up 替代入口，或明确产品层 retired 决策。
+- 下一条边界：`server-py:legacy-workbench-exception-helper-dead-code-audit`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_app.AppTests.test_health_endpoint_reports_current_and_future_capabilities tests.test_ledger_api -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+```
+
 ## 2026-06-24 - pending invoice pair service boundary audit
 
 目标：审计待找发票 query/application service 对 `pair_relation_service`、`relation_facade`、`relation_command_service` 的真实依赖，决定旧 pair service 注入应删除、隔离还是保留为兼容路径。

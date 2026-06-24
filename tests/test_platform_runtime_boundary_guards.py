@@ -380,6 +380,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "EtcBusinessBatchApiRoutes",
                 "server_markers": ("def _etc_business_routes", "_etc_business_routes()."),
             },
+            "routes_legacy_workbench_actions.py": {
+                "module": "fin_ops_platform.app.routes_legacy_workbench_actions",
+                "class": "LegacyWorkbenchActionRoutes",
+                "server_markers": ("_legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(", "_handle_legacy_workbench_action("),
+            },
             "routes_no_oa_bank_batches.py": {
                 "module": "fin_ops_platform.app.routes_no_oa_bank_batches",
                 "class": "NoOaBankBatchApiRoutes",
@@ -441,6 +446,84 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             for marker in owner["server_markers"]:
                 if marker not in server_source:
                     violations.append(f"server.py route owner {route_class} is missing marker {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_legacy_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        if not _class_source(route_tree, route_source, "LegacyWorkbenchActionRoutes"):
+            violations.append("legacy Workbench action route owner is missing")
+        if not _imports_name_from_module(
+            server_tree,
+            module="fin_ops_platform.app.routes_legacy_workbench_actions",
+            name="LegacyWorkbenchActionRoutes",
+        ):
+            violations.append("server.py does not import LegacyWorkbenchActionRoutes")
+        for marker in (
+            "self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(",
+            'return self._handle_legacy_workbench_action("confirm", body)',
+            'return self._handle_legacy_workbench_action("difference", body)',
+            'return self._handle_legacy_workbench_action("exception", body)',
+            'return self._handle_legacy_workbench_action("offline", body)',
+            'return self._handle_legacy_workbench_action("offset", body)',
+        ):
+            if marker not in server_source:
+                violations.append(f"server.py legacy route quarantine marker missing: {marker}")
+
+        for old_handler in (
+            "_handle_workbench_confirm",
+            "_handle_workbench_difference",
+            "_handle_workbench_exception",
+            "_handle_workbench_offline",
+            "_handle_workbench_offset",
+        ):
+            if _function_source(server_tree, server_source, old_handler):
+                violations.append(f"server.py still owns legacy Workbench action handler {old_handler}")
+
+        for marker in (
+            "ManualReconciliationService",
+            "LedgerReminderService",
+            "confirm_manual_reconciliation(",
+            "confirm_difference_reconciliation(",
+            "record_exception(",
+            "record_offline_reconciliation(",
+            "record_offset_reconciliation(",
+            "sync_from_case(",
+        ):
+            if marker not in route_source:
+                violations.append(f"legacy route owner is missing compat behavior marker {marker}")
+        for forbidden in (
+            "WorkbenchWriteFacade",
+            "WorkbenchRelationCommandService",
+            "ReadModelRefreshGateway",
+            "job.outbox_events",
+            "job.read_model_dirty_scopes",
+        ):
+            if forbidden in route_source:
+                violations.append(f"legacy route owner bypasses quarantine via {forbidden}")
+
+        for handler_name, facade_method in {
+            "_handle_live_workbench_confirm_link": "confirm_link",
+            "_handle_live_workbench_cancel_link": "cancel_link",
+            "_handle_live_workbench_withdraw_link": "withdraw_link",
+            "_handle_live_workbench_mark_exception": "mark_exception",
+            "_handle_live_workbench_update_bank_exception": "update_bank_exception",
+            "_handle_live_workbench_oa_bank_exception": "oa_bank_exception",
+            "_handle_live_workbench_confirm_personal_advance_repayment": "confirm_personal_advance_repayment",
+            "_handle_live_workbench_cancel_exception": "cancel_exception",
+            "_handle_workbench_ignore_row_payload": "ignore_row",
+            "_handle_workbench_unignore_row_payload": "unignore_row",
+        }.items():
+            handler_source = _function_source(server_tree, server_source, handler_name)
+            if f"self._workbench_write_facade().{facade_method}" not in handler_source:
+                violations.append(f"{handler_name} no longer delegates to WorkbenchWriteFacade.{facade_method}")
 
         self.assertEqual(violations, [])
 
@@ -2307,14 +2390,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench legacy action handler audit is not closed as analysis")
         if (
-            "| 192 | `server-py:legacy-workbench-action-route-module-quarantine` | pending"
+            "| 192 | `server-py:legacy-workbench-action-route-module-quarantine` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should quarantine legacy Workbench action routes")
+            violations.append("Legacy Workbench action route quarantine is not closed as implementation")
+        if (
+            "| 193 | `server-py:legacy-workbench-exception-helper-dead-code-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit the remaining legacy Workbench exception helper")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:legacy-workbench-action-route-module-quarantine`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at legacy Workbench action route quarantine")
+        if "`server-py:legacy-workbench-exception-helper-dead-code-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at legacy Workbench exception helper audit")
 
         self.assertEqual(violations, [])
 
