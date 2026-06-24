@@ -3173,10 +3173,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Modern Workbench action route-owner local closure audit is not closed as analysis")
         if (
-            "| 214 | `server-py:workbench-row-detail-route-owner-audit` | pending"
+            "| 214 | `server-py:workbench-row-detail-route-owner-audit`"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit Workbench row detail route ownership")
+            violations.append("Route-owner local closure audit no longer records row detail audit follow-up")
         for marker in (
             "WorkbenchActionApiRoutes",
             "_workbench_write_facade().",
@@ -3193,6 +3193,52 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Next prompt no longer forbids Go implementation during the row detail audit")
         if "Modern Workbench action route-owner local closure audit" not in notes_source:
             violations.append("Workbench relations implementation notes missing local closure audit record")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_row_detail_route_owner_audit_selects_extraction(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-row-detail-route-owner-audit.md"
+        ).read_text(encoding="utf-8")
+        notes_source = (REPO_ROOT / "docs/modules/workbench-relations/implementation-notes.md").read_text(
+            encoding="utf-8"
+        )
+        violations: list[str] = []
+
+        if (
+            "| 214 | `server-py:workbench-row-detail-route-owner-audit` | analysis-closed"
+            not in queue_source
+        ):
+            violations.append("Workbench row detail route-owner audit is not closed as analysis")
+        if (
+            "| 215 | `server-py:workbench-row-detail-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench row detail route ownership")
+        for marker in (
+            "GET /api/workbench/rows/{row_id}",
+            "Application._get_api_workbench_row_detail_payload",
+            "WorkbenchQueryFacade.row_detail",
+            "PostgresReadModelRepository.get_workbench_row_detail",
+            "tests/test_workbench_sql_runtime.py",
+            "`server-py:workbench-row-detail-route-owner-extraction`",
+            "Do not implement Go, Go Fiber or Go Worker.",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench row detail route-owner audit missing marker: {marker}")
+        if "`server-py:workbench-row-detail-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench row detail route-owner extraction")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during row detail extraction")
+        if "Workbench row detail route-owner audit" not in notes_source:
+            violations.append("Workbench relations implementation notes missing row detail route-owner audit record")
 
         self.assertEqual(violations, [])
 

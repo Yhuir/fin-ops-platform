@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:modern-workbench-action-route-owner-local-closure-audit.
+- Last completed boundary: server-py:workbench-row-detail-route-owner-audit.
 - Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -192,7 +192,8 @@ Current state expected on start:
 - `server-py:modern-workbench-action-route-owner-final-residual-audit` is complete as an analysis slice: it found no remaining app-owned direct `WorkbenchWriteFacade` action delegation in the audited modern Workbench action surface.
 - `server-py:workbench-cancel-exception-live-dispatch-noop-cleanup` is complete as an implementation slice: it removed the redundant cancel-exception live-service no-op branch while preserving JSON parsing, freshness guard, route-owner delegation and response serialization.
 - `server-py:modern-workbench-action-route-owner-local-closure-audit` is complete as an analysis slice: it found local closure evidence for the audited modern Workbench action route-owner surface, confirmed no direct `_workbench_write_facade().` action call sites remain in app route files, and selected row detail route ownership as the next bounded server.py slice.
-- The next pending boundary is `server-py:workbench-row-detail-route-owner-audit`.
+- `server-py:workbench-row-detail-route-owner-audit` is complete as an analysis slice: it confirmed the row detail live/cache/SQL fallback and no-write relation boundary are locally tested, found `Application` still owns fallback orchestration, and selected row detail route-owner extraction next.
+- The next pending boundary is `server-py:workbench-row-detail-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -288,15 +289,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-row-detail-route-owner-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-row-detail-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-row-detail-route-owner-audit`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-local-closure-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, `tests/test_workbench_query_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Audit `GET /api/workbench/rows/{row_id}` route ownership.
-- Verify the current live/cache/SQL `WorkbenchQueryFacade` fallback order and no-write relation boundary.
-- Classify `Application._handle_api_workbench_row_detail(...)`, `_get_api_workbench_row_detail_payload(...)`, `_workbench_row_detail_from_query_facade(...)` and `_workbench_row_detail_route_fallback_allowed(...)` responsibilities.
-- Select the next bounded row-detail route-owner implementation or follow-up audit boundary based on evidence.
-- Do not change runtime behavior, move routes, remove wrappers, alter response shapes, or change row detail behavior in this audit slice unless a clear guard/documentation fix is required for state consistency.
+For `server-py:workbench-row-detail-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-row-detail-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, `tests/test_workbench_query_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Extract Workbench row detail payload/fallback orchestration behind an explicit route owner.
+- Preserve `Application` as HTTP route dispatch and response serializer only.
+- Preserve existing row detail fallback order, row override application, production PostgreSQL route fallback blocking and `404` response shape.
+- Add/update static guards proving row detail fallback orchestration no longer lives in `Application` and the route owner remains read-only.
+- Do not change row detail response shape, status codes, override application, fallback order, stale/fresh behavior, SQL runtime fallback semantics, frontend detail drawer behavior or existing API tests.
 - Do not change Workbench groups, refresh status, settings, active generation publishing, matching worker, read model queue, legacy `/workbench/actions/*`, relation write behavior or modern Workbench action behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.

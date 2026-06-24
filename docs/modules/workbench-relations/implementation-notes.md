@@ -1,5 +1,31 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench row detail route-owner audit
+
+目标：审计 `GET /api/workbench/rows/{row_id}` 的 route ownership、live/cache/SQL fallback 顺序和 no-write relation 边界。
+
+结论：
+
+- 当前 row detail 仍由 `Application._get_api_workbench_row_detail_payload(...)` 编排 fallback：ETC summary、live service、cached read model、`WorkbenchQueryFacade.row_detail(...)`、opaque OA fail-closed 和旧 `WorkbenchApiRoutes.get_row_detail(...)` fallback。
+- `WorkbenchQueryFacade.row_detail(...)` 和 `PostgresReadModelRepository.get_workbench_row_detail(...)` 是只读 SQL active generation 边界，不写 relation、dirty scope、outbox、readiness 或 canonical facts。
+- 生产 PostgreSQL runtime 下，旧 route fallback 被 `_workbench_row_detail_route_fallback_allowed(...)` 阻止，除非 route query service 明确还有内存 row record。
+- 现有测试已覆盖 live path、route fallback、生产 fallback blocking、stale cached row rejection 和 opaque OA SQL active generation fallback。
+
+未关闭：
+
+- row detail 的 fallback orchestration、query facade adaptation、fallback policy 和 override application 仍在 `Application`，不是独立 route owner。
+
+下一条边界：`server-py:workbench-row-detail-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_row_detail_route_owner_audit_selects_extraction tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_modern_workbench_action_route_owner_local_closure_audit_selects_row_detail_audit tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_row_detail_reads_sql_row_without_application_live_sync tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_sql_runtime_uses_query_facade_for_opaque_oa_after_live_and_cache_miss -v
+python3 -m py_compile tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Modern Workbench action route-owner local closure audit
 
 目标：复查现代 Workbench action route-owner 抽离后的本地闭环证据，确认 action surface 不再由 `Application` 直接拥有 `WorkbenchWriteFacade` delegation。
