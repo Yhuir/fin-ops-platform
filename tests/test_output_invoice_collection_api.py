@@ -391,6 +391,18 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             )
             refreshed_row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
 
+        expected_freshness = {
+            "read_model_scope_keys": ["2026-05"],
+            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+        }
+        status_payload = json.loads(status_response.body)
+        reminder_payload = json.loads(reminder_response.body)
+        red_relation_payload = json.loads(red_relation_response.body)
+        receipt_payload = json.loads(receipt_response.body)
+        reminder_delete_payload = json.loads(reminder_delete_response.body)
+        void_payload = json.loads(void_response.body)
+        reissue_payload = json.loads(reissue_response.body)
+        red_relation_delete_payload = json.loads(red_relation_delete_response.body)
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(reminder_response.status_code, 200)
         self.assertEqual(red_relation_response.status_code, 200)
@@ -401,6 +413,21 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(reissue_response.status_code, 200)
         self.assertEqual(duplicate_reissue_response.status_code, 409)
         self.assertEqual(missing_void_response.status_code, 404)
+        for payload in [
+            status_payload,
+            reminder_payload,
+            red_relation_payload,
+            receipt_payload,
+            reminder_delete_payload,
+            void_payload,
+            reissue_payload,
+        ]:
+            self.assertEqual({key: payload[key] for key in expected_freshness}, expected_freshness)
+        self.assertEqual(red_relation_delete_payload["read_model_scope_keys"], ["all"])
+        self.assertEqual(
+            red_relation_delete_payload["freshness_targets"],
+            [{"read_model_key": "output_invoice_collection", "scope_key": "all"}],
+        )
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
         self.assertIsNone(refreshed_row["collectionStatus"]["reminder"])
         self.assertFalse(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))

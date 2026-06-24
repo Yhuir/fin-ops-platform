@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Output invoice collection freshness / operation barrier audit
+
+- 目标：执行 `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`，核对销项收款 read model fresh gate、force refresh、all fan-out、operation barrier 和旧 helper 分类。
+- 影响范围：`OutputInvoiceCollectionLifecycleService`、`OutputInvoiceCollectionReceiptService`、前端 output collection mutation API mapper、页面/抽屉 write-after-read barrier、`Application` app-level output projection helper 和相关测试。
+- 关键决策：output collection mutation response 必须返回 `read_model_scope_keys` 和 `freshness_targets`；前端优先等待具体月份 `output_invoice_collection:<YYYY-MM>`，避免 default all-view 写后只等待 fan-out-only `all`。旧 app-level output projection helper 无生产调用者，删除并以 architecture guard 防回归；真实 worker projection owner 继续是 `InvoiceUsageCollectionSqlProjectionBuilder`。
+- 文档影响：新增 modular IO analysis，更新 read-models/output-invoice-collections 实施记录、状态机、测试矩阵、autonomous state/queue/next prompt 和主控 prompt。
+- 测试覆盖：更新 lifecycle/API/frontend tests 并新增 architecture guard，覆盖 mutation response target、concrete-month operation barrier 和旧 helper removal。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:output-invoice-collection-local-implementation-closure-audit`。
+
 ## 2026-06-24 - Output invoice collection repository port extraction
 
 - 目标：执行 `read-models:output-invoice-collection-repository-port-extraction`，为销项发票收款 read model 建立窄 repository port。

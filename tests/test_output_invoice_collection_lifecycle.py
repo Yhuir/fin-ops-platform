@@ -68,8 +68,20 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         )
 
         refreshed_row = query.list_rows()["rows"][0]
+        expected_freshness = {
+            "read_model_scope_keys": ["2026-05"],
+            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+        }
         self.assertEqual(status_result["override"]["version"], 1)
+        self.assertEqual(
+            {key: status_result[key] for key in expected_freshness},
+            expected_freshness,
+        )
         self.assertEqual(reminder_result["reminder"]["status"], "active")
+        self.assertEqual(
+            {key: reminder_result[key] for key in expected_freshness},
+            expected_freshness,
+        )
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
         self.assertEqual(refreshed_row["collectionStatus"]["manualOverride"]["note"], "客户确认需要冲红")
         self.assertEqual(refreshed_row["collectionStatus"]["expectedCollectionDate"], "2026-06-20")
@@ -208,10 +220,18 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         reissued = receipts.reissue_receipt(first["receipt"]["id"], {"reason": "重开测试"}, actor_id="tester", tenant_id="default")
 
         history = query.receipt_history(invoice_id="out-receipt")
+        expected_freshness = {
+            "read_model_scope_keys": ["2026-05"],
+            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+        }
         self.assertEqual(first["receipt"]["id"], replay["receipt"]["id"])
         self.assertEqual(first["receipt"]["receiptNo"], replay["receipt"]["receiptNo"])
+        self.assertEqual({key: first[key] for key in expected_freshness}, expected_freshness)
+        self.assertEqual({key: replay[key] for key in expected_freshness}, expected_freshness)
         self.assertEqual(voided["receipt"]["status"], "voided")
+        self.assertEqual({key: voided[key] for key in expected_freshness}, expected_freshness)
         self.assertEqual(reissued["receipt"]["status"], "issued")
+        self.assertEqual({key: reissued[key] for key in expected_freshness}, expected_freshness)
         self.assertNotEqual(reissued["receipt"]["id"], first["receipt"]["id"])
         self.assertNotEqual(reissued["receipt"]["receiptNo"], first["receipt"]["receiptNo"])
         self.assertEqual(reissued["receipt"]["reissuedFromReceiptId"], first["receipt"]["id"])

@@ -64,3 +64,16 @@ def output_invoice_collection_scope_key(row: dict[str, Any]) -> str:
     if len(invoice_date) >= 7 and invoice_date[4] == "-":
         return invoice_date[:7]
     return "all"
+
+
+def output_invoice_collection_freshness_metadata(row: dict[str, Any]) -> dict[str, object]:
+    scope_key = output_invoice_collection_scope_key(row)
+    return {
+        "read_model_scope_keys": [scope_key],
+        "freshness_targets": [
+            {
+                "read_model_key": "output_invoice_collection",
+                "scope_key": scope_key,
+            }
+        ],
+    }

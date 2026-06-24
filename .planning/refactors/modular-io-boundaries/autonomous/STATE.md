@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-output-invoice-collection-repository-port-extraction`
+Current state: `autonomous-continue-after-read-models-output-invoice-collection-refresh-freshness-operation-barrier-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:output-invoice-collection-repository-port-extraction`. Added `OutputInvoiceCollectionReadModelRepositoryPort`, returned it from PostgreSQL state-store read wiring, routed output collection projection save/mark/prune through it, and guarded that unrelated read model methods are not exposed. The next executable boundary is `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`. Go hot-path admission remains blocked.
+Completed `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`. Output collection mutation responses now expose `read_model_scope_keys` and `freshness_targets`, frontend lifecycle/receipt/red relation flows wait on concrete month operation barrier targets before refetching, and unused app-level output projection helpers were removed from `Application` with a regression guard. The next executable boundary is `read-models:output-invoice-collection-local-implementation-closure-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -148,6 +148,7 @@ Completed `read-models:output-invoice-collection-repository-port-extraction`. Ad
 - `read-models:input-invoice-usage-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `read-models:next-pilot-selection-after-input-invoice-usage` -> `analysis-closed`
 - `read-models:output-invoice-collection-repository-port-extraction` -> `implementation-closed`
+- `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -161,8 +162,8 @@ Completed `read-models:output-invoice-collection-repository-port-extraction`. Ad
 - `pending_invoice` was the third non-Go read model implementation pilot after `bank_detail` and `workbench_relation`. Repository port extraction is implemented, freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, income-status mutations now wait for pending invoice operation barrier targets before refetching rows, and local implementation support is accounted for. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `oa_pending_payment` was the fourth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, and `pending_invoice`. Repository port extraction is implemented: PostgreSQL read route and OA projection save/mark/prune paths now use `OaPendingPaymentReadModelRepositoryPort`, while Workbench relation source-version lookup uses the Workbench relation port. Freshness/force-refresh/operation-barrier audit found and fixed the frontend gap where default all-view mutations preferred fan-out-only `all` over concrete month barrier targets. Local closure audit removed unused app-level OA pending payment rebuild/list/mark/live helpers and accounted for remaining local support. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`. A follow-up production fail-closed gap was fixed: relation detail no longer live-rebuilds in production SQL runtime when the SQL read repository is unavailable. Local implementation support is now accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `output_invoice_collection` is now the sixth non-Go read model implementation pilot after the input usage local closure audit. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `OutputInvoiceCollectionReadModelRepositoryPort`. The module is not locally closed; freshness/force-refresh/all fan-out/month proof/operation barrier/helper audit remains pending, and real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable.
-- The next pending boundary is `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`, which must audit output collection fresh gates, force refresh, all fan-out/month proof, operation barrier targets and retained app-level projection helpers.
+- `output_invoice_collection` is now the sixth non-Go read model implementation pilot after the input usage local closure audit. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `OutputInvoiceCollectionReadModelRepositoryPort`. Freshness/force-refresh/operation-barrier/helper audit is also implemented: mutation responses expose affected read model scope keys and operation barrier targets, frontend write-after-read flows prefer concrete month targets over fan-out-only `all`, `output_invoice_collection:all` remains a fan-out control scope, and unused app-level output projection helpers were removed from `Application`. The module is not locally closed; local closure accounting and real PostgreSQL/worker/App Status/high-row/browser evidence remain unavailable.
+- The next pending boundary is `read-models:output-invoice-collection-local-implementation-closure-audit`, which must account for output collection repository port, fresh gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination and remaining relation detail/live support before any next pilot or Go admission.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -179,8 +180,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:output-invoice-collection-repository-port-extraction`
+`read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`
 
 ## Next Prompt
 
-`read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`
+`read-models:output-invoice-collection-local-implementation-closure-audit`

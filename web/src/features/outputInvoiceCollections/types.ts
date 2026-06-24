@@ -1,3 +1,5 @@
+import type { OperationBarrierTarget } from "../operationBarrier/api";
+
 export type OutputInvoiceCollectionSortDirection = "asc" | "desc";
 
 export type OutputInvoiceCollectionFilterOperator =
@@ -22,6 +24,12 @@ export type OutputInvoiceCollectionWorkflow =
   | { kind: "receiptPreview"; rowId: string }
   | { kind: "receiptSettings" }
   | null;
+
+export type OutputInvoiceCollectionMutationResponse = {
+  readModelScopeKeys: string[];
+  freshnessTargets: OperationBarrierTarget[];
+  raw: unknown;
+};
 
 export type OutputInvoiceCollectionQuery = {
   page: number;

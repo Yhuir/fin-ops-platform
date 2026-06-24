@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.output_invoice_collection_models import (
     OutputInvoiceCollectionRowRef,
+    output_invoice_collection_freshness_metadata,
     output_invoice_collection_scope_key,
 )
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError, OutputInvoiceReceiptPreviewService
@@ -79,7 +80,7 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.create_receipt(**kwargs)
 
         receipt = self._run_mutation(row, reason="receipt_created", mutate=mutate, trace_id=trace_id)
-        return {"receipt": receipt}
+        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
 
     def void_receipt(
         self,
@@ -103,7 +104,8 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.void_receipt(**kwargs)
 
         receipt = self._run_receipt_mutation(receipt_id, reason="receipt_voided", mutate=mutate, trace_id=trace_id, tenant_id=tenant_id)
-        return {"receipt": receipt}
+        row = self._row_for_receipt(receipt)
+        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
 
     def reissue_receipt(
         self,
@@ -127,7 +129,8 @@ class OutputInvoiceCollectionReceiptService:
             return self._repository.reissue_receipt(**kwargs)
 
         receipt = self._run_receipt_mutation(receipt_id, reason="receipt_reissued", mutate=mutate, trace_id=trace_id, tenant_id=tenant_id)
-        return {"receipt": receipt}
+        row = self._row_for_receipt(receipt)
+        return {**output_invoice_collection_freshness_metadata(row), "receipt": receipt}
 
     def history(self, *, invoice_id: str, tenant_id: str = "default") -> dict[str, Any]:
         receipts = self._repository.list_receipts(invoice_id=str(invoice_id or "").strip(), tenant_id=tenant_id)
@@ -221,6 +224,10 @@ class OutputInvoiceCollectionReceiptService:
         before = self._repository.get_receipt(receipt_id=str(receipt_id or "").strip(), tenant_id=tenant_id)
         row = self._row_provider(str((before or {}).get("invoiceId") or "")) if before else None
         return self._run_mutation(row or {"invoice": {"invoiceDate": ""}}, reason=reason, mutate=mutate, trace_id=trace_id)
+
+    def _row_for_receipt(self, receipt: dict[str, Any]) -> dict[str, Any]:
+        row = self._row_provider(str(receipt.get("invoiceId") or ""))
+        return row or {"invoice": {"invoiceDate": ""}}
 
 
 def _bank_summary(row: dict[str, Any], bank_transaction_id: str) -> dict[str, Any]:

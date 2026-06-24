@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type {
+  OutputInvoiceCollectionMutationResponse,
   OutputInvoiceCollectionRow,
   OutputInvoiceReceiptPreviewRequest,
   OutputInvoiceReceiptPreviewResponse,
@@ -12,8 +13,8 @@ type ReceiptPreviewDrawerProps = {
   open: boolean;
   row: OutputInvoiceCollectionRow | null;
   loadPreview: (request: OutputInvoiceReceiptPreviewRequest) => Promise<OutputInvoiceReceiptPreviewResponse>;
-  createReceipt?: (rowId: string, bankTransactionId: string) => Promise<void>;
-  onChanged?: () => Promise<void> | void;
+  createReceipt?: (rowId: string, bankTransactionId: string) => Promise<OutputInvoiceCollectionMutationResponse>;
+  onChanged?: (result?: OutputInvoiceCollectionMutationResponse | null) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -74,8 +75,8 @@ export default function ReceiptPreviewDrawer({
     setSubmitting(true);
     setError(null);
     try {
-      await createReceipt(rowId, bankTransactionId);
-      await onChanged?.();
+      const result = await createReceipt(rowId, bankTransactionId);
+      await onChanged?.(result);
       onClose();
     } catch (createReason) {
       setError(createReason instanceof Error ? createReason.message : "正式收据创建失败");

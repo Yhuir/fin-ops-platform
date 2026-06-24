@@ -52,6 +52,7 @@
 - refresh 触发来源：
   - 发票导入、关系变化、pending invoice rules、invoice lifecycle 变化后，先刷新 `invoice_lifecycle`，再刷新 `output_invoice_collection`。
   - 手动状态、提醒、红蓝票关系、收据 create/void/reissue 直接 enqueue `output_invoice_collection` month scope。
+  - 手动状态、提醒、红蓝票关系、收据 create/void/reissue 响应必须携带 `read_model_scope_keys` 和 `freshness_targets`；前端必须把返回的具体月份 target 传给 operation barrier 后再 refetch rows。
   - `all` scope 由 `InvoiceUsageCollectionReadModelRefreshService` 扩展为月份 shard。
 - 失败恢复：
   - 按 `docs/operations/runtime-worker-governance.md` 先确认 `workbench_relation` 和 `invoice_lifecycle` fresh，再重放 `output_invoice_collection`。
@@ -62,6 +63,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-24 | 补齐写后 freshness target 合同并删除 app-level output projection helper | 不改变收款/红蓝票/收据业务状态；mutation response 增加 `read_model_scope_keys` 和 `freshness_targets`，前端写后等待具体月份 operation barrier；`Application.list_output_invoice_collection_scope_shards`、`mark_output_invoice_collection_scope_empty`、`rebuild_output_invoice_collection_read_model_scope` 被删除，worker projection owner 保持在 `InvoiceUsageCollectionSqlProjectionBuilder` | `tests.test_output_invoice_collection_lifecycle`、`tests.test_output_invoice_collection_api`、`tests.test_read_model_architecture_guards`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变销项发票收款业务/UI/read model/worker 状态；锁定 `output_invoice_collection` 为 scoped incremental、fan-out `all`、自管 freshness，并保持 query owner、permission owner 和 repository ports 不与 `invoice_lifecycle` / `input_invoice_usage` 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts` |
 | 2026-06-23 | 统一关系 OA/流水/发票项 `+N` 展示 | 不新增收款业务状态；新增 relation list UI 状态和 SQL payload schema stale 条件；销项发票多项显示合计和额外项 `+N` | `python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run` |
 | 2026-06-18 | 补充红蓝票 Browser fan-out | 不改变状态机；新增真实 Chromium 覆盖红蓝票关系确认后 rows refresh 和人工依据展示 | `cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts` |

@@ -10,7 +10,7 @@
 - 销项收款状态由 `InvoiceLifecyclePolicy` 统一判定，页面和 query service 不各自维护业务状态口径。
 - 手动状态、提醒、红蓝票关系和正式收据写入必须经过 lifecycle/receipt service；service 只接收 route 传入的 actor/tenant/权限结果，不读取 HTTP header/cookie。
 - PostgreSQL 写路径必须使用 transaction-bound queue writer 或等价 gateway，把事实写入和 `output_invoice_collection` dirty/outbox 收敛在同一边界。
-- 手动状态、提醒、红蓝票关系和正式收据写入成功后，页面必须先等待当前可见 scope 的 `output_invoice_collection` operation barrier fresh，再刷新 rows；barrier blocked/timeout 时不得提前读取旧投影。
+- 手动状态、提醒、红蓝票关系和正式收据写入成功后，API 必须返回 `read_model_scope_keys` 与 `freshness_targets`；页面必须优先等待返回的具体月份 `output_invoice_collection:<YYYY-MM>` operation barrier fresh，再刷新 rows。只有无法定位具体月份时才 fallback 到当前可见 scope 或 fan-out-only `all`；barrier blocked/timeout 时不得提前读取旧投影。
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
 - OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
 
@@ -48,6 +48,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-24 - Freshness target contract and app projection helper removal
+
+- 目标：关闭 `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`，让销项收款写后同步等待真实受影响月份，而不是默认 all 视图下的 fan-out-only `all`。
+- 影响范围：`OutputInvoiceCollectionLifecycleService`、`OutputInvoiceCollectionReceiptService`、`output_invoice_collection_freshness_metadata(...)`、前端 API mapper、`OutputInvoiceCollectionsPage`、状态/提醒/收据抽屉、`Application` 旧 output projection helpers、API/lifecycle/frontend/architecture guard 测试和 modular IO state。
+- 关键决策：mutation response 增加 `read_model_scope_keys` 与 `freshness_targets`；前端优先使用服务端返回的 concrete month target。`revoke_red_invoice_relation(...)` 仍返回 `all`，因为当前删除入口只接收 relation id，实际 enqueue scope 也是 `all`，不能伪造具体月份。`Application.list_output_invoice_collection_scope_shards(...)`、`mark_output_invoice_collection_scope_empty(...)`、`rebuild_output_invoice_collection_read_model_scope(...)` 无生产调用者，删除而不是 compat-only 保留；真实 worker/backfill owner 保持在 `InvoiceUsageCollectionSqlProjectionBuilder`。
+- 文档影响：同步 README、状态机、测试矩阵、read-models 实施记录、modular IO analysis/state/queue/journal/next prompt 和主控 prompt；不改产品口径。
+- 测试覆盖：新增/更新 lifecycle service、API contract、frontend operation barrier 和 architecture guard 覆盖，证明 mutation response target、frontend concrete-month barrier、旧 app helper 不回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。`output_invoice_collection` 还需 local closure accounting，不能声明全局闭环。
 
 ## 2026-06-24 - Read model repository port extraction
 

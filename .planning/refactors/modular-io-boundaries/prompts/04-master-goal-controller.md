@@ -96,9 +96,10 @@ Current state expected on start:
 - output_invoice_collection is the sixth non-Go read model implementation pilot.
 - output_invoice_collection shares the invoice-usage-collection worker/projection family with input_invoice_usage and oa_pending_payment.
 - `OutputInvoiceCollectionReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
-- output_invoice_collection still has open freshness, force-refresh, all fan-out/month proof, operation-barrier and app-level helper audit work.
+- output_invoice_collection freshness, force-refresh, all fan-out/month proof, operation-barrier and app-level helper audit work is implemented locally: mutation responses expose `read_model_scope_keys`/`freshness_targets`, frontend flows wait on concrete month targets, and unused app-level output projection helpers were removed from `Application`.
+- output_invoice_collection still has open local implementation closure accounting and real PostgreSQL/worker/App Status/high-row/browser evidence defer work.
 - No module is globally closed.
-- The next pending boundary is read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit.
+- The next pending boundary is read-models:output-invoice-collection-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -194,22 +195,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:output-invoice-collection-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, `docs/modules/output-invoice-collections/implementation-notes.md`, `backend/src/fin_ops_platform/services/output_invoice_collection_read_model_repository.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`, `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, `tests/test_output_invoice_collection_api.py`, and `tests/test_read_model_architecture_guards.py`.
-- Use CodeGraph for structural lookup before implementation edits.
-- Audit output collection fresh gates for rows, filter options, export and relation details.
-- Confirm force refresh and operation barrier targets for lifecycle, receipt and red/blue relation writes.
-- Confirm `output_invoice_collection:all` remains fan-out control scope and all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
-- Classify retained app-level output projection helpers: `Application.list_output_invoice_collection_scope_shards(...)`, `Application.mark_output_invoice_collection_scope_empty(...)`, and `Application.rebuild_output_invoice_collection_read_model_scope(...)`.
-- Remove unused unsafe helpers if call graph and tests prove they are dead; otherwise quarantine them as compat-only/gateway-backed with owner, caller list, deletion condition and forbidden writes.
+For read-models:output-invoice-collection-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, and `docs/modules/output-invoice-collections/implementation-notes.md`.
+- Use CodeGraph for structural lookup before implementation or closure accounting edits.
+- Account for local output collection implementation support after repository port, rows/filter/export fresh gate, source-version proof, scope policy, worker all fan-out, mutation operation barrier targets and app-level projection helper removal.
+- Classify any remaining output collection live/detail support, especially `/rows/{row_id}/relation-details`, as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
+- Decide whether local implementation support can move to `production-evidence-deferred` or whether another concrete local gap must be split before defer.
 - Do not change lifecycle write business rules, receipt numbering/history behavior, red/blue relation semantics, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
-- Do not declare `output_invoice_collection` globally closed unless every local support surface is accounted for.
+- Do not declare `output_invoice_collection` globally closed unless every full closure requirement is proven.
 - Produce/update an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
 - Update prompts/04-master-goal-controller.md and affected module docs/tests.
-- Run targeted backend tests, app check if app wiring changes, docs verification and diff checks.
+- Run docs verification and diff checks; run targeted backend/frontend tests only if runtime code or tests change.
 - Commit and push to origin/dev.
 - Continue to the next safe boundary if verification passes.
 

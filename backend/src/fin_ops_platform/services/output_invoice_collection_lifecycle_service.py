@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fin_ops_platform.services.output_invoice_collection_models import (
     OutputInvoiceCollectionRowRef,
+    output_invoice_collection_freshness_metadata,
     output_invoice_collection_scope_key,
 )
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
@@ -416,7 +417,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.set_status_override(**kwargs)
 
         override = self._run_mutation(row, reason="lifecycle_status_changed", mutate=mutate, trace_id=trace_id)
-        return {"override": override}
+        return {**output_invoice_collection_freshness_metadata(row), "override": override}
 
     def upsert_collection_reminder(
         self,
@@ -448,7 +449,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.upsert_reminder(**kwargs)
 
         reminder = self._run_mutation(row, reason="lifecycle_reminder_changed", mutate=mutate, trace_id=trace_id)
-        return {"reminder": reminder}
+        return {**output_invoice_collection_freshness_metadata(row), "reminder": reminder}
 
     def cancel_collection_reminder(
         self,
@@ -467,7 +468,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.cancel_reminder(**kwargs)
 
         reminder = self._run_mutation(row, reason="lifecycle_reminder_cancelled", mutate=mutate, trace_id=trace_id)
-        return {"reminder": reminder}
+        return {**output_invoice_collection_freshness_metadata(row), "reminder": reminder}
 
     def confirm_red_invoice_relation(
         self,
@@ -504,7 +505,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.confirm_red_relation(**kwargs)
 
         relation = self._run_mutation(row, reason="lifecycle_red_relation_changed", mutate=mutate, trace_id=trace_id)
-        return {"relation": relation}
+        return {**output_invoice_collection_freshness_metadata(row), "relation": relation}
 
     def revoke_red_invoice_relation(
         self,
@@ -523,7 +524,7 @@ class OutputInvoiceCollectionLifecycleService:
             return self._repository.revoke_red_relation(**kwargs)
 
         relation = self._run_mutation(row, reason="lifecycle_red_relation_revoked", mutate=mutate, trace_id=trace_id)
-        return {"relation": relation}
+        return {**output_invoice_collection_freshness_metadata(row), "relation": relation}
 
     def _require_row(self, row_id: str) -> dict[str, Any]:
         normalized = str(row_id or "").strip()

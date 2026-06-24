@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
-import type { OutputInvoiceReceiptHistoryResponse } from "../../features/outputInvoiceCollections/types";
+import type {
+  OutputInvoiceCollectionMutationResponse,
+  OutputInvoiceReceiptHistoryResponse,
+} from "../../features/outputInvoiceCollections/types";
 import AppDialog from "../common/AppDialog";
 import AppDrawer from "../common/AppDrawer";
 import StatePanel from "../common/StatePanel";
@@ -10,9 +13,9 @@ type ReceiptHistoryDrawerProps = {
   invoiceId: string | null;
   canMutateData: boolean;
   loadHistory: (invoiceId: string) => Promise<OutputInvoiceReceiptHistoryResponse>;
-  onVoidReceipt: (receiptId: string, reason: string) => Promise<void>;
-  onReissueReceipt: (receiptId: string, reason: string) => Promise<void>;
-  onChanged?: () => Promise<void> | void;
+  onVoidReceipt: (receiptId: string, reason: string) => Promise<OutputInvoiceCollectionMutationResponse>;
+  onReissueReceipt: (receiptId: string, reason: string) => Promise<OutputInvoiceCollectionMutationResponse>;
+  onChanged?: (result?: OutputInvoiceCollectionMutationResponse | null) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -81,9 +84,9 @@ export default function ReceiptHistoryDrawer({
     setSubmittingId(receiptId);
     setError(null);
     try {
-      await onVoidReceipt(receiptId, actionReason);
+      const result = await onVoidReceipt(receiptId, actionReason);
       await reload();
-      await onChanged?.();
+      await onChanged?.(result);
       return true;
     } catch (voidReason) {
       setError(voidReason instanceof Error ? voidReason.message : "作废收据失败");
@@ -97,9 +100,9 @@ export default function ReceiptHistoryDrawer({
     setSubmittingId(receiptId);
     setError(null);
     try {
-      await onReissueReceipt(receiptId, actionReason);
+      const result = await onReissueReceipt(receiptId, actionReason);
       await reload();
-      await onChanged?.();
+      await onChanged?.(result);
       return true;
     } catch (reissueReason) {
       setError(reissueReason instanceof Error ? reissueReason.message : "重开收据失败");

@@ -1,4 +1,5 @@
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
+import type { OperationBarrierTarget } from "../operationBarrier/api";
 import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
@@ -6,6 +7,7 @@ import type {
   OutputInvoiceCollectionExportPreview,
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterOptionsResponse,
+  OutputInvoiceCollectionMutationResponse,
   OutputInvoiceCollectionQuery,
   OutputInvoiceCollectionRedRelationRequest,
   OutputInvoiceCollectionRowsResponse,
@@ -59,6 +61,38 @@ function encodeFilters(filters: OutputInvoiceCollectionFilter[]) {
 function objectStringMap(value: unknown): Record<string, string> {
   const raw = objectValue(value);
   return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
+}
+
+function stringList(value: unknown): string[] {
+  return arrayValue(value).map((item) => stringValue(item).trim()).filter(Boolean);
+}
+
+function mapFreshnessTargets(value: unknown): OperationBarrierTarget[] {
+  const targets: OperationBarrierTarget[] = [];
+  for (const item of arrayValue(value)) {
+    const raw = objectValue(item);
+    const readModelKey = stringValue(camelOrSnake(raw, "readModelKey", "read_model_key")).trim();
+    const scopeKey = stringValue(camelOrSnake(raw, "scopeKey", "scope_key")).trim();
+    const scopeType = stringValue(camelOrSnake(raw, "scopeType", "scope_type")).trim();
+    if (!readModelKey || !scopeKey) {
+      continue;
+    }
+    targets.push({
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    });
+  }
+  return targets;
+}
+
+function mapMutationResponse(payload: unknown): OutputInvoiceCollectionMutationResponse {
+  const raw = objectValue(payload);
+  return {
+    readModelScopeKeys: stringList(camelOrSnake(raw, "readModelScopeKeys", "read_model_scope_keys")),
+    freshnessTargets: mapFreshnessTargets(camelOrSnake(raw, "freshnessTargets", "freshness_targets")),
+    raw: payload,
+  };
 }
 
 function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
@@ -646,65 +680,73 @@ export async function previewOutputInvoiceReceipt(
 }
 
 export async function updateOutputInvoiceCollectionStatus(rowId: string, request: OutputInvoiceCollectionStatusUpdateRequest) {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-status`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-status`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function updateOutputInvoiceCollectionReminder(rowId: string, request: OutputInvoiceCollectionReminderUpdateRequest) {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function cancelOutputInvoiceCollectionReminder(rowId: string, reminderId: string) {
-  return apiRequestJson<unknown>(
+  const payload = await apiRequestJson<unknown>(
     `/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder/${encodeURIComponent(reminderId)}`,
     { method: "DELETE" },
   );
+  return mapMutationResponse(payload);
 }
 
 export async function confirmOutputInvoiceRedRelation(rowId: string, request: OutputInvoiceCollectionRedRelationRequest) {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/red-invoice-relations`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/red-invoice-relations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function revokeOutputInvoiceRedRelation(relationId: string) {
-  return apiRequestJson<unknown>(
+  const payload = await apiRequestJson<unknown>(
     `/api/output-invoice-collections/red-invoice-relations/${encodeURIComponent(relationId)}`,
     { method: "DELETE" },
   );
+  return mapMutationResponse(payload);
 }
 
 export async function createOutputInvoiceReceipt(rowId: string, request: OutputInvoiceReceiptCreateRequest) {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/receipts`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/receipts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
     body: JSON.stringify(request),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function voidOutputInvoiceReceipt(receiptId: string, reason = "") {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/void`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/void`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason }),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function reissueOutputInvoiceReceipt(receiptId: string, reason = "") {
-  return apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/reissue`, {
+  const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/reissue`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason }),
   });
+  return mapMutationResponse(payload);
 }
 
 export async function fetchOutputInvoiceReceiptSettings(signal?: AbortSignal): Promise<OutputInvoiceReceiptSettingsResponse> {

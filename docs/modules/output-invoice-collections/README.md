@@ -53,9 +53,11 @@
 - 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
 - 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
 - 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 必须 enqueue `output_invoice_collection` scope，并在 PostgreSQL 模式下通过 transaction-bound queue writer 与事实写入同事务提交。
+- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 响应必须返回 `read_model_scope_keys` 与 `freshness_targets`。前端写后同步优先等待具体月份 `output_invoice_collection:<YYYY-MM>` operation barrier target；`all` 只作为无法定位具体月份时的 fan-out 控制 fallback。
 - 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
 - `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本；统一关系展示字段缺失属于 SQL payload schema stale，必须 enqueue refresh。
 - `output_invoice_collection:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+- `Application` 不再保留 output collection app-level projection helpers；`list_output_invoice_collection_scope_shards(...)`、`mark_output_invoice_collection_scope_empty(...)` 和 `rebuild_output_invoice_collection_read_model_scope(...)` 的 owner 是 `InvoiceUsageCollectionSqlProjectionBuilder` / `InvoiceUsageCollectionReadModelRefreshService` worker projection boundary。
 - App Status domain `output_invoice_collections` 依赖 `output_invoice_collection`、`invoice_lifecycle` readiness，以及 `invoice-usage-collection`、`invoice-lifecycle` worker。
 
 跨模块影响：

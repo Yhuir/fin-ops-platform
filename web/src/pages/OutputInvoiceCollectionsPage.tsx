@@ -45,6 +45,7 @@ import type {
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterFieldConfig,
   OutputInvoiceCollectionFilterOption,
+  OutputInvoiceCollectionMutationResponse,
   OutputInvoiceCollectionQuery,
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionSortDirection,
@@ -458,11 +459,13 @@ export default function OutputInvoiceCollectionsPage() {
     return code ? [{ code, label }] : [];
   }, [collectionStatusRow, manualStatusOptions]);
 
-  const handleLifecycleChanged = useCallback(async () => {
+  const handleLifecycleChanged = useCallback(async (result?: OutputInvoiceCollectionMutationResponse | null) => {
+    const responseTargets = (result?.freshnessTargets ?? []).filter((target) => target.scopeKey && target.scopeKey !== "all");
+    const targets = responseTargets.length > 0
+      ? responseTargets
+      : operationBarrierTargets("output_invoice_collection", [query.month || "all"]);
     try {
-      await waitForOperationFreshness(
-        operationBarrierTargets("output_invoice_collection", [query.month || "all"]),
-      );
+      await waitForOperationFreshness(targets);
       loadRows("refresh");
     } catch {
       // The write already committed. Do not immediately reread a projection that
@@ -641,8 +644,8 @@ export default function OutputInvoiceCollectionsPage() {
       invoiceId={receiptHistoryInvoiceId}
       canMutateData={canMutateData}
       loadHistory={fetchOutputInvoiceReceiptHistory}
-      onVoidReceipt={(receiptId, reason) => voidOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
-      onReissueReceipt={(receiptId, reason) => reissueOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
+      onVoidReceipt={(receiptId, reason) => voidOutputInvoiceReceipt(receiptId, reason)}
+      onReissueReceipt={(receiptId, reason) => reissueOutputInvoiceReceipt(receiptId, reason)}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
@@ -654,7 +657,7 @@ export default function OutputInvoiceCollectionsPage() {
         ? (rowId, bankTransactionId) => createOutputInvoiceReceipt(rowId, {
           bankTransactionId,
           idempotencyKey: `receipt:${rowId}:${bankTransactionId}`,
-        }).then(() => undefined)
+        })
         : undefined}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
@@ -663,13 +666,13 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "collectionStatus"}
       row={collectionStatusRow}
       statusOptions={collectionStatusOptions}
-      onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => undefined)}
-      onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => undefined)}
+      onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload)}
+      onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload)}
       onClearStatus={(rowId, expectedVersion) => updateOutputInvoiceCollectionStatus(rowId, {
         statusCode: "",
         expectedVersion,
-      }).then(() => handleLifecycleChanged())}
-      onCancelReminder={(rowId, reminderId) => cancelOutputInvoiceCollectionReminder(rowId, reminderId).then(() => handleLifecycleChanged())}
+      }).then((result) => handleLifecycleChanged(result))}
+      onCancelReminder={(rowId, reminderId) => cancelOutputInvoiceCollectionReminder(rowId, reminderId).then((result) => handleLifecycleChanged(result))}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
@@ -677,8 +680,8 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "redRelation"}
       row={redRelationRow}
       candidateRows={rows}
-      onConfirm={(rowId, payload) => confirmOutputInvoiceRedRelation(rowId, payload).then(() => handleLifecycleChanged())}
-      onRevoke={(relationId) => revokeOutputInvoiceRedRelation(relationId).then(() => handleLifecycleChanged())}
+      onConfirm={(rowId, payload) => confirmOutputInvoiceRedRelation(rowId, payload).then((result) => handleLifecycleChanged(result))}
+      onRevoke={(relationId) => revokeOutputInvoiceRedRelation(relationId).then((result) => handleLifecycleChanged(result))}
       onClose={handleCloseWorkflow}
     />
     <ReceiptSettingsDrawer

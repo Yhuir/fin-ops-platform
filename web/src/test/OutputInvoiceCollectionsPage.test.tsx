@@ -359,7 +359,8 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
           amountUppercase: "人民币伍仟元整",
           remark: "销项发票 XSFP-2026-0001",
           bankName: "建设银行",
-          canCreateFormalReceipt: false,
+          bankTransactionId: "bank-001",
+          canCreateFormalReceipt: true,
         },
       });
     }
@@ -431,7 +432,11 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       || url.pathname === "/api/output-invoice-collections/red-invoice-relations/relation-manual-001"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder/reminder-001"
     ) {
-      return jsonResponse({ ok: true });
+      return jsonResponse({
+        ok: true,
+        read_model_scope_keys: ["2026-05"],
+        freshness_targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
+      });
     }
     return jsonResponse({});
   });
@@ -1103,7 +1108,41 @@ describe("Output invoice collections page", () => {
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
     expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "output_invoice_collection", scope_key: "all" }],
+      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
+    });
+    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
+
+    barrier.resolve();
+
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
+    });
+  }, 45000);
+
+  test("waits for output invoice collection barrier target returned by receipt creation", async () => {
+    const barrier = deferred();
+    const user = userEvent.setup();
+    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    renderAuthenticatedAppAt("/output-invoice-collections", { session: { canAdminAccess: true } });
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    await within(page).findByText("XSFP-2026-0001");
+    await user.click(within(page).getAllByRole("button", { name: "待出收据" })[0]);
+    expect(await screen.findByLabelText("待出收据预览")).toBeInTheDocument();
+    const rowsBeforeMutation = rowsRequests(fetchMock).length;
+
+    await user.click(screen.getByRole("button", { name: "创建正式收据" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/rows/output-collection-row-001/receipts"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
+    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
+    expect(JSON.parse(String(barrierInit?.body))).toEqual({
+      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
     });
     expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
 

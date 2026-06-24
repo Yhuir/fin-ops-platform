@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type {
+  OutputInvoiceCollectionMutationResponse,
   OutputInvoiceCollectionReminderUpdateRequest,
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionStatusUpdateRequest,
@@ -12,11 +13,11 @@ type CollectionStatusReminderDrawerProps = {
   open: boolean;
   row: OutputInvoiceCollectionRow | null;
   statusOptions: Array<{ code: string; label: string }>;
-  onSaveStatus: (rowId: string, payload: OutputInvoiceCollectionStatusUpdateRequest) => Promise<void>;
-  onSaveReminder: (rowId: string, payload: OutputInvoiceCollectionReminderUpdateRequest) => Promise<void>;
+  onSaveStatus: (rowId: string, payload: OutputInvoiceCollectionStatusUpdateRequest) => Promise<OutputInvoiceCollectionMutationResponse>;
+  onSaveReminder: (rowId: string, payload: OutputInvoiceCollectionReminderUpdateRequest) => Promise<OutputInvoiceCollectionMutationResponse>;
   onClearStatus: (rowId: string, expectedVersion: number) => Promise<void>;
   onCancelReminder: (rowId: string, reminderId: string) => Promise<void>;
-  onChanged?: () => Promise<void> | void;
+  onChanged?: (result?: OutputInvoiceCollectionMutationResponse | null) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -67,18 +68,19 @@ export default function CollectionStatusReminderDrawer({
     };
     const statusFingerprint = JSON.stringify(statusPayload);
     try {
+      let mutationResult: OutputInvoiceCollectionMutationResponse | null = null;
       if (savedStatusFingerprint !== statusFingerprint) {
-        await onSaveStatus(row.id, statusPayload);
+        mutationResult = await onSaveStatus(row.id, statusPayload);
         setSavedStatusFingerprint(statusFingerprint);
       }
       if (remindAt) {
-        await onSaveReminder(row.id, {
+        mutationResult = await onSaveReminder(row.id, {
           remindAt: new Date(remindAt).toISOString(),
           channel: "oa",
           note: reminderNote,
         });
       }
-      await onChanged?.();
+      await onChanged?.(mutationResult);
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存失败");
