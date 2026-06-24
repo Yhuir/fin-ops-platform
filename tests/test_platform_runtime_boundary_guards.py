@@ -810,6 +810,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_bank_exception_delegation_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def oa_bank_exception",
+            ".oa_bank_exception(",
+        ):
+            if marker not in route_class:
+                violations.append(f"OA-bank exception route owner is missing marker {marker}")
+
+        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_oa_bank_exception")
+        for marker in (
+            "_load_json_body(body)",
+            "_workbench_write_freshness_guard()",
+            "_workbench_action_api_routes.oa_bank_exception(payload)",
+            "_workbench_write_response(result)",
+        ):
+            if marker not in wrapper_source:
+                violations.append(f"server.py OA-bank exception wrapper no longer preserves marker {marker}")
+        if "_workbench_write_facade().oa_bank_exception" in wrapper_source:
+            violations.append("server.py OA-bank exception wrapper still calls the write facade directly")
+
+        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_oa_bank_exception")
+        if "_workbench_action_api_routes.oa_bank_exception(payload)" not in live_source:
+            violations.append("server.py OA-bank exception live handler does not delegate to the route owner")
+        if "_workbench_write_response(result)" not in live_source:
+            violations.append("server.py OA-bank exception live handler no longer preserves write response mapping")
+        if "_workbench_write_facade().oa_bank_exception" in live_source:
+            violations.append("server.py OA-bank exception live handler still calls the write facade directly")
+
+        self.assertEqual(violations, [])
+
     def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -872,7 +911,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"legacy route owner bypasses quarantine via {forbidden}")
 
         for handler_name, facade_method in {
-            "_handle_live_workbench_oa_bank_exception": "oa_bank_exception",
             "_handle_live_workbench_confirm_personal_advance_repayment": "confirm_personal_advance_repayment",
             "_handle_live_workbench_cancel_exception": "cancel_exception",
             "_handle_workbench_ignore_row_payload": "ignore_row",
@@ -2807,14 +2845,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench update-bank-exception route owner extraction is not closed as implementation")
         if (
-            "| 204 | `server-py:workbench-oa-bank-exception-route-owner-extraction` | pending"
+            "| 204 | `server-py:workbench-oa-bank-exception-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench OA-bank exception route ownership")
+            violations.append("Workbench OA-bank exception route owner extraction is not closed as implementation")
+        if (
+            "| 205 | `server-py:workbench-personal-advance-repayment-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench personal advance repayment route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-oa-bank-exception-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench OA-bank exception route owner extraction")
+        if "`server-py:workbench-personal-advance-repayment-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench personal advance repayment route owner extraction")
 
         self.assertEqual(violations, [])
 

@@ -12373,7 +12373,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().oa_bank_exception(payload)
+        result = self._workbench_action_api_routes.oa_bank_exception(payload)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_personal_advance_repayment(
@@ -14106,7 +14106,7 @@ class Application:
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_oa_bank_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_write_facade().oa_bank_exception(payload)
+        result = self._workbench_action_api_routes.oa_bank_exception(payload)
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_confirm_personal_advance_repayment(

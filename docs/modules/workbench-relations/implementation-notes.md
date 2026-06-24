@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench OA-bank exception route owner extraction
+
+目标：把现代 `/api/workbench/actions/oa-bank-exception` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `oa_bank_exception(...)`。
+- `WorkbenchActionApiRoutes.oa_bank_exception(...)` 现在拥有 `WorkbenchWriteFacade.oa_bank_exception(...)` 调用。
+- `Application._handle_api_workbench_oa_bank_exception(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard 和 `_workbench_write_response(...)`。
+- `Application._handle_live_workbench_oa_bank_exception(...)` 仍负责测试/内部 live helper 的 response mapping，并通过 route owner 调用 facade。
+- 新增静态 guard，确保 OA-bank exception 不会重新直接调用 `WorkbenchWriteFacade.oa_bank_exception(...)`，同时确认 JSON/freshness/response mapping 仍保留。
+
+未改变：
+
+- personal advance、cancel exception、ignore/unignore、exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link、cash special 和 update-bank-exception 都未迁移。
+- response shape、status code、auth、freshness guard、idempotency、exception case 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-personal-advance-repayment-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_oa_bank_exception_reuses_case_and_reschedules_current_behavior tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_oa_bank_exception_after_pair_relation_returns_conflict_and_preserves_relation tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_oa_bank_exception_scheduling_failure_propagates_after_case_and_override_are_persisted tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_resolves_selected_rows_without_rebuilding_grouped_workbench tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_live_oa_bank_exception_keeps_rows_in_open_processed_exception_state tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_oa_bank_exception_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench update-bank-exception route owner extraction
 
 目标：把现代 `/api/workbench/actions/update-bank-exception` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。

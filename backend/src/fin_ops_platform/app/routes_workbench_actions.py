@@ -122,3 +122,6 @@ class WorkbenchActionApiRoutes:
 
     def update_bank_exception(self, payload: dict[str, Any]) -> Any:
         return self._write_facade_provider().update_bank_exception(payload)
+
+    def oa_bank_exception(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().oa_bank_exception(payload)
