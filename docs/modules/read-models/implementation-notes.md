@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle local implementation closure accounting
+
+- 目标：执行 `read-models:invoice-lifecycle-local-implementation-closure-audit`，确认 `invoice_lifecycle` 在本地可验证范围内是否还有必须先修的实现缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models 实施记录和测试矩阵；不改变 SQL、API、worker、queue schema、lifecycle 规则或前端行为。
+- 关键决策：`invoice_lifecycle` 本地支持已 accounted：repository port、facade freshness/non-fresh enqueue、refresh worker all fan-out、source-version before/after checks、manifest/App Status/worker registration、operation barrier exact-month guard、derived lifecycle executor 和 app-owned helper removal 均有证据。真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，模块不全局关闭，Go admission 继续 blocked。
+- 文档影响：新增 modular IO closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 audit/accounting only，无运行时代码变化，无新增测试；复用 invoice lifecycle facade、refresh、derived executor、operation barrier、manifest、input usage payment-rules 和 static guard 测试作为证据。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:next-pilot-selection-after-invoice-lifecycle`。
+
 ## 2026-06-24 - Invoice lifecycle derived lifecycle executor extraction
 
 - 目标：执行 `read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction`，把 app-owned invoice lifecycle derived lifecycle refresh 执行逻辑抽到显式 executor。
