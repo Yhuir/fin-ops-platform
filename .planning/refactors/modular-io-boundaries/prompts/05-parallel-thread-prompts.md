@@ -40,7 +40,8 @@ All worker prompts inherit these rules:
 - Do not ask the user for staging databases, PostgreSQL URLs, SSH passwords, DB passwords, tokens, cookies or private secrets.
 - Missing real PostgreSQL/read model/worker evidence is a soft gate. Record it as `production-evidence-deferred`, `unavailable` or equivalent evidence status and keep working on another safe owned scope.
 - Use local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and non-secret production read-only SSH evidence when useful.
-- `ssh finops-prod-root` may be used only for non-secret read-only checks. Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
+- T1-T8 workers may use `ssh finops-prod-root` only for non-secret read-only checks. Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
+- T1-T8 workers must not execute the Controlled Production Gate. If controlled production evidence is required, stop and request T0 Controller action in the handoff.
 - Before editing or commit/push, acquire the write lease: `mkdir /tmp/fin-ops-dev-write.lock`.
 - After acquiring the write lease, run `git fetch origin --prune`, `git switch dev`, `git pull --ff-only origin dev`, and confirm a clean `git status --short --branch`.
 - Commit/push only verified, bounded, owned changes to `origin/dev`. Every worker commit must be safe to merge into `main` for the completed slice, with old behavior protected by targeted verification or documented as unchanged.
@@ -73,6 +74,10 @@ Controller responsibilities:
 - Consume worker handoffs.
 - Review each worker commit/diff for scope, tests, docs, legacy contamination, read model freshness, operation barrier and stop-gate compliance.
 - Accept, reject, or request follow-up for each handoff.
+- Own the Controlled Production Gate. T0 may use `ssh finops-prod-root` for bounded production operations only when `12-PARALLEL-ORCHESTRATION.md` gate conditions are met.
+- Before any controlled production operation, write a runbook/evidence file that states exact commands, target slice, scope, expected evidence, rollback/cleanup, stop gates and post-checks.
+- Prefer dry-run, canary record, test tenant or no-op equivalent. If no safe bounded path exists, record `needs-human-production-gate` or `production-evidence-deferred` instead of forcing the operation.
+- Never print or store secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads. Do not perform broad DB mutation, unbounded worker replay, unbounded queue consume, deploy/restart or destructive system/file operations.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md and 04-master-goal-controller.md only after accepting worker evidence.
 - Generate the next controller or worker prompt from the current state and accepted handoffs; do not generate next work from stale queue assumptions.
 - Keep server-py:workbench-group-detail-route-owner-extraction as the next executable boundary unless accepted handoffs prove a safer next boundary.
@@ -222,6 +227,8 @@ Forbidden:
 - worker replay/consume;
 - deploy/restart/systemd mutation;
 - OA mutation.
+
+T6 cannot execute controlled production operations. If a deferred module needs production mutation, canary write, queue mutation, worker consume/replay or readiness mutation to close evidence, write a request for T0 Controller in this handoff and stop.
 
 Record evidence as local/fake/stub, production-read-only, unavailable or production-evidence-deferred.
 ```

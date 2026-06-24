@@ -52,8 +52,27 @@ All controller and worker prompts inherit the no-staging operating model:
 - Prompts must not ask the user for staging databases, PostgreSQL URLs, SSH passwords, DB passwords, tokens, cookies or private secrets.
 - Missing real PostgreSQL/read model/worker evidence is a soft gate, not a hard blocker. Record it as `production-evidence-deferred`, `unavailable` or equivalent evidence status and continue to the next safe owned scope.
 - Use local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and production read-only SSH evidence where useful.
-- `ssh finops-prod-root` may be used only for non-secret read-only checks such as service status, non-secret logs, deployed file existence, public/non-secret health endpoints and read-only runtime status.
-- Production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, deploy/restart, secret reads and OA mutation are forbidden in the parallel workflow unless a separate human production gate explicitly approves them.
+- T1-T8 workers may use `ssh finops-prod-root` only for non-secret read-only checks such as service status, non-secret logs, deployed file existence, public/non-secret health endpoints and read-only runtime status.
+- T1-T8 workers must not perform production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, deploy/restart, secret reads or OA mutation.
+- T0 Controller may use `ssh finops-prod-root` for controlled production operations only through the Controlled Production Gate below.
+
+## Controlled Production Gate
+
+T0 Controller is the only prompt allowed to perform controlled production operations through root SSH. This authority is not granted to T1-T8 workers or T9.
+
+T0 may use the gate only when all of these are true:
+
+- the target slice is locally/contract verified and the only remaining gap is production closure evidence;
+- the operation is bounded, reversible or cleanup-safe;
+- a dry-run, canary record, test tenant or no-op equivalent exists, or the runbook explains why the operation is still safe;
+- the runbook states exact commands, expected evidence, rollback/cleanup commands, stop gates and post-checks;
+- commands do not print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads;
+- no command performs broad DB mutation, unbounded worker replay, unbounded queue consume, deploy/restart, or destructive file/system operation;
+- the result can be recorded as `production-controlled`, `production-evidence-deferred`, `needs-human-production-gate` or equivalent evidence status.
+
+If a safe canary/dry-run/rollback path cannot be proven, T0 must not force the production operation. It must record `needs-human-production-gate` or `production-evidence-deferred` and continue another safe boundary.
+
+T0 must write the controlled production runbook and evidence into an analysis or handoff file before updating global state.
 
 ## Controller Permissions
 
@@ -77,6 +96,7 @@ The controller also owns:
 - merge from `origin/main` into `dev`,
 - conflict resolution policy,
 - production evidence classification,
+- controlled production gate runbook/evidence classification,
 - Go candidate admission/defer decisions.
 
 The controller may edit worker handoff files only when reconciling or archiving completed work.
@@ -101,7 +121,8 @@ Workers must not:
 - change global state-machine semantics;
 - claim global closure;
 - implement Go/Fiber/Go Worker unless explicitly assigned by the controller and the admission gates are already satisfied;
-- perform production writes or read secrets;
+- perform production writes, DB writes, queue/readiness mutation, worker replay/consume, systemd mutation, deploy/restart, OA mutation or secret reads;
+- execute the Controlled Production Gate;
 - push to `main`;
 - rebase, reset, force-push, delete branches or run destructive git operations.
 
@@ -151,13 +172,13 @@ The initial parallel workstreams are:
 
 | Thread | Workstream | Primary ownership | Forbidden shared files |
 | --- | --- | --- | --- |
-| T0 | Controller / Integration | controller-only files, global state, final closure | none |
+| T0 | Controller / Integration | controller-only files, global state, final closure, controlled production gate runbooks/evidence | none |
 | T1 | Server route owner | `backend/src/fin_ops_platform/app/server.py`, route modules for assigned server routes, workstream-specific tests | controller-only files |
 | T2 | Read model contract closure | `docs/modules/read-models/`, read model manifest/tests, module read model docs | controller-only files, `server.py` unless assigned |
 | T3 | Worker queue/App Status | runtime worker docs, worker registry tests, queue/operation barrier tests | controller-only files |
 | T4 | Frontend freshness/barrier | `web/src/features/`, `web/src/pages/`, frontend tests for assigned pages | controller-only files, backend runtime code unless assigned |
 | T5 | Legacy contamination sweep | workstream-specific legacy analysis/tests, assigned legacy code paths | controller-only files, unrelated module code |
-| T6 | Production read-only evidence | read-only runbooks and evidence reports only | code, tests, controller-only state |
+| T6 | Production read-only evidence | read-only runbooks and evidence reports only | code, tests, controller-only state, controlled production operations |
 | T7 | Go admission evidence | Go admission analysis, evidence tooling/tests only | Go implementation files unless admission passes |
 | T8 | Module docs/contracts | `docs/modules/<assigned-module>/`, module IO contract analysis | controller-only files |
 | T9 | Final closure audit | closure report after controller requests it | code files before controller request |
@@ -252,6 +273,6 @@ The controller may claim global closure only after all of these are proven from 
 - controller has consumed every worker handoff;
 - targeted tests and docs verification have run;
 - missing production evidence is explicitly `production-evidence-deferred`, not silently accepted as closed;
-- final closure report states which evidence is local/fake/stub, production read-only, or deferred.
+- final closure report states which evidence is local/fake/stub, production read-only, production-controlled, or deferred.
 
 If any item is incomplete, the controller must continue or produce a new bounded prompt. It must not mark the refactor globally closed.
