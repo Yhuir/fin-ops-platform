@@ -24,17 +24,24 @@ Continue after the `planning:parallel-handoff-review-and-state-update` slice.
 
 ## Options
 
-Single-thread continuation:
+Recommended autonomous continuation:
+
+- Use `prompts/06-t0-meta-orchestrator-goal.md`.
+- Start exactly one T0 `/goal` thread.
+- T0 will execute `planning:post-parallel-handoff-next-boundary-selection`, create worker threads when safe, monitor them, accept/reject handoffs, update controller-only state files, commit/push to `origin/dev`, and continue the loop.
+- Do not manually start old T1-T9 worker prompts unless T0 explicitly instructs that fallback.
+
+Single-thread fallback:
 
 - Use `prompts/04-master-goal-controller.md`.
 - Start with `planning:post-parallel-handoff-next-boundary-selection`.
 
-Parallel continuation:
+Manual parallel fallback:
 
 - Read `12-PARALLEL-ORCHESTRATION.md`.
-- Start T0 from `prompts/05-parallel-thread-prompts.md`.
-- Start T0 controller first to select the next worker boundary from accepted handoff risks.
-- Do not start new workers from stale assumptions; generate prompts after T0 selects the next safe boundary.
+- `prompts/05-parallel-thread-prompts.md` is retained only as worker archetype/reference material.
+- Manual T1-T9 startup is deprecated for unattended runs. Prefer T0-created worker threads from `06-t0-meta-orchestrator-goal.md`.
+- If manual fallback is unavoidable, start T0 first to select the next worker boundary from accepted handoff risks. Do not start new workers from stale assumptions.
 
 ## Required First Steps On Resume
 

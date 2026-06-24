@@ -22,16 +22,36 @@ The parallel model is:
 
 ```text
 Controller thread
-  owns global state, dev integration, queue accounting and final closure
+  owns thread creation, global state, dev integration, queue accounting and final closure
 
 Worker threads
   own bounded workstreams, local code/docs/tests inside assigned file scope,
   write handoff reports, and may push direct-dev commits only under the write lease
 ```
 
+## T0 Meta Orchestrator Mode
+
+The primary autonomous entrypoint is now `prompts/06-t0-meta-orchestrator-goal.md`.
+
+The user should start one T0 Meta Orchestrator thread. T0 may then create, monitor, review and close worker threads through Codex thread-management tools. The older T1-T9 prompt set in `prompts/05-parallel-thread-prompts.md` is retained as worker archetype/reference material, not as a manual launch requirement.
+
+T0 owns thread creation authority:
+
+- only T0 may create Codex worker threads;
+- workers must not create or fork additional threads;
+- T0 must select worker scopes from current `MODULE-QUEUE.md`, accepted handoff risks and current code/docs state;
+- T0 must not start workers from stale T1-T8 assumptions;
+- T0 must cap each worker wave at five concurrent workers, with two to four preferred when runtime files may overlap;
+- T0 must record worker thread ids, assigned scope, file ownership, base commit, expected handoff and final status in an analysis file;
+- T0 must read each worker final answer and handoff before accepting any result;
+- T0 must update controller-only state only after review and verification;
+- T0 must not start final closure audit until the closure gate is proven from current evidence.
+
+If Codex thread-management tools are unavailable, T0 must fall back to a single-thread GSD closed loop and record the fallback. Lack of thread tools is not by itself a reason to block safe single-thread progress.
+
 ## Auto-Progress Semantics
 
-Worker prompts are autonomous inside their assigned workstream. A worker may continue through multiple narrow slices in that workstream when all of the following are true:
+Worker prompts created by T0 are autonomous inside their assigned workstream. A worker may continue through multiple narrow slices in that workstream when all of the following are true:
 
 - the next slice is inside the same assigned file ownership,
 - no controller-only file must be changed,
@@ -84,6 +104,7 @@ Only the controller may edit these files:
 - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
 - `.planning/refactors/modular-io-boundaries/prompts/04-master-goal-controller.md`
 - `.planning/refactors/modular-io-boundaries/prompts/05-parallel-thread-prompts.md`
+- `.planning/refactors/modular-io-boundaries/prompts/06-t0-meta-orchestrator-goal.md`
 - `.planning/refactors/modular-io-boundaries/12-PARALLEL-ORCHESTRATION.md`
 - any future global progress/completion percentage document
 

@@ -1,14 +1,16 @@
-# Parallel Thread Prompts
+# Parallel Worker Prompt Archetypes
 
-**Status:** Ready for controller-led use
+**Status:** Legacy/manual reference; superseded as primary entrypoint by `06-t0-meta-orchestrator-goal.md`
 **Source plan:** `../12-PARALLEL-ORCHESTRATION.md`
 **Planning input base:** `1402e7c9 docs(server): audit workbench group detail route owner`
 
 ## How To Use
 
-Use these prompts only after reading `12-PARALLEL-ORCHESTRATION.md`.
+Use `06-t0-meta-orchestrator-goal.md` as the primary prompt. It creates worker threads, monitors them, accepts/rejects handoffs and continues the GSD loop without requiring the user to manually paste T1-T9 prompts.
 
-Recommended launch order:
+This file is retained as worker archetype/reference material for T0. Do not manually launch these prompts unless the T0 Meta Orchestrator explicitly instructs you to do so after selecting a fresh boundary from current state.
+
+Deprecated manual launch order:
 
 1. Start T0 Controller.
 2. Start T1-T8 workers.
