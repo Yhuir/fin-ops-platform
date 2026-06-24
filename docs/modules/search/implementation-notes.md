@@ -40,3 +40,11 @@
 - 改动：新增 `SearchReadModelRefreshProducer`；删除旧 app-owned refresh/invalidation helper；`SearchQueryFreshnessService`、settings update、import-state invalidation、Workbench invalidation 和 derived lifecycle search cache invalidation 改为调用 producer。
 - 保持不变：refresh 仍通过 `ReadModelRefreshGateway`，scope type 仍为 `search`，reason/metadata 透传保持不变；search API、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
 - 下一步：执行 `read-models:search-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence defer，还是仍有本地 implementation gap。
+
+## 2026-06-24 - production repository unavailable fail closed
+
+- 目标：生产 PostgreSQL runtime 下，`/api/search` 缺少 SQL read repository 时不能回退到 legacy/local live scan。
+- 审计结论：local closure audit 发现缺口：`SearchQueryFreshnessService.get_payload(...)` 返回 `None` 后，`Application._handle_api_search(...)` 仍会调用 `SearchService.search(...)`。
+- 改动：当 `_requires_sql_read_model_runtime()` 为 true 且 SQL search repository 不可用时，`/api/search` 返回 HTTP `503`、`error=read_model_unavailable`、`read_model_status=unavailable`，并通过 `SearchReadModelRefreshProducer` 入队 `api_sql_repository_unavailable`。
+- 保持不变：legacy/local 非 PostgreSQL fallback 仍可用；SQL miss/fresh/stale 行为、search ranking、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
+- 下一步：执行 `read-models:search-post-fail-closed-local-implementation-closure-audit`。

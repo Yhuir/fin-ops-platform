@@ -62,6 +62,17 @@
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
 - 后续事项：执行 `read-models:search-local-implementation-closure-audit`。
 
+## 2026-06-24 - Search production repository unavailable fail closed
+
+- 目标：执行 `read-models:search-local-implementation-closure-audit` 并修复发现的生产 repository unavailable fallback 缺口。
+- 影响范围：`Application._handle_api_search(...)`、`SearchReadModelRefreshProducer`、search runtime/API tests、modular IO state 和 search/read-models 文档；不改变 SQL miss/fresh/stale 正常路径、worker event、queue/schema/Redis 合同。
+- 关键决策：生产 PostgreSQL runtime 缺少 search SQL repository 时，`/api/search` 必须 fail closed，返回 `read_model_unavailable` / `read_model_status=unavailable` 并入队 `api_sql_repository_unavailable`；不能调用 legacy/local `SearchService.search(...)`。
+- 文档影响：新增 closure audit 和 fail-closed implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 search/read-models 文档。
+- 测试覆盖：新增生产 repository unavailable API regression，证明不 live scan local state。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-search-production-repository-unavailable-fail-closed.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:search-post-fail-closed-local-implementation-closure-audit`。
+
 ## 2026-06-24 - No-OA bank batch derived lifecycle executor extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，将 no-OA derived lifecycle target/enqueue behavior 从 `Application` 收敛到显式 executor。

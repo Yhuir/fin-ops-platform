@@ -1228,6 +1228,32 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("search", "2026-05", "api_miss")])
 
+    def test_search_api_requires_sql_repository_in_production_without_live_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._search_sql_read_repository = None
+        app._search_service = type(
+            "SearchService",
+            (),
+            {
+                "search": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("production search API must not scan in-memory state without SQL repository")
+                )
+            },
+        )()
+
+        response = app._handle_api_search(q="昆明", scope="all", month="2026-05", project_name=None, status=None, limit="20")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("search", "2026-05", "api_sql_repository_unavailable")])
+
     def test_search_api_reads_sql_index(self) -> None:
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()

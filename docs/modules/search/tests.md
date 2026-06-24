@@ -64,6 +64,16 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
 ```
 
+## 2026-06-24 - production repository unavailable fail closed
+
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_requires_sql_repository_in_production_without_live_scan`。
+- 覆盖：生产 PostgreSQL runtime 下 `/api/search` 缺少 SQL repository 时返回 unavailable、入队 `api_sql_repository_unavailable`，并且不调用 legacy/local live scan。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_requires_sql_repository_in_production_without_live_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_miss_enqueues_refresh_without_sync_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_reads_sql_index tests.test_search_api -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

@@ -4830,6 +4830,26 @@ class Application:
         if sql_payload is not None:
             status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("summary", {}).get("total") else HTTPStatus.OK
             return self._json_response(status_code, sql_payload)
+        if self._requires_sql_read_model_runtime():
+            scope_key = SearchQueryFreshnessService.scope_key(resolved_month)
+            refresh_enqueued = self._search_read_model_refresh_producer().enqueue_one(
+                scope_key,
+                reason="api_sql_repository_unavailable",
+            )
+            payload = SearchQueryFreshnessService.empty_payload(
+                q=q,
+                scope=resolved_scope,
+                month=resolved_month,
+                project_name=project_name,
+                status=resolved_status,
+                limit=resolved_limit,
+                scope_key=scope_key,
+            )
+            payload["error"] = "read_model_unavailable"
+            payload["read_model_status"] = "unavailable"
+            payload["refresh_enqueued"] = refresh_enqueued
+            payload["message"] = "Search SQL read model repository is not configured for production runtime."
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, payload)
         payload = self._search_service.search(
             q=q,
             scope=resolved_scope,
