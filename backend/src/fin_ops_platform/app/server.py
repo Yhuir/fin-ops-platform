@@ -1262,6 +1262,7 @@ class Application:
         )
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
+            write_facade_provider=self._workbench_write_facade,
         )
         self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(
             reconciliation_service=self._reconciliation_service,
@@ -12248,12 +12249,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().apply_exception(
-            payload,
-            actor=str(payload.get("actor") or payload.get("confirmed_by") or "system"),
-            request_id=request_id,
-            action_name="exception_apply",
-        )
+        result = self._workbench_action_api_routes.exception_apply(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:

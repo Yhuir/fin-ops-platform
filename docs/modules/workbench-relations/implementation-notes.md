@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench exception apply route owner extraction
+
+目标：把现代 `/api/workbench/exception/apply` 的 facade delegation、actor fallback 和 request-id mapping 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `write_facade_provider` 和 `exception_apply(...)`。
+- `WorkbenchActionApiRoutes.exception_apply(...)` 现在拥有 `WorkbenchWriteFacade.apply_exception(...)` 调用、`actor || confirmed_by || system` fallback、`request_id` 传递和 `action_name=exception_apply`。
+- `Application._handle_api_workbench_exception_apply(...)` 仍负责 JSON body parse、Workbench 写入 freshness guard 和 `_workbench_write_response(...)`。
+- 新增静态 guard，确保 apply delegate/actor mapping 不会回流到 `server.py` wrapper，同时确认 freshness guard 和 response mapping 仍留在 app wrapper。
+
+未改变：
+
+- confirm/cancel/withdraw、cash special、bank exception、OA-bank exception、personal advance、cancel exception、ignore/unignore 都未迁移。
+- response shape、status code、freshness guard、auth、idempotency、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-confirm-link-preview-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_exception_apply_api_creates_closed_case_and_pair_relation tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_exception_apply_is_service_idempotent_at_http_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_exception_apply_mapping_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench exception preview route owner extraction
 
 目标：把现代 `/api/workbench/exception/preview` 的 preview/error mapping 从 `server.py` 抽到显式 route owner，同时保持 HTTP 行为不变。
