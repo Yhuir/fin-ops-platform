@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: select authenticated API/browser smoke runbook boundary.
-- Last status: worker wave 1 accepted as local evidence/gap maps; API response-shape smoke selected next; browser smoke deferred until non-secret auth/harness proof.
+- Last completed controller step: authenticated API response-shape smoke runbook deferred because production lacks non-secret HTTP SLO auth config.
+- Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred; public page-shell smoke selected next.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
@@ -82,7 +82,8 @@ Current state expected on start:
 - `planning:read-model-module-closure-evidence-ownership-map` is complete in `analysis/read-model-module-closure-evidence-ownership-map-2026-06-25.md`: row248 mapped read-model-heavy modules to route/API surfaces, local docs/test owners, row245/246 production facts, remaining authenticated API/browser/high-row gaps and four worker ownership/handoff scopes. No worker thread, production command, runtime mutation or closure claim occurred.
 - `planning:read-model-module-closure-worker-wave-1-prompts` and `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` are complete. T0 accepted W1 `bf03ba98`, W2 `82eb8919`, W3 `cfc495f1` and W4 `525818ba` as local evidence/gap maps only in `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`.
 - `planning:read-model-authenticated-api-browser-smoke-runbook-selection` is complete in `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`: T0 selected a production read-only API response-shape smoke runbook as the next boundary and deferred browser smoke until non-secret auth/harness proof.
-- The next pending boundary is `production:read-model-authenticated-api-response-shape-smoke-runbook`.
+- `production:read-model-authenticated-api-response-shape-smoke-runbook` is deferred in `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`: `/health/ready` was ready, but no non-secret HTTP SLO auth env was configured, so API smoke did not run; post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
+- The next pending boundary is `production:read-model-public-page-shell-smoke-runbook`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -216,7 +217,8 @@ Current state expected on start:
 - `planning:read-model-module-closure-evidence-ownership-map` is complete as a planning slice: row248 produced the controller-owned evidence/ownership map and selected a prompt-generation boundary for a four-worker read-model closure evidence wave.
 - `planning:read-model-module-closure-worker-wave-1-prompts` created four worker threads, and `planning:read-model-module-closure-worker-wave-1-monitor-and-accept` accepted their handoffs as local evidence/gap maps only.
 - `planning:read-model-authenticated-api-browser-smoke-runbook-selection` selected API response-shape smoke first; browser smoke remains deferred until a non-secret auth/harness path is proven.
-- The next pending boundary is `production:read-model-authenticated-api-response-shape-smoke-runbook`.
+- `production:read-model-authenticated-api-response-shape-smoke-runbook` is production-evidence-deferred because auth config is absent; no API smoke was run.
+- The next pending boundary is `production:read-model-public-page-shell-smoke-runbook`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -319,16 +321,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:read-model-authenticated-api-response-shape-smoke-runbook`.
+Start with `production:read-model-public-page-shell-smoke-runbook`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/read-model-module-closure-worker-wave-1-acceptance-2026-06-25.md`, `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`, `analysis/production-read-model-scope-contract-runtime-dry-run-classification-2026-06-25.md`, the four accepted handoff files, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Before any production command, write a bounded API smoke runbook/evidence file with exact commands, redaction rules, stop gates, expected evidence and post-checks.
-- Execute only if the runbook proves no secrets or sensitive payload rows will be printed and no production state will be mutated.
+- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Before any production command, write a bounded public page-shell smoke runbook/evidence file with exact commands, redaction rules, stop gates, expected evidence and post-checks.
+- Do not run API probes until a non-secret auth path is configured; use page-shell-only unauthenticated probes.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state in this planning slice.
 - Do not claim module/global closure from row245, row246, row248 or worker handoffs alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.

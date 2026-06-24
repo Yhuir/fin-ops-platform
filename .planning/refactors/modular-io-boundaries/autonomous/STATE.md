@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-authenticated-api-smoke-runbook-selected`
+Current state: `read-model-authenticated-api-smoke-deferred-auth-missing`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:read-model-authenticated-api-browser-smoke-runbook-selection` in `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`. T0 selected `production:read-model-authenticated-api-response-shape-smoke-runbook` as the next safe boundary and deferred browser smoke until a non-secret authentication/harness path is proven. No production command or runtime mutation occurred, and no module/global closure is claimed.
+Completed `production:read-model-authenticated-api-response-shape-smoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`. `/health/ready` was ready, but production had no non-secret HTTP SLO auth config (`FIN_OPS_HTTP_SLO_BEARER_TOKEN`, `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`, `FIN_OPS_HTTP_SLO_COOKIE`), so authenticated API smoke was not executed. Post-checks showed dirty scopes all done, readiness all fresh and read-model outbox all done. No production mutation occurred, and no module/global closure is claimed. The next boundary is `production:read-model-public-page-shell-smoke-runbook`.
 
 ## Closed Or Deferred Slices
 
