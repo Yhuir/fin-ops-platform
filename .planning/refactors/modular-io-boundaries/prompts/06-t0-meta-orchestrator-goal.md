@@ -104,13 +104,17 @@ Environment constraints:
 - No staging database is available.
 - No local `PGSQL_URL` or PostgreSQL URL is available.
 - Do not ask the user for staging databases, PostgreSQL URLs, SSH passwords, database passwords, tokens, cookies or private secrets.
+- The absence of a staging database and local PostgreSQL URL must not be treated as a hard blocker for the refactor. Use local/fake/stub/contract tests first, then use the T0-only controlled production SSH gate when real production evidence is required.
 - Missing real PostgreSQL/read model/worker evidence is a soft gate. Record it as `production-evidence-deferred`, `unavailable`, `needs-human-production-gate` or a precise equivalent status; then continue another safe owned boundary.
 - Local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and non-secret production read-only SSH evidence are valid local progress evidence.
-- Do not claim real production DB/worker/App Status/browser closure unless it was actually proven.
+- Do not claim real production DB/worker/App Status/browser closure unless it was actually proven through non-secret production evidence or a controlled production operation with rollback/post-check evidence.
 
 Controlled production gate:
 - `ssh finops-prod-root` is available for root SSH.
-- T0 may use root SSH for controlled production operations only when local/contract verification is complete and the only missing evidence is production closure.
+- Treat root SSH as the sanctioned T0-only production evidence and controlled-operation path for this refactor because no staging database and no local PostgreSQL URL are available.
+- T0 may use root SSH for controlled production operations when local/contract verification is complete and the only missing evidence is production closure.
+- Root SSH is sufficient for production closure evidence when the evidence can be collected through non-secret commands, deployed-runtime tools, health/status endpoints, bounded canary/dry-run/no-op operations, or a reversible operation with cleanup and post-checks.
+- Root SSH is not sufficient when the task would require printing/storing secrets, broad or destructive production mutation, unbounded worker replay/queue consume, unclear business contract, or an operation with no proven rollback/cleanup path.
 - Workers may request this gate in their handoff, but workers must not execute it.
 - Before any controlled production operation, write a runbook/evidence file under `.planning/refactors/modular-io-boundaries/analysis/` describing:
   - target boundary/module;
@@ -121,9 +125,10 @@ Controlled production gate:
   - post-checks;
   - why the operation is bounded, reversible or cleanup-safe;
   - why no secret output is required.
-- Prefer dry-run, canary record, test tenant, no-op equivalent or read-only wrapper.
+- Prefer read-only checks, deployed application commands that use existing server configuration without printing secrets, dry-run, canary record, test tenant, no-op equivalent or read-only wrapper.
 - Do not print or store secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
-- Do not perform broad DB mutation, unbounded worker replay, unbounded queue consume, deploy/restart, destructive system/file operations or broad production data mutation.
+- Do not perform broad DB mutation, unbounded worker replay, unbounded queue consume, destructive system/file operations or broad production data mutation.
+- Do not deploy, restart services, requeue jobs, mark scopes done, mutate readiness or run repair tools with `--apply` unless the selected boundary has passed the controlled production runbook gate and the action is explicitly bounded, reversible/cleanup-safe, has pre-checks/post-checks, and has no safer validation path.
 - If a safe canary/dry-run/rollback path cannot be proven, do not force production operation. Record `needs-human-production-gate` or `production-evidence-deferred` and continue another safe boundary.
 
 Controller-only files:
