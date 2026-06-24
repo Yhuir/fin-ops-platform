@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle derived lifecycle executor extraction
+
+- 目标：执行 `read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction`，把 app-owned invoice lifecycle derived lifecycle refresh 执行逻辑抽到显式 executor。
+- 影响范围：`InvoiceLifecycleDerivedLifecycleExecutor`、`Application` derived lifecycle domain map、platform runtime boundary guard、invoice lifecycle/domain-events/read-models 文档；不改变 lifecycle 业务规则、payload、source-version、worker event、queue schema、API、前端或生产状态。
+- 关键决策：`Application` 只保留依赖组装，向 executor 注入 gateway-backed generic read model refresh callback；scope selection、reason default、metadata filtering、`deleted_counts`、`invalidated_scopes`、`enqueued_jobs` 由 `InvoiceLifecycleDerivedLifecycleExecutor` 维护。旧 `_derived_lifecycle_invoice_lifecycle_executor(...)` 已删除并由静态 guard 防回归。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/domain-events 实施记录和测试矩阵；共享状态机定义不变。
+- 测试覆盖：新增 `tests/test_invoice_lifecycle_derived_lifecycle_executor.py`；新增 `PlatformRuntimeBoundaryGuardTests.test_invoice_lifecycle_derived_lifecycle_uses_explicit_executor_boundary`；复跑 derived lifecycle、operation barrier 和 invoice lifecycle refresh 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一条边界是 `read-models:invoice-lifecycle-local-implementation-closure-audit`，不能直接声明全局闭环。
+
 ## 2026-06-24 - Invoice lifecycle freshness / operation barrier audit
 
 - 目标：执行 `read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit`，审计 `invoice_lifecycle` 的 fresh gate、force refresh、fan-out `all`、source-version proof、operation barrier 和旧链路污染风险。

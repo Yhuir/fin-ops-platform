@@ -671,6 +671,34 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_invoice_lifecycle_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        executor_path = SERVICES_ROOT / "invoice_lifecycle_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
+        violations: list[str] = []
+
+        removed_helper = "_derived_lifecycle_invoice_lifecycle_executor"
+        if _function_source(server_tree, server_source, removed_helper):
+            violations.append(f"server.py still owns removed invoice lifecycle executor {removed_helper}")
+        if "InvoiceLifecycleDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not build the explicit invoice lifecycle executor")
+        if '"invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit invoice lifecycle executor")
+        if "class InvoiceLifecycleDerivedLifecycleExecutor" not in executor_source:
+            violations.append("invoice lifecycle executor service is missing")
+        for snippet in (
+            "def execute(",
+            'reason=str(domain_plan.get("reason") or "derived_lifecycle_invoice_lifecycle")',
+            '"deleted_counts": {"invoice_lifecycle_read_models": 0}',
+            '"enqueued_jobs": ["invoice_lifecycle.read_model.refresh"] if enqueued else []',
+        ):
+            if snippet not in executor_source:
+                violations.append(f"invoice lifecycle executor is missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",

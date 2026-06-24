@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit.
-- Last status: regression-guard-closed.
+- Last completed boundary: read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -106,9 +106,10 @@ Current state expected on start:
 - No `PostgresStateStore.invoice_lifecycle_sql_read_repository` property was added because no existing property, construction path or caller exists.
 - Invoice lifecycle freshness/barrier audit is closed as a regression guard: facade reads do not expose a queryable `all`, refresh service expands `all` into month shards, source-version currentness is checked before and after rebuild, scope policy accepts month/all only, and App Status/worker/manifest contracts are registered.
 - `OperationFreshnessBarrierService` now has an invoice lifecycle regression proving exact month targets are not blocked by other-month pending outbox.
-- `Application._derived_lifecycle_invoice_lifecycle_executor(...)` remains app-owned but gateway-backed; it is the next local implementation gap.
+- `InvoiceLifecycleDerivedLifecycleExecutor` now owns invoice lifecycle derived lifecycle refresh execution; `Application` only assembles the gateway-backed enqueue callback.
+- `Application._derived_lifecycle_invoice_lifecycle_executor(...)` is removed and guarded from returning.
 - No module is globally closed.
-- The next pending boundary is read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction.
+- The next pending boundary is read-models:invoice-lifecycle-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -204,17 +205,16 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:invoice-lifecycle-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:invoice-lifecycle-derived-lifecycle-executor-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/domain-events-lifecycle/README.md`, and `docs/modules/domain-events-lifecycle/tests.md`.
+For read-models:invoice-lifecycle-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/domain-events-lifecycle/README.md`, `docs/modules/domain-events-lifecycle/implementation-notes.md`, and `docs/modules/domain-events-lifecycle/tests.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Add `InvoiceLifecycleDerivedLifecycleExecutor`.
-- Move `Application._derived_lifecycle_invoice_lifecycle_executor(...)` behavior into the executor while preserving scope selection, reason default, metadata filtering, `deleted_counts`, `invalidated_scopes` and `enqueued_jobs` response shape.
-- Keep enqueue behind `ReadModelRefreshGateway` through the existing application refresh callback; do not directly SQL-write durable queue tables.
-- Wire `Application` to call the new executor from the derived lifecycle domain map.
-- Add unit/static guard coverage preventing `_derived_lifecycle_invoice_lifecycle_executor` from returning as app-owned implementation logic.
-- Preserve invoice lifecycle rules, payload shape, source-version semantics, worker event semantics, queue schema, API behavior and frontend behavior.
+- Audit whether `invoice_lifecycle` local implementation support is fully accounted for after repository port, freshness/barrier and explicit derived lifecycle executor extraction.
+- Inspect remaining invoice lifecycle app/server/service/worker/repository/query/facade/projection paths for old live rebuild fallback contamination, direct dirty/outbox SQL writes outside gateway/transactional contract, app-owned implementation helpers, missing freshness proof/operation barrier targets, and speculative broad repository/state-store exposure.
+- If a concrete local implementation gap is found, split to the smallest safe implementation boundary and execute that boundary instead of marking closure/defer.
+- If no local implementation gap remains, mark local support as accounted and record real PostgreSQL/worker/App Status/high-row/browser evidence as `production-evidence-deferred`, not globally closed.
+- Preserve invoice lifecycle rules, payload shape, source-version semantics, worker event semantics, queue schema, API behavior and frontend behavior unless a concrete required local implementation gap is found.
 - Do not claim `invoice_lifecycle` globally closed.
 - Produce/update an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.

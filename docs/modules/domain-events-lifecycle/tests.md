@@ -57,7 +57,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_derived_data_lifecycle_service.py` | lifecycle event 到派生域的映射、scope 去重、protected target、防未知事件是核心规则。 |
-| 2. Service-layer tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | `execute_plan` 聚合 executor 结果；runtime worker derived lifecycle 负责把 plan 落到 dirty/read model refresh。 |
+| 2. Service-layer tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_invoice_lifecycle_derived_lifecycle_executor.py` | `execute_plan` 聚合 executor 结果；runtime worker derived lifecycle 负责把 plan 落到 dirty/read model refresh；invoice lifecycle explicit executor 保护 scope/reason/metadata/result shape。 |
 | 3. API contract tests | 间接适用 | 各业务模块 API contract tests | 本模块不直接暴露普通业务 API；若改 `Application._execute_derived_data_lifecycle_event` 的 API 响应 shape，必须补对应 API contract。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | lifecycle 只规划影响域；实际 dirty/outbox、readiness、worker 由 runtime/read-model 测试保护。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`、各页面测试 | 覆盖事件合同、affected months、跨 tab、订阅/退订、inactive 页面不 replay。 |
@@ -85,6 +85,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 
 ```bash
 PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_runtime_worker_read_model_refresh_scopes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_lifecycle_derived_lifecycle_executor -v
 cd web && npm test -- --run src/test/domainEvents.test.ts src/test/useActiveFinanceDomainEvent.test.tsx
 bash scripts/verify.sh docs
 ```

@@ -114,6 +114,9 @@ from fin_ops_platform.services.cost_statistics_runtime_service import CostStatis
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
+from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor import (
+    InvoiceLifecycleDerivedLifecycleExecutor,
+)
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -19295,7 +19298,7 @@ class Application:
                 "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
                 "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
                 "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
-                "invoice_lifecycle_read_model": self._derived_lifecycle_invoice_lifecycle_executor,
+                "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
                 "cost_statistics_read_model": lambda domain_plan: self._derived_lifecycle_cost_statistics_executor(
                     domain_plan,
                     schedule_warmup=schedule_cost_warmup,
@@ -19357,21 +19360,6 @@ class Application:
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
-        }
-
-    def _derived_lifecycle_invoice_lifecycle_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        target_scope_keys = scope_keys or ["all"]
-        enqueued = self._enqueue_generic_read_model_refreshes(
-            "invoice_lifecycle",
-            target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_invoice_lifecycle"),
-            metadata=self._read_model_refresh_metadata(domain_plan),
-        )
-        return {
-            "deleted_counts": {"invoice_lifecycle_read_models": 0},
-            "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["invoice_lifecycle.read_model.refresh"] if enqueued else [],
         }
 
     def _enqueue_generic_read_model_refreshes(
@@ -19524,6 +19512,15 @@ class Application:
         return WorkbenchRelationDerivedLifecycleExecutor(
             enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
                 "workbench_relation",
+                scope_keys,
+                **kwargs,
+            ),
+        )
+
+    def _invoice_lifecycle_derived_lifecycle_executor(self) -> InvoiceLifecycleDerivedLifecycleExecutor:
+        return InvoiceLifecycleDerivedLifecycleExecutor(
+            enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
+                "invoice_lifecycle",
                 scope_keys,
                 **kwargs,
             ),

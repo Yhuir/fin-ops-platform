@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle derived lifecycle executor boundary
+
+- 目标：将 `invoice_lifecycle_read_model` derived lifecycle 执行逻辑从 `Application` helper 抽到显式 `InvoiceLifecycleDerivedLifecycleExecutor`。
+- 影响范围：后端 derived lifecycle executor wiring、invoice lifecycle read model refresh enqueue callback、platform runtime boundary guard；不改变 `DerivedDataLifecycleService` event/domain plan 合同或前端 domain event 合同。
+- 关键决策：`Application` 只负责把 `invoice_lifecycle_read_model` domain 映射到 executor，并注入 gateway-backed refresh callback；executor 保持 scope/reason/metadata/result shape，与 workbench relation explicit executor 模式一致。
+- 文档影响：同步 read-models/domain-events 模块实施记录和测试矩阵；状态机定义不变。
+- 测试覆盖：`tests/test_invoice_lifecycle_derived_lifecycle_executor.py` 覆盖 executor 合同；`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_invoice_lifecycle_derived_lifecycle_uses_explicit_executor_boundary` 防止 app-owned helper 回归；`tests/test_derived_data_lifecycle_service.py` 继续覆盖 domain plan/order。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：本轮不证明每个页面在 invoice lifecycle event 后的 UI stale/fresh 行为；仍由页面/read-model freshness 和 worker readiness 证明。
+
 ## 2026-06-11 - 测试闭环矩阵、状态机与事件合同补强
 
 - 目标：执行测试闭环 master goal 的 domain-events-lifecycle 模块轮次，审计后端 derived lifecycle、前端 finance domain event、页面订阅和跨页面刷新边界。
