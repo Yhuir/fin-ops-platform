@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics repository port extraction
+
+- 目标：执行 `read-models:cost-statistics-repository-port-extraction`，为成本统计建立窄 read model repository port。
+- 影响范围：`CostStatisticsReadModelRepositoryPort`、`CostStatisticsSqlProjectionBuilder`、`PostgresStateStore.cost_statistics_sql_read_repository`、成本统计 SQL runtime/state-store tests、modular IO state；不改变成本归因、API、UI、worker event、queue、Redis 合同或 parent aggregate 语义。
+- 关键决策：新增 port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`。SQL/table knowledge 继续留在 `PostgresReadModelRepository`；projection builder 和 SQL read wiring 只持有窄 port。
+- 文档影响：新增 repository port extraction analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：新增 cost statistics port guard，扩展 PostgresStateStore optional read connection 测试；复跑目标 SQL projection parent/month tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；cost statistics freshness/barrier 和 app-owned helper audit 仍是下一边界。
+- 后续事项：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics selected after tax offset
 
 - 目标：执行 `read-models:next-pilot-selection-after-tax-offset`，在 `tax_offset` 本地支持 accounted 后选择下一个非 Go modular IO/read model pilot。

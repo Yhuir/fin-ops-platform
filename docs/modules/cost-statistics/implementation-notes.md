@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO repository port extraction
+
+- 目标：执行 `read-models:cost-statistics-repository-port-extraction`，把成本统计 read model load/get/save surface 收窄到显式 repository port。
+- 影响范围：`CostStatisticsReadModelRepositoryPort`、`CostStatisticsSqlProjectionBuilder`、`PostgresStateStore.cost_statistics_sql_read_repository`、成本统计 SQL runtime/state-store tests；不改变成本归因、项目范围、导出、parent aggregate、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：新增 `CostStatisticsReadModelRepositoryPort`，只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`。`CostStatisticsSqlProjectionBuilder` 和 PostgreSQL SQL read wiring 使用该 port；SQL/table owner 仍是 `PostgresReadModelRepository`。
+- 文档影响：新增 modular IO repository port extraction analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵。
+- 测试覆盖：新增 `CostStatisticsReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`，扩展 `PostgresStateStoreTests.test_read_model_repositories_use_optional_read_connection`，复跑成本统计 SQL projection parent/month 目标测试。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `cost-statistics` worker drain、真实大数据性能、真实浏览器生产样本和生产 scope cleanup evidence 仍 deferred。
+- 后续事项：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`；Go summary-rollup admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO pilot selected after tax offset
 
 - 目标：执行 `read-models:next-pilot-selection-after-tax-offset`，确认 `cost_statistics` 是否应作为 tax offset 之后的下一非 Go read model 模块化试点。

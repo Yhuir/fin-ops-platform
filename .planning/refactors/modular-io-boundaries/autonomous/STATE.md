@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-tax-offset`
+Current state: `autonomous-continue-after-read-models-cost-statistics-repository-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:next-pilot-selection-after-tax-offset`. `cost_statistics` is selected as the ninth non-Go modular IO/read model pilot because it has high cross-page stale-read risk, special queryable parent aggregate scope semantics, an old `cost-tax` compatibility worker lane, and a narrow repository-port first slice. The next executable boundary is `read-models:cost-statistics-repository-port-extraction`. Go hot-path admission remains blocked.
+Completed `read-models:cost-statistics-repository-port-extraction`. `CostStatisticsReadModelRepositoryPort` now owns the manifest-listed cost statistics load/get/save read model boundary, PostgreSQL state-store cost read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` saves through the port. The next executable boundary is `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -168,6 +168,7 @@ Completed `read-models:next-pilot-selection-after-tax-offset`. `cost_statistics`
 - `read-models:tax-offset-full-state-read-model-snapshot-quarantine` -> `implementation-closed`
 - `read-models:tax-offset-post-full-state-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `read-models:next-pilot-selection-after-tax-offset` -> `analysis-closed`
+- `read-models:cost-statistics-repository-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -184,9 +185,9 @@ Completed `read-models:next-pilot-selection-after-tax-offset`. `cost_statistics`
 - `output_invoice_collection` is now the sixth non-Go read model implementation pilot after the input usage local closure audit. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `OutputInvoiceCollectionReadModelRepositoryPort`. Freshness/force-refresh/operation-barrier/helper audit is implemented: mutation responses expose affected read model scope keys and operation barrier targets, frontend write-after-read flows prefer concrete month targets over fan-out-only `all`, `output_invoice_collection:all` remains a fan-out control scope, and unused app-level output projection helpers were removed from `Application`. Relation detail production fail-closed support is implemented: missing SQL detail repository returns refreshing/enqueue instead of live rebuild. Local closure accounting is now complete enough to defer only real PostgreSQL/worker/App Status/high-row/browser evidence; the module remains not globally closed.
 - `invoice_lifecycle` is now the seventh non-Go read model implementation pilot after the output collection local closure audit. Repository port extraction is implemented: facade lifecycle row lookups and SQL projection save/mark paths now use `InvoiceLifecycleReadModelRepositoryPort`, while lifecycle rules, payload shape, worker semantics and API behavior remain unchanged. Freshness/barrier audit is also closed as a regression guard: facade reads do not use queryable `all`, refresh service expands `all` to month shards, source-version checks run before/after rebuild, scope policy is month-or-all, App Status/worker/manifest contracts are registered, and exact-month operation barrier behavior is now covered. Derived lifecycle execution now uses `InvoiceLifecycleDerivedLifecycleExecutor` instead of an app-owned helper, preserving gateway-backed refresh enqueue metadata and response shape. Local implementation support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. Repository port extraction is implemented: `TaxOffsetReadModelRepositoryPort` exposes only manifest-listed load/get/save methods, state-store tax read/write wiring uses the port, the SQL read repository property returns the port over the optional read connection, and tax projection save paths go through the port. Freshness/barrier audit is also implemented: SQL fresh gate, force refresh scope policy, `all` fan-out/month shard proof, plan-save/certified-import operation barrier and legacy/app-owned wrappers are accounted for; OA attachment invoice evidence fallback now promotes formal invoice payloads with `invoice_type` and no `evidence_type`. Worker rebuild executor extraction moved compat worker rebuild/persist/fresh-cache publish behavior into `TaxOffsetWorkerRebuildExecutor` and made the app method a thin delegate. Derived lifecycle executor extraction moved read model invalidation and month-cache clearing behavior into `TaxOffsetDerivedLifecycleExecutor` and removed the app-owned helper methods. Cache warmup executor extraction moved optional warmup scheduling/job execution, read model upsert and snapshot persistence into `TaxOffsetCacheWarmupExecutor`; the remaining app helper is compat-only delegation. Full-state snapshot quarantine removed broad `Application._persist_state(...)` tax offset read model writes and kept explicit persistence callback ownership. Post-quarantine audit found no remaining local implementation gap, so `tax_offset` local support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
-- `cost_statistics` is now the ninth non-Go read model implementation pilot. It was selected because it consumes Workbench relation, bank detail tags, import facts, ETC/no-OA/turnover/settings fan-out, owns special `active/all` scope grammar, and has a queryable parent aggregate that must be isolated before Go summary-rollup admission. The first implementation boundary is repository port extraction: manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models` should move behind `CostStatisticsReadModelRepositoryPort` while preserving existing API, parent aggregate, worker and Redis behavior.
+- `cost_statistics` is now the ninth non-Go read model implementation pilot. It was selected because it consumes Workbench relation, bank detail tags, import facts, ETC/no-OA/turnover/settings fan-out, owns special `active/all` scope grammar, and has a queryable parent aggregate that must be isolated before Go summary-rollup admission. Repository port extraction is implemented: manifest-listed `load_cost_statistics_read_models`, `get_cost_statistics_view`, and `save_cost_statistics_read_models` are behind `CostStatisticsReadModelRepositoryPort`, PostgreSQL state-store cost SQL read wiring returns the port, and `CostStatisticsSqlProjectionBuilder` uses it for projection save paths while preserving existing API, parent aggregate, worker and Redis behavior.
 - `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
-- The next pending boundary is `read-models:cost-statistics-repository-port-extraction`.
+- The next pending boundary is `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -206,8 +207,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:next-pilot-selection-after-tax-offset`
+`read-models:cost-statistics-repository-port-extraction`
 
 ## Next Prompt
 
-`read-models:cost-statistics-repository-port-extraction`
+`read-models:cost-statistics-refresh-freshness-operation-barrier-audit`

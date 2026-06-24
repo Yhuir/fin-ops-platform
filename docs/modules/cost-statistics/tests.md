@@ -41,7 +41,7 @@
 
 ## 七类测试适用性
 
-2026-06-24 modular IO 更新：`read-models:next-pilot-selection-after-tax-offset` 已选择 `cost_statistics` 作为第九个非 Go read model 试点。下一实现边界是 `read-models:cost-statistics-repository-port-extraction`，必须新增/更新 repository port guard，证明 cost statistics port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`，并保持 SQL runtime fresh gate、parent aggregate、scope gateway 和 API shape 回归通过。
+2026-06-24 modular IO 更新：`read-models:next-pilot-selection-after-tax-offset` 已选择 `cost_statistics` 作为第九个非 Go read model 试点。`read-models:cost-statistics-repository-port-extraction` 已新增 `CostStatisticsReadModelRepositoryPort`，证明 cost statistics port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`，并让 projection save 与 SQL read wiring 使用该 port。下一边界是 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，继续审计 SQL fresh gate、parent aggregate、force refresh、operation barrier、compat worker 和 legacy/app-owned helper。
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |

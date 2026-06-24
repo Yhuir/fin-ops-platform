@@ -5,6 +5,7 @@ from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.cost_tax_sql_projection import CostStatisticsSqlProjectionBuilder
@@ -304,6 +305,42 @@ class CostStatisticsSaveRecorder:
 
     def save_cost_statistics_read_models(self, snapshot: dict, *, changed_scope_keys: set[str] | None = None) -> None:
         self.saved.append((snapshot, changed_scope_keys))
+
+
+class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Repository:
+            def load_cost_statistics_read_models(self) -> dict[str, object]:
+                return {"read_models": {}}
+
+            def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "payload": {}}
+
+            def save_cost_statistics_read_models(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_scope_keys: set[str] | None = None,
+            ) -> None:
+                self.saved = (snapshot, changed_scope_keys)
+
+            def get_tax_offset_view(self, *, scope_key: str) -> dict[str, object]:
+                raise AssertionError("tax offset should not be exposed through cost statistics port")
+
+            def list_turnover_ledger_view(self, **_kwargs) -> dict[str, object]:
+                raise AssertionError("turnover should not be exposed through cost statistics port")
+
+            def save_search_index_rows(self, **_kwargs) -> None:
+                raise AssertionError("search should not be exposed through cost statistics port")
+
+        port = CostStatisticsReadModelRepositoryPort(Repository())
+
+        self.assertEqual(port.load_cost_statistics_read_models(), {"read_models": {}})
+        self.assertEqual(port.get_cost_statistics_view(scope_key="active:2026-05")["scope_key"], "active:2026-05")
+        port.save_cost_statistics_read_models({"read_models": {}}, changed_scope_keys={"active:2026-05"})
+        self.assertFalse(hasattr(port, "get_tax_offset_view"))
+        self.assertFalse(hasattr(port, "list_turnover_ledger_view"))
+        self.assertFalse(hasattr(port, "save_search_index_rows"))
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):

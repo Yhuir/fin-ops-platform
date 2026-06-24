@@ -1,22 +1,24 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-tax-offset` slice.
+Continue the autonomous modular IO refactor after the `read-models:cost-statistics-repository-port-extraction` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:next-pilot-selection-after-tax-offset`
-- Last status: `analysis-closed`
+- Last completed boundary: `read-models:cost-statistics-repository-port-extraction`
+- Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `tax_offset` local implementation support is accounted for but not globally closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `cost_statistics` is selected as the ninth non-Go modular IO/read model pilot.
-- `cost_statistics` has high cross-page stale-read risk, special `active/all` scope grammar, queryable parent aggregate semantics and an old `cost-tax` compatibility worker lane.
+- `cost_statistics` is the ninth non-Go modular IO/read model pilot.
+- `CostStatisticsReadModelRepositoryPort` now owns the manifest-listed load/get/save read model boundary.
+- PostgreSQL state-store cost statistics SQL read wiring returns the port.
+- `CostStatisticsSqlProjectionBuilder` saves cost statistics read models through the port.
+- `cost_statistics` is still `implementation-gap-open`; repository port extraction is only the first local slice.
 - No Go hot-path candidate has passed admission.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:cost-statistics-repository-port-extraction`
+`read-models:cost-statistics-refresh-freshness-operation-barrier-audit`
 
 ## Required First Steps On Resume
 
@@ -30,9 +32,8 @@ Continue the autonomous modular IO refactor after the `read-models:next-pilot-se
    - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
 5. Read target planning evidence:
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-tax-ledger-summary-contract.md`
-   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
-   - `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/modules/read-models/tests.md`
@@ -40,39 +41,41 @@ Continue the autonomous modular IO refactor after the `read-models:next-pilot-se
    - `docs/modules/cost-statistics/implementation-notes.md`
    - `docs/modules/cost-statistics/state-machine.md`
    - `docs/modules/cost-statistics/tests.md`
-6. Use CodeGraph for structural lookup before implementation.
+6. Use CodeGraph for structural lookup before implementation decisions.
 
 ## Boundary Scope
 
 Target:
 
-- Add a narrow `CostStatisticsReadModelRepositoryPort`.
-- Expose only manifest-listed methods:
-  - `load_cost_statistics_read_models`;
-  - `get_cost_statistics_view`;
-  - `save_cost_statistics_read_models`.
-- Wire PostgreSQL state-store cost statistics read wiring to return/use the port where applicable.
-- Wire `CostStatisticsQueryService` and `CostStatisticsSqlProjectionBuilder` read/save paths through the port.
-- Add/update tests proving the port excludes unrelated read model methods and existing SQL runtime/freshness behavior remains unchanged.
-- Update state machine/accounting/docs for the completed slice.
+- Audit cost statistics freshness and operation-barrier local support after repository port extraction.
+- Cover:
+  - SQL fresh gate and production repository unavailable behavior;
+  - `active:YYYY-MM` / `all:YYYY-MM` month shard semantics;
+  - `active:all` / `all:all` queryable parent aggregate proof;
+  - force refresh normalization and legacy naked scope quarantine;
+  - parent scope missing/stale shard behavior;
+  - operation barrier target registration and frontend write-after-read relevance;
+  - `cost-statistics` primary worker vs `cost-tax` compatibility worker;
+  - remaining app-owned helper/runtime/cache warmup surfaces;
+  - old live/cache fallback classification;
+  - permissions, audit, tests and docs evidence.
+- If a concrete local implementation gap is found, insert the next narrow implementation boundary before Go candidates.
+- If no local gap remains, record only real production evidence gaps and do not claim module closure unless full closure evidence exists.
 
 Forbidden:
 
-- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior.
-- Do not move SQL table knowledge out of `PostgresReadModelRepository` in this slice.
 - Do not implement Go/Fiber/Go Worker.
 - Do not run Go admission while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
+- Do not change cost attribution, project scope, export behavior, parent aggregate semantics, worker event names, queue schema, Redis key/envelope contract, permissions, audit meaning, API shape or frontend behavior unless a concrete gap requires a tested narrow fix.
 - Do not depend on staging DB or local `PGSQL_URL`.
 - Do not perform production writes or read/print secrets.
 
 Expected verification:
 
-- Targeted py_compile for changed backend/tests.
-- Targeted cost statistics SQL runtime / repository port tests.
-- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Targeted static guard/cost statistics tests if evidence depends on executable behavior.
 - `bash scripts/verify.sh docs`
 - `git diff --check`
 
 ## Stop Condition
 
-Complete one verified cost statistics repository port extraction slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified cost statistics freshness/barrier audit slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.

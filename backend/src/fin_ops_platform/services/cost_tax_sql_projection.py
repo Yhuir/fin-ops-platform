@@ -10,6 +10,7 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
+from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_relation_rules import (
     is_candidate_workbench_group,
     is_cost_eligible_open_group,
@@ -39,11 +40,13 @@ class CostStatisticsSqlProjectionBuilder:
         self,
         *,
         connection: Any,
-        read_model_repository: PostgresReadModelRepository | None = None,
+        read_model_repository: Any | None = None,
         redis_helper: Any | None = None,
     ) -> None:
         self._connection = connection
-        self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._read_model_repository = CostStatisticsReadModelRepositoryPort(
+            read_model_repository or PostgresReadModelRepository(connection)
+        )
         self._redis_helper = redis_helper
 
     def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
