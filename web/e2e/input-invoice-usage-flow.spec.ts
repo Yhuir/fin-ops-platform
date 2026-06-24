@@ -40,6 +40,7 @@ function mutationCalls(calls: string[]) {
 function durableWriteCalls(calls: string[]) {
   const readLikePosts = new Set([
     "POST /api/input-invoice-usage/oa-reverse/preview",
+    "POST /api/operation-barrier/status",
   ]);
   return mutationCalls(calls).filter((entry) => !readLikePosts.has(entry));
 }
@@ -297,7 +298,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "进项发票使用情况" })).toBeVisible();
     await expect(page.getByText("进项发票使用情况数据正在刷新")).toBeVisible();
-    await expect(page.getByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).toBeVisible();
+    await expect(page.getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeVisible();
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     await expect(page.getByText("当前条件下没有进项发票使用记录。")).toHaveCount(0);
     await expect(page.getByText("SD-INV-E2E-0001")).toHaveCount(0);
@@ -400,7 +401,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     await page.getByLabel("进项发票使用情况搜索").fill("浏览器进项供应商");
-    await page.getByRole("button", { name: "查询" }).click();
+    await page.getByRole("button", { name: "查询", exact: true }).click();
     await expect(page.getByRole("row", { name: /SD-INV-E2E-0001/ })).toBeVisible();
 
     const previewResponsePromise = page.waitForResponse((response) => {

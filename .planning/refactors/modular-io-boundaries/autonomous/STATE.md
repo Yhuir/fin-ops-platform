@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `browser-data-targeted-smoke-selected`
+Current state: `post-browser-data-targeted-smoke-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:read-model-browser-data-harness-coverage-map` as `planning-closed` in `analysis/planning-read-model-browser-data-harness-coverage-map-2026-06-25.md`. T0 mapped read-model-heavy modules to existing deterministic Playwright/Vitest evidence, Row262 local API harness evidence, Row245/246/257 production-controlled facts and remaining external-risk gaps. The next boundary is `browser:read-model-browser-data-targeted-smoke-runbook`, a targeted existing Playwright subset rerun. No browser test, production command, runtime code change or closure claim occurred.
+Completed `browser:read-model-browser-data-targeted-smoke-runbook` as `browser-guard-closed` in `analysis/browser-read-model-browser-data-targeted-smoke-runbook-2026-06-25.md`. T0 ran the targeted deterministic Playwright subset, fixed stale Playwright assertions in input invoice usage and Workbench specs, verified the failure specs with 20/20 passed, and reran the full Row265 subset with 53/53 passed. The next boundary is `planning:post-browser-data-targeted-smoke-next-boundary-selection`. No production command, product code change or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
