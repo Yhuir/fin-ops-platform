@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Selected as next read model modular IO pilot
+
+- 目标：记录 modular IO 自动推进选择 `input_invoice_usage` 作为 OA 待付款后的下一个非 Go read model 试点。
+- 影响范围：仅文档和 GSD 状态；不改进项发票使用运行时代码、API、read model schema、worker 或前端。
+- 关键决策：第一条实现边界为 `read-models:input-invoice-usage-repository-port-extraction`，先建立窄 read-model repository port，再评估 freshness/operation barrier 和 legacy contamination；不得直接改 OA reverse、支付规则业务语义或 Go/Fiber/Go Worker。
+- 文档影响：同步 read-models 实施记录和 modular IO autonomous queue/state。
+- 测试覆盖：本轮 analysis-only 无新增测试；下一轮需要以 `tests/test_input_invoice_usage_api.py` 和 `tests/test_invoice_usage_collection_sql_runtime.py` 为主覆盖 port、freshness 和 projection regression。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser 证据仍未执行；本记录不声明模块闭环。
+
 ## 2026-06-23 - 跨月配对 relation 显示修复
 
 - 目标：修复 75,799 元进项发票在 Workbench 已与 OA/银行流水配对，但进项发票使用情况 OA、流水、发票配对列为空的问题。

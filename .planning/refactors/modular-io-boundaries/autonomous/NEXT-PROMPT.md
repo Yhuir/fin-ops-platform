@@ -1,27 +1,25 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:oa-pending-payment-local-implementation-closure-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:next-pilot-selection-after-oa-pending-payment` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:oa-pending-payment-local-implementation-closure-audit`
-- Last status: `production-evidence-deferred`
+- Last completed boundary: `read-models:next-pilot-selection-after-oa-pending-payment`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
-- `oa_pending_payment` was the fourth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, and `pending_invoice`.
-- `OaPendingPaymentReadModelRepositoryPort` is wired for rows/detail and projection save/mark/prune paths.
-- Workbench relation source-version lookup for OA pending payment uses the Workbench relation port.
-- OA pending payment rows/filter-options/detail freshness gates return refreshing/unavailable on missing/stale/source mismatch and enqueue through `ReadModelRefreshGateway`.
-- OA pending payment `all` refresh is fan-out control scope; worker expansion enqueues concrete month shards and prunes orphan shards.
-- Frontend write-after-read operation barrier selection prefers concrete month scopes over fan-out-only `all` when mutation responses return both.
-- Unused app-level OA pending payment rebuild/list/mark/live helpers were removed from `Application`.
-- Local OA pending payment implementation support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
+- `input_invoice_usage` is selected as the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`.
+- `input_invoice_usage` shares the `invoice-usage-collection` worker/projection family with `oa_pending_payment` and `output_invoice_collection`.
+- The module has high stale-read/cross-page risk because rows, filter/export helpers and relation-details display Workbench relation-backed OA/bank/invoice evidence.
+- Production PostgreSQL runtime must not fall back to `InputInvoiceUsageQueryService` live scan when the SQL read model repository/view/payload/source versions are missing or stale.
+- `input_invoice_usage:all` remains a fan-out control scope; all-query freshness proof must come from concrete month rows/scopes and active dirty/outbox state.
+- No runtime code changed in the selection slice.
 - No module is globally closed.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:next-pilot-selection-after-oa-pending-payment`
+`read-models:input-invoice-usage-repository-port-extraction`
 
 ## Required First Steps On Resume
 
@@ -30,60 +28,62 @@ Continue the autonomous modular IO refactor after the `read-models:oa-pending-pa
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Reconcile:
    - `.planning/ROADMAP.md`
-   - `.planning/refactors/README.md`
-   - `.planning/refactors/modular-io-boundaries/README.md`
-   - `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`
    - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
-5. Read the completed pilot closure audits:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-service-factory-collaborator-closure-audit.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/workbench-relations-final-local-implementation-closure-and-production-evidence-defer.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pending-invoice-local-implementation-closure-audit.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-oa-pending-payment-local-implementation-closure-audit.md`
-6. Read current read model contracts and remaining candidates:
+5. Read target docs:
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
-   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
    - `docs/modules/input-invoice-usage/README.md`
-   - `docs/modules/output-invoice-collections/README.md`
-   - `docs/modules/cost-statistics/README.md`
-   - `docs/modules/tax-offset/README.md`
-   - `docs/modules/turnover-ledger/README.md`
-   - `docs/modules/no-oa-bank-batches/README.md`
-   - relevant tests/docs for the selected candidate.
-7. Use CodeGraph for candidate structural context before writing analysis.
+   - `docs/modules/input-invoice-usage/state-machine.md`
+   - `docs/modules/input-invoice-usage/tests.md`
+   - `docs/modules/input-invoice-usage/implementation-notes.md`
+6. Read target code/tests:
+   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
+   - `backend/src/fin_ops_platform/services/input_invoice_usage_service.py`
+   - `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py`
+   - `backend/src/fin_ops_platform/services/postgres_state_store.py`
+   - `tests/test_input_invoice_usage_api.py`
+   - `tests/test_invoice_usage_collection_sql_runtime.py`
+7. Use CodeGraph for structural lookup before implementation edits.
 
 ## Boundary Scope
 
 Target:
 
-- Compare remaining read model candidates after `oa_pending_payment` local accounting.
-- Select exactly one next non-Go read model implementation pilot.
-- Prefer the candidate with the highest stale-read/cross-page risk, clear IO boundary, manageable first implementation slice, and existing test leverage.
-- Produce an analysis file under `.planning/refactors/modular-io-boundaries/analysis/`.
-- Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
-- Insert the first narrow implementation boundary for the selected candidate before Go candidates.
-- Keep all Go/Fiber/Go Worker admissions blocked unless documented prerequisites are actually satisfied.
+- Add a narrow `InputInvoiceUsageReadModelRepositoryPort`.
+- Expose only input usage read-model methods from the manifest:
+  - `list_input_invoice_usage_rows`
+  - `save_input_invoice_usage_rows`
+  - `mark_input_invoice_usage_scope`
+  - `prune_input_invoice_usage_scope_shards`
+  - `get_input_invoice_usage_row_by_row_id`
+- Decide during implementation whether `list_input_invoice_usage_scope_shards` belongs in the same port or a projection-only helper port, based on current worker fan-out call sites.
+- Wire PostgreSQL state-store input usage read repository and the input-usage portions of `InvoiceUsageCollectionSqlProjectionBuilder` through the narrow port where they currently pass the broad read model repository.
+- Add or update tests proving unrelated read model repository methods are not exposed through the port.
+- Preserve rows/filter-options/export/detail response shape, `read_model_status`, stale reasons, source-version proof, `all` fan-out/month shard behavior, payment-status rule source version behavior and relation-detail payload shape.
 
 Forbidden:
 
-- Do not implement Go/Fiber/Go Worker.
-- Do not declare any module globally closed.
+- Do not change OA reverse draft creation, OA credential/token flows, Workbench relation command behavior, payment status business rules, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
+- Do not declare `input_invoice_usage` or any other module globally closed.
 - Do not rely on staging DB or local `PGSQL_URL`.
 - Do not perform production writes or read/print secrets.
-- Do not start a broad global cleanup.
+- Do not start broad shared `PostgresReadModelRepository` splitting.
 
 Expected output:
 
-- One candidate-selection analysis slice.
-- Queue/state updated so the selected pilot's first narrow implementation boundary is next.
-- Docs verification and `git diff --check`.
+- One narrow implementation slice.
+- Analysis/accounting file under `.planning/refactors/modular-io-boundaries/analysis/`.
+- Updated `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and `NEXT-PROMPT.md`.
+- Updated module docs/tests matrix if the implementation changes ownership evidence.
+- Targeted Python tests for input usage API/projection behavior plus docs verification and `git diff --check`.
 - Commit and push to `origin/dev` if verification passes.
-- Continue to the selected pilot's first implementation boundary if safe.
 
 ## Stop Condition
 
-Complete one verified non-Go read model pilot selection slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
+Complete one verified `input_invoice_usage` repository port extraction slice, update analysis/docs/state, commit and push to `origin/dev`, then continue to the next pending boundary unless a hard stop gate is hit.
