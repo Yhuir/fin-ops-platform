@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-production-evidence-matrix-read-only-sweep-pending`
+Current state: `read-model-scope-contract-runtime-dry-run-classification-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-production-baseline-module-closure-wave-selection` as `planning-closed` in `analysis/planning-post-production-baseline-module-closure-wave-selection-2026-06-25.md`. T0 reconciled the clean row243 production baseline against remaining production-evidence-deferred/module-open rows and selected `production:read-model-production-evidence-matrix-read-only-sweep` as the next safe T0-only boundary. Worker waves are deferred until production DB/readiness/scope/source-version facts are matrixed. No global/module closure is claimed.
+Completed `production:read-model-production-evidence-matrix-read-only-sweep` as `production-controlled` in `analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`. T0 collected a non-secret read-only matrix proving current read-model runtime health is clean: all App Status read-model readiness rows are fresh, all dirty scopes are done, read-model outbox events are done, no read-model dead letters remain, current workers have fresh heartbeats, and read-model row-count/source-version tables are queryable. The matrix found historical legacy `cost`/`tax` done dirty-scope rows and remaining browser/API/high-row/module-specific closure gaps. The next boundary is `production:read-model-scope-contract-runtime-dry-run-classification`; no global/module closure is claimed.
 
 ## Closed Or Deferred Slices
 
