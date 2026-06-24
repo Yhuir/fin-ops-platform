@@ -1,67 +1,66 @@
 # Next Prompt
 
-Continue after `production:no-oa-source-version-provider-fix-deploy-and-convergence`.
+Continue after `production:read-model-full-user-scope-api-metadata-smoke-after-no-oa-fix`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row284 deployed release `dev-no-oa-source-version-480d2d0e-20260625`.
-- Active release `RELEASE.json`:
-  - `git_branch=dev`.
-  - `git_commit=d117b4519284db00c0fa88bdf7faaa938a5b1f69`.
-  - `release_name=dev-no-oa-source-version-480d2d0e-20260625`.
-- Deployed commit contains code fix commit `480d2d0ebe3bbf3543a8b0a855ec252fae4bbc1a`.
-- Focused authenticated no-OA user-scope API metadata probe now passes:
-  - configured target credential count: `2`;
-  - session `allowed=true`, `can_access_app=true`, `can_mutate_data=true`, `can_admin_access=false`, `access_tier=full_access`;
-  - `no_oa_bank_batches` only;
-  - HTTP `200`;
-  - `read_model_statuses={"fresh": 1}`;
-  - `refresh_enqueued_count=0`;
-  - p95 `138.167ms`;
-  - focused report `status=pass`.
-- Postcheck stayed clean:
+- Active release remains `dev-no-oa-source-version-480d2d0e-20260625`.
+- Full non-admin user-scope API metadata smoke used target OA applicant credentials inside the remote production process.
+- The smoke did not print secrets, tokens, cookies, response bodies, `samples`, payload rows or business identifiers.
+- Probe scope: 37 `http_slo_probe.DEFAULT_API_PROBES` with `auth_scope != "admin"`.
+- Probe result:
+  - report `status=pass`;
+  - failed probe count `0`;
+  - max p95 `757.465ms`;
+  - all reported read-model metadata was fresh;
+  - `http_slo_probe` reported `refresh_enqueued_count=0` for every probe.
+- Previously failing probes now pass:
+  - `pending_invoices_rows`;
+  - `pending_invoices_filter_options`;
+  - `no_oa_bank_batches`.
+- Postcheck stayed operationally clean:
   - `/health/ready`: ready;
-  - dirty scopes: `done=187057`;
-  - readiness: `fresh=498`;
-  - read-model outbox: `done=203223`;
+  - App Status readiness: `fresh=498`;
   - read-model dead letters: none.
-- No response body, payload row, secret, direct DB/queue/readiness mutation, repair, requeue or worker replay occurred.
-- Full non-admin user-scope API metadata, browser/admin/write probes and global/module closure remain open.
+- But aggregate queue evidence showed one hidden refresh enqueue during the smoke:
+  - Dirty scopes changed from `done=187057` to `done=187058`.
+  - Outbox changed from `done=203223` to `done=203224`.
+  - Recent event: `turnover_ledger.read_model.refresh`, `scope_type=turnover_ledger`, `scope_key=all`, `status=done`, latest `2026-06-25 06:48:10.775011+08`.
+  - Recent dirty scope: `turnover_ledger:all`, `status=done`, latest `2026-06-25 06:48:10.769301+08`.
+- Because the Row285 target required no refresh enqueue, Row285 is `production-evidence-deferred`, not production-controlled.
+- Browser/admin/write probes and global/module closure remain open.
 
 ## Next Boundary
 
-`production:read-model-full-user-scope-api-metadata-smoke-after-no-oa-fix`
+`production:turnover-ledger-user-scope-hidden-refresh-enqueue-diagnosis`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Finish committing/pushing Row284 evidence if it is not already committed.
-3. Write a bounded production runbook under `analysis/` before running the full user-scope API metadata smoke.
-4. Reuse the target OA applicant credential seam inside the remote production process; do not print or store credentials, tokens, cookies or env values.
-5. Run only non-admin user-scope `http_slo_probe.DEFAULT_API_PROBES` metadata with `include_samples=False`.
+2. Finish committing/pushing Row285 evidence if it is not already committed.
+3. Write a bounded diagnosis runbook under `analysis/` before any production API call.
+4. Inspect the deployed/local `turnover_ledger_grouped` API contract and route/service metadata behavior.
+5. Run only the minimal sanitized production evidence needed to classify the hidden enqueue:
+   - read-only aggregate precheck;
+   - one focused authenticated `turnover_ledger_grouped` metadata probe or direct allowlisted GET if needed;
+   - read-only aggregate postcheck.
 
-## Full User-Scope API Metadata Scope
+## Diagnosis Scope
 
-Run authenticated metadata-only probes for all default API probes except `auth_scope="admin"`.
+Classify why user-scope `GET /api/turnover-ledger?view=grouped&page=1&page_size=50` can create a `turnover_ledger:all` refresh while `http_slo_probe` reports `refresh_enqueued_count=0`.
 
-Target:
+Possible outcomes:
 
-- report `status=pass`;
-- every user-scope probe has expected HTTP status;
-- read-model-backed probes are fresh;
-- `refresh_enqueued_count=0`;
-- p95 under each probe target;
-- `/health/ready` remains ready;
-- dirty scopes remain done;
-- readiness remains fresh;
-- read-model outbox remains done;
-- read-model dead letters remain empty.
+- response metadata lacks `refresh_enqueued` even when enqueue occurs;
+- endpoint intentionally schedules background refresh despite fresh-enough response;
+- enqueue came from a different probe and Row285 attribution is ambiguous;
+- aggregate event was unrelated external activity during the smoke window.
 
 ## Stop Gates
 
-- Do not run browser/admin/write probes in this boundary.
-- Do not print response bodies, `samples`, payload rows, business identifiers, credentials, tokens, cookies, passwords or env values.
-- Stop if precheck health/dirty/readiness/outbox/dead-letter state is not clean.
-- If any user-scope probe fails, stale, enqueues refresh, or exceeds target, collect only sanitized failing-probe metadata and postcheck evidence.
-- Do not claim module/global closure from a full user-scope API metadata pass alone.
+- Do not run broad API, browser, admin or write probes.
+- Do not print response bodies, payload rows, business identifiers, credentials, tokens, cookies, passwords or env values.
+- Do not perform manual refresh, repair, requeue, direct DB mutation, readiness mutation, deploy or restart.
+- If a focused GET enqueues refresh, wait only for normal convergence and record sanitized postcheck evidence.
+- Do not claim module/global closure from this diagnosis.
