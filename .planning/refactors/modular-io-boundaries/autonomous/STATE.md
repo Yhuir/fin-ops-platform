@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `controlled-production-api-browser-runbook-selected`
+Current state: `pending-invoice-no-oa-api-freshness-mismatch-diagnosis-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-default-api-probe-harness-next-boundary-selection` as `planning-closed` in `analysis/planning-post-default-api-probe-harness-next-boundary-selection-2026-06-25.md`. T0 reconciled Row271 all-probe local API harness evidence with remaining production API/browser/high-row/worker gaps and selected `production:read-model-controlled-production-api-browser-runbook` as the next boundary. The next boundary must use `ssh finops-prod-root` and existing deployed runtime configuration without printing secrets or payload rows, and must stop precisely if no non-secret authenticated/internal-equivalent evidence path exists. No production command or closure claim occurred.
+Completed `production:read-model-controlled-production-api-browser-runbook` as `production-evidence-deferred` in `analysis/production-read-model-controlled-production-api-browser-runbook-2026-06-25.md`. T0 used root SSH and target OA applicant credentials in a remote process to run user-scope authenticated API metadata probes without printing tokens. The session was full-access user scope but not admin. Initial 37 user-scope probes had 30 pass / 7 fail; focused retry after refresh convergence reduced failures to `pending_invoices_rows`, `pending_invoices_filter_options` and `no_oa_bank_batches`. GET fresh gates triggered bounded read-model refresh enqueues that converged to done/fresh, with final `/health/ready`, dirty scopes, readiness, outbox and dead-letter postchecks clean. Browser/admin/write closure remains open.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-default-api-probe-harness-next-boundary-selection`
+`production:read-model-controlled-production-api-browser-runbook`
 
 ## Next Prompt
 
-`production:read-model-controlled-production-api-browser-runbook`
+`production:pending-invoice-no-oa-api-freshness-mismatch-read-only-diagnosis`
