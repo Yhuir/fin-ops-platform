@@ -38,7 +38,7 @@
 - 测试覆盖：本轮是 analysis/accounting only；复用 cost statistics runtime/SQL/derived lifecycle tests 和 read model architecture guard 作为证据。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-full-state-local-implementation-closure-audit.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go admission 继续 blocked。
-- 后续事项：执行 `read-models:next-pilot-selection-after-cost-statistics`。
+- 后续事项：`read-models:next-pilot-selection-after-cost-statistics` 已选择 `turnover_ledger`；下一步执行 `read-models:turnover-ledger-repository-port-extraction`。
 
 ## 2026-06-24 - Cost statistics full-state snapshot quarantine
 
@@ -1086,3 +1086,11 @@
 - 2026-06-20 后续归因：`workbench_relation_withdraw_cross_page` 是 broad profile，不适合该 bank/turnover 恢复样本。新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` profile：要求 `workbench`、`workbench_relation`、`bank_detail`、`pending_invoice`、`cost_statistics`、`search`，但不要求 invoice-only 的 `invoice_lifecycle`、`input_invoice_usage`、`tax_offset`。本轮慢尾仍保留为 read model/worker 性能风险，不能因为 profile 拆分而视为 5s 写后跨页收敛已闭合。
 - 生产只读下钻：bank/turnover profile 下 `pending_invoice` 慢尾不是 handler 本身慢，最终 `runtime_result.duration_ms` 多数只有几十到一百多毫秒；慢尾来自 `bank_detail_read_model_not_fresh` dependency defer，并由多个 pending scope 反复补投同一 `bank_detail:2026-03`，把银行明细 source version 从 `44635` bump 到 `44638`。`RuntimeWorker` 追加 dependency fresh guard：依赖 scope 已 fresh 时记录 `already_fresh`，不再 enqueue 依赖 refresh，避免下游 fan-out 自己制造新的 stale。
 - 生产健康：写后 outbox/dirty/readiness 无非 done / 非 fresh；`/health/ready` ready；API、dispatcher 和 20 个 worker active。
+
+## 2026-06-24 - turnover ledger selected as next modular IO read model pilot
+
+- 目标：在 `cost_statistics` 本地实现支持完成当前 accounting 后，选择下一个非 Go read model 模块化 IO pilot。
+- 决策：选择 `turnover_ledger`，下一条边界为 `read-models:turnover-ledger-repository-port-extraction`。
+- 理由：`turnover_ledger` 是用户可见的写邻近页面 read model；tag-selection、extra、manual closure confirm/withdraw 会影响 Workbench relation、Workbench、成本统计和搜索。旧 grouped payload 被误判 fresh 时，最容易复现“这个页面更新了，另一个页面没有同步”的问题。
+- 首切范围：新增 `TurnoverLedgerReadModelRepositoryPort`，只暴露 manifest 登记的 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`，并让 query/projection 路径使用窄 port。暂不改变业务规则、grouped payload、manual closure、Workbench relation command、API shape、worker event、queue、Redis/cache、权限、审计、前端或 Go/Fiber/Go Worker。
+- 状态：Go/Fiber/Go Worker admission 继续 blocked；`no_oa_bank_batch`、`search`、`bank_account_balance` 仍为后续 implementation-gap-open 候选。

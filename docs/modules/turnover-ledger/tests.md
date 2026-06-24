@@ -62,6 +62,18 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-24 - repository port extraction test note
+
+`turnover_ledger` 已被选为下一非 Go read model 模块化 IO pilot。下一实现 slice `read-models:turnover-ledger-repository-port-extraction` 的测试合同：
+
+- Business core unit tests：默认不适用，除非实现改动外部往来标签、金额、闭环、撤回或 extra 规则。
+- Service-layer tests：适用，必须新增或扩展 port guard，证明 `TurnoverLedgerReadModelRepositoryPort` 只暴露 manifest 登记的三项 read model 方法。
+- API contract tests：默认不适用，除非实现改动 `/api/turnover-ledger` response shape、状态码、错误字段或权限。
+- Read model/cache/background job tests：适用，至少运行 `tests/test_turnover_ledger_query_service.py` 和 `tests/test_turnover_ledger_read_model_refresh.py`，保护 fresh/stale/missing、projection save、worker complete dirty scope。
+- Frontend component and interaction tests：默认不适用，除非实现改动 grouped payload、stale 诊断、operation overlay 或前端 API mapper。
+- End-to-end business-flow integration tests：默认不适用；repository port 首切不改变 confirm/withdraw/tag-selection 业务流。
+- Existing feature regression tests：适用，必须保持 manifest/architecture guard 对无关 read model 方法污染的防护。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

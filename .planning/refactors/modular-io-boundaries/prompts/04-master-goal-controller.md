@@ -131,9 +131,10 @@ Current state expected on start:
 - Cost statistics post-derived local closure audit is analysis-closed: warmup/retry/rebuild app methods are compat-only delegates to `CostStatisticsRuntimeService`.
 - Cost statistics full-state snapshot quarantine is complete: broad `Application._persist_state(...)` no longer serializes `cost_statistics_read_models`, while explicit runtime/query persistence through `_persist_cost_statistics_read_models_best_effort(...)` remains available and startup compatibility loading remains.
 - Cost statistics post-full-state local closure audit is complete: no remaining local implementation gap was found, local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
-- Remaining non-Go read model candidates include `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance`.
+- `turnover_ledger` is selected as the tenth non-Go read model implementation pilot because it has high user-visible stale grouped-ledger risk, direct Workbench/cost/search fan-out impact and a narrow manifest-listed repository-port first slice.
+- Remaining later non-Go read model candidates include `no_oa_bank_batch`, `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:next-pilot-selection-after-cost-statistics.
+- The next pending boundary is read-models:turnover-ledger-repository-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -229,18 +230,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-cost-statistics unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:turnover-ledger-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-cost-statistics:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-post-full-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-full-state-read-model-snapshot-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-tax-offset.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/cost-statistics/README.md`, `docs/modules/cost-statistics/implementation-notes.md`, and `docs/modules/cost-statistics/tests.md`.
-- Use CodeGraph for structural lookup before selecting implementation work.
-- Select the next non-Go read model modular IO pilot after `cost_statistics`.
-- Compare remaining candidates by user-visible stale-read risk, cross-page consistency risk, current implementation gap clarity, narrow first-slice feasibility, existing tests, and Go-admission prerequisites.
-- If the next module is clear, insert its first narrow implementation boundary before Go candidates and set it as the next prompt.
-- If candidate evidence is insufficient, insert a smaller candidate-audit boundary before selecting implementation.
-- Do not implement Go/Fiber/Go Worker while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
+For read-models:turnover-ledger-repository-port-extraction:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-cost-statistics.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/turnover-ledger/README.md`, `docs/modules/turnover-ledger/implementation-notes.md`, `docs/modules/turnover-ledger/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`, `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`, `tests/test_turnover_ledger_query_service.py`, `tests/test_turnover_ledger_read_model_refresh.py`, and `tests/test_read_model_manifest.py`.
+- Use CodeGraph for structural lookup before implementation.
+- Add a narrow `TurnoverLedgerReadModelRepositoryPort` exposing only `list_turnover_ledger_view`, `save_turnover_ledger_rows`, and `clear_turnover_ledger_rows`.
+- Wire `TurnoverLedgerQueryService` and `TurnoverLedgerSqlProjectionBuilder` read/save paths through the port, and return/use the port from PostgreSQL state-store or route/service read wiring where applicable.
+- Keep SQL table knowledge in `PostgresReadModelRepository`.
+- Add/update tests proving the port excludes unrelated read model methods and existing SQL runtime/freshness behavior remains unchanged.
+- Do not change turnover business rules, grouped payload shape, manual closure semantics, Workbench relation command behavior, API shape, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning, frontend behavior, Go/Fiber or Go Worker status.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification and diff checks.
+- Run targeted turnover query/worker/port tests, app check, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

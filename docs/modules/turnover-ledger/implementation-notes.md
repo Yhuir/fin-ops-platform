@@ -379,3 +379,11 @@ git diff --check
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_turnover_ledger_uow_contract.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_turnover_ledger_api.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_turnover_workbench_pair_port_has_no_direct_pair_write_fallback -q`。
 - 未测风险：真实 PostgreSQL 历史数据和 worker drain 仍需 staging 或发布前 smoke；本阶段未改前端。
 - 后续事项：继续收口 no-OA legacy migration/repair/consolidation，它仍在 `build_batches(...)` 中执行 direct pair relation mutation，需要单独设计 repair port 或离线工具。
+
+## 2026-06-24 - Read model repository port pilot selection
+
+- 目标：作为 `read-models:next-pilot-selection-after-cost-statistics` 的结果，把 `turnover_ledger` 选为第十个非 Go read model 模块化 IO 实现试点。
+- 决策：下一条边界为 `read-models:turnover-ledger-repository-port-extraction`。
+- 理由：外部往来 grouped read model 直接影响用户确认/撤回闭环前看到的业务事实，并向 Workbench relation、Workbench、成本统计和搜索产生跨页一致性影响；它已有 `ReadModelQueryGateway`、worker refresh service 和清晰的 manifest repository contract，适合先抽窄 repository port。
+- 首切范围：新增 `TurnoverLedgerReadModelRepositoryPort`，只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`，并让 query/projection read model 路径使用该 port。
+- 非目标：不改变外部往来业务状态、grouped payload shape、manual closure/withdraw 语义、Workbench relation command 写路径、API shape、worker event、queue、Redis/cache、权限、审计、前端行为或 Go/Fiber/Go Worker 状态。
