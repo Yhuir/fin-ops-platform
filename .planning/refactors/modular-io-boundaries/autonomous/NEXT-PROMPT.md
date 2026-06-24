@@ -1,32 +1,27 @@
 # Next Prompt
 
-Continue after `read-models:pending-invoice-source-version-contract-alignment`.
+Continue after `production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row276 implemented the pending invoice source-version contract alignment locally.
-- Row276 did not run production commands and did not mutate production.
-- `pending_invoice_source_versions(...)` now matches SQL projection writer source-version shape:
-  - includes `invoice_lifecycle_policy_schema_version`;
-  - always includes stable `bank_detail_source_versions` and `workbench_relation_source_versions` dict keys.
-- `PostgresReadModelRepository._pending_invoice_scope_row(...)` now selects `row_count` from `read_model.pending_invoice_scopes`.
-- `_pending_invoice_scope_source_versions_row(...)` now derives aggregate source-version proof from non-empty month shards (`row_count > 0`) when any exist, so zero-row historical shards do not poison aggregate `expense:all` freshness.
-- Added local regressions:
-  - `test_pending_invoice_writer_and_api_source_version_contracts_match`
-  - `test_pending_invoice_repository_ignores_zero_row_historical_shards_for_aggregate_source_versions`
-- Verification passed:
-  - `PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime -v`
-  - `PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_api -v`
-  - `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`
-  - `python3 -m py_compile backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_search_pending_sql_runtime.py`
-- Pending invoice module docs were updated.
-- Module/global closure remains open because production deploy/rebuild/API convergence is not yet proven.
-- no-OA `bank_transaction_category_snapshot_version_mismatch` remains a separate open production issue after pending invoice convergence.
+- Row276 fixed pending invoice source-version contract alignment locally.
+- Row277 deployed release `dev-pending-invoice-source-17d13466-20260625` at git commit `3329d8954a7219a1c21641392aaa3f5448ec20f5`.
+- Row277 production evidence:
+  - `/health/ready` was ready before and after deploy.
+  - One bounded `pending_invoice=expense:all` smoke event reached `event_status=done` and `dirty_status=done`.
+  - The smoke tool returned timeout only because the explicit override scope had no App Status readiness row; this is a smoke-tool evidence gap, not a worker failure.
+  - A no-enqueue sanitized metadata probe proved pending invoice rows/filter-options for `expense:all` are `fresh`.
+  - Pending invoice source-version stale reasons are empty.
+  - Actual source-version keys include `invoice_lifecycle_policy_schema_version`, `bank_detail_source_versions` and `workbench_relation_source_versions`.
+  - Selected pending invoice dirty scopes/outbox are `done`; pending invoice readiness is `fresh`.
+- Pending invoice production convergence is closed for Row277.
+- Module/global closure remains open.
+- no-OA `bank_transaction_category_snapshot_version_mismatch` remains the next open production source-version issue from Row275.
 
 ## Next Boundary
 
-`production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`
+`production:no-oa-bank-batch-category-source-version-mismatch-diagnosis`
 
 ## Required First Steps On Resume
 
@@ -35,34 +30,36 @@ Continue after `read-models:pending-invoice-source-version-contract-alignment`.
 3. Acquire the direct-dev write lease before editing:
    - `mkdir /tmp/fin-ops-dev-write.lock`
 4. Read:
-   - `analysis/read-models-pending-invoice-source-version-contract-alignment-2026-06-25.md`
+   - `analysis/production-pending-invoice-source-version-contract-deploy-and-convergence-runbook-2026-06-25.md`
    - `analysis/production-pending-invoice-no-oa-source-version-contract-deep-diagnosis-2026-06-25.md`
-   - `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`
-   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
-   - `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`
+   - `docs/modules/no-oa-bank-batches/README.md`
+   - `docs/modules/no-oa-bank-batches/tests.md`
+   - `docs/modules/no-oa-bank-batches/implementation-notes.md`
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`
    - `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
+   - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
    - `docs/operations/runtime-worker-governance.md`
-   - `deploy/oa/README.md`
-5. Write a production controlled-operation runbook/evidence file under `analysis/` before any production command.
+5. Write a read-only diagnosis/runbook file under `analysis/` before any production command.
 
-## Production Runbook Scope
+## Diagnosis Scope
 
-- Deploy current `dev` through the documented production deploy path only if the runbook proves prechecks and rollback/cleanup safety.
-- Use only root SSH controlled production operations authorized by the T0 goal.
-- Refresh/rebuild only explicit pending invoice scopes needed to prove `expense:all` convergence.
-- Prefer the least invasive operation:
-  - precheck `/health/ready`, release, current git commit, dirty/outbox/readiness summaries;
-  - deploy current dev if production is not already at the fix commit;
-  - enqueue or run bounded explicit-scope pending invoice refresh for `expense:all` and relevant month shards;
-  - wait boundedly for dirty/outbox/readiness convergence;
-  - run sanitized authenticated API metadata probe for pending invoice rows/filter-options only, without printing response bodies or payload rows.
-- Post-check `/health/ready`, dirty scopes, outbox, readiness, dead letters and sanitized pending invoice source-version mismatch metadata.
+- Use root SSH controlled production evidence, but keep the first boundary read-only.
+- Reconstruct expected no-OA source versions without broad `Application` startup when possible.
+- Inspect only metadata needed for `bank_transaction_category_snapshot_version_mismatch`:
+  - expected category snapshot/source version;
+  - actual no-OA row source-version hashes/key sets for bounded month/bucket samples;
+  - current dirty/outbox/readiness/dead-letter status for no-OA and bank transaction category related scopes;
+  - whether a normal gateway-backed no-OA refresh would update the stale row source versions;
+  - whether a local code-contract mismatch exists before any production rebuild is trusted.
+- Do not print payload rows, business identifiers, counterparties, account names, tokens, cookies, DSNs or env secret values.
+- Do not mutate production in this boundary.
 
 ## Stop Gates
 
 - Any command would print secrets, tokens, cookies, DSNs, passwords, private keys or business payload rows.
-- Any operation would require broad DB mutation, unbounded worker replay/consume, manual mark-done, broad repair, or unclear rollback/cleanup.
-- The explicit pending invoice scope list cannot be derived from source/read-model metadata without guessing.
-- Deploy prechecks are not clean or rollback path is not documented in the runbook.
-- Do not broaden into no-OA repair/rebuild in this boundary.
-- Do not claim module/global closure from pending invoice convergence alone.
+- Exact source-version contract cannot be derived from code/docs/tests without guessing.
+- Diagnosis would require broad DB mutation, no-OA rebuild, requeue, repair, manual mark-done, readiness mutation or worker replay.
+- The mismatch cannot be scoped to a bounded no-OA/category source-version contract.
+- Do not broaden back into pending invoice; Row277 already closed pending invoice production convergence for this slice.
+- Do not claim module/global closure from no-OA diagnosis alone.

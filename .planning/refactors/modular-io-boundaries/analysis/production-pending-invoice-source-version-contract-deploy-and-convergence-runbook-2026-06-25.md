@@ -1,12 +1,13 @@
 # Production Pending Invoice Source Version Contract Deploy And Convergence Runbook - 2026-06-25
 
 **Boundary:** `production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`
-**Status:** `runbook-written`
+**Status:** `production-controlled`
 **Module closure:** `not-module-closed`
 **Production mutation:** bounded deploy plus explicit `pending_invoice:expense:all` refresh smoke only
 **Previous boundary:** `read-models:pending-invoice-source-version-contract-alignment`
 **Runtime fix commit:** `17d13466d5b4a5c28d55c7fedcd0815a0f21f91f`
 **Target release:** `dev-pending-invoice-source-17d13466-20260625`
+**Deployed release commit:** `3329d8954a7219a1c21641392aaa3f5448ec20f5`
 
 ## Goal
 
@@ -288,9 +289,129 @@ Expected evidence:
 
 Rollback/cleanup: none for successful convergence. If post-check fails because the new release regressed health, use the release rollback command from Step 2.
 
-## Evidence To Record After Execution
+## Execution Evidence
 
-After running this runbook, update this file with:
+Executed by T0 through the documented deploy path plus root SSH controlled production commands.
+
+### Precheck
+
+- Precheck release: `dev-workbench-matching-port-20260625020818`.
+- `/health/ready`: `status=ready`.
+- `finops-deploy-control status`: API, dispatcher and required workers were active.
+- No secrets, DSNs, tokens, cookies or payload rows were printed.
+
+### Deploy
+
+- Command: `./scripts/deploy-oa.sh --release-name dev-pending-invoice-source-17d13466-20260625`.
+- Result: success.
+- Build completed with pre-existing CSS minifier warnings only.
+- Remote release activated at `/opt/fin-ops/releases/dev-pending-invoice-source-17d13466-20260625/src`.
+- Release metadata:
+  - `release_name=dev-pending-invoice-source-17d13466-20260625`
+  - `git_branch=dev`
+  - `git_commit=3329d8954a7219a1c21641392aaa3f5448ec20f5`
+- Deploy script completed backend readiness, deploy-control status, runtime worker ensure, frontend hash check, public session route check and release cleanup.
+- Rollback was not needed.
+
+### Pending Invoice Smoke
+
+Command:
+
+```bash
+PYTHONPATH="$release_src/backend/src" /opt/fin-ops/venv/bin/python \
+  -m fin_ops_platform.tools.read_model_slo_smoke \
+  --json \
+  --apply \
+  --read-model-key pending_invoice \
+  --scope pending_invoice=expense:all \
+  --reason row277_pending_invoice_source_version_contract \
+  --priority high \
+  --trace-id row277-pending-invoice-source-version-contract \
+  --target-ms 5000 \
+  --timeout-seconds 180 \
+  --poll-interval-seconds 0.5
+```
+
+Result:
+
+```json
+{
+  "event_id": "810547f6-fb28-4d83-bd0c-6b7f72d24074",
+  "event_status": "done",
+  "dirty_status": "done",
+  "enqueue_to_fresh_ms": 326.029,
+  "handler_duration_ms": 134.48,
+  "readiness_status": null,
+  "status": "timeout",
+  "error": "timeout_waiting_for_done_and_fresh"
+}
+```
+
+Classification: `read_model_slo_smoke` failed its readiness wait because the explicit override scope `pending_invoice=expense:all` had no matching App Status readiness row, not because the worker failed. The selected event was `done`, the dirty scope was `done`, and handler latency was bounded. This is a smoke-tool evidence gap for explicit override readiness, not pending invoice API freshness failure.
+
+### Sanitized Metadata Probe
+
+The metadata-only probe constructed `PendingInvoiceReadModelService` with `queue_repository=None`, so it could not enqueue refreshes. It printed no payload rows.
+
+Result:
+
+```json
+{
+  "actual_hash": "03b4381fc0dd918f",
+  "actual_key_count": 9,
+  "actual_keys": [
+    "bank_auto_tag_rules_version",
+    "bank_detail_source_versions",
+    "invoice_lifecycle_policy_schema_version",
+    "oa_attachment_invoice_parser_version",
+    "oa_projection_sync_version",
+    "pending_invoice_read_model_schema_version",
+    "pending_invoice_tag_groups_version",
+    "pending_output_invoice_tag_groups_version",
+    "workbench_relation_source_versions"
+  ],
+  "expected_hash": "264382f68785de19",
+  "expected_key_count": 9,
+  "filter_options_scope": "expense:all",
+  "filter_options_status": "fresh",
+  "rows_returned_count": 1,
+  "rows_scope": "expense:all",
+  "rows_status": "fresh",
+  "rows_total": 683,
+  "stale_reasons": []
+}
+```
+
+### Post-Check
+
+- Final release path: `/opt/fin-ops/releases/dev-pending-invoice-source-17d13466-20260625/src`.
+- Final release metadata git commit: `3329d8954a7219a1c21641392aaa3f5448ec20f5`.
+- Final `/health/ready`: `status=ready`.
+- Pending invoice target dirty scopes:
+
+```json
+[{"count": 2901, "status": "done"}]
+```
+
+- Recent selected pending invoice outbox events:
+
+```json
+[{"count": 7, "status": "done"}]
+```
+
+- Pending invoice App Status readiness:
+
+```json
+[{"count": 126, "status": "fresh"}]
+```
+
+### Final Classification
+
+`production-controlled`: Row276 is deployed and pending invoice `expense:all` rows/filter-options metadata now converge as fresh with no source-version stale reasons. No direct SQL mutation, manual readiness mutation, manual mark-done, broad repair, no-OA repair, unbounded replay/consume, payload-row output or secret output occurred.
+
+Module/global closure is still not claimed. no-OA `bank_transaction_category_snapshot_version_mismatch` remains a separate open production issue.
+
+## Evidence Checklist Completed
 
 - actual precheck release and commit;
 - deploy command outcome and release identity;

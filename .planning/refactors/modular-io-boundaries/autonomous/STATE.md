@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-source-version-contract-deploy-and-convergence-runbook-selected`
+Current state: `no-oa-bank-batch-category-source-version-mismatch-diagnosis-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `read-models:pending-invoice-source-version-contract-alignment` as `implementation-closed` in `analysis/read-models-pending-invoice-source-version-contract-alignment-2026-06-25.md`. The local fix aligns pending invoice API expected source versions with SQL projection writer output by including `invoice_lifecycle_policy_schema_version` plus stable `bank_detail_source_versions` and `workbench_relation_source_versions` keys, and changes aggregate scope source-version proof to prefer non-empty month shards so zero-row historical shards do not poison `expense:all` freshness. Targeted backend tests and docs were updated. No production command or mutation occurred; production convergence remains open.
+Completed `production:pending-invoice-source-version-contract-deploy-and-convergence-runbook` as `production-controlled` in `analysis/production-pending-invoice-source-version-contract-deploy-and-convergence-runbook-2026-06-25.md`. T0 deployed release `dev-pending-invoice-source-17d13466-20260625` at git commit `3329d8954a7219a1c21641392aaa3f5448ec20f5`, ran one bounded `pending_invoice=expense:all` refresh smoke event that reached `event_status=done` and `dirty_status=done`, and proved sanitized pending invoice rows/filter-options metadata fresh with no source-version stale reasons. The smoke tool reported timeout only because the explicit override scope had no App Status readiness row; post-checks showed `/health/ready` ready, selected pending invoice dirty scopes/outbox done and pending invoice readiness fresh. Pending invoice production convergence is closed for this boundary, but module/global closure remains open and no-OA `bank_transaction_category_snapshot_version_mismatch` remains the next selected issue.
 
 ## Closed Or Deferred Slices
 
