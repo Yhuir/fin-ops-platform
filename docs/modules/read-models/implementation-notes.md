@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle selected as next modular IO read model pilot
+
+- 目标：执行 `read-models:next-pilot-selection-after-output-invoice-collection`，在销项收款本地实现支持 accounted 后选择下一个非 Go read model 试点。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models 实施记录和测试矩阵；不改运行时代码、API shape、read model schema、worker 或前端。
+- 关键决策：选择 `invoice_lifecycle`。它是 pending invoice、input/output usage、OA pending payment、tax offset、cost/search 和 import fan-out 的共享生命周期状态边界；第一条实现边界是 `read-models:invoice-lifecycle-repository-port-extraction`。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；共享 read model 状态机定义不变。
+- 测试覆盖：本轮是 analysis-only slice，无运行时代码变化；下一轮实现必须覆盖 invoice lifecycle repository port 不暴露无关 read model 方法，并复跑 read facade、refresh、manifest 和 page integration 回归。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：未连接真实 PostgreSQL/worker/App Status/high-row/browser；本轮只选择下一试点，不证明 `invoice_lifecycle` 闭环。
+
 ## 2026-06-24 - Output invoice collection local implementation closure accounting
 
 - 目标：执行 `read-models:output-invoice-collection-local-implementation-closure-audit`，确认销项收款 read model 本地实现支持是否可进入 production evidence defer。
