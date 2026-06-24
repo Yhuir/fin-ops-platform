@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: internal API contract harness design.
+- Last completed controller step: internal API contract harness implementation.
 - Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
@@ -92,7 +92,8 @@ Current state expected on start:
 - `production:read-model-unauthenticated-api-status-shape-classification-runbook` is complete as `production-evidence-deferred` in `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`: all 38 default API probes returned 401, so public API shape closure needs auth or an internal contract harness.
 - `planning:post-unauthenticated-api-classification-next-boundary-selection` is complete in `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`: authenticated HTTP retry, public browser data smoke, another unauthenticated route sweep and final closure were rejected as premature; the next boundary is an internal API contract harness design using existing `Application.handle_request(...)`, route-owner and auth/session test seams.
 - `planning:read-model-internal-api-contract-harness-design` is complete in `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`: the harness design uses `Application.handle_request(...)`, existing unittest default auth plus explicit auth guard negatives, `http_slo_probe.DEFAULT_API_PROBES` as route inventory, and sanitized response envelope/readiness metadata assertions; it rejects Flask test client, production auth bypass and broad payload snapshots.
-- The next pending boundary is `contract:read-model-internal-api-contract-harness-implementation`.
+- `contract:read-model-internal-api-contract-harness-implementation` is complete in `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`: added `tests/test_read_model_api_contract_harness.py`, covering representative local GET envelopes and explicit auth guard negatives through `Application.handle_request(...)`; targeted verification passed with 2 tests and 51 subtests.
+- The next pending boundary is `planning:post-internal-api-contract-harness-next-boundary-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -337,15 +338,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `contract:read-model-internal-api-contract-harness-implementation`.
+Start with `planning:post-internal-api-contract-harness-next-boundary-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`, `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`, `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`, `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`, `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`, `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Implement the smallest local GET-only read-model API contract harness test without printing secrets or mutating production.
+- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`, `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`, `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`, `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`, `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`, `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`, `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Reconcile Row262 local API contract harness evidence and choose the next safe API/browser/module closure boundary.
 - Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers, route-owner classes or existing tests.
 - Do not run API probes until a non-secret auth path is configured.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.

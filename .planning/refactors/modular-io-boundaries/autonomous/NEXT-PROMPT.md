@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `planning:read-model-internal-api-contract-harness-design`.
+Continue after `contract:read-model-internal-api-contract-harness-implementation`.
 
 ## Current State
 
@@ -44,12 +44,17 @@ Continue after `planning:read-model-internal-api-contract-harness-design`.
   - use existing unittest default auth for local success-shape evidence plus explicit negative auth guard checks;
   - seed representative route inventory from `http_slo_probe.DEFAULT_API_PROBES`;
   - assert sanitized envelopes, status codes, freshness/readiness metadata and permission denial shapes without full payload snapshots.
+- Row262 implemented the local contract harness:
+  - added `tests/test_read_model_api_contract_harness.py`;
+  - covered representative session, Workbench, pending invoice, input usage, output collection, tax, cost and search GET envelopes;
+  - kept explicit auth guard negatives with `FIN_OPS_TEST_DEFAULT_AUTH=0`;
+  - targeted verification passed with 2 tests and 51 subtests.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`contract:read-model-internal-api-contract-harness-implementation`
+`planning:post-internal-api-contract-harness-next-boundary-selection`
 
 ## Required First Steps On Resume
 
@@ -70,8 +75,9 @@ Continue after `planning:read-model-internal-api-contract-harness-design`.
 9. Read `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`.
 10. Read `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`.
 11. Read `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`.
-12. Implement the smallest local GET-only API contract harness test for representative read-model-heavy endpoints, using existing fixtures/stubs and sanitized response-shape assertions.
-13. Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers or route-owner classes.
+12. Read `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`.
+13. Reconcile Row262 and choose the next safe path: broaden local contract harness coverage, design browser data harness, or select another bounded production/read-only evidence route.
+14. Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers, route-owner classes or existing tests.
 
 ## Stop Gates
 

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `internal-api-contract-harness-implementation-selected`
+Current state: `internal-api-contract-harness-local-guard-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:read-model-internal-api-contract-harness-design` as `planning-closed` in `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`. T0 designed the local/internal API contract harness path around `Application.handle_request(...)`, existing unittest default auth plus explicit negative auth guard checks, `http_slo_probe.DEFAULT_API_PROBES` as route inventory, and sanitized response envelope/readiness metadata assertions. The design rejects Flask test client, production auth bypass, production HTTP retry, browser data smoke and broad fixture snapshots. No production command, runtime auth/code change, implementation or closure claim occurred. The next boundary is `contract:read-model-internal-api-contract-harness-implementation`.
+Completed `contract:read-model-internal-api-contract-harness-implementation` as `contract-guard-closed` in `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`. T0 added `tests/test_read_model_api_contract_harness.py`, a local GET-only `Application.handle_request(...)` harness for representative read-model-heavy response envelopes plus explicit `FIN_OPS_TEST_DEFAULT_AUTH=0` auth guard negatives. Targeted verification passed with 2 tests and 51 subtests. No production HTTP, runtime auth change, payload snapshot, production mutation or closure claim occurred. The next boundary is `planning:post-internal-api-contract-harness-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:read-model-internal-api-contract-harness-design`
+`contract:read-model-internal-api-contract-harness-implementation`
 
 ## Next Prompt
 
-`contract:read-model-internal-api-contract-harness-implementation`
+`planning:post-internal-api-contract-harness-next-boundary-selection`
