@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-full-deterministic-e2e-smoke-selection-pending`
+Current state: `auth-preflight-api-smoke-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `browser:read-model-full-deterministic-e2e-smoke-runbook` as `browser-guard-closed` in `analysis/browser-read-model-full-deterministic-e2e-smoke-runbook-2026-06-25.md`. T0 ran `cd web && npm run e2e:smoke`; the deterministic Chromium smoke inventory passed with 175/175 tests in 7.6m. The next boundary is `planning:post-full-deterministic-e2e-smoke-next-boundary-selection`. No production command, product code change, smoke membership change or closure claim occurred.
+Completed `planning:post-full-deterministic-e2e-smoke-next-boundary-selection` as `planning-closed` in `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`. T0 reconciled Row267 full local smoke evidence against remaining external-risk gaps and selected `production:read-model-auth-preflight-and-api-smoke-runbook` as the next boundary. No production command, runtime mutation or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`browser:read-model-full-deterministic-e2e-smoke-runbook`
+`planning:post-full-deterministic-e2e-smoke-next-boundary-selection`
 
 ## Next Prompt
 
-`planning:post-full-deterministic-e2e-smoke-next-boundary-selection`
+`production:read-model-auth-preflight-and-api-smoke-runbook`

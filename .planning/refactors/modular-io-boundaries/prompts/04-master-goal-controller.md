@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: full deterministic e2e smoke runbook.
+- Last completed controller step: post-full deterministic e2e smoke next-boundary selection.
 - Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
@@ -98,7 +98,8 @@ Current state expected on start:
 - `browser:read-model-browser-data-targeted-smoke-runbook` is complete in `analysis/browser-read-model-browser-data-targeted-smoke-runbook-2026-06-25.md`: the targeted Playwright subset initially exposed four stale spec assertions, T0 aligned the input-invoice and Workbench specs with current operation-barrier/non-fresh/projection contracts, reran the affected specs with 20/20 passed and the full subset with 53/53 passed.
 - `planning:post-browser-data-targeted-smoke-next-boundary-selection` is complete in `analysis/planning-post-browser-data-targeted-smoke-next-boundary-selection-2026-06-25.md`: Row265 local browser evidence was reconciled and full deterministic `npm run e2e:smoke` was selected as the next boundary because smoke is the repository's broad local Browser evidence layer.
 - `browser:read-model-full-deterministic-e2e-smoke-runbook` is complete in `analysis/browser-read-model-full-deterministic-e2e-smoke-runbook-2026-06-25.md`: the full deterministic Chromium smoke inventory passed with 175/175 tests in 7.6m and no product/spec/smoke membership change.
-- The next pending boundary is `planning:post-full-deterministic-e2e-smoke-next-boundary-selection`.
+- `planning:post-full-deterministic-e2e-smoke-next-boundary-selection` is complete in `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`: Row267 local smoke evidence was reconciled against remaining external-risk gaps and auth preflight plus metadata-only production API smoke was selected next.
+- The next pending boundary is `production:read-model-auth-preflight-and-api-smoke-runbook`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
