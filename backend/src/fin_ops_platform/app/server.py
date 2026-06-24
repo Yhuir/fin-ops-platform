@@ -16162,7 +16162,6 @@ class Application:
                 "matching": self._matching_service.snapshot(),
                 "workbench_overrides": self._workbench_override_service.snapshot(),
                 "workbench_exception_cases": self._workbench_exception_case_service.snapshot(),
-                "no_oa_bank_batches": self._no_oa_bank_batch_service.snapshot(),
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
                 "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
                 "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),

@@ -68,7 +68,16 @@
 - 关键决策：生产 PostgreSQL 继续使用 `PostgresStateStore.save_no_oa_bank_batch_mutation(...)`；local/Mongo 通过新增 `ApplicationStateStore.save_no_oa_bank_batch_mutation(...)` 保持同名显式边界；service 若拿不到该 boundary 就 fail fast 为 `NoOaBankBatchPersistenceError`。
 - 旧路径分类：`persist_mutation(...)` 不再直接调用 `save_workbench_pair_relations(...)`、`save_no_oa_bank_batches(...)`、`save_workbench_read_models(...)`。
 - 测试覆盖：新增缺少 atomic boundary 的 fail-fast service test、本地 state-store mutation boundary test、platform guard 防止 broad fallback 回归。
-- 下一步：执行 `read-models:no-oa-bank-batch-local-implementation-closure-audit`，复核 no-OA 是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred。
+- 下一步：已由 `read-models:no-oa-bank-batch-local-implementation-closure-audit` 发现 broad full-state snapshot gap，并进入 full-state snapshot quarantine。
+
+## 2026-06-24 - Modular IO full-state snapshot quarantine
+
+- 目标：移除 broad `Application._persist_state(...)` 对 `no_oa_bank_batches` 的旧全状态 snapshot 写入。
+- 影响范围：`Application._persist_state(...)`、read model architecture guard、modular IO state；不改变 no-OA 业务规则、API shape、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 关键决策：no-OA mutation persistence 继续通过 `save_no_oa_bank_batch_mutation(...)`；worker refresh public snapshot persistence 继续通过 `NoOaBankBatchReadModelPersistencePort.save_public_snapshot(...)`；broad full-state writer 不再作为 no-OA batch snapshot 的第二写入路径。
+- 旧路径分类：`Application._persist_state(...)` 不再序列化 `no_oa_bank_batches` 或调用 `_no_oa_bank_batch_service.snapshot()`。
+- 测试覆盖：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，防止旧 full-state 写路径回归，同时确认 explicit no-OA persistence boundaries 仍存在。
+- 下一步：执行 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit`，复核 no-OA 是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred。
 
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 

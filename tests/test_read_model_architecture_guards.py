@@ -369,6 +369,22 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
         self.assertIn("def _persist_tax_offset_read_models_best_effort(", server_source)
 
+    def test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        start = server_source.index("    def _persist_state(self) -> None:")
+        end = server_source.index("\n    def _persist_state_with_workbench_invalidation", start)
+        helper_body = server_source[start:end]
+
+        self.assertNotIn('"no_oa_bank_batches"', helper_body)
+        self.assertNotIn("_no_oa_bank_batch_service.snapshot()", helper_body)
+
+        service_source = (SOURCE_ROOT / "services" / "no_oa_bank_batch_read_model_refresh.py").read_text(encoding="utf-8")
+        state_store_source = (SOURCE_ROOT / "services" / "state_store.py").read_text(encoding="utf-8")
+        postgres_state_store_source = (SOURCE_ROOT / "services" / "postgres_state_store.py").read_text(encoding="utf-8")
+        self.assertIn("class NoOaBankBatchReadModelPersistencePort", service_source)
+        self.assertIn("def save_no_oa_bank_batch_mutation(", state_store_source)
+        self.assertIn("def save_no_oa_bank_batch_mutation(", postgres_state_store_source)
+
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []
         for path in SOURCE_ROOT.rglob("*.py"):

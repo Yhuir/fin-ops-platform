@@ -60,7 +60,18 @@
 - 测试覆盖：新增 fail-fast service test、本地 state-store explicit boundary test 和 platform guard，防止 `persist_mutation(...)` 回退到 broad pair/no-OA/workbench writes。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-mutation-persistence-fallback-quarantine.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
-- 后续事项：执行 `read-models:no-oa-bank-batch-local-implementation-closure-audit`。
+- 后续事项：已由 `read-models:no-oa-bank-batch-local-implementation-closure-audit` 发现 broad full-state snapshot gap，并进入 full-state snapshot quarantine。
+
+## 2026-06-24 - No-OA bank batch full-state snapshot quarantine
+
+- 目标：执行 `read-models:no-oa-bank-batch-full-state-snapshot-quarantine`，移除 broad `Application._persist_state(...)` 对 `no_oa_bank_batches` 的旧全状态 snapshot 写入。
+- 影响范围：`Application._persist_state(...)`、read model architecture guard、modular IO state 和 no-OA/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
+- 关键决策：no-OA mutation persistence 必须走 `save_no_oa_bank_batch_mutation(...)`；worker refresh public snapshot persistence 必须走 `NoOaBankBatchReadModelPersistencePort.save_public_snapshot(...)`；broad full-state writer 不再作为 no-OA batch snapshot 的第二写入路径。
+- 文档影响：新增 local closure audit 和 full-state quarantine analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，防止 `_persist_state(...)` 再写 `no_oa_bank_batches` 或调用 `_no_oa_bank_batch_service.snapshot()`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-full-state-snapshot-quarantine.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit`，不能直接进入 Go admission。
 
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 

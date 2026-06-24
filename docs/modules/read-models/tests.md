@@ -158,6 +158,14 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - Existing feature regression tests：新增 platform boundary guard，防止 `persist_mutation(...)` 重新出现 broad pair/no-OA/workbench snapshot writes。
 - Business core、API contract、frontend interaction 和 E2E tests 未新增，因为本 slice 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
 
+## 2026-06-24 - no-OA bank batch full-state snapshot quarantine test note
+
+`read-models:no-oa-bank-batch-full-state-snapshot-quarantine` 已完成。测试覆盖如下：
+
+- Read model/cache/background job tests：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，证明 broad `_persist_state(...)` 不再写 `no_oa_bank_batches` 或读取 `_no_oa_bank_batch_service.snapshot()`。
+- Existing feature regression tests：同一 guard 证明 `NoOaBankBatchReadModelPersistencePort`、local `save_no_oa_bank_batch_mutation(...)` 和 PostgreSQL `save_no_oa_bank_batch_mutation(...)` 仍存在，防止 explicit persistence boundaries 被误删。
+- Business core、API contract、frontend interaction 和 E2E tests 未新增，因为本 slice 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
+
 ## 2026-06-24 - turnover ledger freshness/barrier audit note
 
 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice。结论：

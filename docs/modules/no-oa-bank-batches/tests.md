@@ -115,6 +115,14 @@
 - Existing feature regression tests：新增 platform guard，证明 `NoOaBankBatchApplicationService.persist_mutation(...)` 只依赖 `save_no_oa_bank_batch_mutation(...)`，不再包含 broad `save_workbench_pair_relations(...)`、`save_no_oa_bank_batches(...)`、`save_workbench_read_models(...)` fallback。
 - 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变提交/撤回业务规则、HTTP shape、权限、前端 operation barrier 或用户流程。
 
+## 2026-06-24 - Modular IO full-state snapshot quarantine test note
+
+`read-models:no-oa-bank-batch-full-state-snapshot-quarantine` 已完成。测试覆盖如下：
+
+- Read model/cache/background job tests：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，证明 broad `Application._persist_state(...)` 不再序列化 `no_oa_bank_batches` 或调用 `_no_oa_bank_batch_service.snapshot()`。
+- Existing feature regression tests：同一 guard 还确认 `NoOaBankBatchReadModelPersistencePort`、local `save_no_oa_bank_batch_mutation(...)` 和 PostgreSQL `save_no_oa_bank_batch_mutation(...)` 仍存在，防止删除旧路径时破坏显式持久化边界。
+- Service-layer/API/frontend/E2E：未新增新测试，因为本 slice 不改变 no-OA 提交/撤回业务规则、HTTP shape、权限、前端 operation barrier 或用户流程；已复跑 no-OA application/read model/workbench integration 和 read model manifest/gateway 回归。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |
