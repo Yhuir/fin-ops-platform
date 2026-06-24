@@ -56,6 +56,7 @@
 | `09-DEV-BRANCH-WORKFLOW.md` | 主 repo 直接切 `dev`、对齐 main、commit/push、禁止 main 实现提交的工作流。 |
 | `10-AUTONOMOUS-STOP-GATES.md` | 自动运行的硬停止条件、软延迟条件和继续推进规则。 |
 | `11-GO-HOT-PATH-CARVE-OUT.md` | Go / Go Fiber / Go Worker 热点模块 carve-out 候选、准入门槛和目标运行时。 |
+| `12-PARALLEL-ORCHESTRATION.md` | 多 Codex thread 并发执行的 controller/worker 权限、direct-dev 写锁、文件归属、handoff 和最终闭环 gate。 |
 | `analysis/codebase-scan-2026-06-22.md` | 2026-06-22 代码扫描原始摘要和风险登记。 |
 | `analysis/boundary-risk-register.md` | 后续持续维护的边界风险登记表。 |
 | `analysis/production-access-status-2026-06-22.md` | 当前 SSH 访问能力、生产验证可做/不可做事项和缺口。 |
@@ -68,6 +69,7 @@
 | `prompts/02-refactor-phase-planning.md` | 单模块重构 phase 规划提示词模板。 |
 | `prompts/03-autonomous-start.md` | 可直接喂给 Codex 的无人值守启动 prompt。 |
 | `prompts/04-master-goal-controller.md` | 修正 queue 语义后的主控 Goal Prompt：按状态机自动推进，不把 guard-only slice 当成模块完成，不在 read model 试点实现前跳到 GoHotPath。 |
+| `prompts/05-parallel-thread-prompts.md` | controller-led 并发模式的 10 个 thread prompt；worker 可在 assigned workstream 内自动推进，global closure 由 controller/final audit 负责。 |
 
 ## 工作规则
 
@@ -89,6 +91,7 @@
 16. 自动推进只能评估 `11-GO-HOT-PATH-CARVE-OUT.md` 中列出的 Go candidate；候选未通过性能证据、IO contract、legacy isolation、shadow run、rollback 和 freshness proof gate 时，只能标记 `go-candidate-deferred`。
 17. 所有页面 read model 的目标优化方向是 `Partitioned Scoped Read Model + Scoped Incremental Projection`；Workbench 保留 active generation 原子发布模型。
 18. Worker 目标态是逐个迁移到 `Go Worker + PostgreSQL Dual Queue`，其中 PostgreSQL dual queue 指 `job.outbox_events` 和 `job.read_model_dirty_scopes`；RabbitMQ 只能作为未来 wakeup/transport，不能作为事实源。
+19. 多 thread 并发必须遵守 `12-PARALLEL-ORCHESTRATION.md`：controller 唯一拥有全局状态文件和最终闭环，worker 只能在分配的文件范围内自动推进，并通过 handoff 交给 controller 集成。
 
 ## 当前结论
 

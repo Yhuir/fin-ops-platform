@@ -17,4 +17,5 @@
 | `01-module-io-audit.md` | 对一个模块做 IO 合同审计，不改代码。 |
 | `02-refactor-phase-planning.md` | 基于已完成 IO 合同，为一个模块生成实现 phase 计划。 |
 | `03-autonomous-start.md` | 旧版完整 GSD 自动推进 goal prompt；保留作历史入口，但执行前必须遵守 `MODULE-QUEUE.md` 的新 slice/module closure 语义。 |
-| `04-master-goal-controller.md` | 当前推荐主控 Goal Prompt：修正 queue 语义后，自动执行 planning preflight -> 当前 pending 边界 -> 状态更新 -> 下一个 prompt；当前下一步是 `server-py:legacy-handler-extraction-implementation`，不会在 read model / server.py legacy 前置条件未闭合时跳到 GoHotPath。 |
+| `04-master-goal-controller.md` | 单线程主控 Goal Prompt：自动执行 planning preflight -> 当前 pending 边界 -> 状态更新 -> 下一个 prompt；当前下一步是 `server-py:workbench-group-detail-route-owner-extraction`。不要把它同时喂给多个 thread。 |
+| `05-parallel-thread-prompts.md` | controller-led 并发执行入口：T0 controller、T1-T8 worker 和 T9 final closure audit。worker 可在 assigned scope 内自动推进，但不更新全局状态、不声明全局闭环。 |

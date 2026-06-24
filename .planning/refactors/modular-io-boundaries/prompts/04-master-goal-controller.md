@@ -69,9 +69,10 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:workbench-group-detail-route-owner-audit.
-- Last status: analysis-closed.
+- Last completed boundary: planning:parallel-orchestration-workflow.
+- Last status: planning-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
+- Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
 - pending_invoice local implementation support is accounted for after repository port, freshness/barrier audit, scope policy filter allowlist and mutation freshness target work; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
@@ -195,6 +196,7 @@ Current state expected on start:
 - `server-py:workbench-row-detail-route-owner-audit` is complete as an analysis slice: it confirmed the row detail live/cache/SQL fallback and no-write relation boundary are locally tested, found `Application` still owns fallback orchestration, and selected row detail route-owner extraction next.
 - `server-py:workbench-row-detail-route-owner-extraction` is complete as an implementation slice: it moved row detail payload/fallback orchestration behind `WorkbenchRowDetailApiRoutes` while preserving response shape, fallback order, row override behavior and production PostgreSQL fallback blocking.
 - `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
+- `planning:parallel-orchestration-workflow` is complete as a planning slice: it defined controller/worker permissions, direct-dev write lease, worker file ownership, handoff format, final closure audit gate and 10 thread prompts. Worker prompts may auto-progress inside assigned workstreams, but controller owns global state and global closure.
 - The next pending boundary is `server-py:workbench-group-detail-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
@@ -292,6 +294,13 @@ Autonomous loop:
 
 Immediate next boundary:
 Start with `server-py:workbench-group-detail-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
+
+Parallel execution:
+- If the user wants multiple Codex threads, do not paste this master prompt into every thread.
+- Use `12-PARALLEL-ORCHESTRATION.md` and `prompts/05-parallel-thread-prompts.md`.
+- Start exactly one T0 controller and bounded worker prompts.
+- Controller-only files must remain controller-owned.
+- Workers may auto-progress inside assigned scopes, then write handoffs for controller integration.
 
 For `server-py:workbench-group-detail-route-owner-extraction`:
 - Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-detail-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
