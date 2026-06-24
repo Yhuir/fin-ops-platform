@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-browser-harness-missing-packaging-audit-selected`
+Current state: `browser-harness-packaging-audit-closed-admin-seam-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-authenticated-browser-harness-missing-next-boundary-selection` as `planning-closed` in `analysis/planning-post-authenticated-browser-harness-missing-next-boundary-selection-2026-06-25.md`. T0 reconciled Row294's browser evidence defer as a deploy artifact/harness gap: production release archive contains backend, `web/dist`, scripts and deploy assets, excludes `node_modules`, and does not package `web/e2e` or Playwright config. The next boundary is `deployment:production-browser-smoke-harness-packaging-feasibility-audit`. Browser/admin/write production evidence and global/module closure remain open.
+Completed `deployment:production-browser-smoke-harness-packaging-feasibility-audit` as `analysis-closed` in `analysis/deployment-production-browser-smoke-harness-packaging-feasibility-audit-2026-06-25.md`. T0 found that packaging only e2e/config files would not solve missing Playwright/browser runtime; packaging `node_modules` or browser binaries into release is too broad for this closure slice; installing/downloading on production and copying target OA tokens locally remain forbidden. Browser evidence remains deferred pending a dedicated ops runner design. The next boundary is `production:admin-scope-auth-seam-read-only-classification`.
 
 ## Closed Or Deferred Slices
 
