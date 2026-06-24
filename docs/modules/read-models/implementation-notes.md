@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Output invoice collection local implementation closure accounting
+
+- 目标：执行 `read-models:output-invoice-collection-local-implementation-closure-audit`，确认销项收款 read model 本地实现支持是否可进入 production evidence defer。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models/output-invoice-collections 实施记录和测试矩阵；不改变 SQL、API、worker、queue schema、lifecycle、receipt、红蓝票关系或前端行为。
+- 关键决策：`output_invoice_collection` 本地支持已 accounted：repository port、rows/filter/export/detail fresh gate、source-version proof、scope policy、worker fan-out、operation barrier、app-level projection helper removal、legacy/live path classification 和测试/文档证据均已记录。真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，模块不全局关闭，Go admission 继续 blocked。
+- 文档影响：新增 modular IO closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮无运行时代码变更，无新增测试；复用 output collection API/runtime/architecture guard/frontend/Browser 覆盖作为审计证据。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:next-pilot-selection-after-output-invoice-collection`。
+
 ## 2026-06-24 - Output invoice collection relation detail production fail-closed
 
 - 目标：执行 `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`，补齐销项收款 relation detail 的生产 SQL read-model fail-closed 边界。

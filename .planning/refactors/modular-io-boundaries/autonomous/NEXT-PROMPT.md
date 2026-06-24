@@ -1,31 +1,32 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed` slice.
+Continue the autonomous modular IO refactor after the `read-models:output-invoice-collection-local-implementation-closure-audit` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`
-- Last status: `implementation-closed`
+- Last completed boundary: `read-models:output-invoice-collection-local-implementation-closure-audit`
+- Last status: `production-evidence-deferred`
 - Queue semantics remain corrected: slice status is not module closure.
 - `output_invoice_collection` is the sixth non-Go read model pilot.
-- `OutputInvoiceCollectionReadModelRepositoryPort` exists and is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
-- Output collection freshness/barrier/helper audit is locally implemented:
-  - mutation responses expose `read_model_scope_keys` and `freshness_targets`;
-  - frontend lifecycle, receipt and red/blue relation write-after-read flows prefer concrete month targets over fan-out-only `all`;
-  - `output_invoice_collection:all` remains fan-out control scope;
-  - unused `Application` output projection helpers were removed and guarded.
-- Output collection relation detail production fail-closed support is locally implemented:
-  - `OutputInvoiceCollectionReadModelDetailService` reads fresh SQL read-model rows for relation details;
-  - production SQL runtime returns `202`/refreshing and enqueues `output_invoice_collection:all` when the SQL repository/detail lookup is unavailable;
-  - relation detail no longer falls back to live query in production SQL runtime.
-- `output_invoice_collection` is not globally closed. Local closure accounting and real PostgreSQL/worker/App Status/high-row/browser evidence remain open or deferred.
+- `OutputInvoiceCollectionReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
+- Output collection rows/filter/export/detail freshness behavior is locally accounted for:
+  - production SQL runtime rows/filter/export miss/stale/schema/source-version mismatch returns refreshing and enqueues refresh;
+  - production SQL runtime relation detail uses `OutputInvoiceCollectionReadModelDetailService`;
+  - missing SQL repository/detail lookup returns `202`/refreshing and enqueues `output_invoice_collection:all`;
+  - legacy/local non-production mode may still use `OutputInvoiceCollectionQueryService.row_relation_details(...)` as compat-only read support.
+- Output collection mutation operation barrier behavior is locally accounted for:
+  - lifecycle, reminder, red/blue relation and receipt mutations expose `read_model_scope_keys` / `freshness_targets`;
+  - frontend flows prefer concrete month targets over fan-out-only `all`;
+  - `output_invoice_collection:all` remains a fan-out control scope.
+- Output collection app-level projection helpers were removed from `Application`; worker projection ownership remains in `InvoiceUsageCollectionSqlProjectionBuilder` / `InvoiceUsageCollectionReadModelRefreshService`.
+- `output_invoice_collection` is not globally closed. Real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - No module is globally closed.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
 
 ## Next Boundary
 
-`read-models:output-invoice-collection-local-implementation-closure-audit`
+`read-models:next-pilot-selection-after-output-invoice-collection`
 
 ## Required First Steps On Resume
 
@@ -38,40 +39,41 @@ Continue the autonomous modular IO refactor after the `read-models:output-invoic
    - `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md`
 5. Read target planning evidence:
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`
+   - `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`
+   - `.planning/refactors/modular-io-boundaries/06-PILOT-SELECTION.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-pilot-gap-audit-and-contract-selection.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-local-implementation-closure-audit.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/modules/read-models/tests.md`
-   - `docs/modules/output-invoice-collections/README.md`
-   - `docs/modules/output-invoice-collections/state-machine.md`
-   - `docs/modules/output-invoice-collections/tests.md`
-   - `docs/modules/output-invoice-collections/implementation-notes.md`
-6. Use CodeGraph for structural lookup before implementation or closure accounting edits.
+   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
+6. Use CodeGraph for structural lookup before any implementation or accounting edits.
 
 ## Boundary Scope
 
 Target:
 
-- Account for local `output_invoice_collection` implementation support after:
-  - repository port extraction;
-  - rows/filter/export/detail fresh gate and production fail-closed behavior;
-  - source-version proof;
-  - scope policy validation;
-  - worker `all` fan-out/month shard behavior;
-  - lifecycle/receipt/red relation operation barrier target contract;
-  - app-level projection helper removal;
-  - tests/docs coverage.
-- Classify remaining output collection live/detail support after relation detail production fail-closed as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
-- Decide whether local implementation support can move to `production-evidence-deferred` or whether another concrete local gap must be split before defer.
-- Produce/update an analysis/accounting file.
-- Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, `prompts/04-master-goal-controller.md`, and affected module docs/tests.
+- Select the next non-Go read model pilot from remaining implementation-gap-open manifest candidates.
+- Compare remaining candidates by:
+  - user-visible stale-read/cross-page risk;
+  - read model repository-port gap;
+  - freshness/source-version proof gap;
+  - force-refresh and operation-barrier gap;
+  - legacy contamination risk;
+  - test coverage readiness;
+  - ability to execute a narrow first slice without staging DB or local `PGSQL_URL`.
+- Candidate pool should include remaining read-model modules that are not locally accounted yet, such as `invoice_lifecycle`, `no_oa_bank_batch`, `cost_statistics`, `tax_offset`, `turnover_ledger`, `search`, `bank_account_balance`, and any manifest entry whose implementation migration remains open.
+- Produce/update an analysis file for the pilot selection.
+- Insert the selected first narrow implementation boundary before Go candidates in `MODULE-QUEUE.md`.
+- Update `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, `prompts/04-master-goal-controller.md`, and affected read-model docs.
 
 Forbidden:
 
-- Do not change lifecycle write business rules, receipt numbering/history behavior, red/blue relation semantics, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
-- Do not claim `output_invoice_collection` globally closed unless every full closure requirement is proven.
+- Do not select Go/Fiber/Go Worker while non-Go modular IO/read model implementation-gap-open work remains.
+- Do not implement the selected pilot in this selection slice unless the queue already contains the implementation boundary and the selection slice has been committed.
+- Do not claim any module globally closed.
 - Do not depend on staging DB or local `PGSQL_URL`.
 - Do not perform production writes or read/print secrets.
 
@@ -79,8 +81,8 @@ Expected verification:
 
 - `bash scripts/verify.sh docs`
 - `git diff --check`
-- Targeted backend/frontend tests only if local closure accounting changes runtime code or tests.
+- Runtime backend/frontend tests only if runtime code or tests change.
 
 ## Stop Condition
 
-Complete one verified output invoice collection local implementation closure accounting slice, commit and push to `origin/dev`, then continue to the next safe boundary unless a hard stop gate is hit.
+Complete one verified next-pilot-selection slice, commit and push to `origin/dev`, then continue to the selected first implementation boundary unless a hard stop gate is hit.

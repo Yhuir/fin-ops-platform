@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Local implementation closure accounting
+
+- 目标：完成 `read-models:output-invoice-collection-local-implementation-closure-audit`，确认销项收款 read model 本地实现支持是否还有阻塞下一试点的 P0/P1 缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models/output-invoice-collections 实施记录和测试矩阵；不改运行时代码、API shape、worker、lifecycle、receipt、红蓝票关系或前端行为。
+- 关键决策：本地支持已 accounted：repository port、rows/filter/export/detail fresh gates、source-version proof、scope policy、worker all fan-out、mutation operation barrier targets、app-level projection helper removal 和 tests/docs 证据齐备。`OutputInvoiceCollectionQueryService.row_relation_details(...)` 仅保留为 legacy/local non-production compat-only read path，不能写 canonical facts、dirty/outbox、readiness、cache 或 App Status。
+- 文档影响：同步 modular IO analysis、autonomous state/queue/journal/next prompt、主控 prompt和 read-models 测试矩阵；状态机定义不变。
+- 测试覆盖：本轮是 accounting-only slice，无新增运行时代码测试；复用 relation detail fail-closed、repository port、projection builder、operation barrier、architecture guard、frontend 和 Browser 覆盖。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。模块不全局关闭。
+
 ## 2026-06-24 - Relation detail production fail-closed
 
 - 目标：关闭 `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`，避免生产 PostgreSQL runtime 下 `/rows/{row_id}/relation-details` 缺 SQL detail repository 时回退 live query。
