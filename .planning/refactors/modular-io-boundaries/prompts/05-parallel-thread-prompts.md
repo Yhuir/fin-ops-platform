@@ -20,6 +20,8 @@ Workers can auto-progress within their assigned scope. They do not need the user
 
 Workers do not declare global closure. The controller and final closure audit own that decision.
 
+Do not start T9 while T0-T8 are still running. T9 is a final audit prompt, not a parallel worker prompt.
+
 ## Common Worker Rules
 
 All worker prompts inherit these rules:
@@ -28,13 +30,20 @@ All worker prompts inherit these rules:
 - Use branch `dev`.
 - Read `AGENTS.md`, `.planning/refactors/modular-io-boundaries/12-PARALLEL-ORCHESTRATION.md`, `00-REQUIREMENTS.md`, `03-REFACTOR-STATE-MACHINE.md`, `04-IMPLEMENTATION-ROADMAP.md`, `05-IMPACT-AND-TEST-GATES.md`, `10-AUTONOMOUS-STOP-GATES.md`, and target module docs before edits.
 - Use CodeGraph for structural lookup before code changes.
+- Follow this work loop inside the assigned workstream: pre-implementation analysis, bounded implementation or evidence collection, self-review, verification, handoff.
 - Do not edit controller-only files.
 - Do not claim global closure.
 - Do not implement Go/Fiber/Go Worker unless the prompt explicitly assigns Go admission and all gates pass.
 - Do not perform production writes or read secrets.
+- No staging database is available.
+- No local `PGSQL_URL` or PostgreSQL URL is available.
+- Do not ask the user for staging databases, PostgreSQL URLs, SSH passwords, DB passwords, tokens, cookies or private secrets.
+- Missing real PostgreSQL/read model/worker evidence is a soft gate. Record it as `production-evidence-deferred`, `unavailable` or equivalent evidence status and keep working on another safe owned scope.
+- Use local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and non-secret production read-only SSH evidence when useful.
+- `ssh finops-prod-root` may be used only for non-secret read-only checks. Do not read or print secrets, DSNs, tokens, cookies, env secret values, private keys or sensitive payloads.
 - Before editing or commit/push, acquire the write lease: `mkdir /tmp/fin-ops-dev-write.lock`.
 - After acquiring the write lease, run `git fetch origin --prune`, `git switch dev`, `git pull --ff-only origin dev`, and confirm a clean `git status --short --branch`.
-- Commit/push only verified, bounded, owned changes to `origin/dev`.
+- Commit/push only verified, bounded, owned changes to `origin/dev`. Every worker commit must be safe to merge into `main` for the completed slice, with old behavior protected by targeted verification or documented as unchanged.
 - Always write or update your handoff file under `.planning/refactors/modular-io-boundaries/parallel/handoffs/`.
 - Release the write lease with `rmdir /tmp/fin-ops-dev-write.lock`.
 
@@ -57,12 +66,15 @@ Objective: act as the parallel orchestration controller for the modular IO refac
 - .planning/refactors/modular-io-boundaries/parallel/handoffs/*.md if present
 
 Controller responsibilities:
+- Run full state analysis before implementation or state updates.
+- Review the previous completed boundary and every new handoff before selecting the next prompt.
 - Own all controller-only files listed in 12-PARALLEL-ORCHESTRATION.md.
 - Pull origin/dev with --ff-only and verify clean dev.
 - Consume worker handoffs.
 - Review each worker commit/diff for scope, tests, docs, legacy contamination, read model freshness, operation barrier and stop-gate compliance.
 - Accept, reject, or request follow-up for each handoff.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md and 04-master-goal-controller.md only after accepting worker evidence.
+- Generate the next controller or worker prompt from the current state and accepted handoffs; do not generate next work from stale queue assumptions.
 - Keep server-py:workbench-group-detail-route-owner-extraction as the next executable boundary unless accepted handoffs prove a safer next boundary.
 - Commit and push controller-only state updates to origin/dev.
 - Do not implement runtime code unless no worker is assigned and the next boundary is explicitly controller-owned.
@@ -272,6 +284,8 @@ Do not edit controller-only files or change runtime behavior.
 You are Codex working in /Users/yu/Desktop/fin-ops-platform on branch dev.
 
 Objective: perform final closure audit only after the controller says worker handoffs are accepted.
+
+Do not run this prompt in parallel with active T0-T8 work. If any worker handoff is missing, incomplete, unaccepted or still being produced, stop and tell the controller which handoff is missing.
 
 Read:
 - 12-PARALLEL-ORCHESTRATION.md

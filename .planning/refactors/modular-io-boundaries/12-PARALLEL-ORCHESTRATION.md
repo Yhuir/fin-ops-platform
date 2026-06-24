@@ -43,6 +43,18 @@ Worker prompts do not automatically close the global refactor. When a worker rea
 
 The controller prompt is autonomous across the whole refactor. It consumes worker handoffs, reconciles `dev`, updates global state, assigns more work if needed, and runs final closure audit. If all worker prompts finish, the user should run the controller/final-closure prompt once more unless the controller thread has stayed active and already consumed every handoff.
 
+## Environment Policy
+
+All controller and worker prompts inherit the no-staging operating model:
+
+- No staging database is available.
+- No local `PGSQL_URL` or PostgreSQL URL is available.
+- Prompts must not ask the user for staging databases, PostgreSQL URLs, SSH passwords, DB passwords, tokens, cookies or private secrets.
+- Missing real PostgreSQL/read model/worker evidence is a soft gate, not a hard blocker. Record it as `production-evidence-deferred`, `unavailable` or equivalent evidence status and continue to the next safe owned scope.
+- Use local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and production read-only SSH evidence where useful.
+- `ssh finops-prod-root` may be used only for non-secret read-only checks such as service status, non-secret logs, deployed file existence, public/non-secret health endpoints and read-only runtime status.
+- Production writes, DB writes, queue mutation, readiness mutation, worker replay/consume, systemd mutation, deploy/restart, secret reads and OA mutation are forbidden in the parallel workflow unless a separate human production gate explicitly approves them.
+
 ## Controller Permissions
 
 Only the controller may edit these files:
