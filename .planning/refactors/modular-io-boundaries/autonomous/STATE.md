@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `planning-post-workbench-matching-production-convergence-next-boundary-selection-pending`
+Current state: `production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:workbench-matching-constructor-fix-deploy-and-convergence-runbook` as `production-controlled` in `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`. T0 deployed release `dev-workbench-matching-port-20260625020818`, proved `fin-ops-worker@workbench-matching.service` stable with `NRestarts=0`, `/health` and `/health/ready` ready, dirty scopes all done, readiness all fresh, and no post-deploy constructor traceback. Historical dead-letter rows remain unchanged and no global/module closure is claimed. The next boundary is `planning:post-workbench-matching-production-convergence-next-boundary-selection`.
+Completed `planning:post-workbench-matching-production-convergence-next-boundary-selection` as `planning-closed` in `analysis/planning-post-workbench-matching-production-convergence-next-boundary-selection-2026-06-25.md`. T0 reconciled the no-OA and workbench-matching production-controlled evidence, confirmed current health/readiness/dirty scopes are clean, and selected `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan` as the next safe boundary. Historical dead-letter rows remain unchanged and no global/module closure is claimed.
 
 ## Closed Or Deferred Slices
 

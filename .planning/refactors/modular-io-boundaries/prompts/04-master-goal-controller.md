@@ -306,18 +306,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-workbench-matching-production-convergence-next-boundary-selection`.
+Start with `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/runtime-workers-workbench-matching-orchestrator-constructor-fix-2026-06-25.md`, `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`, and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
-- Reconcile the latest production-controlled no-OA and workbench-matching evidence.
-- Select the next safe boundary without claiming module/global closure from `/health/ready` and aggregate freshness alone.
-- Do not clean historical `dead_lettered` rows without a separate bounded maintenance boundary.
-- Do not requeue, resolve, repair, run worker replay, mutate readiness or print secrets inside this planning selection boundary.
+- Read `analysis/planning-post-workbench-matching-production-convergence-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`, and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
+- Write a bounded read-only production evidence file before SSH collection.
+- Classify the 24 historical dead-letter rows using read-only inspect/dry-run evidence: dead-letter row groups and last errors, later same-dedupe done/fresh coverage, readiness fresh evidence, no active dirty scope evidence, and dry-run `resolve-covered-dead-letters` output if safe.
+- Produce a bounded apply-or-defer decision, but do not execute cleanup in this boundary.
+- Do not execute `resolve-covered-dead-letters --execute`, requeue, resolve, repair, run worker replay, mutate readiness or print secrets.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:
