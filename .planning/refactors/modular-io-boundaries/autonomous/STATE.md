@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-high-row-query-plan-selected`
+Current state: `workbench-high-row-query-plan-collected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-shadow-read-rehearsal-next-boundary-selection` as `planning-closed` in `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`. T0 reconciled Row255, rejected `local_pickle` parity retry, `postgres` vs `postgres`, authenticated API retry, browser smoke and worker waves as premature, and selected `production:workbench-read-model-high-row-query-plan-read-only-runbook` to directly investigate the Row255 PostgreSQL-side `workbench_read_models` statement timeout. No production command, runtime mutation, deploy, restart, requeue, repair, replay or closure claim occurred.
+Completed `production:workbench-read-model-high-row-query-plan-read-only-runbook` as `production-controlled` in `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`. T0 collected read-only PostgreSQL aggregate/index/EXPLAIN evidence with `/health/ready` ready before and after. Current active Workbench generations are bounded (`active` metadata rows 3491, largest active scope 1624 rows) while physical historical tables remain large (`workbench_rows=654911`, `workbench_group_rows=729629`). Representative active page-like queries use generation/scope indexes and EXPLAIN completed after correcting a runbook alias bug. No payload rows, secrets, DB writes, queue/readiness mutation, deploy, restart, requeue, repair, replay or closure claim occurred. The next boundary is `planning:post-workbench-high-row-query-plan-next-boundary-selection`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-shadow-read-rehearsal-next-boundary-selection`
+`production:workbench-read-model-high-row-query-plan-read-only-runbook`
 
 ## Next Prompt
 
-`production:workbench-read-model-high-row-query-plan-read-only-runbook`
+`planning:post-workbench-high-row-query-plan-next-boundary-selection`

@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `planning:post-shadow-read-rehearsal-next-boundary-selection`.
+Continue after `production:workbench-read-model-high-row-query-plan-read-only-runbook`.
 
 ## Current State
 
@@ -22,12 +22,18 @@ Continue after `planning:post-shadow-read-rehearsal-next-boundary-selection`.
   - `workbench_read_models` hit a PostgreSQL statement timeout;
   - output was redacted/hash based and `/health/ready` stayed ready.
 - Row256 selected a PostgreSQL-native Workbench high-row query-plan/read-only runbook as the next boundary because Row255's concrete PostgreSQL-side gap was `workbench_read_models` statement timeout.
+- Row257 collected read-only PostgreSQL Workbench high-row evidence:
+  - active generation metadata rows: 3491;
+  - largest active scope: 1624 rows;
+  - physical historical tables remain large: `workbench_rows=654911`, `workbench_group_rows=729629`;
+  - representative active page-like queries use generation/scope indexes and corrected EXPLAIN completed;
+  - no payload rows or mutations were used.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`production:workbench-read-model-high-row-query-plan-read-only-runbook`
+`planning:post-workbench-high-row-query-plan-next-boundary-selection`
 
 ## Required First Steps On Resume
 
@@ -44,9 +50,8 @@ Continue after `planning:post-shadow-read-rehearsal-next-boundary-selection`.
 5. Read `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`.
 6. Read `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`.
 7. Read `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`.
-8. Write a bounded read-only PostgreSQL runbook before any production command.
-9. Use `/health/ready` pre/post checks and `runuser -u postgres -- psql -d fin_ops` with `set default_transaction_read_only = on`, `begin read only` and `rollback`.
-10. Collect only aggregate counts, index metadata, bounded EXPLAIN/timeout classification for Workbench high-row read-model queries. Do not select payload rows or mutate production.
+8. Reconcile Row257 and select the next safe boundary for remaining authenticated API, browser/hydration, operation-barrier, high-row or module-specific closure gaps.
+9. Do not retry broad load-all shadow parity or claim Workbench closure from PostgreSQL EXPLAIN evidence alone.
 
 ## Stop Gates
 
