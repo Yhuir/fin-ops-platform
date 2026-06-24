@@ -2302,14 +2302,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Residual server.py handler boundary audit is not closed as analysis")
         if (
-            "| 191 | `server-py:workbench-legacy-action-handler-quarantine-audit` | pending"
+            "| 191 | `server-py:workbench-legacy-action-handler-quarantine-audit` | analysis-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit Workbench legacy action handlers")
+            violations.append("Workbench legacy action handler audit is not closed as analysis")
+        if (
+            "| 192 | `server-py:legacy-workbench-action-route-module-quarantine` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should quarantine legacy Workbench action routes")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-legacy-action-handler-quarantine-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench legacy action handler audit")
+        if "`server-py:legacy-workbench-action-route-module-quarantine`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at legacy Workbench action route quarantine")
 
         self.assertEqual(violations, [])
 

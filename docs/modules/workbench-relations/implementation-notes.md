@@ -1,5 +1,25 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - server.py Workbench legacy action handler quarantine audit
+
+目标：审计 `server.py` 中残留的 Workbench legacy action handler，判断哪些属于旧链路、哪些属于现代 facade/command 边界，避免旧代码污染新的 relation/read model 链路。
+
+结论：
+
+- 旧 `/workbench/actions/confirm`、`/difference`、`/exception`、`/offline`、`/offset` 仍由 `_handle_request_untracked(...)` 注册，并直接调用 `ManualReconciliationService` 与 `LedgerService`。
+- 这些旧 endpoint 不是现代 Workbench relation command/read model 链路；当前分类为 test-observed compat-only，因为 `tests/test_ledger_api.py` 仍通过 `/workbench/actions/confirm` 和 `/workbench/actions/exception` 验证 ledger/follow-up 行为。
+- 现代 `/api/workbench/actions/*` wrapper 已经委托 `WorkbenchWriteFacade`，不应回退或混入旧 `ManualReconciliationService` 链路。
+- `_handle_legacy_workbench_exception_via_application(...)` 本次未发现当前 route dispatch caller；后续需要单独证明可删除或明确 compat-only 条件。
+
+下一条边界：`server-py:legacy-workbench-action-route-module-quarantine`，先把旧 `/workbench/actions/*` HTTP/payload mapping 隔离到显式 legacy route owner，保留行为并加 guard；不在同一刀迁移 ledger 语义、不删除现代 `/api/workbench/actions/*` facade 路径、不启动 Go/Fiber/Go Worker。
+
+验证：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - pending invoice pair service boundary audit
 
 目标：审计待找发票 query/application service 对 `pair_relation_service`、`relation_facade`、`relation_command_service` 的真实依赖，决定旧 pair service 注入应删除、隔离还是保留为兼容路径。

@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:residual-route-handler-boundary-audit.
+- Last completed boundary: server-py:workbench-legacy-action-handler-quarantine-audit.
 - Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -169,7 +169,8 @@ Current state expected on start:
 - `go-hot-path:workbench-compute-production-evidence-gate` is complete as a production-evidence-deferred slice: local collector execution returned structured `configuration_missing`; production SSH confirmed active workers but the deployed release lacks the collector, and a deployed-runtime read-only PostgreSQL sampling attempt could not connect. Real candidate-specific Workbench compute evidence remains unavailable.
 - `planning:post-workbench-compute-evidence-gate-next-boundary-selection` is complete as a planning slice: Go admission rows were skipped because performance evidence, shadow diff and rollback proof are still missing, and `server-py:residual-route-handler-boundary-audit` was selected as the next non-Go shared-boundary audit.
 - `server-py:residual-route-handler-boundary-audit` is complete as an analysis slice: residual `server.py` handler/helper surfaces were classified, Workbench was identified as the largest residual owner group, and `server-py:workbench-legacy-action-handler-quarantine-audit` was selected as the next narrow audit.
-- The next pending boundary is `server-py:workbench-legacy-action-handler-quarantine-audit`.
+- `server-py:workbench-legacy-action-handler-quarantine-audit` is complete as an analysis slice: old `/workbench/actions/*` routes were classified as test-observed compat paths backed by `ManualReconciliationService` and `LedgerService`, modern `/api/workbench/actions/*` wrappers were classified as `WorkbenchWriteFacade` delegates, and `server-py:legacy-workbench-action-route-module-quarantine` was selected as the next narrow implementation boundary.
+- The next pending boundary is `server-py:legacy-workbench-action-route-module-quarantine`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -265,20 +266,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-legacy-action-handler-quarantine-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:legacy-workbench-action-route-module-quarantine` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-legacy-action-handler-quarantine-audit`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-residual-route-handler-boundary-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Audit Workbench legacy action handlers in `server.py` before any code movement.
-- Target functions include `_handle_workbench_confirm`, `_handle_workbench_difference`, `_handle_workbench_exception`, `_handle_workbench_offline`, `_handle_workbench_offset`, `_handle_legacy_workbench_exception_via_application`, `_handle_live_workbench_confirm_link`, `_handle_live_workbench_cancel_link`, `_handle_live_workbench_withdraw_link`, `_handle_live_workbench_mark_exception`, `_handle_live_workbench_update_bank_exception`, `_handle_live_workbench_oa_bank_exception`, `_handle_live_workbench_confirm_personal_advance_repayment`, `_handle_live_workbench_cancel_exception`, `_handle_workbench_ignore_row_payload`, and `_handle_workbench_unignore_row_payload`.
-- Classify current route dispatch callers, canonical writes, read model/worker side effects, `WorkbenchWriteFacade` vs old reconciliation/ledger service delegation, current tests, and target state per handler group.
-- Select exactly one next narrow implementation or follow-up audit boundary.
-- Do not move, delete or rewrite runtime code in this audit slice.
+For `server-py:legacy-workbench-action-route-module-quarantine`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-legacy-action-handler-quarantine-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/reconciliation.py`, `backend/src/fin_ops_platform/services/ledger_service.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_app.py`, `tests/test_ledger_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Isolate old `/workbench/actions/confirm`, `/workbench/actions/difference`, `/workbench/actions/exception`, `/workbench/actions/offline`, and `/workbench/actions/offset` HTTP/payload mapping behind an explicit legacy Workbench action route owner.
+- Preserve current legacy endpoint behavior and tests.
+- Keep modern `/api/workbench/actions/*` behavior unchanged and facade-backed.
+- Add or update static guard coverage proving legacy `/workbench/actions/*` is compat-only, modern `/api/workbench/actions/*` continues through `WorkbenchWriteFacade`, legacy handlers do not become modern Workbench relation/read model endpoints, and Go/Fiber/Go Worker remains blocked.
+- Do not migrate ledger/follow-up semantics into modern Workbench relation command service in this slice.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
 - Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
-- Do not change canonical Python runtime behavior in this audit slice.
+- Do not change API response shapes, status codes, ledger/reminder behavior, Workbench relation semantics, read model refresh behavior, permissions or frontend behavior.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification and diff checks.
+- Run targeted legacy route tests, platform guard, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 
