@@ -37,3 +37,13 @@ class WorkbenchActionApiRoutes:
             request_id=request_id,
             action_name="exception_apply",
         )
+
+    def confirm_link_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            preview = self._write_facade_provider().preview_confirm_link(payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "invalid_confirm_link_preview_request",
+                "message": str(exc),
+            }
+        return HTTPStatus.OK, preview

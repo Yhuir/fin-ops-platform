@@ -528,6 +528,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_confirm_link_preview_mapping_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def confirm_link_preview",
+            "preview_confirm_link",
+            "invalid_confirm_link_preview_request",
+            "KeyError",
+            "TypeError",
+            "ValueError",
+        ):
+            if marker not in route_class:
+                violations.append(f"confirm-link preview route owner is missing marker {marker}")
+
+        handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_confirm_link_preview")
+        if "_workbench_action_api_routes.confirm_link_preview(payload)" not in handler_source:
+            violations.append("server.py confirm-link preview wrapper does not delegate to the route owner")
+        if "_json_response(status, preview)" not in handler_source:
+            violations.append("server.py confirm-link preview wrapper no longer serializes the owner result")
+        for forbidden in (
+            "_workbench_write_facade().preview_confirm_link",
+            "invalid_confirm_link_preview_request",
+            "except (KeyError, TypeError, ValueError)",
+        ):
+            if forbidden in handler_source:
+                violations.append(f"server.py confirm-link preview wrapper still owns {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2495,14 +2531,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench exception apply route owner extraction is not closed as implementation")
         if (
-            "| 197 | `server-py:workbench-confirm-link-preview-route-owner-extraction` | pending"
+            "| 197 | `server-py:workbench-confirm-link-preview-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench confirm-link preview route ownership")
+            violations.append("Workbench confirm-link preview route owner extraction is not closed as implementation")
+        if (
+            "| 198 | `server-py:workbench-confirm-link-submit-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench confirm-link submit route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-confirm-link-preview-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench confirm-link preview route owner extraction")
+        if "`server-py:workbench-confirm-link-submit-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench confirm-link submit route owner extraction")
 
         self.assertEqual(violations, [])
 

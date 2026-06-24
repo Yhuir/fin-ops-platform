@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:workbench-exception-apply-route-owner-extraction.
+- Last completed boundary: server-py:workbench-confirm-link-preview-route-owner-extraction.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -175,7 +175,8 @@ Current state expected on start:
 - `server-py:modern-workbench-action-route-owner-audit` is complete as an analysis slice: modern `/api/workbench/actions/*` and `/api/workbench/exception/*` wrappers were classified by JSON/auth/freshness/timing responsibility, facade/application-service delegate, tests and target owner.
 - `server-py:workbench-exception-preview-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/exception/preview` payload/error mapping while `Application` keeps HTTP dispatch, JSON parsing and response serialization.
 - `server-py:workbench-exception-apply-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/exception/apply` facade delegation, actor fallback, request-id forwarding and `exception_apply` action-name mapping while `Application` keeps HTTP dispatch, JSON parsing, freshness guard and response serialization.
-- The next pending boundary is `server-py:workbench-confirm-link-preview-route-owner-extraction`.
+- `server-py:workbench-confirm-link-preview-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/actions/confirm-link/preview` facade delegation and invalid-request mapping while `Application` keeps HTTP dispatch, JSON parsing and response serialization.
+- The next pending boundary is `server-py:workbench-confirm-link-submit-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -271,15 +272,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-confirm-link-preview-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-confirm-link-submit-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-confirm-link-preview-route-owner-extraction`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-exception-apply-route-owner-extraction.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Move `/api/workbench/actions/confirm-link/preview` preview facade delegation and invalid-request mapping behind `WorkbenchActionApiRoutes`.
-- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; `WorkbenchWriteFacade.preview_confirm_link(...)` remains the delegate; `KeyError`, `TypeError` and `ValueError` still map to HTTP 400 with `error="invalid_confirm_link_preview_request"`; successful preview still maps to HTTP 200 with the existing preview payload; response serialization remains through `Application._json_response(...)` for this slice unless a smaller reviewed route-owner helper can preserve it exactly.
-- Keep `Application` as HTTP dispatch, JSON body parser and response serializer for this slice if that keeps the change narrower.
-- Add or update a static guard proving confirm-link preview facade/error mapping is no longer app-owned once extracted.
-- Do not move confirm submit, cancel, withdraw, cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, unignore, exception preview or exception apply routes.
+For `server-py:workbench-confirm-link-submit-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-confirm-link-preview-route-owner-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `tests/test_workbench_v2_api.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Move `/api/workbench/actions/confirm-link` live facade delegation behind `WorkbenchActionApiRoutes` without changing behavior.
+- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; freshness guard remains in `Application` unless a reviewed helper preserves it exactly; auth context resolution remains in `Application._workbench_write_auth_context(...)` unless a reviewed helper preserves it exactly; request timing behavior remains unchanged; `WorkbenchWriteFacade.confirm_link(...)` remains the delegate through the existing live helper semantics; `request_id`, `actor_id`, `tenant_id`, response shape, idempotency, operation projection and operation barrier behavior remain unchanged.
+- Keep `Application` as HTTP dispatch, JSON body parser, freshness gate, auth resolver, request timing owner and response serializer for this slice if that keeps the change narrower.
+- Add or update a static guard proving confirm-link submit facade delegation is no longer app-owned once extracted.
+- Do not move cancel, withdraw, cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, unignore, exception preview/apply or confirm-link preview routes.
 - Do not change modern Workbench API response shapes, status codes, auth, freshness guard, idempotency, relation semantics, operation barrier behavior, read model refresh behavior or frontend behavior.
 - Do not change legacy `/workbench/actions/*` behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.

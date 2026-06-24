@@ -12221,14 +12221,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        try:
-            preview = self._workbench_write_facade().preview_confirm_link(payload)
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_confirm_link_preview_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, preview)
+        status, preview = self._workbench_action_api_routes.confirm_link_preview(payload)
+        return self._json_response(status, preview)
 
     def _handle_api_workbench_exception_preview(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)

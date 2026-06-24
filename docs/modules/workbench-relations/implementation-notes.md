@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench confirm-link preview route owner extraction
+
+目标：把现代 `/api/workbench/actions/confirm-link/preview` 的 preview facade delegation 和 invalid-request mapping 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `confirm_link_preview(...)`。
+- `WorkbenchActionApiRoutes.confirm_link_preview(...)` 现在拥有 `WorkbenchWriteFacade.preview_confirm_link(...)` 调用，以及 `KeyError` / `TypeError` / `ValueError` 到 `invalid_confirm_link_preview_request` 的映射。
+- `Application._handle_api_workbench_confirm_link_preview(...)` 仍负责 JSON body parse 和 `_json_response(...)`。
+- 新增静态 guard，确保 confirm-link preview delegate/error mapping 不会回流到 `server.py` wrapper。
+
+未改变：
+
+- confirm submit、cancel/withdraw、cash special、bank exception、OA-bank exception、personal advance、cancel exception、ignore/unignore、exception preview/apply 都未迁移。
+- response shape、status code、auth、freshness guard、request timing、idempotency、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-confirm-link-submit-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_and_submit_require_note_for_amount_mismatch tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_preserves_existing_case_group_before_submit tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_confirm_link_preview_mapping_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench exception apply route owner extraction
 
 目标：把现代 `/api/workbench/exception/apply` 的 facade delegation、actor fallback 和 request-id mapping 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
