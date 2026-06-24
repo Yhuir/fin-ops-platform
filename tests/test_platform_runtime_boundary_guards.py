@@ -699,6 +699,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_tax_offset_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        executor_path = SERVICES_ROOT / "tax_offset_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
+        violations: list[str] = []
+
+        removed_helpers = {
+            "_derived_lifecycle_tax_offset_executor",
+            "_derived_lifecycle_tax_offset_month_cache_executor",
+        }
+        for helper_name in sorted(removed_helpers):
+            if _function_source(server_tree, server_source, helper_name):
+                violations.append(f"server.py still owns removed tax offset lifecycle executor {helper_name}")
+        if "TaxOffsetDerivedLifecycleExecutor(" not in server_source:
+            violations.append("server.py does not build the explicit tax offset lifecycle executor")
+        if '"tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit tax offset read model executor")
+        if '"tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache' not in server_source:
+            violations.append("derived lifecycle registry does not use the explicit tax offset month cache executor")
+        if "class TaxOffsetDerivedLifecycleExecutor" not in executor_source:
+            violations.append("tax offset lifecycle executor service is missing")
+        for snippet in (
+            "def execute_read_model(",
+            "def execute_month_cache(",
+            'reason=str(domain_plan.get("reason") or "derived_lifecycle_tax_offset")',
+            '"deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)}',
+            '"deleted_counts": {"tax_offset_month_cache": len(months) if months else int("all" in scope_keys)}',
+            '"enqueued_jobs": ["tax_offset_cache_warmup"] if deleted_scope_keys else []',
+        ):
+            if snippet not in executor_source:
+                violations.append(f"tax offset lifecycle executor is missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",

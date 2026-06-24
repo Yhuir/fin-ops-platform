@@ -330,6 +330,7 @@ from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_offset_derived_lifecycle_executor import TaxOffsetDerivedLifecycleExecutor
 from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 from fin_ops_platform.services.tax_offset_read_model_service import (
@@ -19262,8 +19263,8 @@ class Application:
                     domain_plan,
                     schedule_warmup=schedule_cost_warmup,
                 ),
-                "tax_offset_read_model": self._derived_lifecycle_tax_offset_executor,
-                "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
+                "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
+                "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
                 "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
                 "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
@@ -19419,30 +19420,6 @@ class Application:
             "enqueued_jobs": enqueued_jobs,
         }
 
-    def _derived_lifecycle_tax_offset_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        if "all" in scope_keys:
-            deleted_scope_keys = self._invalidate_tax_offset_read_models()
-        else:
-            deleted_scope_keys = self._invalidate_tax_offset_read_model_scopes(
-                scope_keys,
-                reason=str(domain_plan.get("reason") or "derived_lifecycle_tax_offset"),
-            )
-        return {
-            "deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)},
-            "invalidated_scopes": deleted_scope_keys,
-            "enqueued_jobs": ["tax_offset_cache_warmup"] if deleted_scope_keys else [],
-        }
-
-    def _derived_lifecycle_tax_offset_month_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        months = self._months_from_lifecycle_scope_keys(scope_keys)
-        self._tax_offset_service.clear_month_cache(None if "all" in scope_keys else months)
-        return {
-            "deleted_counts": {"tax_offset_month_cache": len(months) if months else int("all" in scope_keys)},
-            "invalidated_scopes": months or (["all"] if "all" in scope_keys else []),
-        }
-
     def _derived_lifecycle_pending_invoice_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         metadata = self._domain_plan_metadata(domain_plan)
         metadata_scope_keys = metadata.get("pending_invoice_scope_keys")
@@ -19483,6 +19460,12 @@ class Application:
                 scope_keys,
                 **kwargs,
             ),
+        )
+
+    def _tax_offset_derived_lifecycle_executor(self) -> TaxOffsetDerivedLifecycleExecutor:
+        return TaxOffsetDerivedLifecycleExecutor(
+            runtime_service=self._tax_offset_runtime(),
+            clear_month_cache=self._tax_offset_service.clear_month_cache,
         )
 
     def _derived_lifecycle_no_oa_bank_batch_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

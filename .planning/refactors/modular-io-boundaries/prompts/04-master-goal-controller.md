@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:tax-offset-worker-rebuild-executor-port-extraction.
+- Last completed boundary: read-models:tax-offset-derived-lifecycle-executor-boundary-audit.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -117,9 +117,10 @@ Current state expected on start:
 - The recorded OA attachment invoice API regression was fixed by centralizing `invoice_type=进项发票` / `销项发票` formal invoice evidence fallback in `FinancialObjectIdentityPolicy` when `evidence_type` is missing.
 - Tax offset worker rebuild executor extraction is complete: `TaxOffsetWorkerRebuildExecutor` now owns compat worker rebuild, read model persistence and fresh Redis month/summary cache publish behavior.
 - `Application.rebuild_tax_offset_read_model_scope(...)` is now dependency assembly plus a thin delegate to `TaxOffsetWorkerRebuildExecutor.rebuild_scope(scope_key)` and is guarded from re-owning rebuild, persistence or direct fresh cache publishing.
-- `tax_offset` cannot move to `production-evidence-deferred` until remaining derived lifecycle tax offset executor surfaces are audited and either extracted, quarantined, or proven acceptable.
+- Tax offset derived lifecycle executor extraction is complete: `TaxOffsetDerivedLifecycleExecutor` now owns read model invalidation and month-cache clearing behavior; registry entries use explicit executor methods and removed app-owned helper methods are guarded.
+- `tax_offset` cannot move to `production-evidence-deferred` until the post-derived local closure/defer audit confirms no further local implementation gaps.
 - No module is globally closed.
-- The next pending boundary is read-models:tax-offset-derived-lifecycle-executor-boundary-audit.
+- The next pending boundary is read-models:tax-offset-post-derived-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -215,19 +216,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:tax-offset-derived-lifecycle-executor-boundary-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:tax-offset-post-derived-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:tax-offset-derived-lifecycle-executor-boundary-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
+For read-models:tax-offset-post-derived-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Audit remaining app-owned tax offset derived lifecycle support surfaces, especially `_derived_lifecycle_tax_offset_executor(...)`, `_derived_lifecycle_tax_offset_month_cache_executor(...)`, derived lifecycle domain-map wiring, cache payload handling and refresh enqueue metadata.
-- Classify each path as removable legacy, compatibility-only delegate, legitimate dependency assembly, or implementation behavior that must move behind an explicit executor/service boundary.
-- If the audit proves a narrow extraction is necessary and safe, implement that extraction in the same bounded slice with focused tests and guards; otherwise close the slice as analysis with explicit next boundary selection.
+- Re-audit local `tax_offset` implementation closure after repository port, freshness/barrier, worker rebuild executor and derived lifecycle executor extraction.
+- Search for remaining app-owned or legacy-contaminating tax offset read model/read cache/worker/lifecycle support surfaces.
+- If no further local implementation gap remains, record local implementation support as accounted and move only production PostgreSQL/worker/App Status/high-row/browser evidence to production-evidence-deferred.
+- If another local implementation gap remains, insert exactly one next narrow boundary before Go candidates and do not mark tax_offset local support accounted.
 - Preserve lifecycle event semantics, refresh scope selection, operation names, metadata shape, response shape, cache behavior, gateway-backed enqueue behavior and tax offset API behavior.
 - Do not select Go hot-path admission while modular IO/read model implementation-pending or implementation-gap-open work remains.
 - Produce/update an analysis file documenting previous state, inspected call graph, selected decision, legacy/pollution classification, state-machine impact, seven-category test applicability, verification and next boundary.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted tax offset/derived lifecycle tests if implementation changes are made; for analysis-only closure run docs verification and diff checks at minimum.
+- For analysis-only closure run docs verification and diff checks at minimum; if implementation is required, run targeted static guard/tax offset tests.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

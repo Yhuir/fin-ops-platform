@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-tax-offset-worker-rebuild-executor-port-extraction`
+Current state: `autonomous-continue-after-read-models-tax-offset-derived-lifecycle-executor-boundary-audit`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:tax-offset-worker-rebuild-executor-port-extraction`. `TaxOffsetWorkerRebuildExecutor` now owns tax offset compat worker rebuild, read model persistence and fresh Redis cache publish behavior; `Application.rebuild_tax_offset_read_model_scope(...)` is a thin delegate guarded by static tests. `tax_offset` remains implementation-gap-open because derived lifecycle tax offset executor surfaces still need audit. The next executable boundary is `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`. Go hot-path admission remains blocked.
+Completed `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`. `TaxOffsetDerivedLifecycleExecutor` now owns tax offset derived lifecycle read model invalidation and month-cache clearing behavior; derived lifecycle registry entries use explicit executor methods, and removed app-owned helper methods are guarded. `tax_offset` remains implementation-gap-open until the post-derived local closure/defer audit confirms no further local implementation gaps. The next executable boundary is `read-models:tax-offset-post-derived-local-implementation-closure-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -161,6 +161,7 @@ Completed `read-models:tax-offset-worker-rebuild-executor-port-extraction`. `Tax
 - `read-models:tax-offset-refresh-freshness-operation-barrier-audit` -> `implementation-closed`
 - `read-models:tax-offset-local-implementation-closure-audit` -> `analysis-closed`
 - `read-models:tax-offset-worker-rebuild-executor-port-extraction` -> `implementation-closed`
+- `read-models:tax-offset-derived-lifecycle-executor-boundary-audit` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -176,8 +177,8 @@ Completed `read-models:tax-offset-worker-rebuild-executor-port-extraction`. `Tax
 - `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`. A follow-up production fail-closed gap was fixed: relation detail no longer live-rebuilds in production SQL runtime when the SQL read repository is unavailable. Local implementation support is now accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `output_invoice_collection` is now the sixth non-Go read model implementation pilot after the input usage local closure audit. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `OutputInvoiceCollectionReadModelRepositoryPort`. Freshness/force-refresh/operation-barrier/helper audit is implemented: mutation responses expose affected read model scope keys and operation barrier targets, frontend write-after-read flows prefer concrete month targets over fan-out-only `all`, `output_invoice_collection:all` remains a fan-out control scope, and unused app-level output projection helpers were removed from `Application`. Relation detail production fail-closed support is implemented: missing SQL detail repository returns refreshing/enqueue instead of live rebuild. Local closure accounting is now complete enough to defer only real PostgreSQL/worker/App Status/high-row/browser evidence; the module remains not globally closed.
 - `invoice_lifecycle` is now the seventh non-Go read model implementation pilot after the output collection local closure audit. Repository port extraction is implemented: facade lifecycle row lookups and SQL projection save/mark paths now use `InvoiceLifecycleReadModelRepositoryPort`, while lifecycle rules, payload shape, worker semantics and API behavior remain unchanged. Freshness/barrier audit is also closed as a regression guard: facade reads do not use queryable `all`, refresh service expands `all` to month shards, source-version checks run before/after rebuild, scope policy is month-or-all, App Status/worker/manifest contracts are registered, and exact-month operation barrier behavior is now covered. Derived lifecycle execution now uses `InvoiceLifecycleDerivedLifecycleExecutor` instead of an app-owned helper, preserving gateway-backed refresh enqueue metadata and response shape. Local implementation support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. Repository port extraction is implemented: `TaxOffsetReadModelRepositoryPort` exposes only manifest-listed load/get/save methods, state-store tax read/write wiring uses the port, the SQL read repository property returns the port over the optional read connection, and tax projection save paths go through the port. Freshness/barrier audit is also implemented: SQL fresh gate, force refresh scope policy, `all` fan-out/month shard proof, plan-save/certified-import operation barrier and legacy/app-owned wrappers are accounted for; OA attachment invoice evidence fallback now promotes formal invoice payloads with `invoice_type` and no `evidence_type`. Worker rebuild executor extraction moved compat worker rebuild/persist/fresh-cache publish behavior into `TaxOffsetWorkerRebuildExecutor` and made the app method a thin delegate. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
-- The next pending boundary is `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`, which must audit remaining app-owned tax offset derived lifecycle and month-cache executor surfaces before local closure/defer accounting.
+- `tax_offset` is now the eighth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection` and `invoice_lifecycle`. Repository port extraction is implemented: `TaxOffsetReadModelRepositoryPort` exposes only manifest-listed load/get/save methods, state-store tax read/write wiring uses the port, the SQL read repository property returns the port over the optional read connection, and tax projection save paths go through the port. Freshness/barrier audit is also implemented: SQL fresh gate, force refresh scope policy, `all` fan-out/month shard proof, plan-save/certified-import operation barrier and legacy/app-owned wrappers are accounted for; OA attachment invoice evidence fallback now promotes formal invoice payloads with `invoice_type` and no `evidence_type`. Worker rebuild executor extraction moved compat worker rebuild/persist/fresh-cache publish behavior into `TaxOffsetWorkerRebuildExecutor` and made the app method a thin delegate. Derived lifecycle executor extraction moved read model invalidation and month-cache clearing behavior into `TaxOffsetDerivedLifecycleExecutor` and removed the app-owned helper methods. `cost_statistics`, `turnover_ledger`, `no_oa_bank_batch`, `search` and `bank_account_balance` remain implementation-gap-open candidates for later slices.
+- The next pending boundary is `read-models:tax-offset-post-derived-local-implementation-closure-audit`, which must re-audit local tax offset implementation closure/defer status after repository port, freshness/barrier, worker rebuild executor and derived lifecycle executor extraction.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -196,8 +197,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:tax-offset-worker-rebuild-executor-port-extraction`
+`read-models:tax-offset-derived-lifecycle-executor-boundary-audit`
 
 ## Next Prompt
 
-`read-models:tax-offset-derived-lifecycle-executor-boundary-audit`
+`read-models:tax-offset-post-derived-local-implementation-closure-audit`

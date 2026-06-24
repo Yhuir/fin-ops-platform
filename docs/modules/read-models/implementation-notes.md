@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset derived lifecycle executor extraction
+
+- 目标：执行 `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`，把 tax offset derived lifecycle read model/cache execution 从 `Application` 迁到显式 executor。
+- 影响范围：`TaxOffsetDerivedLifecycleExecutor`、tax offset derived lifecycle registry wiring、platform runtime boundary guard 和 modular IO state；不改变 tax business/API/UI/worker event/queue/schema/SQL projection builder/Redis 合同。
+- 关键决策：`TaxOffsetDerivedLifecycleExecutor.execute_read_model(...)` 维护 read model invalidation result shape；`execute_month_cache(...)` 维护 month extraction 和 cache clear result shape。`Application` 只通过 `_tax_offset_derived_lifecycle_executor()` 组装 runtime service 与 cache clearer，旧 app-owned helper 方法已删除并 guarded。
+- 文档影响：新增 derived lifecycle executor analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；共享 read model 状态机定义不变。
+- 测试覆盖：新增 `tests/test_tax_offset_derived_lifecycle_executor.py`；扩展 `tests/test_platform_runtime_boundary_guards.py`；复跑 derived lifecycle service 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:tax-offset-post-derived-local-implementation-closure-audit`。
+
 ## 2026-06-24 - Tax offset worker rebuild executor extraction
 
 - 目标：执行 `read-models:tax-offset-worker-rebuild-executor-port-extraction`，把 `Application.rebuild_tax_offset_read_model_scope(...)` 中的 app-owned worker rebuild 行为迁出到显式 executor/service boundary。

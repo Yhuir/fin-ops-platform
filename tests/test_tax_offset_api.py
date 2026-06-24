@@ -396,7 +396,7 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertIn("2026-05", create_job.call_args.kwargs["idempotency_key"])
         run_job.assert_called_once()
 
-    def test_tax_certified_confirm_invalidates_tax_offset_month_cache(self) -> None:
+    def test_tax_certified_confirm_triggers_tax_offset_lifecycle_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             preview_body, preview_headers = build_multipart_payload(
@@ -411,7 +411,11 @@ class TaxOffsetApiTests(unittest.TestCase):
             )
             preview_payload = json.loads(preview_response.body)
 
-            with patch.object(app, "_invalidate_tax_offset_read_model_scopes") as invalidate:
+            with patch.object(
+                app._import_processing_service,
+                "_execute_derived_data_lifecycle_event",
+                wraps=app._import_processing_service._execute_derived_data_lifecycle_event,
+            ) as lifecycle_event:
                 confirm_response = app.handle_request(
                     "POST",
                     "/api/tax-offset/certified-import/confirm",
@@ -419,7 +423,10 @@ class TaxOffsetApiTests(unittest.TestCase):
                 )
 
         self.assertEqual(confirm_response.status_code, 200)
-        invalidate.assert_called_once_with(["2026-01"], reason="tax_certified_import_confirm")
+        lifecycle_event.assert_called_once()
+        self.assertEqual(lifecycle_event.call_args.args[0], "tax_certified_import_confirmed")
+        self.assertEqual(lifecycle_event.call_args.kwargs["months"], ["2026-01"])
+        self.assertEqual(lifecycle_event.call_args.kwargs["include_all"], False)
 
     def test_invoice_import_confirm_invalidates_tax_offset_month_cache(self) -> None:
         app = build_application()

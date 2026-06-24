@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO derived lifecycle executor extraction
+
+- 目标：执行 `read-models:tax-offset-derived-lifecycle-executor-boundary-audit`，审计并迁出税金抵扣 derived lifecycle read model invalidation 与 month-cache clearing 的 app-owned 执行逻辑。
+- 影响范围：`TaxOffsetDerivedLifecycleExecutor`、derived lifecycle registry、`Application` lifecycle helper、platform runtime boundary guard、tax offset/read-models 文档；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：新增显式 `TaxOffsetDerivedLifecycleExecutor`，由它维护 `tax_offset_read_model` 和 `tax_offset_month_cache` 两条 derived lifecycle 执行路径；`Application` 只组装 runtime service 与 month-cache clearer，并注册 executor 方法。旧 `_derived_lifecycle_tax_offset_executor(...)` 和 `_derived_lifecycle_tax_offset_month_cache_executor(...)` 已删除并由 guard 防回归。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：新增 `tests/test_tax_offset_derived_lifecycle_executor.py` 覆盖 explicit scope、empty scope、all scope、month cache month/all 行为；扩展 `tests/test_platform_runtime_boundary_guards.py` 证明 old app-owned helpers 不回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+- 后续事项：执行 `read-models:tax-offset-post-derived-local-implementation-closure-audit`，确认本地实现支持是否可以进入 production evidence defer。
+
 ## 2026-06-24 - Modular IO worker rebuild executor extraction
 
 - 目标：执行 `read-models:tax-offset-worker-rebuild-executor-port-extraction`，把税金抵扣 compat worker rebuild、read model persistence 和 fresh Redis month/summary cache publish 行为迁出 `Application`。
