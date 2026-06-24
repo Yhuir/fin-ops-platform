@@ -17,6 +17,15 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-24 - Read model local implementation closure audit
+
+- 目标：执行 modular IO slice `read-models:turnover-ledger-local-implementation-closure-audit`，确认外部往来台账 read model 本地实现是否还存在旧链路污染或未分类 authoritative 行为。
+- 影响范围：外部往来 query service、repository port、SQL projection builder、refresh producer、worker refresh service、write UoW、legacy fallback adapters、bank detail side-effect callback、frontend operation barrier usage 和测试/状态文档；不改变外部往来 grouped payload、闭环、撤回、标签、extra、导出、权限、审计或前端行为。
+- 关键决策：未发现剩余本地 implementation gap。`Application` 已不拥有 turnover refresh/clear helper；事务内写路径通过 dirty outbox writer 和 scope policy；非事务刷新通过 `TurnoverLedgerReadModelRefreshProducer`；worker 只消费 `turnover_ledger.read_model.refresh` 并 complete dirty scope。`BankDetailsApplicationService` 内部同名 wrapper 只作为 producer callback 缺失时的 local/isolated compat fallback，正常 server factory 已注入 producer。
+- 测试覆盖：本轮是 analysis/accounting only，复用 turnover producer/query/refresh/API、manifest、runtime worker registry、operation barrier、platform boundary guard 和前端 operation barrier 测试证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL rows/source_versions/readiness、真实 turnover worker drain、真实 App Status/dirty/outbox 状态、高行数 grouped ledger 性能和 authenticated browser smoke 仍 deferred；这不是外部往来模块全局 closed。
+
 ## 2026-06-24 - Read model refresh producer and clear port extraction
 
 - 目标：执行 modular IO slice `read-models:turnover-ledger-refresh-producer-clear-port-extraction`，移除 `Application` 拥有的 turnover read model refresh/clear helper。

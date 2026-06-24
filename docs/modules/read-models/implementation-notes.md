@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Turnover ledger local implementation closure audit
+
+- 目标：执行 `read-models:turnover-ledger-local-implementation-closure-audit`，复核外部往来台账在 repository port、freshness/barrier 和 refresh producer/clear 抽取后是否仍有本地 implementation gap。
+- 影响范围：turnover read/query/refresh/worker/write/fallback/frontend operation barrier surfaces、modular IO state 和 read-models/turnover-ledger 文档；不改变运行时代码、API shape、业务规则、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 关键决策：未发现新的本地 implementation gap。`TurnoverLedgerQueryService`、`TurnoverLedgerReadModelRepositoryPort`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshProducer`、`TurnoverLedgerReadModelRefreshService` 和 `TurnoverLedgerWriteUnitOfWork` 已形成明确边界；剩余 legacy fallback/local adapter 仅作为 compat-only 路径，并不得直接写 job tables、readiness、Redis fresh payload 或绕过 gateway/port。
+- 文档影响：新增 local closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/turnover-ledger 实施记录和测试矩阵。
+- 测试覆盖：本轮是 analysis/accounting only，复用 turnover producer/query/refresh/API、manifest、runtime worker registry、operation barrier 和 platform boundary guard 作为证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；`turnover_ledger` 是 `production-evidence-deferred`，不是 module closed。
+- 后续事项：执行 `read-models:next-pilot-selection-after-turnover-ledger`，从 `no_oa_bank_batch`、`search`、`bank_account_balance` 选择下一个非 Go read model pilot；Go admission 继续 blocked。
+
 ## 2026-06-24 - Turnover ledger refresh producer and clear port extraction
 
 - 目标：执行 `read-models:turnover-ledger-refresh-producer-clear-port-extraction`，把外部往来台账 read model refresh/clear 行为从 `Application` helper 收敛到显式 producer 边界。

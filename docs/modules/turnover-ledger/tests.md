@@ -96,6 +96,20 @@
 - End-to-end business-flow integration tests：不适用；本 slice 只迁移 refresh/clear producer 边界，未改变 confirm/withdraw/tag-selection 业务流。
 - Existing feature regression tests：适用，更新 `tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` 和 `tests/test_platform_runtime_boundary_guards.py`，防止旧 app-owned helper 返回并防止 clear 再走 broad workbench repository。
 
+## 2026-06-24 - local implementation closure audit test note
+
+`read-models:turnover-ledger-local-implementation-closure-audit` 已完成为 analysis/accounting slice：
+
+- Business core unit tests：不适用；本轮不改金额、分类、分组、闭环、撤回、标签或 extra 规则。
+- Service-layer tests：适用但未新增；复用 `tests/test_turnover_ledger_read_model_refresh_producer.py`、`tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、UoW/API regressions 和 platform boundary guard 作为本地边界证据。
+- API contract tests：适用但未新增；本轮不改 HTTP shape/status/error/permission/freshness target，复用 `tests/test_turnover_ledger_api.py` 的合同回归。
+- Read model/cache/background job tests：适用但未新增；复用 producer/query/worker/manifest/runtime worker registry/operation barrier tests 证明 gateway、scope policy、worker event 和 dirty scope complete 行为。
+- Frontend component and interaction tests：适用为证据；本轮不改前端，复用现有 TurnoverLedgerPage/API/operation barrier tests 证明写后等待 `turnover_ledger` barrier 和 stale grouped payload 阻断。
+- End-to-end business-flow integration tests：适用为证据；本轮不改业务流，复用 turnover/workbench integration 和 Browser E2E 文档证据。
+- Existing feature regression tests：适用，复用 platform runtime boundary guards，证明旧 app-owned refresh/clear helper 不得回归。
+
+结论：本地实现支持已 accounted，剩余是 production evidence deferred；仍需真实 PostgreSQL/worker/App Status/high-row/browser evidence，不能把本结论理解为模块全局 closed。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

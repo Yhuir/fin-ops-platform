@@ -109,6 +109,17 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - 发现 gap：`Application._enqueue_turnover_ledger_read_model_refreshes(...)` 与 `_clear_turnover_ledger_read_model_best_effort(...)` 仍是 app-owned refresh/clear helper，且 clear 仍通过 broad workbench SQL repository。
 - 下一实现 slice `read-models:turnover-ledger-refresh-producer-clear-port-extraction` 必须新增/更新 service-layer/read-model regression guard，证明 refresh producer 行为在显式边界内，clear 使用 turnover-specific port，旧 app helper 不再重新拥有 authoritative behavior。
 
+## 2026-06-24 - turnover ledger local implementation closure audit note
+
+`read-models:turnover-ledger-local-implementation-closure-audit` 已完成为 analysis/accounting slice。结论：
+
+- 本地支持 accounted：query service、repository port、SQL projection builder、refresh producer、worker refresh service、transactional write UoW/dirty outbox writer、manifest/App Status/worker registry 和 frontend operation barrier usage 均有现有代码/测试证据。
+- compat-only：turnover legacy fallback facades、`TurnoverLedgerLocalDirtyOutboxWriter` 和 `BankDetailsApplicationService` 的内部 turnover enqueue fallback；正常 server factory 注入 `TurnoverLedgerReadModelRefreshProducer.enqueue`。
+- 未新增测试：本轮不改运行时代码，复用 producer/query/refresh/API、manifest、runtime worker registry、operation barrier 和 platform boundary guard 作为证据。
+- 剩余风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred；该状态不是 module closed。
+
+下一 slice 是 `read-models:next-pilot-selection-after-turnover-ledger`，必须从 `no_oa_bank_batch`、`search`、`bank_account_balance` 中选择下一个非 Go read model pilot。
+
 ## 历史 bug 回归库
 
 | 日期 | Bug | 根因 | 回归测试 | 验证命令 | 状态 |

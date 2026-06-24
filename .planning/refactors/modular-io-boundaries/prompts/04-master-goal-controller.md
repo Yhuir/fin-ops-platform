@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:turnover-ledger-refresh-producer-clear-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:turnover-ledger-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -135,9 +135,10 @@ Current state expected on start:
 - Turnover ledger repository port extraction is complete: `TurnoverLedgerReadModelRepositoryPort` owns manifest-listed list/save/clear methods, PostgreSQL state-store turnover read wiring returns the port, `TurnoverLedgerQueryService` app injection uses the turnover-specific port instead of the broad workbench SQL read repository, and worker projection save paths receive the port.
 - Turnover ledger freshness/barrier audit is analysis-closed: SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence exist, but app-owned clear/refresh helpers remain a local implementation gap.
 - Turnover ledger refresh producer/clear extraction is complete: `TurnoverLedgerReadModelRefreshProducer` owns non-transactional turnover refresh enqueue and best-effort clear, enqueue stays behind `ReadModelRefreshGateway`, and clear uses the turnover-specific read repository port instead of broad `_workbench_sql_read_repository`.
+- Turnover ledger local implementation support is accounted for after repository port, freshness/barrier audit and refresh producer/clear extraction, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
 - Remaining later non-Go read model candidates include `no_oa_bank_batch`, `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:turnover-ledger-local-implementation-closure-audit.
+- The next pending boundary is read-models:next-pilot-selection-after-turnover-ledger.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -233,19 +234,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:turnover-ledger-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-turnover-ledger unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:turnover-ledger-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-producer-clear-port-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/turnover-ledger/README.md`, `docs/modules/turnover-ledger/implementation-notes.md`, `docs/modules/turnover-ledger/tests.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh_producer.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_repository.py`, `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`, `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`, `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`, `backend/src/fin_ops_platform/services/bank_details_application_service.py`, `tests/test_turnover_ledger_read_model_refresh_producer.py`, `tests/test_turnover_ledger_query_service.py`, `tests/test_turnover_ledger_api.py`, `tests/test_read_model_architecture_guards.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Use CodeGraph for structural lookup before declaring closure or selecting a follow-up implementation boundary.
-- Audit remaining `turnover_ledger` local implementation surfaces after repository port, freshness/barrier audit and refresh producer/clear extraction.
-- Classify remaining route/service/repository/read model/worker/frontend API paths as explicit boundary, dependency assembly, compat-only, removed, or implementation gap.
-- If no local implementation gap remains, move local support to `production-evidence-deferred` without claiming global module closure; if a concrete gap remains, queue exactly one next narrow boundary.
-- Do not change turnover business rules, grouped payload shape, manual closure semantics, Workbench relation command behavior, API shape, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning, frontend behavior, Go/Fiber or Go Worker status.
+For read-models:next-pilot-selection-after-turnover-ledger:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-cost-statistics.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/runtime_worker_registry.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, target module docs for `no_oa_bank_batch`, `search` and `bank_account_balance`, and relevant tests for those candidates.
+- Use CodeGraph for structural lookup before selecting the next pilot.
+- Compare `no_oa_bank_batch`, `search` and `bank_account_balance` by stale-read risk, user-visible impact, repository-port narrowness, freshness/operation-barrier gaps, worker/App Status contract and test coverage.
+- Select exactly one next non-Go read model pilot.
+- Insert the selected pilot's first narrow implementation boundary before Go/Fiber/Go Worker admission items.
+- Do not implement repository-port extraction in the selection slice.
+- Do not implement Go/Fiber/Go Worker.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted audit-driven tests, app check, docs verification and diff checks.
+- Run targeted static evidence collection, app check, docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to the next selected boundary if verification passes.
+- Continue to the selected first implementation boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
