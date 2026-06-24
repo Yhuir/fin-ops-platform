@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-parallel-handoff-next-boundary-selection-pending`
+Current state: `production-readiness-worker-status-runbook-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:commit-backed-state-reconciliation` as `planning-closed` in `analysis/commit-backed-state-reconciliation-2026-06-25.md`. T0 reconciled queue, roadmap and worker handoff evidence from git commits/diffs/tests instead of state-file claims. The reconciliation found 124 queue rows with local proof/guard evidence, 79 docs/analysis-only rows, 22 deferred production/Go/prerequisite rows and no globally closed product module. The next controller-owned boundary is now `planning:post-parallel-handoff-next-boundary-selection`.
+Completed `planning:post-parallel-handoff-next-boundary-selection` as `planning-closed` in `analysis/planning-post-parallel-handoff-next-boundary-selection-2026-06-25.md`. T0 selected `production:readiness-and-worker-status-controlled-read-only-runbook` as the next boundary because accepted T6 evidence found `/health/ready` timeouts and Workbench worker `activating/auto-restart`. This is T0-only, read-only, and must not print secrets or mutate production.
 
 ## Closed Or Deferred Slices
 
