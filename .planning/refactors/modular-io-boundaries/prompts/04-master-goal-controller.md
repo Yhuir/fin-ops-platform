@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: go-hot-path:workbench-compute-python-reference-contract-guards.
-- Last status: static-guard-closed.
+- Last completed boundary: go-hot-path:workbench-compute-production-evidence-gate.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -166,7 +166,8 @@ Current state expected on start:
 - `go-hot-path:workbench-compute-performance-baseline-contract` is complete as a planning slice: Workbench compute Python reference IO, candidate input/output, state/events/read model dependencies, permissions/audit assumptions, shadow forbidden writes, minimum performance evidence and rollback gates are documented.
 - `go-hot-path:workbench-compute-python-reference-contract-guards` is complete as a static guard slice: local tests now guard Workbench compute Python reference state-write ownership and Go shadow/admission forbidden-write queue prerequisites.
 - `go-hot-path:workbench-compute-performance-evidence-collector-contract` is complete as an implementation slice: read-only `workbench_compute_evidence` tooling now reports matching duration p95/p99, scope samples, worker heartbeat, candidate/decision counts, active generation row counts, matching-originated enqueue-to-fresh, query timing/EXPLAIN and structured configuration-missing/partial evidence status.
-- The next pending boundary is `go-hot-path:workbench-compute-production-evidence-gate`.
+- `go-hot-path:workbench-compute-production-evidence-gate` is complete as a production-evidence-deferred slice: local collector execution returned structured `configuration_missing`; production SSH confirmed active workers but the deployed release lacks the collector, and a deployed-runtime read-only PostgreSQL sampling attempt could not connect. Real candidate-specific Workbench compute evidence remains unavailable.
+- The next pending boundary is `planning:post-workbench-compute-evidence-gate-next-boundary-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -262,22 +263,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `go-hot-path:workbench-compute-production-evidence-gate` unless planning-state reconciliation finds an inconsistency first.
+Start with `planning:post-workbench-compute-evidence-gate-next-boundary-selection` unless planning-state reconciliation finds an inconsistency first.
 
-For `go-hot-path:workbench-compute-production-evidence-gate`:
-- Read `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-baseline-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-python-reference-contract-guards.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-performance-evidence-collector-contract.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/reconciliation-workbench/implementation-notes.md`, `docs/operations/runtime-worker-governance.md`, `backend/src/fin_ops_platform/tools/workbench_compute_evidence.py`, and `tests/test_workbench_compute_evidence.py`.
-- Run or explicitly defer the read-only Workbench compute evidence collection path in an approved deployed/runtime context.
-- First run the collector locally without assuming `PGSQL_URL`; if configuration is missing, record the structured `configuration_missing` result as expected local evidence.
-- If SSH production access is used, perform only read-only checks. Do not write secrets into files, docs, prompts, shell scripts or git history.
-- Prefer an existing approved runtime wrapper/env on the server. Do not print database URLs or secret values.
-- If no safe approved way exists to run the collector with production database connectivity, write an analysis file that records `production-evidence-deferred` and explains the missing runtime evidence.
-- Required real evidence includes worker p95/p99 duration, claimed/processed/failed/stale-completed scope counts, row counts, candidate/decision counts, dirty-scope lag, heartbeat, query timing where available and active generation enqueue-to-fresh p95/p99 after matching invalidation.
-- Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
+For `planning:post-workbench-compute-evidence-gate-next-boundary-selection`:
+- Read `.planning/ROADMAP.md`, `.planning/refactors/README.md`, `.planning/refactors/modular-io-boundaries/README.md`, `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`, `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-production-evidence-gate.md`, `autonomous/MODULE-QUEUE.md`, `autonomous/STATE.md`, `autonomous/JOURNAL.md`, and `docs/modules/README.md`.
+- Reconcile the roadmap and queue after the Workbench compute production evidence gate was deferred.
+- Select the next safe non-blocked boundary from the existing modular IO roadmap.
+- Do not select any Go admission row while candidate-specific evidence, shadow-run proof and rollback gates remain missing.
+- If the next useful boundary is not already represented in `MODULE-QUEUE.md`, insert one narrow planning or implementation slice with a concrete boundary name, status `pending`, and clear module-closure semantics.
+- Prefer remaining modular IO/read model/worker boundary hardening over Go implementation while Go admission gates are blocked.
 - Do not implement Go, Go Fiber or Go Worker in this slice.
-- Do not change canonical Python runtime behavior.
-- Keep `go-hot-path:workbench-compute-admission` blocked unless real performance evidence and shadow prerequisites are satisfied.
+- Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
+- Do not change canonical Python runtime behavior in this planning slice.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run docs verification, diff checks and targeted evidence-gate checks.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 

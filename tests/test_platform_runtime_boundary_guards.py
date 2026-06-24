@@ -2285,14 +2285,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench compute performance evidence collector is not closed")
         if (
-            "| 184 | `go-hot-path:workbench-compute-production-evidence-gate` | pending"
+            "| 184 | `go-hot-path:workbench-compute-production-evidence-gate` | production-evidence-deferred"
             not in queue_source
         ):
-            violations.append("Workbench compute production evidence gate is not the pending queue item")
+            violations.append("Workbench compute production evidence gate is not deferred after missing real evidence")
         if "| 185 | `go-hot-path:workbench-compute-admission` | blocked-by-prerequisite" not in queue_source:
             violations.append("Workbench compute admission is no longer blocked behind production evidence prerequisites")
+        if (
+            "| 189 | `planning:post-workbench-compute-evidence-gate-next-boundary-selection` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should select the next safe non-Go boundary after evidence defer")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
+        if "`planning:post-workbench-compute-evidence-gate-next-boundary-selection`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at post-evidence boundary selection")
 
         self.assertEqual(violations, [])
 

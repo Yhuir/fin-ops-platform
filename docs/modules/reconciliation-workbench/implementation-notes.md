@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Workbench compute 生产证据门延期
+
+- 目标：执行 `go-hot-path:workbench-compute-production-evidence-gate`，在不部署、不拷贝代码、不写生产数据、不输出 secret 的前提下，尝试收集 Workbench matching/grouping/check 的生产只读性能证据。
+- 影响范围：Go hot-path admission、Workbench compute evidence、autonomous state/queue/next prompt；未改变 Workbench API、UI、matching 规则、relation 写入或 read model 刷新行为。
+- 关键决策：本 slice 记录为 `production-evidence-deferred`，不是 admission 通过。原因是本地 collector 返回结构化 `configuration_missing`，生产当前 release 未部署 `workbench_compute_evidence.py`，且使用已部署 runtime/env 的只读 PostgreSQL 采样尝试无法建立连接。`go-hot-path:workbench-compute-admission` 继续 `blocked-by-prerequisite`。
+- 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/go-hot-path-workbench-compute-production-evidence-gate.md`，更新 autonomous state/queue/next prompt 和主控 prompt。
+- 测试覆盖：更新 `tests/test_platform_runtime_boundary_guards.py`，要求生产证据门为 deferred、Go admission 继续 blocked、下一 prompt 禁止 Go 实现并回到安全边界选择。
+- 验证命令：`env -u FIN_OPS_POSTGRES_DATABASE_URL -u DATABASE_URL PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.workbench_compute_evidence --json`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_compute_evidence tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实生产 Workbench p95/p99、row-count、candidate/decision、heartbeat、query timing、enqueue-to-fresh 和 shadow diff 仍缺失；Go/Fiber/Go Worker 仍不得开始实现。
+- 后续事项：执行 `planning:post-workbench-compute-evidence-gate-next-boundary-selection`，从现有 roadmap/queue 中选择下一个非阻塞边界。
+
 ## 2026-06-24 - Workbench compute 性能证据 collector
 
 - 目标：在 Go/Fiber/Go Worker admission 前补齐 `workbench:matching-grouping-check` 的只读性能证据采集路径，避免在缺少真实 p95/p99、heartbeat、row-count 和 query timing 证据时误启动 Go 实现。
