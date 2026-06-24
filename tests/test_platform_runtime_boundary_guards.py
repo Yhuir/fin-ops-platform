@@ -606,6 +606,41 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_mark_exception_delegation_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        for marker in (
+            "def mark_exception",
+            ".mark_exception(",
+        ):
+            if marker not in route_class:
+                violations.append(f"mark-exception route owner is missing marker {marker}")
+
+        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_mark_exception")
+        for marker in (
+            "_workbench_write_freshness_guard()",
+            "_handle_live_workbench_mark_exception(payload)",
+        ):
+            if marker not in wrapper_source:
+                violations.append(f"server.py mark-exception wrapper no longer preserves marker {marker}")
+
+        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_mark_exception")
+        if "_workbench_action_api_routes.mark_exception(payload)" not in live_source:
+            violations.append("server.py mark-exception live handler does not delegate to the route owner")
+        if "_workbench_write_response(result)" not in live_source:
+            violations.append("server.py mark-exception live handler no longer preserves write response mapping")
+        if "_workbench_write_facade().mark_exception" in live_source:
+            violations.append("server.py mark-exception live handler still calls the write facade directly")
+
+        self.assertEqual(violations, [])
+
     def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2583,14 +2618,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench confirm-link submit route owner extraction is not closed as implementation")
         if (
-            "| 199 | `server-py:workbench-mark-exception-route-owner-extraction` | pending"
+            "| 199 | `server-py:workbench-mark-exception-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench mark-exception route ownership")
+            violations.append("Workbench mark-exception route owner extraction is not closed as implementation")
+        if (
+            "| 200 | `server-py:workbench-cancel-link-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench cancel-link route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-mark-exception-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench mark-exception route owner extraction")
+        if "`server-py:workbench-cancel-link-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench cancel-link route owner extraction")
 
         self.assertEqual(violations, [])
 

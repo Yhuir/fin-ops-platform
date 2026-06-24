@@ -1,5 +1,33 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench mark-exception route owner extraction
+
+目标：把现代 `/api/workbench/actions/mark-exception` 的 facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。
+
+变更：
+
+- `WorkbenchActionApiRoutes` 新增 `mark_exception(...)`。
+- `WorkbenchActionApiRoutes.mark_exception(...)` 现在拥有 `WorkbenchWriteFacade.mark_exception(...)` 调用。
+- `Application._handle_api_workbench_mark_exception(...)` 仍负责 JSON body parse 和 Workbench 写入 freshness guard。
+- `Application._handle_live_workbench_mark_exception(...)` 仍负责 `_workbench_write_response(...)`。
+- 新增静态 guard，确保 mark-exception 不会重新直接调用 `WorkbenchWriteFacade.mark_exception(...)`，同时确认 freshness guard 和 response mapping 仍保留。
+
+未改变：
+
+- cancel/withdraw、cash special、bank exception、OA-bank exception、personal advance、cancel exception、ignore/unignore、exception preview/apply、confirm-link preview/submit 都未迁移。
+- response shape、status code、auth、freshness guard、request timing、idempotency、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-cancel-link-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_duplicate_mark_exception_reuses_existing_case_and_replays_success tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_mark_exception_invalidates_only_changed_scopes_and_rebuilds_in_background tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_mark_exception_returns_503_and_keeps_workbench_loadable_when_override_persist_fails tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_mark_exception_delegation_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench confirm-link submit route owner extraction
 
 目标：把现代 `/api/workbench/actions/confirm-link` 的 live facade delegation 从 `server.py` 抽到 `WorkbenchActionApiRoutes`。

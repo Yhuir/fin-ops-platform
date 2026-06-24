@@ -14073,7 +14073,7 @@ class Application:
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_mark_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_write_facade().mark_exception(payload)
+        result = self._workbench_action_api_routes.mark_exception(payload)
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_cancel_link(

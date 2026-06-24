@@ -62,3 +62,6 @@ class WorkbenchActionApiRoutes:
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
+
+    def mark_exception(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().mark_exception(payload)
