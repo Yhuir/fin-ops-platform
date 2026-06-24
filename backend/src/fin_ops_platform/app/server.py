@@ -8843,6 +8843,15 @@ class Application:
     ) -> dict[str, object] | None:
         repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
         if not callable(getattr(repository, "get_input_invoice_usage_row_by_row_id", None)):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_input_invoice_usage_read_model_refresh(
+                    "all",
+                    reason="api_detail_sql_repository_unavailable",
+                )
+                return InputInvoiceUsageReadModelDetailService.refreshing_payload(
+                    kind=query.get("kind", [""])[0],
+                    scope_key="all",
+                )
             return None
         service = InputInvoiceUsageReadModelDetailService(
             repository=repository,

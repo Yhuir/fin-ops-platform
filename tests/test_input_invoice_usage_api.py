@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from http import HTTPStatus
 from io import BytesIO
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ from urllib.parse import quote
 
 from openpyxl import load_workbook
 
-from fin_ops_platform.app.server import build_application
+from fin_ops_platform.app.server import Application, build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -120,6 +121,20 @@ class StaticInputInvoiceUsageReadRepository:
 class FailingInputInvoiceUsageQueryService(InputInvoiceUsageQueryService):
     def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("relation detail must be served from input_invoice_usage read model")
+
+
+class RecordingReadModelRefreshQueue:
+    def __init__(self) -> None:
+        self.refreshes: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.refreshes.append(
+            (
+                str(kwargs.get("scope_type") or ""),
+                str(kwargs.get("scope_key") or ""),
+                str(kwargs.get("reason") or ""),
+            )
+        )
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -293,6 +308,33 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(payload["rowId"], "usage-row-read-model")
         self.assertEqual(payload["relationCount"], 2)
         self.assertEqual([summary["oaId"] for summary in payload["summaries"]], ["oa-a", "oa-b"])
+
+    def test_relation_details_require_sql_repository_in_production_without_live_rebuild(self) -> None:
+        queue = RecordingReadModelRefreshQueue()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._input_invoice_usage_sql_read_repository = None
+        app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService()
+        )
+
+        response = app._handle_api_input_invoice_usage_relation_details(
+            "usage-row-missing-repository",
+            {"kind": ["oa"]},
+        )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["readModelStatus"], "refreshing")
+        self.assertEqual(payload["detailAvailable"], False)
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(
+            queue.refreshes,
+            [("input_invoice_usage", "all", "api_detail_sql_repository_unavailable")],
+        )
 
     def test_relation_details_compare_source_versions_with_row_scope(self) -> None:
         current_versions = {

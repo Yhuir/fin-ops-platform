@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-input-invoice-usage-refresh-freshness-operation-barrier-audit`
+Current state: `autonomous-continue-after-read-models-input-invoice-usage-relation-detail-production-repository-fail-closed`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`. Input usage fresh gate, force refresh, all fan-out/month proof, source-version proof and operation barrier behavior are accounted for locally; unused app-level input usage rebuild/list/mark projection helpers were removed from `Application` and guarded from returning. Runtime behavior and API shape are unchanged. The next executable boundary is `read-models:input-invoice-usage-local-implementation-closure-audit`. Go hot-path admission remains blocked.
+Completed `read-models:input-invoice-usage-relation-detail-production-repository-fail-closed`. The local closure audit found a concrete relation-detail production gap, so it was split into a narrow implementation slice: production SQL runtime now returns refreshing and enqueues `input_invoice_usage:all` when the detail SQL read repository is unavailable, instead of falling back to live relation-detail rebuild. The next executable boundary is `read-models:input-invoice-usage-local-implementation-closure-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -144,6 +144,7 @@ Completed `read-models:input-invoice-usage-refresh-freshness-operation-barrier-a
 - `read-models:next-pilot-selection-after-oa-pending-payment` -> `analysis-closed`
 - `read-models:input-invoice-usage-repository-port-extraction` -> `implementation-closed`
 - `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit` -> `implementation-closed`
+- `read-models:input-invoice-usage-relation-detail-production-repository-fail-closed` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -156,7 +157,7 @@ Completed `read-models:input-invoice-usage-refresh-freshness-operation-barrier-a
 - Actual `bank_detail` pilot work still blocks Go admission: environment evidence/defer status and any remaining classified support wrappers/callbacks must stay visible, and broader shared-boundary cleanup remains implementation-gap-open.
 - `pending_invoice` was the third non-Go read model implementation pilot after `bank_detail` and `workbench_relation`. Repository port extraction is implemented, freshness/barrier audit is analysis-closed, scope policy filter allowlist enforcement is implemented, income-status mutations now wait for pending invoice operation barrier targets before refetching rows, and local implementation support is accounted for. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `oa_pending_payment` was the fourth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, and `pending_invoice`. Repository port extraction is implemented: PostgreSQL read route and OA projection save/mark/prune paths now use `OaPendingPaymentReadModelRepositoryPort`, while Workbench relation source-version lookup uses the Workbench relation port. Freshness/force-refresh/operation-barrier audit found and fixed the frontend gap where default all-view mutations preferred fan-out-only `all` over concrete month barrier targets. Local closure audit removed unused app-level OA pending payment rebuild/list/mark/live helpers and accounted for remaining local support. The module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`.
+- `input_invoice_usage` is now the fifth non-Go read model implementation pilot after `bank_detail`, `workbench_relation`, `pending_invoice` and `oa_pending_payment`. Repository port extraction is implemented: PostgreSQL read wiring and projection save/mark/prune paths now use `InputInvoiceUsageReadModelRepositoryPort`, while source-fact month shard enumeration remains outside the repository port. Freshness/barrier/helper audit is also implemented: rows/detail/filter/export fresh gates are accounted for, `all` remains a fan-out control scope with month proof, operation barrier behavior is documented, and unused app-level rebuild/list/mark projection helpers were removed from `Application`. A follow-up production fail-closed gap was fixed: relation detail no longer live-rebuilds in production SQL runtime when the SQL read repository is unavailable.
 - The next pending boundary is `read-models:input-invoice-usage-local-implementation-closure-audit`, which must decide whether local support can move to production-evidence-deferred or whether additional service/provider ownership migration is required before Go admission.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
@@ -173,7 +174,7 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`
+`read-models:input-invoice-usage-relation-detail-production-repository-fail-closed`
 
 ## Next Prompt
 

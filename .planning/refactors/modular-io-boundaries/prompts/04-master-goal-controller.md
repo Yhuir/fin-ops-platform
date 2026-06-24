@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit.
+- Last completed boundary: read-models:input-invoice-usage-relation-detail-production-repository-fail-closed.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -89,6 +89,7 @@ Current state expected on start:
 - `InputInvoiceUsageReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
 - `InvoiceUsageCollectionSqlProjectionBuilder` owns input usage projection rebuild/list/mark/prune behavior.
 - `input_invoice_usage` rows/detail/filter/export SQL read paths are fresh-gated and enqueue refresh through `ReadModelRefreshGateway` on miss/stale/source-version mismatch.
+- Production SQL runtime relation detail now returns `202`/refreshing and enqueues `input_invoice_usage:all` when the SQL read repository is unavailable, instead of falling back to live detail rebuild.
 - `input_invoice_usage:all` remains fan-out control scope; all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
 - Unused app-level input usage projection helpers were removed from `Application`: `list_input_invoice_usage_scope_shards(...)`, `mark_input_invoice_usage_scope_empty(...)`, and `rebuild_input_invoice_usage_read_model_scope(...)`.
 - No module is globally closed.
@@ -191,7 +192,7 @@ Immediate next boundary:
 Start with read-models:input-invoice-usage-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
 For read-models:input-invoice-usage-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-refresh-freshness-operation-barrier-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/input-invoice-usage/state-machine.md`, `docs/modules/input-invoice-usage/tests.md`, `docs/modules/input-invoice-usage/implementation-notes.md`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_repository.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, `tests/test_input_invoice_usage_api.py`, and `tests/test_read_model_architecture_guards.py`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/input-invoice-usage/state-machine.md`, `docs/modules/input-invoice-usage/tests.md`, `docs/modules/input-invoice-usage/implementation-notes.md`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_repository.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, `tests/test_input_invoice_usage_api.py`, and `tests/test_read_model_architecture_guards.py`.
 - Use CodeGraph for structural lookup before implementation edits.
 - Decide whether local `input_invoice_usage` implementation support can move to `production-evidence-deferred`, or whether another narrow implementation boundary is required.
 - Account for repository port, fresh gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination, tests, docs and remaining app-level wrappers.

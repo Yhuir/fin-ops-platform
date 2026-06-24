@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:input-invoice-usage-relation-detail-production-repository-fail-closed` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`
+- Last completed boundary: `read-models:input-invoice-usage-relation-detail-production-repository-fail-closed`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `InputInvoiceUsageReadModelRepositoryPort` exists and exposes only input usage read-model rows/detail/save/mark/prune methods.
@@ -13,6 +13,7 @@ Continue the autonomous modular IO refactor after the `read-models:input-invoice
 - `InvoiceUsageCollectionSqlProjectionBuilder` owns input usage projection rebuild/list/mark/prune behavior.
 - `input_invoice_usage:all` remains a fan-out control scope; all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
 - Rows/detail/filter/export SQL read paths are fresh-gated and enqueue refresh through `ReadModelRefreshGateway` on miss/stale/source-version mismatch.
+- Production SQL runtime relation detail now returns `202`/refreshing and enqueues `input_invoice_usage:all` when the SQL read repository is unavailable, instead of falling back to live detail rebuild.
 - Unused app-level input usage projection helpers were removed from `Application`:
   - `list_input_invoice_usage_scope_shards(...)`
   - `mark_input_invoice_usage_scope_empty(...)`
@@ -39,6 +40,7 @@ Continue the autonomous modular IO refactor after the `read-models:input-invoice
 5. Read target docs and code:
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-repository-port-extraction.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-refresh-freshness-operation-barrier-audit.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`
    - `docs/modules/read-models/README.md`
    - `docs/modules/read-models/implementation-notes.md`
    - `docs/modules/input-invoice-usage/README.md`

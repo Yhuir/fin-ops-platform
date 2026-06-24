@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Relation detail production SQL repository fail-closed
+
+- 目标：修复生产 PostgreSQL runtime 下 `/api/input-invoice-usage/rows/{row_id}/relation-details` 缺 SQL read repository 时可能 fallback 到 live detail rebuild 的缺口。
+- 影响范围：`Application._get_input_invoice_usage_relation_details_from_sql_read_model(...)`、`InputInvoiceUsageReadModelDetailService.refreshing_payload(...)` 和 input usage API 回归测试；不改变 OA reverse、支付规则、前端 UI、worker event 或 read model schema。
+- 关键决策：生产 SQL runtime 下缺少 `get_input_invoice_usage_row_by_row_id(...)` 时返回标准 detail refreshing payload，并通过 gateway-backed wrapper 入队 `input_invoice_usage:all`，reason 为 `api_detail_sql_repository_unavailable`。local/legacy runtime 仍可 fallback。
+- 文档影响：同步 read-models 实施记录、测试矩阵和 modular IO autonomous state。
+- 测试覆盖：新增 `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_relation_details_require_sql_repository_in_production_without_live_rebuild`，并复跑 fresh detail、scoped source-version detail 和 rows repository unavailable 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser 证据仍未执行；local closure/defer audit 继续作为下一步。
+
 ## 2026-06-24 - Read model freshness/barrier helper audit
 
 - 目标：执行 `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`，核对进项发票使用 read model fresh gate、force refresh、all fan-out、source-version proof、operation barrier 和旧 helper 分类。

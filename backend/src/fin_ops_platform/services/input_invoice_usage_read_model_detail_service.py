@@ -41,12 +41,12 @@ class InputInvoiceUsageReadModelDetailService:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):
             self._enqueue_refresh("all", "api_detail_miss")
-            return self._refreshing_payload(kind=normalized_kind, scope_key="all")
+            return self.refreshing_payload(kind=normalized_kind, scope_key="all")
         scope_key = str(payload.get("read_model_scope_key") or "all")
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
             self._enqueue_refresh(scope_key, "api_detail_stale")
-            return self._refreshing_payload(kind=normalized_kind, scope_key=scope_key)
+            return self.refreshing_payload(kind=normalized_kind, scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
                 _source_versions_from_provider(self._source_versions_provider, scope_key=scope_key),
@@ -56,7 +56,7 @@ class InputInvoiceUsageReadModelDetailService:
         )
         if stale_reasons:
             self._enqueue_refresh(scope_key, "api_detail_source_versions_stale")
-            return self._refreshing_payload(kind=normalized_kind, scope_key=scope_key, stale_reasons=stale_reasons)
+            return self.refreshing_payload(kind=normalized_kind, scope_key=scope_key, stale_reasons=stale_reasons)
         row = payload.get("row")
         if not isinstance(row, dict):
             raise InputInvoiceUsageError(
@@ -74,7 +74,7 @@ class InputInvoiceUsageReadModelDetailService:
         return result
 
     @staticmethod
-    def _refreshing_payload(
+    def refreshing_payload(
         *,
         kind: str,
         scope_key: str,

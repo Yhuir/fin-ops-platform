@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Input invoice usage relation detail production repository fail-closed
+
+- 目标：修复进项发票使用 relation detail 在生产 SQL runtime 缺 repository 时可能绕过 read model fresh gate 的缺口。
+- 影响范围：`Application._get_input_invoice_usage_relation_details_from_sql_read_model(...)`、`InputInvoiceUsageReadModelDetailService` 和 input usage API tests；不改 read model schema、worker、queue schema、OA reverse 或前端行为。
+- 关键决策：rows/filter/export 已有生产 fail-closed guard；relation detail 也必须等价执行。缺 `get_input_invoice_usage_row_by_row_id(...)` 时返回 `202`/refreshing 并入队 `input_invoice_usage:all`，不能 live rebuild 详情。
+- 文档影响：新增 modular IO analysis，更新 read-models/input-invoice-usage 实施记录、input usage 测试矩阵和 autonomous state/queue/next prompt；共享 read model 状态定义不变。
+- 测试覆盖：新增 `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_relation_details_require_sql_repository_in_production_without_live_rebuild`；复跑 detail fresh/source-version 和 rows fail-closed 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
+
 ## 2026-06-24 - Input invoice usage freshness / operation barrier audit
 
 - 目标：执行 `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`，核对进项发票使用 read model fresh gate、force refresh、all fan-out、source-version proof、operation barrier 和旧 helper 分类。
