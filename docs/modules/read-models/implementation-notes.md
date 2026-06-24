@@ -71,7 +71,18 @@
 - 测试覆盖：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，防止 `_persist_state(...)` 再写 `no_oa_bank_batches` 或调用 `_no_oa_bank_batch_service.snapshot()`。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-full-state-snapshot-quarantine.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
-- 后续事项：执行 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit`，不能直接进入 Go admission。
+- 后续事项：已由 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit` 复核 no-OA 本地支持并记录真实环境证据 deferred；不能直接进入 Go admission。
+
+## 2026-06-24 - No-OA bank batch post-full-state local closure audit
+
+- 目标：执行 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit`，复核 full-state snapshot quarantine 后 no-OA 是否仍有本地 implementation gap。
+- 关键决策：未发现新的本地 implementation gap。no-OA local support 在 repository port、fresh gate、scope policy、worker refresh persistence、derived lifecycle executor、mutation persistence、full-state snapshot quarantine、manifest/App Status/worker registry 和 frontend operation barrier 方面已 accounted。
+- 旧路径清理：删除未使用的 `Application._no_oa_bank_batch_source_versions(...)` 与 `_no_oa_bank_batch_stale_reasons(...)`，source-version/stale reason calculation 继续由 `NoOaBankBatchApplicationService` 拥有。
+- 文档影响：新增 post-full-state local closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 文档。
+- 测试覆盖：新增 platform guard，防止 no-OA source-version/stale-reason helper 回到 `Application`；复跑 no-OA application/read model/workbench integration、manifest、gateway 和 full-state architecture guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-post-full-state-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；模块不标记 closed。
+- 后续事项：执行 `read-models:next-pilot-selection-after-no-oa-bank-batch`，在 `search` 与 `bank_account_balance` 等剩余非 Go read model 候选中选择下一 pilot。
 
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 

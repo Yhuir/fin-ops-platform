@@ -77,7 +77,15 @@
 - 关键决策：no-OA mutation persistence 继续通过 `save_no_oa_bank_batch_mutation(...)`；worker refresh public snapshot persistence 继续通过 `NoOaBankBatchReadModelPersistencePort.save_public_snapshot(...)`；broad full-state writer 不再作为 no-OA batch snapshot 的第二写入路径。
 - 旧路径分类：`Application._persist_state(...)` 不再序列化 `no_oa_bank_batches` 或调用 `_no_oa_bank_batch_service.snapshot()`。
 - 测试覆盖：新增 `ReadModelArchitectureGuardTests.test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist`，防止旧 full-state 写路径回归，同时确认 explicit no-OA persistence boundaries 仍存在。
-- 下一步：执行 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit`，复核 no-OA 是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred。
+- 下一步：已由 `read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit` 复核本地支持并记录真实环境证据 deferred。
+
+## 2026-06-24 - Modular IO post-full-state local closure audit
+
+- 目标：复核 full-state snapshot quarantine 后 no-OA 是否还有本地 implementation gap。
+- 结论：未发现剩余本地 implementation gap；local support 已在 repository port、refresh persistence port、derived lifecycle executor、mutation persistence boundary、full-state snapshot quarantine 和 frontend operation barrier 方面 accounted。
+- 旧路径清理：删除未使用的 `Application._no_oa_bank_batch_source_versions(...)` 和 `_no_oa_bank_batch_stale_reasons(...)`，source-version/stale reason 计算由 `NoOaBankBatchApplicationService` 继续拥有。
+- 模块状态：记录为 `production-evidence-deferred`，不是 module closed；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍需发布/生产只读验证。
+- 下一步：执行 `read-models:next-pilot-selection-after-no-oa-bank-batch`，从 `search` 和 `bank_account_balance` 等剩余非 Go read model 候选中选择下一 pilot。
 
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 

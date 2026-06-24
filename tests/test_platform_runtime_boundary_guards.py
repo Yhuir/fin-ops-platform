@@ -2004,6 +2004,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_source_version_helpers_stay_out_of_application(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+
+        violations: list[str] = []
+        for removed_helper in (
+            "_no_oa_bank_batch_source_versions",
+            "_no_oa_bank_batch_stale_reasons",
+        ):
+            if _function_source(tree, source, removed_helper):
+                violations.append(f"server.py still owns removed no-OA helper {removed_helper}")
+
+        service_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
+        if "def no_oa_bank_batch_source_versions(" not in service_source:
+            violations.append("NoOaBankBatchApplicationService no longer owns no-OA source version calculation")
+        if "def no_oa_bank_batch_stale_reasons(" not in service_source:
+            violations.append("NoOaBankBatchApplicationService no longer owns no-OA stale reason calculation")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

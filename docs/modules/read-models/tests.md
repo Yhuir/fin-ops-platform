@@ -166,6 +166,15 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - Existing feature regression tests：同一 guard 证明 `NoOaBankBatchReadModelPersistencePort`、local `save_no_oa_bank_batch_mutation(...)` 和 PostgreSQL `save_no_oa_bank_batch_mutation(...)` 仍存在，防止 explicit persistence boundaries 被误删。
 - Business core、API contract、frontend interaction 和 E2E tests 未新增，因为本 slice 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
 
+## 2026-06-24 - no-OA bank batch post-full-state local closure audit test note
+
+`read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit` 已完成。测试覆盖如下：
+
+- Service-layer tests：复跑 no-OA application service tests，证明 no-OA source-version/stale-reason、list payload、mutation persistence 和 relation command behavior 仍由服务层/ports 管理。
+- Read model/cache/background job tests：复跑 no-OA refresh、manifest、refresh gateway 和 full-state architecture guard。
+- Existing feature regression tests：新增 platform guard，防止 `_no_oa_bank_batch_source_versions(...)` 和 `_no_oa_bank_batch_stale_reasons(...)` 回到 `Application`。
+- Business core、API contract、frontend interaction 和 E2E tests 未新增，因为本 audit 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
+
 ## 2026-06-24 - turnover ledger freshness/barrier audit note
 
 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice。结论：

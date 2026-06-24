@@ -123,6 +123,15 @@
 - Existing feature regression tests：同一 guard 还确认 `NoOaBankBatchReadModelPersistencePort`、local `save_no_oa_bank_batch_mutation(...)` 和 PostgreSQL `save_no_oa_bank_batch_mutation(...)` 仍存在，防止删除旧路径时破坏显式持久化边界。
 - Service-layer/API/frontend/E2E：未新增新测试，因为本 slice 不改变 no-OA 提交/撤回业务规则、HTTP shape、权限、前端 operation barrier 或用户流程；已复跑 no-OA application/read model/workbench integration 和 read model manifest/gateway 回归。
 
+## 2026-06-24 - Modular IO post-full-state local closure audit test note
+
+`read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit` 已完成。测试覆盖如下：
+
+- Service-layer tests：复跑 no-OA application service tests，证明 source-version ownership、mutation persistence 和 list/read model behavior 仍由 service/ports 承担。
+- Read model/cache/background job tests：复跑 no-OA refresh tests、manifest tests、refresh gateway tests 和 full-state architecture guard。
+- Existing feature regression tests：新增 `PlatformRuntimeBoundaryGuardTests.test_no_oa_source_version_helpers_stay_out_of_application`，防止 dead app-owned source-version/stale-reason helpers 回到 `Application`。
+- 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 audit 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

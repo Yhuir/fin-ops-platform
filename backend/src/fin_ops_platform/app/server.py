@@ -15934,42 +15934,6 @@ class Application:
             actual=source_versions if isinstance(source_versions, dict) else {},
         )
 
-    def _no_oa_bank_batch_source_versions(self) -> dict[str, object]:
-        no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
-        relation_source_versions = self._workbench_relation_source_version_provider()
-        payload = {
-            **self._workbench_matching_source_versions(),
-            "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
-            "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
-            "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "pair_relation_snapshot_version": relation_source_versions.pair_relation_snapshot_version(),
-            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._bank_transaction_category_service.snapshot()
-            ),
-        }
-        return payload
-
-    def _no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
-        batch_rows = batches if isinstance(batches, list) else []
-        if not batch_rows:
-            return []
-        expected = require_expected_source_versions(
-            self._no_oa_bank_batch_source_versions(),
-            context="no_oa_bank_batch_read_model",
-        )
-        reasons: list[str] = []
-        for batch in batch_rows:
-            if not isinstance(batch, dict):
-                continue
-            source_versions = batch.get("source_versions")
-            for reason in source_version_mismatch_reasons(
-                expected=expected,
-                actual=source_versions if isinstance(source_versions, dict) else {},
-            ):
-                if reason not in reasons:
-                    reasons.append(reason)
-        return reasons
-
     def _turnover_ledger_source_versions(self) -> dict[str, object]:
         return build_turnover_ledger_source_versions(
             relation_service=self._turnover_relation_service,

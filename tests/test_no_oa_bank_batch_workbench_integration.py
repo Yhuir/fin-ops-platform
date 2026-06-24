@@ -530,7 +530,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             bank_rows,
             {row_id: {"category_code": "fee", "source": "auto"}},
             [],
-            app._no_oa_bank_batch_source_versions(),
+            app._no_oa_bank_batch_application_service().no_oa_bank_batch_source_versions(),
             eligible_batch_types=["fee"],
         )
         batch_id = app._no_oa_bank_batch_service.list_batches()[0]["batch_id"]

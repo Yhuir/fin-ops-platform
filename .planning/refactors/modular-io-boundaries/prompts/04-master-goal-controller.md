@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:no-oa-bank-batch-full-state-snapshot-quarantine.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -146,7 +146,8 @@ Current state expected on start:
 - The no-OA derived lifecycle executor extraction is implemented: `NoOaBankBatchDerivedLifecycleExecutor` owns target scope selection, refresh metadata forwarding and enqueued-job accounting; `Application` only assembles the explicit enqueue dependency.
 - The no-OA mutation persistence fallback quarantine is implemented: `NoOaBankBatchApplicationService.persist_mutation(...)` requires `save_no_oa_bank_batch_mutation(...)`, `ApplicationStateStore` exposes the same explicit boundary, and the service-layer broad state-store fallback is guarded from returning.
 - The no-OA first local closure audit found broad `Application._persist_state(...)` still serialized `no_oa_bank_batches`; the no-OA full-state snapshot quarantine is implemented and guarded.
-- The next pending boundary is read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit.
+- The no-OA post-full-state local closure audit is complete: no remaining local implementation gap was found after deleting dead app-owned source-version/stale-reason helpers. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
+- The next pending boundary is read-models:next-pilot-selection-after-no-oa-bank-batch.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -242,20 +243,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-no-oa-bank-batch unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:no-oa-bank-batch-post-full-state-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-full-state-snapshot-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-mutation-persistence-fallback-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_repository.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_derived_lifecycle_executor.py`, and relevant no-OA/read model/frontend operation barrier tests.
-- Use CodeGraph for structural lookup before deciding closure.
-- Re-audit no-OA local route/service/repository/read model/worker/frontend/API surfaces after full-state snapshot quarantine.
-- Classify remaining old no-OA route/service/repository/read model/frontend API/worker paths as removed, quarantined, compat-only, production-evidence-deferred, or implementation-gap-open.
-- Verify no local app-owned helper still owns read model refresh persistence, list repository access, derived lifecycle execution, mutation persistence fallback or broad full-state no-OA snapshot persistence.
-- If a concrete local implementation gap remains, split and execute the first narrow implementation boundary.
-- If no local implementation gap remains, record `production-evidence-deferred` for real PostgreSQL/worker/App Status/high-row/browser evidence only; do not mark the module globally closed.
+For read-models:next-pilot-selection-after-no-oa-bank-batch:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-post-full-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-manifest-and-boundary-inventory.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-and-bank-account-balance-contract.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, and relevant module docs/code for `search` and `bank_account_balance`.
+- Use CodeGraph and `rg` for structural lookup before choosing the next pilot.
+- Compare remaining non-Go read model candidates, especially `search` and `bank_account_balance`, by stale-read risk, cross-page fan-out impact, current IO boundary quality, legacy contamination risk, testability and Go admission prerequisites.
+- Insert the first concrete pending audit/implementation boundary for the selected module before Go candidates.
+- Do not implement the selected module in this selection slice unless planning-state reconciliation requires it.
 - Do not implement Go/Fiber/Go Worker.
 - Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior unless a verified gap requires it and tests are updated.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted app check, no-OA application/read model/workbench integration tests, relevant platform/read model boundary guards, docs verification and diff checks.
+- Run docs verification and diff checks; run app check if Python imports/manifests change.
 - Commit and push to origin/dev.
 - Continue to the next selected boundary if verification passes.
 
