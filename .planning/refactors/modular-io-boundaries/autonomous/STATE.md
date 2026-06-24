@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `browser-data-harness-coverage-map-selected`
+Current state: `browser-data-targeted-smoke-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-internal-api-contract-harness-next-boundary-selection` as `planning-closed` in `analysis/planning-post-internal-api-contract-harness-next-boundary-selection-2026-06-25.md`. T0 reconciled Row262 local `Application.handle_request(...)` API contract harness evidence, rejected authenticated production HTTP retry, final closure and immediate full e2e smoke as premature, deferred broadening every API probe until browser evidence is mapped, and selected `planning:read-model-browser-data-harness-coverage-map` as the next safe boundary. No production command, runtime code change or closure claim occurred.
+Completed `planning:read-model-browser-data-harness-coverage-map` as `planning-closed` in `analysis/planning-read-model-browser-data-harness-coverage-map-2026-06-25.md`. T0 mapped read-model-heavy modules to existing deterministic Playwright/Vitest evidence, Row262 local API harness evidence, Row245/246/257 production-controlled facts and remaining external-risk gaps. The next boundary is `browser:read-model-browser-data-targeted-smoke-runbook`, a targeted existing Playwright subset rerun. No browser test, production command, runtime code change or closure claim occurred.
 
 ## Closed Or Deferred Slices
 

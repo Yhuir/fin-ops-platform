@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed controller step: post-internal API contract harness next-boundary selection.
+- Last completed controller step: read-model browser data harness coverage map.
 - Last status: worker wave 1 accepted as local evidence/gap maps; authenticated API smoke deferred for missing non-secret auth config; public page-shell smoke passed for 17 default `/fin-ops/*` routes; Workbench active-generation query-plan evidence is collected; all public API probes are auth-gated with 401.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
@@ -94,7 +94,8 @@ Current state expected on start:
 - `planning:read-model-internal-api-contract-harness-design` is complete in `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`: the harness design uses `Application.handle_request(...)`, existing unittest default auth plus explicit auth guard negatives, `http_slo_probe.DEFAULT_API_PROBES` as route inventory, and sanitized response envelope/readiness metadata assertions; it rejects Flask test client, production auth bypass and broad payload snapshots.
 - `contract:read-model-internal-api-contract-harness-implementation` is complete in `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`: added `tests/test_read_model_api_contract_harness.py`, covering representative local GET envelopes and explicit auth guard negatives through `Application.handle_request(...)`; targeted verification passed with 2 tests and 51 subtests.
 - `planning:post-internal-api-contract-harness-next-boundary-selection` is complete in `analysis/planning-post-internal-api-contract-harness-next-boundary-selection-2026-06-25.md`: Row262 local API evidence was reconciled, production auth retry/final closure/full e2e smoke were rejected as premature, and browser data harness coverage mapping was selected next.
-- The next pending boundary is `planning:read-model-browser-data-harness-coverage-map`.
+- `planning:read-model-browser-data-harness-coverage-map` is complete in `analysis/planning-read-model-browser-data-harness-coverage-map-2026-06-25.md`: existing deterministic Playwright/Vitest/browser evidence, Row262 local API harness coverage, Row245/246/257 production-controlled facts and external-risk gaps were mapped for read-model-heavy modules; the next smallest executable boundary is a targeted existing Playwright subset rerun.
+- The next pending boundary is `browser:read-model-browser-data-targeted-smoke-runbook`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
