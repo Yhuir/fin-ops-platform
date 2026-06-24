@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset final local closure audit found full-state snapshot gap
+
+- 目标：执行 `read-models:tax-offset-final-local-implementation-closure-audit`，复核 cache warmup executor 之后 `tax_offset` 是否只剩生产证据缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/tax-offset 实施记录；不改 tax business/API/UI/worker event/queue/Redis 合同。
+- 关键决策：不能 defer。`Application._persist_state(...)` 仍把 `tax_offset_read_models` 写入 broad full-state snapshot，属于旧全量状态链路写 read model snapshot 的本地 implementation gap；显式 runtime/executor persistence callback 应保留，但 broad `_persist_state(...)` 不应继续成为第二写入路径。
+- 文档影响：新增 final local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only，无运行时代码变化；下一轮 `read-models:tax-offset-full-state-read-model-snapshot-quarantine` 必须新增/更新 static guard，证明 `_persist_state(...)` 不再 serializes `tax_offset_read_models`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-final-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，但不能用于绕过本地 full-state snapshot gap。
+- 后续事项：执行 `read-models:tax-offset-full-state-read-model-snapshot-quarantine`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Tax offset cache warmup executor extraction
 
 - 目标：执行 `read-models:tax-offset-cache-warmup-executor-port-extraction`，把 optional tax offset cache warmup scheduling/job execution 从 `Application` 迁到显式 executor。
