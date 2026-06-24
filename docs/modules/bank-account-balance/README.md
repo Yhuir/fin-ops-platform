@@ -36,7 +36,9 @@
 
 - Projection save path 已通过 `BankAccountBalanceReadModelRepositoryPort.save_bank_account_balances(...)` 写入。
 - Bank Details accounts SQL read path 已优先通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 仍作为过渡兼容 fallback，后续必须审计移除或加固为 compat-only。
-- `Application._enqueue_bank_account_balance_read_model_refresh(...)` 和 `_derived_lifecycle_bank_account_balance_executor(...)` 仍是 app-owned refresh/derived lifecycle helper。
+- refresh/freshness/operation-barrier audit 已确认下一条实现边界是 `BankAccountBalanceReadModelRefreshProducer`。当前 `Application._enqueue_bank_account_balance_read_model_refresh(...)`、`_derived_lifecycle_bank_account_balance_executor(...)` 和 runtime import-state generic fan-out 仍是待迁移路径。
+- `bank_account_balance:all` 是当前唯一 publish scope；scope policy 的 month/all 允许范围需要在 producer 后续 scope-contract slice 中收敛或明确拒绝。
+- dedicated `bank_account_balance:all` operation barrier regression 尚未补齐。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
 
 ## 本目录文件

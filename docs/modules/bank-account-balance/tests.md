@@ -29,6 +29,12 @@
 - 覆盖：账户余额 repository port 只暴露 manifest-listed 方法；Bank Details accounts SQL read path 优先使用显式 account-balance port，不再把 Bank Detail read port 当作正常 owner。
 - 保持不变：余额计算、account identity、API shape、worker event、scope、queue、权限、审计和前端行为。
 
+## 2026-06-24 - refresh/freshness/operation-barrier audit
+
+- 新增测试：无。本轮是 analysis/accounting slice，不改运行时代码或测试 contract。
+- 复用覆盖：account-balance projection/repository port、Bank Details SQL runtime、backfill CLI、manifest 和 runtime worker registry tests。
+- 审计结论：下一条实现边界需要新增 `BankAccountBalanceReadModelRefreshProducer`；后续还需补 dedicated `bank_account_balance:all` operation barrier regression、all-only scope contract guard 和兼容 fallback 处理。
+
 ## 下一 slice 必跑建议
 
 ```bash

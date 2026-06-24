@@ -1309,3 +1309,9 @@
 - 保留兼容：`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 暂时保留为 compatibility fallback，但不再是正常 `Application` 装配 owner。
 - 测试覆盖：新增 account-balance port guard 和 Bank Details accounts explicit-port regression；复跑 account balance、Bank Details SQL runtime、backfill CLI、manifest 和 worker registry 测试。
 - 下一步：`read-models:bank-account-balance-refresh-freshness-operation-barrier-audit`。
+
+## 2026-06-24 - bank account balance refresh/freshness/operation-barrier audit
+
+- 目标：审计 `bank_account_balance` refresh enqueue、derived lifecycle、runtime import-state fan-out、all-only scope contract、operation barrier 和 Bank Detail fallback。
+- 结论：审计关闭为 `analysis-closed`，但模块仍为 `implementation-gap-open`。最高优先级实现缺口是 `Application._enqueue_bank_account_balance_read_model_refresh(...)` 仍拥有模块 refresh IO；下一条边界为 `read-models:bank-account-balance-refresh-producer-extraction`。
+- 后续：producer extraction 后继续处理 derived lifecycle executor、all-only scope contract、dedicated operation barrier regression 和 Bank Detail fallback quarantine。
