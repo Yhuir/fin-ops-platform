@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench exception preview route owner extraction
+
+目标：把现代 `/api/workbench/exception/preview` 的 preview/error mapping 从 `server.py` 抽到显式 route owner，同时保持 HTTP 行为不变。
+
+变更：
+
+- 新增 `WorkbenchActionApiRoutes`，作为现代 Workbench action route owner。
+- `WorkbenchActionApiRoutes.exception_preview(...)` 现在拥有 `WorkbenchExceptionApplicationService.preview(...)` 的 `200` / `404` / `400` 映射。
+- `Application._handle_api_workbench_exception_preview(...)` 仍负责 JSON body parse 和 HTTP response 输出，但不再直接调用 exception application service 或持有错误码映射。
+- 新增静态 guard，确保新 route owner 已纳入 route owner inventory，且 exception preview 映射不会回流到 `server.py` wrapper。
+
+未改变：
+
+- `/api/workbench/exception/apply`、confirm/cancel/withdraw、cash special、bank exception、OA-bank exception、personal advance、cancel exception、ignore/unignore 都未迁移。
+- response shape、status code、freshness guard、auth、idempotency、relation 写入、operation barrier、read model refresh 和前端行为未改变。
+
+下一条边界：`server-py:workbench-exception-apply-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_exception_preview_api_returns_backend_scenario_for_oa_bank_missing_invoice tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_exception_preview_mapping_is_owned_by_action_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile backend/src/fin_ops_platform/app/routes_workbench_actions.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - modern Workbench action route owner audit
 
 目标：审计现代 `/api/workbench/actions/*` 与 `/api/workbench/exception/*` wrapper 是否继续混在 `server.py` 中，以及下一步 route owner 拆分应该从哪里开始。

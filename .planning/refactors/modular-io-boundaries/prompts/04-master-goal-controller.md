@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:modern-workbench-action-route-owner-audit.
-- Last status: analysis-closed.
+- Last completed boundary: server-py:workbench-exception-preview-route-owner-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -173,7 +173,8 @@ Current state expected on start:
 - `server-py:legacy-workbench-action-route-module-quarantine` is complete as an implementation slice: `LegacyWorkbenchActionRoutes` owns old `/workbench/actions/confirm|difference|exception|offline|offset` payload mapping and reconciliation/ledger calls, `Application` no longer defines the five old app-owned handlers, and modern `/api/workbench/actions/*` wrappers remain facade-backed.
 - `server-py:legacy-workbench-exception-helper-dead-code-audit` is complete as an implementation slice: no-caller `_handle_legacy_workbench_exception_via_application(...)` was removed, the unused conflict import was cleaned, and the legacy Workbench action quarantine guard prevents the helper from returning.
 - `server-py:modern-workbench-action-route-owner-audit` is complete as an analysis slice: modern `/api/workbench/actions/*` and `/api/workbench/exception/*` wrappers were classified by JSON/auth/freshness/timing responsibility, facade/application-service delegate, tests and target owner.
-- The next pending boundary is `server-py:workbench-exception-preview-route-owner-extraction`.
+- `server-py:workbench-exception-preview-route-owner-extraction` is complete as an implementation slice: `WorkbenchActionApiRoutes` owns `/api/workbench/exception/preview` payload/error mapping while `Application` keeps HTTP dispatch, JSON parsing and response serialization.
+- The next pending boundary is `server-py:workbench-exception-apply-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -269,15 +270,14 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-exception-preview-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-exception-apply-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-exception-preview-route-owner-extraction`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_exception_application.py`, `tests/test_workbench_v2_api.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Move `/api/workbench/exception/preview` payload/error mapping behind an explicit modern Workbench action route owner.
-- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; `WorkbenchExceptionApplicationService.preview(payload)` remains the delegate; `KeyError` maps to `404` with `error=workbench_row_not_found`; `TypeError` and `ValueError` map to `400` with `error=invalid_workbench_exception_preview_request`; success maps to `200` with the preview payload.
-- Keep `Application` as HTTP dispatch and JSON body parser for this slice if that keeps the change narrower.
-- Add or update a static guard proving the preview endpoint is no longer implemented as an app-owned business/error-mapping wrapper once extracted.
-- Do not move `/api/workbench/exception/apply` in the same slice.
+For `server-py:workbench-exception-apply-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-exception-preview-route-owner-extraction.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/README.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench_actions.py`, `backend/src/fin_ops_platform/services/workbench_write_facade.py`, `backend/src/fin_ops_platform/services/workbench_exception_application_service.py`, `tests/test_workbench_v2_api.py`, `tests/test_workbench_write_characterization.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Move `/api/workbench/exception/apply` facade delegation and actor/request-id mapping behind `WorkbenchActionApiRoutes`.
+- Preserve current behavior exactly: invalid JSON remains handled by `Application._load_json_body(...)`; freshness guard remains in `Application` for this slice unless a smaller reviewed route-owner helper can preserve it exactly; `WorkbenchWriteFacade.apply_exception(...)` remains the delegate; actor remains `payload["actor"] || payload["confirmed_by"] || "system"`; `request_id` is forwarded unchanged; `action_name` remains `exception_apply`; response mapping remains through `Application._workbench_write_response(...)`.
+- Keep `Application` as HTTP dispatch, JSON body parser, freshness gate and response serializer for this slice if that keeps the change narrower.
+- Add or update a static guard proving exception apply delegate/actor mapping is no longer app-owned once extracted.
 - Do not move confirm/cancel/withdraw, cash special, bank exception, OA-bank exception, personal advance repayment, cancel exception, ignore, or unignore routes.
 - Do not change modern Workbench API response shapes, status codes, auth, freshness guard, idempotency, relation semantics, operation barrier behavior, read model refresh behavior or frontend behavior.
 - Do not change legacy `/workbench/actions/*` behavior.

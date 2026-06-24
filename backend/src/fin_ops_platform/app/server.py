@@ -62,6 +62,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
 )
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
+from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
 from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder, request_database_timing
@@ -1258,6 +1259,9 @@ class Application:
         self._workbench_api_routes = WorkbenchApiRoutes(
             self._workbench_query_service,
             self._workbench_action_service,
+        )
+        self._workbench_action_api_routes = WorkbenchActionApiRoutes(
+            exception_service=self._workbench_exception_application_service,
         )
         self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(
             reconciliation_service=self._reconciliation_service,
@@ -12229,19 +12233,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        try:
-            preview = self._workbench_exception_application_service.preview(payload)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_exception_preview_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, preview)
+        status, response_payload = self._workbench_action_api_routes.exception_preview(payload)
+        return self._json_response(status, response_payload)
 
     def _handle_api_workbench_exception_apply(
         self,

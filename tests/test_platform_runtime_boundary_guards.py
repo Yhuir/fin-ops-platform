@@ -420,6 +420,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "WorkbenchApiRoutes",
                 "server_markers": ("_workbench_api_routes = WorkbenchApiRoutes(", "_workbench_api_routes."),
             },
+            "routes_workbench_actions.py": {
+                "module": "fin_ops_platform.app.routes_workbench_actions",
+                "class": "WorkbenchActionApiRoutes",
+                "server_markers": (
+                    "_workbench_action_api_routes = WorkbenchActionApiRoutes(",
+                    "_workbench_action_api_routes.",
+                ),
+            },
         }
         discovered_route_modules = {path.name for path in APP_ROOT.glob("routes_*.py")}
         violations: list[str] = []
@@ -446,6 +454,40 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             for marker in owner["server_markers"]:
                 if marker not in server_source:
                     violations.append(f"server.py route owner {route_class} is missing marker {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_exception_preview_mapping_is_owned_by_action_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_workbench_actions.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
+        if not route_class:
+            violations.append("modern Workbench action route owner is missing")
+        for marker in (
+            "def exception_preview",
+            "WorkbenchExceptionApplicationService",
+            "workbench_row_not_found",
+            "invalid_workbench_exception_preview_request",
+        ):
+            if marker not in route_class:
+                violations.append(f"exception preview route owner is missing marker {marker}")
+
+        handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_exception_preview")
+        if "_workbench_action_api_routes.exception_preview(payload)" not in handler_source:
+            violations.append("server.py exception preview wrapper does not delegate to the route owner")
+        for forbidden in (
+            "_workbench_exception_application_service.preview",
+            "workbench_row_not_found",
+            "invalid_workbench_exception_preview_request",
+        ):
+            if forbidden in handler_source:
+                violations.append(f"server.py exception preview wrapper still owns {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -2406,14 +2448,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Modern Workbench action route-owner audit is not closed as analysis")
         if (
-            "| 195 | `server-py:workbench-exception-preview-route-owner-extraction` | pending"
+            "| 195 | `server-py:workbench-exception-preview-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
-            violations.append("Next pending slice should extract Workbench exception preview route ownership")
+            violations.append("Workbench exception preview route owner extraction is not closed as implementation")
+        if (
+            "| 196 | `server-py:workbench-exception-apply-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should extract Workbench exception apply route ownership")
         if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
             violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:workbench-exception-preview-route-owner-extraction`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench exception preview route owner extraction")
+        if "`server-py:workbench-exception-apply-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench exception apply route owner extraction")
 
         self.assertEqual(violations, [])
 
