@@ -10,6 +10,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
+from fin_ops_platform.services.invoice_lifecycle_read_model_repository import InvoiceLifecycleReadModelRepositoryPort
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     input_invoice_usage_source_versions,
     oa_pending_payment_source_versions,
@@ -43,10 +44,15 @@ class InvoiceLifecycleSqlProjectionBuilder:
         workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
         oa_source_adapter: Any | None = None,
+        invoice_lifecycle_read_model_repository: Any | None = None,
     ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._invoice_lifecycle_read_model_repository = (
+            invoice_lifecycle_read_model_repository
+            or InvoiceLifecycleReadModelRepositoryPort(self._read_repository)
+        )
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._payment_status_repository = payment_status_repository
         self._oa_source_adapter = oa_source_adapter
@@ -77,7 +83,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
         rows.extend(self._output_invoice_lifecycle_rows(normalized_scope_key))
         rows.extend(self._oa_pending_payment_lifecycle_rows(normalized_scope_key))
         source_versions = self._source_versions()
-        self._read_repository.save_invoice_lifecycle_rows(
+        self._invoice_lifecycle_read_model_repository.save_invoice_lifecycle_rows(
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
@@ -85,9 +91,11 @@ class InvoiceLifecycleSqlProjectionBuilder:
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
     def mark_invoice_lifecycle_scope_empty(self, scope_key: str) -> None:
-        mark_scope = getattr(self._read_repository, "mark_invoice_lifecycle_scope", None)
-        if callable(mark_scope):
-            mark_scope(scope_key=scope_key, row_count=0, source_versions=self._source_versions())
+        self._invoice_lifecycle_read_model_repository.mark_invoice_lifecycle_scope(
+            scope_key=scope_key,
+            row_count=0,
+            source_versions=self._source_versions(),
+        )
 
     def _pending_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
         builder = SearchPendingSqlProjectionBuilder(

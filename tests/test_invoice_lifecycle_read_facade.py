@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.invoice_lifecycle_read_facade import InvoiceLifecycleReadFacade
+from fin_ops_platform.services.invoice_lifecycle_read_model_repository import InvoiceLifecycleReadModelRepositoryPort
 
 
 class QueueRecorder:
@@ -26,6 +27,15 @@ class FakeLifecycleRepository:
         tenant_id: str = "default",
     ) -> dict[str, object] | None:
         self.subject_calls.append({"subject_ids": list(subject_ids), "tenant_id": tenant_id})
+        return self.payload
+
+    def get_invoice_lifecycle_rows_by_identity_keys(
+        self,
+        invoice_identity_keys: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.subject_calls.append({"identity_keys": list(invoice_identity_keys), "tenant_id": tenant_id})
         return self.payload
 
     def list_invoice_lifecycle_rows(
@@ -99,6 +109,119 @@ class InvoiceLifecycleReadFacadeTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(repository.month_calls[0]["subject_types"], ["input_invoice", "bank_transaction"])
+
+
+class InvoiceLifecycleReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Underlying:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, object]] = []
+
+            def save_invoice_lifecycle_rows(self, **kwargs: object) -> None:
+                self.calls.append(("save_invoice_lifecycle_rows", dict(kwargs)))
+
+            def mark_invoice_lifecycle_scope(self, **kwargs: object) -> None:
+                self.calls.append(("mark_invoice_lifecycle_scope", dict(kwargs)))
+
+            def get_invoice_lifecycle_rows_by_subject_ids(
+                self,
+                subject_ids: list[str],
+                *,
+                tenant_id: str = "default",
+            ) -> dict[str, object]:
+                self.calls.append(
+                    (
+                        "get_invoice_lifecycle_rows_by_subject_ids",
+                        {"subject_ids": list(subject_ids), "tenant_id": tenant_id},
+                    )
+                )
+                return {"rows": [{"subject_id": "invoice-1"}], "read_model_status": "fresh"}
+
+            def get_invoice_lifecycle_rows_by_identity_keys(
+                self,
+                invoice_identity_keys: list[str],
+                *,
+                tenant_id: str = "default",
+            ) -> dict[str, object]:
+                self.calls.append(
+                    (
+                        "get_invoice_lifecycle_rows_by_identity_keys",
+                        {"invoice_identity_keys": list(invoice_identity_keys), "tenant_id": tenant_id},
+                    )
+                )
+                return {"rows": [{"invoice_identity_key": "identity-1"}], "read_model_status": "fresh"}
+
+            def list_invoice_lifecycle_rows(
+                self,
+                *,
+                month: str,
+                subject_types: list[str] | None = None,
+                tenant_id: str = "default",
+            ) -> dict[str, object]:
+                self.calls.append(
+                    (
+                        "list_invoice_lifecycle_rows",
+                        {"month": month, "subject_types": list(subject_types or []), "tenant_id": tenant_id},
+                    )
+                )
+                return {"rows": [{"subject_id": "invoice-1"}], "read_model_status": "fresh"}
+
+            def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("invoice lifecycle port must not expose input usage reads")
+
+            def list_output_invoice_collection_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("invoice lifecycle port must not expose output collection reads")
+
+            def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("invoice lifecycle port must not expose OA pending payment reads")
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("invoice lifecycle port must not expose pending invoice reads")
+
+            def search_index(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("invoice lifecycle port must not expose search reads")
+
+        underlying = Underlying()
+        port = InvoiceLifecycleReadModelRepositoryPort(underlying)
+
+        self.assertEqual(
+            port.get_invoice_lifecycle_rows_by_subject_ids(["invoice-1"], tenant_id="tenant-a")["rows"][0]["subject_id"],
+            "invoice-1",
+        )
+        self.assertEqual(
+            port.get_invoice_lifecycle_rows_by_identity_keys(["identity-1"])["rows"][0]["invoice_identity_key"],
+            "identity-1",
+        )
+        self.assertEqual(
+            port.list_invoice_lifecycle_rows(month="2026-05", subject_types=["input_invoice"])["rows"][0]["subject_id"],
+            "invoice-1",
+        )
+        port.save_invoice_lifecycle_rows(
+            scope_key="2026-05",
+            rows=[{"subject_id": "invoice-1"}],
+            source_versions={"schema": "v1"},
+        )
+        port.mark_invoice_lifecycle_scope(
+            scope_key="2026-05",
+            row_count=1,
+            source_versions={"schema": "v1"},
+        )
+
+        self.assertFalse(hasattr(port, "list_input_invoice_usage_rows"))
+        self.assertFalse(hasattr(port, "list_output_invoice_collection_rows"))
+        self.assertFalse(hasattr(port, "list_oa_pending_payment_rows"))
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertFalse(hasattr(port, "search_index"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "get_invoice_lifecycle_rows_by_subject_ids",
+                "get_invoice_lifecycle_rows_by_identity_keys",
+                "list_invoice_lifecycle_rows",
+                "save_invoice_lifecycle_rows",
+                "mark_invoice_lifecycle_scope",
+            ],
+        )
 
 
 if __name__ == "__main__":

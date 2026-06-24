@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-output-invoice-collection.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:invoice-lifecycle-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -100,9 +100,12 @@ Current state expected on start:
 - output_invoice_collection production SQL runtime relation detail now returns `202`/refreshing and enqueues `output_invoice_collection:all` when the SQL read repository/detail lookup is unavailable, instead of falling back to live detail rebuild.
 - output_invoice_collection local implementation support is accounted for after repository port, rows/filter/export/detail fresh gates, source-version proof, scope policy, worker fan-out, operation barrier, app-level helper removal, legacy/live path classification and tests/docs; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - invoice_lifecycle is selected as the seventh non-Go read model implementation pilot because it is the shared upstream lifecycle state boundary for pending invoice, input/output usage, OA pending payment, tax, cost/search and import fan-out.
-- invoice_lifecycle currently has manifest-listed repository methods but no narrow repository port; `InvoiceLifecycleReadFacade` and `InvoiceLifecycleSqlProjectionBuilder` still use broad read repository methods directly.
+- `InvoiceLifecycleReadModelRepositoryPort` now exposes only the manifest-listed lifecycle read model methods.
+- `InvoiceLifecycleReadFacade` uses the narrow port for lifecycle row lookups while preserving unavailable-path behavior for missing repository methods.
+- `InvoiceLifecycleSqlProjectionBuilder` uses the narrow port for lifecycle save/mark paths.
+- No `PostgresStateStore.invoice_lifecycle_sql_read_repository` property was added because no existing property, construction path or caller exists.
 - No module is globally closed.
-- The next pending boundary is read-models:invoice-lifecycle-repository-port-extraction.
+- The next pending boundary is read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -198,16 +201,15 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:invoice-lifecycle-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:invoice-lifecycle-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-output-invoice-collection.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-repository-port-and-sql-owner-split-plan.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/domain-events-lifecycle/README.md`, `docs/modules/domain-events-lifecycle/tests.md`, `docs/modules/pending-invoices/README.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/tax-offset/README.md`, and `docs/modules/imports-invoices/README.md`.
+For read-models:invoice-lifecycle-refresh-freshness-operation-barrier-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-output-invoice-collection.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-and-usage-contract.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/read-models/state-machine.md`, `docs/modules/domain-events-lifecycle/README.md`, `docs/modules/domain-events-lifecycle/tests.md`, `docs/modules/pending-invoices/README.md`, `docs/modules/input-invoice-usage/README.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/oa-pending-payments/README.md`, `docs/modules/tax-offset/README.md`, and `docs/modules/imports-invoices/README.md`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Add `InvoiceLifecycleReadModelRepositoryPort`.
-- Expose only manifest-listed methods: `save_invoice_lifecycle_rows(...)`, `mark_invoice_lifecycle_scope(...)`, `get_invoice_lifecycle_rows_by_subject_ids(...)`, `get_invoice_lifecycle_rows_by_identity_keys(...)`, and `list_invoice_lifecycle_rows(...)`.
-- Wire `InvoiceLifecycleReadFacade` and `InvoiceLifecycleSqlProjectionBuilder` through the narrow port.
-- Inspect PostgreSQL state-store read wiring; only add/return the narrow port where existing construction or callers need it.
-- Add a repository-port isolation test proving unrelated read model methods are not exposed.
+- Audit invoice lifecycle freshness, force refresh, fan-out `all`, source-version proof, operation-barrier behavior and legacy/live rebuild contamination.
+- Inspect `InvoiceLifecycleReadFacade`, `InvoiceLifecycleReadModelRefreshService`, `InvoiceLifecycleSqlProjectionBuilder`, runtime worker wiring, scope policy, manifest, App Status target mapping and downstream lifecycle consumers.
+- If a concrete narrow gap is found and can be fixed safely inside this slice, implement it with focused tests.
+- If no runtime gap is found, close the slice as analysis with explicit evidence and queue the next narrow boundary.
 - Preserve invoice lifecycle rules, payload shape, source-version semantics, worker event semantics, queue schema, API behavior and frontend behavior.
 - Do not claim `invoice_lifecycle` globally closed.
 - Produce/update an analysis file.

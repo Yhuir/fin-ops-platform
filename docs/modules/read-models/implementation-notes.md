@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Invoice lifecycle repository port extraction
+
+- 目标：执行 `read-models:invoice-lifecycle-repository-port-extraction`，为 `invoice_lifecycle` read model 建立窄 repository port。
+- 影响范围：`InvoiceLifecycleReadModelRepositoryPort`、`InvoiceLifecycleReadFacade` lifecycle row lookup、`InvoiceLifecycleSqlProjectionBuilder` lifecycle save/mark path、invoice lifecycle facade/refresh/manifest tests 和 modular IO state。
+- 关键决策：facade 和 SQL projection builder 不再直接消费 broad read repository lifecycle 方法；它们通过 `InvoiceLifecycleReadModelRepositoryPort` 访问 manifest-listed 方法。没有新增 `PostgresStateStore.invoice_lifecycle_sql_read_repository` property，因为当前没有既有 property、construction path 或 caller，需要避免 speculative API。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models 实施记录和测试矩阵；共享 read model 状态机定义不变。
+- 测试覆盖：新增 `InvoiceLifecycleReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 invoice lifecycle facade、refresh 和 manifest 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-invoice-lifecycle-repository-port-extraction.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；invoice lifecycle freshness/barrier/legacy live path audit 仍是下一步。
+
 ## 2026-06-24 - Invoice lifecycle selected as next modular IO read model pilot
 
 - 目标：执行 `read-models:next-pilot-selection-after-output-invoice-collection`，在销项收款本地实现支持 accounted 后选择下一个非 Go read model 试点。

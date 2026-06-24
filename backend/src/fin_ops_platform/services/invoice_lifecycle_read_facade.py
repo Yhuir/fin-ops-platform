@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.invoice_lifecycle_read_model_repository import InvoiceLifecycleReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.common import text
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
@@ -21,7 +22,8 @@ class InvoiceLifecycleReadFacade:
         queue_repository: Any | None = None,
         tenant_id: str = "default",
     ) -> None:
-        self._read_model_repository = read_model_repository
+        self._read_model_repository_source = read_model_repository
+        self._read_model_repository = InvoiceLifecycleReadModelRepositoryPort(read_model_repository)
         self._queue_repository = queue_repository
         self._tenant_id = text(tenant_id) or "default"
         self._last_result: dict[str, Any] = _facade_result(status="missing")
@@ -47,7 +49,7 @@ class InvoiceLifecycleReadFacade:
             return result
         reader = getattr(self._read_model_repository, "get_invoice_lifecycle_rows_by_subject_ids", None)
         fallback_scope_keys = _fallback_scope_keys(month_hint=month_hint, scope_keys_hint=scope_keys_hint)
-        if not callable(reader):
+        if not callable(getattr(self._read_model_repository_source, "get_invoice_lifecycle_rows_by_subject_ids", None)):
             return self._non_fresh_result(
                 status="unavailable",
                 scope_keys=fallback_scope_keys,
@@ -81,7 +83,7 @@ class InvoiceLifecycleReadFacade:
             return result
         reader = getattr(self._read_model_repository, "get_invoice_lifecycle_rows_by_identity_keys", None)
         fallback_scope_keys = _fallback_scope_keys(month_hint=month_hint, scope_keys_hint=scope_keys_hint)
-        if not callable(reader):
+        if not callable(getattr(self._read_model_repository_source, "get_invoice_lifecycle_rows_by_identity_keys", None)):
             return self._non_fresh_result(
                 status="unavailable",
                 scope_keys=fallback_scope_keys,
@@ -109,13 +111,14 @@ class InvoiceLifecycleReadFacade:
     ) -> dict[str, Any]:
         normalized_month = text(month)
         reader = getattr(self._read_model_repository, "list_invoice_lifecycle_rows", None)
-        if not callable(reader) or not normalized_month:
+        source_reader = getattr(self._read_model_repository_source, "list_invoice_lifecycle_rows", None)
+        if not callable(source_reader) or not normalized_month:
             return self._non_fresh_result(
                 status="unavailable",
                 scope_keys=[normalized_month] if normalized_month else [],
                 require_fresh=require_fresh,
                 reason=reason,
-                stale_reasons=["repository_method_unavailable" if not callable(reader) else "month_required"],
+                stale_reasons=["repository_method_unavailable" if not callable(source_reader) else "month_required"],
             )
         payload = reader(
             month=normalized_month,
