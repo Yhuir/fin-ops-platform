@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `read-model-focused-user-scope-api-metadata-resmoke-runbook-selected`
+Current state: `no-oa-bank-batches-api-stale-read-only-diagnosis-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection` as `planning-closed` in `analysis/planning-post-no-oa-category-source-version-diagnosis-next-boundary-selection-2026-06-25.md`. T0 reconciled Row273 remaining user-scope API failures with Row277 pending invoice convergence and Row278 no-OA category source-version diagnosis, rejected browser/admin/write evidence and Go admission as premature, and selected `production:read-model-focused-user-scope-api-metadata-resmoke-runbook` as the next smallest closure step. No production command, mutation or closure claim occurred in Row279. Module/global closure remains open.
+Completed `production:read-model-focused-user-scope-api-metadata-resmoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-focused-user-scope-api-metadata-resmoke-runbook-2026-06-25.md`. T0 reused the Row273 in-process target OA applicant credential seam without printing credentials/tokens, ran the focused user-scope API metadata probe, and proved both pending invoice probes now pass fresh under the 1s target. `no_oa_bank_batches` still reports HTTP 200 with `read_model_status=stale` and triggered one bounded GET refresh enqueue; postcheck showed `/health/ready` ready, dirty scopes done, readiness fresh, read-model outbox done, no dead letters, and the no-OA refresh done. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-api-stale-read-only-diagnosis`.
 
 ## Closed Or Deferred Slices
 

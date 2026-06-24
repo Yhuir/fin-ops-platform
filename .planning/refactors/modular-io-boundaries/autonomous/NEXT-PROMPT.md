@@ -1,23 +1,29 @@
 # Next Prompt
 
-Continue after `planning:post-no-oa-category-source-version-diagnosis-next-boundary-selection`.
+Continue after `production:read-model-focused-user-scope-api-metadata-resmoke-runbook`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row273 proved the T0 root SSH target OA applicant credential seam can run user-scope authenticated API metadata probes without printing/storing tokens, cookies, passwords, env values, response bodies or payload rows.
-- Row273 focused retry left exactly three user-scope API failures:
-  - `pending_invoices_rows`
-  - `pending_invoices_filter_options`
-  - `no_oa_bank_batches`
-- Row277 deployed release `dev-pending-invoice-source-17d13466-20260625` and proved pending invoice `expense:all` rows/filter-options fresh with no source-version stale reasons.
-- Row278 proved current no-OA `month=2026-06,bucket=unsubmitted` rows have no category source-version mismatch; expected and actual category snapshot hash prefix is `b1533c3ad8c74afa`, and `source_version_mismatch_reasons` is empty.
-- Row279 selected a focused production user-scope API metadata re-smoke as the next smallest closure step.
+- Row280 reused the Row273 in-process target OA applicant credential seam without printing or storing credentials/tokens.
+- Focused user-scope API metadata re-smoke results:
+  - `pending_invoices_rows`: pass, HTTP `200`, `read_model_status=fresh`, `refresh_enqueued_count=0`, p95 `660.208ms`.
+  - `pending_invoices_filter_options`: pass, HTTP `200`, `read_model_status=fresh`, `refresh_enqueued_count=0`, p95 `129.211ms`.
+  - `no_oa_bank_batches`: fail, HTTP `200`, `read_model_status=stale`, `refresh_enqueued_count=1`, p95 `143.406ms`.
+- Row280 obeyed the stop gate and did not run full non-admin user-scope probes because the focused set failed.
+- Row280 postcheck:
+  - `/health/ready`: ready.
+  - dirty scopes: all `done`.
+  - readiness: all `fresh`.
+  - read-model outbox: all `done`.
+  - read-model dead letters: none.
+  - recent no-OA dirty/outbox from the GET-triggered refresh: `done`.
+- Row278 previously proved the bounded no-OA row category snapshot matched the deployed expected category snapshot and `source_version_mismatch_reasons` was empty against the safely reconstructed base contract.
 - Module/global closure remains open.
 
 ## Next Boundary
 
-`production:read-model-focused-user-scope-api-metadata-resmoke-runbook`
+`production:no-oa-bank-batches-api-stale-read-only-diagnosis`
 
 ## Required First Steps On Resume
 
@@ -26,38 +32,30 @@ Continue after `planning:post-no-oa-category-source-version-diagnosis-next-bound
 3. Acquire the direct-dev write lease before editing:
    - `mkdir /tmp/fin-ops-dev-write.lock`
 4. Read:
-   - `analysis/planning-post-no-oa-category-source-version-diagnosis-next-boundary-selection-2026-06-25.md`
-   - `analysis/production-read-model-controlled-production-api-browser-runbook-2026-06-25.md`
-   - `analysis/production-pending-invoice-source-version-contract-deploy-and-convergence-runbook-2026-06-25.md`
+   - `analysis/production-read-model-focused-user-scope-api-metadata-resmoke-runbook-2026-06-25.md`
    - `analysis/production-no-oa-bank-batch-category-source-version-mismatch-diagnosis-2026-06-25.md`
-   - `backend/src/fin_ops_platform/tools/http_slo_probe.py`
-   - `backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
-   - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
-5. Write a controlled production runbook/evidence file under `analysis/` before any production command.
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+   - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
+   - `docs/modules/no-oa-bank-batches/README.md`
+   - `docs/modules/no-oa-bank-batches/tests.md`
+5. Write a read-only diagnosis runbook/evidence file under `analysis/` before any production command.
 
-## Required Runbook Shape
+## Diagnosis Scope
 
-The Row280 runbook must:
+Diagnose why user-scope `GET /api/no-oa-bank-batches?month=2026-06&bucket=unsubmitted&page=1&page_size=200` still reports `read_model_status=stale` after:
 
-- use the T0-only `ssh finops-prod-root` production gate;
-- discover the active release and verify `/health/ready` before and after;
-- source deployed env files without printing values;
-- reuse the Row273 remote Python in-process target OA applicant credential/login seam;
-- never print/store/copy bearer tokens, cookies, passwords, OA usernames, env values, DSNs, private keys, response bodies, payload rows or business identifiers;
-- first probe exactly:
-  - `pending_invoices_rows`
-  - `pending_invoices_filter_options`
-  - `no_oa_bank_batches`
-- if the focused set passes, optionally run all non-admin user-scope `DEFAULT_API_PROBES` once;
-- print only sanitized metadata such as status, HTTP status counts, read-model status counts, refresh-enqueued counts, p95/max latency and failed probe names;
-- collect pre/post dirty scopes, readiness, read-model outbox and dead-letter summaries;
-- record GET-triggered refresh enqueue side effects if they occur, but do not manually enqueue/requeue/repair/replay/mutate readiness/directly mutate DB rows.
+- Row278 showed category source-version parity for the bounded row set;
+- Row280's GET-triggered no-OA refresh converged to done;
+- App Status readiness remains fresh and dirty/outbox/dead-letter aggregates are clean.
+
+The diagnosis should be read-only first and should avoid production API calls. It should compare deployed API expected source versions against bounded row source versions, including optional downstream keys if the deployed request path can include them, and inspect the freshness/status/dirty/outbox/readiness metadata needed to classify the stale reason.
 
 ## Stop Gates
 
-- Stop before executing if the only available auth path would print/store/copy tokens, cookies, passwords or env secret values.
-- Stop before executing if `/health/ready` is not ready.
-- Stop before executing if precheck shows active dirty/outbox/dead-letter blockers unrelated to the selected probes.
-- Stop if the focused set fails; record sanitized failure evidence and do not retry blindly.
-- Do not run browser/admin/write probes in Row280.
-- Do not claim module/global closure from Row280 alone.
+- Do not call production API endpoints in the diagnosis boundary.
+- Do not print payload rows, batch ids, transaction ids, account names, counterparties, tokens, cookies, passwords, DSNs, env secret values or private keys.
+- Do not enqueue/requeue/refresh/repair/rebuild/replay/deploy/restart/manually mark readiness/directly mutate DB rows.
+- Stop if exact expected source-version construction would require broad `Application` startup or guessing unknown contracts.
+- Do not claim module/global closure from this diagnosis alone.
