@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `browser-harness-packaging-audit-closed-admin-seam-selected`
+Current state: `admin-scope-auth-seam-runbook-written`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-harness-packaging-feasibility-audit` as `analysis-closed` in `analysis/deployment-production-browser-smoke-harness-packaging-feasibility-audit-2026-06-25.md`. T0 found that packaging only e2e/config files would not solve missing Playwright/browser runtime; packaging `node_modules` or browser binaries into release is too broad for this closure slice; installing/downloading on production and copying target OA tokens locally remain forbidden. Browser evidence remains deferred pending a dedicated ops runner design. The next boundary is `production:admin-scope-auth-seam-read-only-classification`.
+Started `production:admin-scope-auth-seam-read-only-classification` in `analysis/production-admin-scope-auth-seam-read-only-classification-2026-06-25.md`. The runbook is written and must be committed/pushed before production execution. It classifies supported admin HTTP SLO env presence and target OA applicant live sessions without printing tokens/cookies/passwords/env values or running browser/write probes.
 
 ## Closed Or Deferred Slices
 
