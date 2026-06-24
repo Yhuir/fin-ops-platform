@@ -74,10 +74,21 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_requires_sql_repository_in_production_without_live_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_miss_enqueues_refresh_without_sync_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_reads_sql_index tests.test_search_api -v
 ```
 
+## 2026-06-24 - OA projection sync Search producer boundary
+
+- 新增：`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_search_refresh_uses_search_producer_boundary`。
+- 更新：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 `OAProjectionSyncService` 重新直接 `enqueue_many("search", ...)`。
+- 覆盖：OA sync 下游 Search refresh fan-out 走 `SearchReadModelRefreshProducer`，同时保持 Workbench/OA pending payment/pending invoice fan-out 和 Search dirty scope 行为。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_oa_sync_search_refresh_uses_search_producer_boundary tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_oa_sync_marks_oa_pending_payment_read_model_dirty_for_progress_rows tests.test_oa_projection_sql_runtime.OAProjectionSqlRuntimeTests.test_oa_sync_worker_persists_projection_and_marks_downstream_scopes_dirty tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
+```
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check

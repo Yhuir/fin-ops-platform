@@ -47,4 +47,12 @@
 - 审计结论：local closure audit 发现缺口：`SearchQueryFreshnessService.get_payload(...)` 返回 `None` 后，`Application._handle_api_search(...)` 仍会调用 `SearchService.search(...)`。
 - 改动：当 `_requires_sql_read_model_runtime()` 为 true 且 SQL search repository 不可用时，`/api/search` 返回 HTTP `503`、`error=read_model_unavailable`、`read_model_status=unavailable`，并通过 `SearchReadModelRefreshProducer` 入队 `api_sql_repository_unavailable`。
 - 保持不变：legacy/local 非 PostgreSQL fallback 仍可用；SQL miss/fresh/stale 行为、search ranking、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
-- 下一步：执行 `read-models:search-post-fail-closed-local-implementation-closure-audit`。
+- 后续：已执行 `read-models:search-post-fail-closed-local-implementation-closure-audit`，并拆出 OA projection sync Search producer boundary。
+
+## 2026-06-24 - OA projection sync Search refresh producer boundary
+
+- 目标：让 OA projection sync 影响 Search read model 的 fan-out 也走统一 Search producer，避免 Search refresh enqueue ownership 分散在上游服务。
+- 审计结论：`OAProjectionSyncService._mark_downstream_dirty(...)` 仍直接 `ReadModelRefreshGateway.enqueue_many("search", target_scopes, reason="oa_projection_sync")`。该路径没有绕过 durable gateway/scope policy，但绕过了 `SearchReadModelRefreshProducer` 的统一边界。
+- 改动：`OAProjectionSyncService` 新增 `search_read_model_refresh_producer` 依赖；默认兼容构造 `SearchReadModelRefreshProducer`；生产 worker 装配显式传入 Search producer；`_mark_downstream_dirty(...)` 调用 producer `enqueue(...)`；静态 guard 防止直接 `enqueue_many("search", ...)` 回流。
+- 保持不变：OA sync target scopes、Workbench/OA pending payment/pending invoice fan-out、Search worker event、scope policy、queue schema、API shape、Redis/cache、权限和前端行为均不变。
+- 下一步：执行 `read-models:search-post-oa-projection-sync-local-implementation-closure-audit`。

@@ -28,3 +28,4 @@
 | 日期 | 变更 | 状态机影响 | 测试/验证 |
 | --- | --- | --- | --- |
 | 2026-06-24 | 建立 search 模块维护骨架，并选择 search 作为下一 read model pilot | 不改变运行时状态定义；记录下一步应先抽 `SearchReadModelRepositoryPort` | `bash scripts/verify.sh docs` |
+| 2026-06-24 | OA projection sync Search fan-out 改走 `SearchReadModelRefreshProducer` | 不改变 read model 状态；Search refresh enqueue ownership 从 OA sync 直接 `enqueue_many("search", ...)` 收敛到 Search producer boundary | `PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_oa_sync_search_refresh_uses_search_producer_boundary tests.test_oa_projection_sql_runtime.OAProjectionSqlRuntimeTests.test_oa_sync_worker_persists_projection_and_marks_downstream_scopes_dirty tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v` |

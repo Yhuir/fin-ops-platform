@@ -66,6 +66,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader, PostgresStateStore
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
@@ -86,6 +87,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 )
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
@@ -281,6 +283,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             queue_repository=queue,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
             pending_payment_relation_promoter=pending_relation_promoter,
+            search_read_model_refresh_producer=SearchReadModelRefreshProducer(
+                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=queue)
+            ),
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:

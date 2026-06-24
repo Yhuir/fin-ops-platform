@@ -56,6 +56,25 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
 
+    def test_oa_sync_search_refresh_uses_search_producer_boundary(self) -> None:
+        records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
+        source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
+        projection_repository = FakeProjectionRepository()
+        queue_repository = FakeQueueRepository()
+        search_refresh_producer = FakeSearchRefreshProducer()
+        service = OAProjectionSyncService(
+            source_adapter=source_adapter,
+            projection_repository=projection_repository,
+            queue_repository=queue_repository,
+            search_read_model_refresh_producer=search_refresh_producer,
+        )
+
+        service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(search_refresh_producer.calls, [(["2026-06", "all"], "oa_projection_sync")])
+        self.assertNotIn(("search", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertIn(("workbench", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+
     def test_oa_sync_promotes_completed_pending_payment_relations_and_marks_affected_scopes_dirty(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
@@ -143,6 +162,15 @@ class FakeQueueRepository:
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+
+class FakeSearchRefreshProducer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def enqueue(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> bool:
+        self.calls.append((list(scope_keys), reason))
+        return True
 
 
 class FakePendingPaymentRelationPromoter:

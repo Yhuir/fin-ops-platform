@@ -8,6 +8,7 @@ from typing import Any
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 
 
 MONTH_FORMAT = "%Y-%m"
@@ -22,12 +23,19 @@ class OAProjectionSyncService:
         queue_repository: Any,
         retention_cutoff_date_provider: Any | None = None,
         pending_payment_relation_promoter: Any | None = None,
+        search_read_model_refresh_producer: Any | None = None,
     ) -> None:
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
         self._queue_repository = queue_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
+        self._search_read_model_refresh_producer = (
+            search_read_model_refresh_producer
+            or SearchReadModelRefreshProducer(
+                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=self._queue_repository)
+            )
+        )
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
@@ -256,7 +264,7 @@ class OAProjectionSyncService:
         if not refresh_gateway.can_enqueue():
             return
         refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
-        refresh_gateway.enqueue_many("search", target_scopes, reason="oa_projection_sync")
+        self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
 

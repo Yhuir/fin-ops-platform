@@ -30,7 +30,7 @@ Prevent `/api/search` from falling back to legacy/local live search when product
 
 `search` needs a post-fail-closed local implementation closure audit before it can move to `production-evidence-deferred`.
 
-Next boundary: `read-models:search-post-fail-closed-local-implementation-closure-audit`.
+Follow-up boundary executed: `read-models:search-post-fail-closed-local-implementation-closure-audit`.
 
 ## Seven-Category Test Applicability
 
