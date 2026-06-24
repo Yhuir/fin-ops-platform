@@ -69,14 +69,14 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: planning:post-historical-dead-letter-resolution-next-boundary-selection.
-- Last status: planning-closed.
+- Last completed boundary: production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep.
+- Last status: production-controlled.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
 - `server-py:workbench-group-detail-route-owner-extraction` is now implementation-closed locally.
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
-- The next pending boundary is `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep`.
+- The next pending boundary is `planning:post-production-baseline-module-closure-wave-selection`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -203,7 +203,7 @@ Current state expected on start:
 - `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
 - `planning:parallel-orchestration-workflow` is complete as a planning slice: it defined controller/worker permissions, direct-dev write lease, worker file ownership, handoff format, final closure audit gate and 10 thread prompts. Worker prompts may auto-progress inside assigned workstreams, but controller owns global state and global closure.
 - `planning:parallel-handoff-review-and-state-update` is complete as a planning slice: T0 consumed T1-T8 handoffs, integrated accepted worker evidence in `b60a343a`, accepted T6 as partial production-read-only evidence, and kept Go admission deferred from T7.
-- The next pending boundary is `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep`.
+- The next pending boundary is `planning:post-production-baseline-module-closure-wave-selection`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -306,18 +306,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep`.
+Start with `planning:post-production-baseline-module-closure-wave-selection`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`, `analysis/production-historical-dead-letter-covered-resolution-apply-runbook-2026-06-25.md`, and `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`.
-- Use row241/row242 evidence as context: 24 covered historical read-model dead letters were resolved, post-check `job.outbox_events done=203169`, dead-letter groups empty, dirty scopes all done, readiness all fresh and `/health/ready` ready; row242 selected a post-cleanup global production evidence sweep.
-- Collect a non-secret read-only production baseline for `/health`, `/health/ready`, API/dispatcher/required worker stability, outbox/dirty-scope/readiness aggregates and worker heartbeat/status samples.
-- Do not deploy, restart, requeue, repair, replay workers, mutate DB/readiness/dirty scopes or print secrets in this read-only sweep.
-- Do not claim module/global closure from dead-letter cleanup alone.
+- Read `analysis/production-post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-2026-06-25.md`, `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`, and `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
+- Use row243 evidence as context: `/health` and `/health/ready` ready and release-consistent; required worker missing/stale/mismatch counts all 0; API, dispatcher and 20 worker units active/running with `NRestarts=0`; outbox only `done=203169`; dirty scopes all done; readiness all fresh; no read-model dead-letter groups; covered-dead-letter dry-run zero candidates; recent worker error grep clean.
+- Select the next highest-risk safe module-specific closure/evidence wave from `production-evidence-deferred` / `not-module-closed` rows.
+- Decide whether the next wave is T0-only production evidence, bounded worker audits, or a planning/accounting reconciliation.
+- Do not claim module/global closure from the clean global baseline alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

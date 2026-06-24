@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-pending`
+Current state: `post-production-baseline-module-closure-wave-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-historical-dead-letter-resolution-next-boundary-selection` as `planning-closed` in `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`. T0 reconciled row241 production-controlled dead-letter resolution evidence, confirmed residue cleanup does not prove module/global closure, and selected `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep` as the next highest-risk safe boundary. No production command or runtime mutation occurred in the planning slice.
+Completed `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep` as `production-controlled` in `analysis/production-post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-2026-06-25.md`. T0 collected a clean non-secret read-only production baseline after dead-letter cleanup: `/health` and `/health/ready` ready and release-consistent, required worker missing/stale/mismatch counts all 0, API/dispatcher/20 worker units active/running with `NRestarts=0` across stability recheck, outbox only `done=203169`, dirty scopes `done=187007`, readiness `fresh=498`, no read-model dead-letter groups and no recent worker error-grep matches. The next boundary is `planning:post-production-baseline-module-closure-wave-selection`; no global/module closure is claimed.
 
 ## Closed Or Deferred Slices
 

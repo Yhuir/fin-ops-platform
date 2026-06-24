@@ -1,57 +1,56 @@
 # Next Prompt
 
-Continue after the `planning:post-historical-dead-letter-resolution-next-boundary-selection` slice.
+Continue after the `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `planning:post-historical-dead-letter-resolution-next-boundary-selection`
-- Last status: `planning-closed`
+- Last completed boundary: `production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep`
+- Last status: `production-controlled`
 - Queue semantics remain corrected: slice status is not module closure.
 - Latest deployed production release: `dev-workbench-matching-port-20260625020818`.
-- Row241 resolved the historical read-model dead-letter residue through a controlled maintenance command:
-  - pre-apply dry-run reported `candidate_count=24`, `eligible_count=24`, `resolved_count=0`;
-  - apply command reported `mode=execute`, `candidate_count=24`, `eligible_count=24`, `resolved_count=24`;
-  - post-check `job.outbox_events` had only `done=203169`;
-  - dead-letter groups were `[]`;
-  - `job.read_model_dirty_scopes` remained `done=187007`;
-  - `read_model.app_status_readiness` remained `fresh=498`;
-  - follow-up dry-run reported `candidate_count=0`, `eligible_count=0`, `resolved_count=0`.
-- Row242 selected the next evidence boundary:
-  - dead-letter cleanup does not prove module/global closure;
-  - the old commit-backed reconciliation baseline predates the latest production-control sequence;
-  - the next safe boundary is a post-cleanup global production readiness/worker/DB evidence sweep.
+- Row243 collected a clean post-dead-letter production baseline:
+  - `/health` and `/health/ready` ready and release-consistent;
+  - required worker missing/stale/mismatch counts all `0`;
+  - API, dispatcher and 20 `fin-ops-worker@*.service` units active/running with `NRestarts=0` across a stability recheck;
+  - `job.outbox_events` only `done=203169`;
+  - no read-model dead-letter groups;
+  - `job.read_model_dirty_scopes` only `done=187007`;
+  - `read_model.app_status_readiness` only `fresh=498`;
+  - covered-dead-letter dry-run returned zero candidates;
+  - recent worker error grep returned no matching lines.
+- No deploy, restart, requeue, repair, worker replay, DB/readiness/dirty-scope mutation or secret output occurred in row243.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep`
+`planning:post-production-baseline-module-closure-wave-selection`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean or only contains controller files from this handoff, and branch is `dev`.
 2. Fetch `origin` and verify local `HEAD == origin/dev` before selecting work.
 3. Read:
+   - `analysis/production-post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-2026-06-25.md`
    - `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`
-   - `analysis/production-historical-dead-letter-covered-resolution-apply-runbook-2026-06-25.md`
-   - `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`
+   - `analysis/commit-backed-state-reconciliation-2026-06-25.md`
    - `MODULE-QUEUE.md`
    - `STATE.md`
    - `JOURNAL.md`
    - this prompt
    - `12-PARALLEL-ORCHESTRATION.md`
-4. Write and execute a bounded read-only evidence sweep for row243.
-5. Collect non-secret production evidence:
-   - `/health` and `/health/ready` release identity and readiness summary;
-   - API, dispatcher and required worker unit status/stability samples;
-   - deployed-runtime PostgreSQL aggregates for `job.outbox_events`, `job.read_model_dirty_scopes`, `read_model.app_status_readiness`;
-   - worker heartbeat/status samples exposed by `/health/ready`;
-   - recent required-worker error grep if useful.
-6. Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and `04-master-goal-controller.md` with the result and next boundary.
+4. Reconcile which `production-evidence-deferred` / `not-module-closed` rows can be revisited using the clean production baseline.
+5. Select the next highest-risk safe module-specific closure/evidence wave.
+6. Decide whether the next wave is:
+   - T0-only production evidence collection;
+   - a bounded worker wave for independent module audits;
+   - or a planning/accounting reconciliation before workers.
+7. Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and `04-master-goal-controller.md` with the selected next boundary.
 
 ## Stop Gates
 
-- This is read-only evidence collection only.
-- Do not deploy, restart, requeue, republish, repair, run worker replay, mutate DB, mutate dirty scopes, mutate readiness or print secrets.
+- Do not claim module/global closure from the clean global baseline alone.
+- Do not start Go/Fiber/Go Worker implementation; Go admission remains blocked.
+- Do not create workers unless ownership scopes are independent and current queue/state evidence is reconciled.
+- Do not perform production mutation in this planning boundary.
 - Stop if current `dev` diverges from `origin/dev` or the worktree contains unrelated dirty files.
-- Stop and classify precisely if `/health/ready` regresses, active dirty scopes appear, readiness is non-fresh, dead-letter groups return, or required workers are missing/stale/mismatched.
