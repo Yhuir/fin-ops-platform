@@ -3130,9 +3130,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         queue_source = (
             REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
         ).read_text(encoding="utf-8")
-        next_prompt_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
-        ).read_text(encoding="utf-8")
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cancel-exception-live-dispatch-noop-cleanup.md"
@@ -3145,16 +3142,57 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench cancel-exception no-op cleanup is not closed as implementation")
         if (
-            "| 213 | `server-py:modern-workbench-action-route-owner-local-closure-audit` | pending"
+            "| 213 | `server-py:modern-workbench-action-route-owner-local-closure-audit`"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit modern Workbench action route-owner local closure")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
-            violations.append("Next prompt no longer forbids Go implementation during the current slice")
-        if "`server-py:modern-workbench-action-route-owner-local-closure-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at route-owner local closure audit")
+            violations.append("Cancel-exception cleanup no longer records route-owner local closure follow-up")
         if "has_rows_for_month" not in analysis_source:
             violations.append("Cancel-exception cleanup analysis does not record removed no-op branch")
+
+        self.assertEqual(violations, [])
+
+    def test_modern_workbench_action_route_owner_local_closure_audit_selects_row_detail_audit(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-modern-workbench-action-route-owner-local-closure-audit.md"
+        ).read_text(encoding="utf-8")
+        notes_source = (REPO_ROOT / "docs/modules/workbench-relations/implementation-notes.md").read_text(
+            encoding="utf-8"
+        )
+        violations: list[str] = []
+
+        if (
+            "| 213 | `server-py:modern-workbench-action-route-owner-local-closure-audit` | analysis-closed"
+            not in queue_source
+        ):
+            violations.append("Modern Workbench action route-owner local closure audit is not closed as analysis")
+        if (
+            "| 214 | `server-py:workbench-row-detail-route-owner-audit` | pending"
+            not in queue_source
+        ):
+            violations.append("Next pending slice should audit Workbench row detail route ownership")
+        for marker in (
+            "WorkbenchActionApiRoutes",
+            "_workbench_write_facade().",
+            "LegacyWorkbenchActionRoutes",
+            "`server-py:workbench-row-detail-route-owner-audit`",
+            "GET /api/workbench/rows/{row_id}",
+            "No module can be marked `closed`",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Route-owner local closure audit missing marker: {marker}")
+        if "`server-py:workbench-row-detail-route-owner-audit`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench row detail route owner audit")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during the row detail audit")
+        if "Modern Workbench action route-owner local closure audit" not in notes_source:
+            violations.append("Workbench relations implementation notes missing local closure audit record")
 
         self.assertEqual(violations, [])
 

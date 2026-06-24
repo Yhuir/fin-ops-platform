@@ -1,5 +1,32 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Modern Workbench action route-owner local closure audit
+
+目标：复查现代 Workbench action route-owner 抽离后的本地闭环证据，确认 action surface 不再由 `Application` 直接拥有 `WorkbenchWriteFacade` delegation。
+
+结论：
+
+- `WorkbenchActionApiRoutes` 已拥有 exception preview/apply、confirm-link preview/submit、mark-exception、cancel-link、withdraw-link preview/submit、cash special、update-bank-exception、OA-bank exception、personal advance repayment、cancel-exception、ignore-row 和 unignore-row 的现代 action delegation。
+- `Application` 仍保留 HTTP dispatch、JSON parse、freshness guard、auth/request context、timing 和 response serialization 等 HTTP 层职责。
+- 对 `server.py`、`routes_workbench_actions.py` 和 `routes_legacy_workbench_actions.py` 的 `_workbench_write_facade().` literal search 未发现剩余现代 action direct facade call site。
+- `LegacyWorkbenchActionRoutes` 继续作为旧 `/workbench/actions/confirm|difference|exception|offline|offset` 的 compat-only owner，不接入现代 write facade、relation command、dirty scope、outbox 或 read model refresh 边界。
+
+未关闭：
+
+- 这只关闭现代 action route-owner 本地审计，不代表 Workbench relation、Workbench read model、server.py、worker、frontend 或生产验证全局闭环。
+- `GET /api/workbench/rows/{row_id}`、groups/detail、refresh status、settings、active generation、matching dirty-scope 和 read model persist/enqueue 仍是后续 server ownership 边界。
+
+下一条边界：`server-py:workbench-row-detail-route-owner-audit`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_modern_workbench_action_route_owner_local_closure_audit_selects_row_detail_audit tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_cancel_exception_noop_cleanup_updates_queue tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_actions_stay_quarantined_in_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_go_shadow_admission_remains_guarded -v
+python3 -m py_compile tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench cancel-exception live dispatch no-op cleanup
 
 目标：清理 `/api/workbench/actions/cancel-exception` wrapper 中两个分支都调用同一 helper 的 no-op `has_rows_for_month(...)` 分支。
