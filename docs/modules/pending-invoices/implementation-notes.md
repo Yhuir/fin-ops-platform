@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - pending invoice source-version 合同对齐
+
+- 目标：修复 Row275 生产只读诊断发现的 pending invoice source-version 合同漂移，避免 `expense:all` 在相关 refresh 全部 done 后仍因 expected/actual source versions 不一致返回 `refreshing`。
+- 影响范围：`PendingInvoiceReadModelService.pending_invoice_source_versions(...)`、`PostgresReadModelRepository._pending_invoice_scope_row(...)` / `_pending_invoice_scope_source_versions_row(...)`、`tests/test_search_pending_sql_runtime.py` 和本模块测试矩阵。
+- 关键决策：API expected-source 与 SQL projection writer 稳定包含 `invoice_lifecycle_policy_schema_version`、`bank_detail_source_versions`、`workbench_relation_source_versions`；aggregate `direction:filter` source-version proof 优先使用 row_count > 0 的有效 month shard，避免零行历史 shard 的旧版本污染当前有数 shard 的 freshness。
+- 文档影响：更新 `tests.md` 和本实施记录；长期产品口径、页面 UI、API response shape 与 worker scope contract 未变化。
+- 测试覆盖：新增 writer/API source-version parity 测试和零行历史 shard aggregate 回归；保留 workbench relation source-version missing/mismatch stale gate 覆盖。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime -v`。
+- 未测风险：本地测试不执行生产 deploy、explicit-scope rebuild 或 worker drain；生产 `expense:all` / no-OA 收敛仍需后续受控生产 runbook。
+- 后续事项：部署后用 bounded production runbook 对 pending invoice 显式 scope rebuild/convergence 取证，再处理 no-OA `bank_transaction_category_snapshot_version_mismatch`。
+
 ## 2026-06-23 - 多 OA / 多流水 / 多发票 `+N` 聚合展示
 
 - 目标：让待找发票列表严格按统一 `workbench_relation` distribution 显示 OA、银行流水和发票配对关系；当同一 relation 下某类成员大于 1 时，该栏只显示代表全部成员的 `+N`，点击后只展开对应类型明细。

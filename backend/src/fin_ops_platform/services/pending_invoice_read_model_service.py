@@ -4,6 +4,7 @@ from http import HTTPStatus
 from inspect import signature
 from typing import Any, Callable
 
+from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
 from fin_ops_platform.services.pending_invoice_service import (
     EXPENSE_FILTERS,
     INCOME_FILTERS,
@@ -37,16 +38,19 @@ def pending_invoice_source_versions(
     bank_tags = payload.get("bank_transaction_tags")
     result: dict[str, Any] = {
         "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
+        "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
         "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
         "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
         "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
         "oa_attachment_invoice_parser_version": attachment_invoice_parser_version,
         "oa_projection_sync_version": oa_projection_sync_version,
+        "bank_detail_source_versions": dict(bank_detail_source_versions) if isinstance(bank_detail_source_versions, dict) else {},
+        "workbench_relation_source_versions": (
+            dict(workbench_relation_source_versions)
+            if isinstance(workbench_relation_source_versions, dict)
+            else {}
+        ),
     }
-    if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
-        result["bank_detail_source_versions"] = dict(bank_detail_source_versions)
-    if isinstance(workbench_relation_source_versions, dict) and workbench_relation_source_versions:
-        result["workbench_relation_source_versions"] = dict(workbench_relation_source_versions)
     return result
 
 

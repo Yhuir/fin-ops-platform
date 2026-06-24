@@ -8,7 +8,10 @@ import unittest
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
+from fin_ops_platform.services.pending_invoice_read_model_service import (
+    PendingInvoiceReadModelService,
+    pending_invoice_source_versions,
+)
 from fin_ops_platform.services.pending_invoice_service import (
     PENDING_INVOICE_EXPORT_ROW_LIMIT,
     PendingInvoiceError,
@@ -115,12 +118,14 @@ class UnderlyingSearchReadModelRepository:
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
     return {
         "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
+        "invoice_lifecycle_policy_schema_version": 1,
         "pending_invoice_tag_groups_version": 1,
         "pending_output_invoice_tag_groups_version": 1,
         "bank_auto_tag_rules_version": 1,
         "oa_attachment_invoice_parser_version": "2026-05-28-attachment-status-v1:2026-05-11-evidence-v1",
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         "bank_detail_source_versions": {},
+        "workbench_relation_source_versions": {},
     }
 
 
@@ -1088,6 +1093,25 @@ class PendingIncomeProjectionConnection:
 
 
 class SearchPendingSqlRuntimeTests(unittest.TestCase):
+    def test_pending_invoice_writer_and_api_source_version_contracts_match(self) -> None:
+        connection = SearchPendingConnection()
+        builder = SearchPendingSqlProjectionBuilder(connection=connection)
+
+        writer_versions = builder._pending_invoice_source_versions()
+        api_versions = pending_invoice_source_versions(
+            {
+                "pending_invoice_tag_groups": {"version": 1},
+                "pending_output_invoice_tag_groups": {"version": 1},
+                "bank_transaction_tags": {"version": 1},
+            },
+            attachment_invoice_parser_version=str(writer_versions["oa_attachment_invoice_parser_version"]),
+            oa_projection_sync_version=str(writer_versions["oa_projection_sync_version"]),
+            bank_detail_source_versions={},
+            workbench_relation_source_versions={},
+        )
+
+        self.assertEqual(writer_versions, api_versions)
+
     def test_search_projection_reads_unique_workbench_rows_before_python_build(self) -> None:
         connection = SearchPendingConnection(
             workbench_rows=[
@@ -1657,7 +1681,11 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
-                    "source_versions": _pending_invoice_expected_source_versions(),
+                    "source_versions": {
+                        key: value
+                        for key, value in _pending_invoice_expected_source_versions().items()
+                        if key != "workbench_relation_source_versions"
+                    },
                 }
             },
         )()
@@ -1813,7 +1841,11 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
-                    "source_versions": _pending_invoice_expected_source_versions(),
+                    "source_versions": {
+                        key: value
+                        for key, value in _pending_invoice_expected_source_versions().items()
+                        if key != "workbench_relation_source_versions"
+                    },
                 }
 
             def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
@@ -2099,6 +2131,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     return [
                         {
                             "scope_key": "expense:all:2026-04",
+                            "row_count": 3,
                             "source_versions": {
                                 **_pending_invoice_expected_source_versions(),
                                 "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 7},
@@ -2110,6 +2143,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                         },
                         {
                             "scope_key": "expense:all:2026-05",
+                            "row_count": 4,
                             "source_versions": {
                                 **_pending_invoice_expected_source_versions(),
                                 "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 8},
@@ -2153,6 +2187,59 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "2026-04": {"workbench_relation_schema_version": "relation-v1", "source_version": 41},
                 "2026-05": {"workbench_relation_schema_version": "relation-v1", "source_version": 42},
             },
+        )
+
+    def test_pending_invoice_repository_ignores_zero_row_historical_shards_for_aggregate_source_versions(self) -> None:
+        class PendingScopeConnection:
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.pending_invoice_scopes" in normalized:
+                    return [
+                        {
+                            "scope_key": "expense:all:2023-05",
+                            "row_count": 0,
+                            "source_versions": {
+                                **_pending_invoice_expected_source_versions(),
+                                "pending_invoice_read_model_schema_version": "stale-schema",
+                                "bank_auto_tag_rules_version": 1,
+                                "bank_detail_source_versions": {"legacy": "stale"},
+                            },
+                        },
+                        {
+                            "scope_key": "expense:all:2026-05",
+                            "row_count": 2,
+                            "source_versions": {
+                                **_pending_invoice_expected_source_versions(),
+                                "bank_auto_tag_rules_version": 7,
+                                "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 8},
+                            },
+                        },
+                    ]
+                return []
+
+            def transaction(self):
+                connection = self
+
+                class Transaction:
+                    def __enter__(self) -> PendingScopeConnection:
+                        return connection
+
+                    def __exit__(self, exc_type, exc, traceback) -> bool:
+                        return False
+
+                return Transaction()
+
+        repository = PostgresReadModelRepository(PendingScopeConnection())
+
+        scope_row = repository._pending_invoice_scope_row("expense:all")
+
+        self.assertIsNotNone(scope_row)
+        source_versions = scope_row["source_versions"]
+        self.assertEqual(source_versions["pending_invoice_read_model_schema_version"], "2026-06-pending-invoice-oa-identity-v2")
+        self.assertEqual(source_versions["bank_auto_tag_rules_version"], 7)
+        self.assertEqual(
+            source_versions["bank_detail_source_versions"],
+            {"2026-05": {"bank_detail_schema_version": 12, "rules": 8}},
         )
 
     def test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months(self) -> None:

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-source-version-contract-alignment-selected`
+Current state: `pending-invoice-source-version-contract-deploy-and-convergence-runbook-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:pending-invoice-no-oa-source-version-contract-deep-diagnosis` as `production-diagnosis-closed` in `analysis/production-pending-invoice-no-oa-source-version-contract-deep-diagnosis-2026-06-25.md`. T0 used root SSH and direct deployed PostgreSQL read-only metadata only; no API endpoint call or production mutation occurred. Pending invoice `expense:all` expected-vs-actual source versions still mismatch after completed refreshes because aggregate source-version proof is built from all 32 historical `expense:all:%` shard rows, including zero-row historical shards not rebuilt in the recent 2026 refresh window; projection writer also includes `invoice_lifecycle_policy_schema_version` while API expected source versions omit it. no-OA exact base expected-vs-row mismatch is `bank_transaction_category_snapshot_version_mismatch`; App Status `all/fresh` remains coarser than row-level API freshness. Next boundary is a local pending invoice source-version contract alignment before any production rebuild/convergence runbook.
+Completed `read-models:pending-invoice-source-version-contract-alignment` as `implementation-closed` in `analysis/read-models-pending-invoice-source-version-contract-alignment-2026-06-25.md`. The local fix aligns pending invoice API expected source versions with SQL projection writer output by including `invoice_lifecycle_policy_schema_version` plus stable `bank_detail_source_versions` and `workbench_relation_source_versions` keys, and changes aggregate scope source-version proof to prefer non-empty month shards so zero-row historical shards do not poison `expense:all` freshness. Targeted backend tests and docs were updated. No production command or mutation occurred; production convergence remains open.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:pending-invoice-no-oa-source-version-contract-deep-diagnosis`
+`read-models:pending-invoice-source-version-contract-alignment`
 
 ## Next Prompt
 
-`read-models:pending-invoice-source-version-contract-alignment`
+`production:pending-invoice-source-version-contract-deploy-and-convergence-runbook`

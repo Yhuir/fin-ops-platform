@@ -3236,7 +3236,7 @@ class PostgresReadModelRepository:
         executor = connection or self._connection
         rows = executor.fetch_all(
             """
-            select scope_key, source_versions
+            select scope_key, row_count, source_versions
             from read_model.pending_invoice_scopes
             where scope_key = %s
                or scope_key like %s
@@ -10933,15 +10933,20 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
             "scope_key": text(row.get("scope_key")) or scope_key,
             "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
         }
+    effective_rows = [
+        row
+        for row in normalized_rows
+        if int_value(row.get("row_count"), 0) > 0
+    ] or normalized_rows
     first_versions = (
-        normalized_rows[0].get("source_versions")
-        if isinstance(normalized_rows[0].get("source_versions"), dict)
+        effective_rows[0].get("source_versions")
+        if isinstance(effective_rows[0].get("source_versions"), dict)
         else {}
     )
     aggregate = dict(first_versions)
     bank_detail_by_month: dict[str, Any] = {}
     workbench_relation_by_month: dict[str, Any] = {}
-    for row in normalized_rows:
+    for row in effective_rows:
         row_scope_key = text(row.get("scope_key")) or ""
         source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
         bank_detail_versions = (
