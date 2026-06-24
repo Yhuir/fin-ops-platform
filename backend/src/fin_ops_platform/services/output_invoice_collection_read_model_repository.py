@@ -35,6 +35,10 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
+        payload = self._repository.get_output_invoice_collection_row_by_row_id(row_id)
+        return dict(payload) if isinstance(payload, dict) else None
+
     def save_output_invoice_collection_rows(
         self,
         *,

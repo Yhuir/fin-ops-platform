@@ -11,6 +11,7 @@ from fin_ops_platform.services.output_invoice_collection_service import OutputIn
 
 SqlRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
 SqlAllRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
+SqlRelationDetailsProvider = Callable[[str, dict[str, list[str]]], dict[str, object] | None]
 
 
 class OutputInvoiceCollectionApiRoutes:
@@ -22,12 +23,14 @@ class OutputInvoiceCollectionApiRoutes:
         receipt_service: OutputInvoiceCollectionReceiptService,
         sql_rows_provider: SqlRowsProvider | None = None,
         sql_all_rows_provider: SqlAllRowsProvider | None = None,
+        sql_relation_details_provider: SqlRelationDetailsProvider | None = None,
     ) -> None:
         self._query_service = query_service
         self._lifecycle_service = lifecycle_service
         self._receipt_service = receipt_service
         self._sql_rows_provider = sql_rows_provider
         self._sql_all_rows_provider = sql_all_rows_provider
+        self._sql_relation_details_provider = sql_relation_details_provider
 
     def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
@@ -156,6 +159,13 @@ class OutputInvoiceCollectionApiRoutes:
         *,
         session: OARequestSession | None = None,
     ) -> dict[str, Any]:
+        sql_payload = (
+            self._sql_relation_details_provider(row_id, query)
+            if callable(self._sql_relation_details_provider)
+            else None
+        )
+        if isinstance(sql_payload, dict):
+            return sql_payload
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
 
     def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:

@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Output invoice collection relation detail production fail-closed
+
+- 目标：执行 `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`，补齐销项收款 relation detail 的生产 SQL read-model fail-closed 边界。
+- 影响范围：`OutputInvoiceCollectionReadModelDetailService`、`OutputInvoiceCollectionReadModelRepositoryPort`、`PostgresReadModelRepository` output row-id lookup、`OutputInvoiceCollectionApiRoutes`、`Application._get_output_invoice_collection_relation_details_from_sql_read_model(...)`、read-model manifest、output/read-models 测试矩阵和 modular IO state。
+- 关键决策：`output_invoice_collection` relation detail 在生产 SQL runtime 下不得 live rebuild；缺 SQL detail repository/lookup 时返回 `202`/refreshing 并通过 gateway enqueue `output_invoice_collection:all`。fresh SQL detail row 使用同一 payload builder，保持 relation detail response shape。
+- 文档影响：新增 modular IO analysis，更新 read-models/output-invoice-collections 实施记录、状态机、测试矩阵、autonomous state/queue/next prompt 和主控 prompt。
+- 测试覆盖：新增 API contract tests 覆盖 production fail-closed 和 fresh SQL detail row；扩展 repository port/manifest tests 登记 `get_output_invoice_collection_row_by_row_id(...)`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-relation-detail-production-repository-fail-closed.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界仍是 `read-models:output-invoice-collection-local-implementation-closure-audit`。
+
 ## 2026-06-24 - Output invoice collection freshness / operation barrier audit
 
 - 目标：执行 `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`，核对销项收款 read model fresh gate、force refresh、all fan-out、operation barrier 和旧 helper 分类。

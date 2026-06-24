@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Relation detail production fail-closed
+
+- 目标：关闭 `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`，避免生产 PostgreSQL runtime 下 `/rows/{row_id}/relation-details` 缺 SQL detail repository 时回退 live query。
+- 影响范围：`OutputInvoiceCollectionReadModelDetailService`、`OutputInvoiceCollectionReadModelRepositoryPort`、`PostgresReadModelRepository` output detail row lookup、`OutputInvoiceCollectionApiRoutes` detail provider、`Application` output detail SQL provider、manifest port contract 和 API/port/manifest 测试。
+- 关键决策：生产 SQL runtime 下缺 `get_output_invoice_collection_row_by_row_id(...)` 时返回 `202`/refreshing 并 enqueue `output_invoice_collection:all`，不得 live rebuild detail；fresh SQL detail row 使用与 live path 相同的 payload builder，保持 relation detail response shape。
+- 文档影响：同步 README、状态机、测试矩阵、read-models 实施记录、modular IO analysis/state/queue/journal/next prompt 和主控 prompt；不改产品口径。
+- 测试覆盖：新增 output relation detail production fail-closed 和 fresh SQL detail API tests；扩展 output repository port 和 read model manifest guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-relation-detail-production-repository-fail-closed.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。`output_invoice_collection` 仍需 local closure accounting，不能声明全局闭环。
+
 ## 2026-06-24 - Freshness target contract and app projection helper removal
 
 - 目标：关闭 `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`，让销项收款写后同步等待真实受影响月份，而不是默认 all 视图下的 fan-out-only `all`。

@@ -230,6 +230,9 @@ from fin_ops_platform.services.output_invoice_collection_lifecycle_service impor
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
 )
+from fin_ops_platform.services.output_invoice_collection_read_model_detail_service import (
+    OutputInvoiceCollectionReadModelDetailService,
+)
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
     build_output_invoice_collection_lifecycle_repository,
@@ -9586,6 +9589,7 @@ class Application:
             receipt_service=receipt_service,
             sql_rows_provider=self._get_output_invoice_collection_rows_from_sql_read_model,
             sql_all_rows_provider=self._get_output_invoice_collection_all_rows_from_sql_read_model,
+            sql_relation_details_provider=self._get_output_invoice_collection_relation_details_from_sql_read_model,
         )
 
     def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
@@ -9680,7 +9684,8 @@ class Application:
             payload = self._output_invoice_collection_routes().relation_details(row_id, query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        status_code = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json_response(status_code, payload)
 
     def _handle_api_output_invoice_collections_status_rules(self, headers: dict[str, str] | None = None) -> Response:
         session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
@@ -10086,6 +10091,33 @@ class Application:
         result["read_model_scope_key"] = scope_key
         result.pop("refresh_status", None)
         return result
+
+    def _get_output_invoice_collection_relation_details_from_sql_read_model(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+    ) -> dict[str, object] | None:
+        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
+        if not callable(getattr(repository, "get_output_invoice_collection_row_by_row_id", None)):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_output_invoice_collection_read_model_refresh(
+                    "all",
+                    reason="api_detail_sql_repository_unavailable",
+                )
+                return OutputInvoiceCollectionReadModelDetailService.refreshing_payload(
+                    kind=query.get("kind", [""])[0],
+                    scope_key="all",
+                )
+            return None
+        service = OutputInvoiceCollectionReadModelDetailService(
+            repository=repository,
+            enqueue_refresh=lambda scope_key, reason: self._enqueue_output_invoice_collection_read_model_refresh(
+                scope_key,
+                reason=reason,
+            ),
+            source_versions_provider=self._output_invoice_collection_expected_source_versions,
+        )
+        return service.relation_details(row_id, kind=query.get("kind", [""])[0])
 
     @staticmethod
     def _input_invoice_usage_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:

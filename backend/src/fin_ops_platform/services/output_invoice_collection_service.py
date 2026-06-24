@@ -795,32 +795,11 @@ class OutputInvoiceCollectionQueryService:
                 f"Output invoice collection row not found: {row_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        if normalized_kind == "oa":
-            relation_payload = row["oa"]
-            summaries = relation_payload.get("summaries", [])
-        elif normalized_kind == "bank":
-            relation_payload = row["bankTransactions"]
-            summaries = relation_payload.get("summaries", [])
-        elif normalized_kind == "invoice":
-            relation_payload = row["invoiceRelations"]
-            summaries = relation_payload.get("summaries", [])
-        elif normalized_kind == "red_invoice":
-            relation_payload = row["redInvoiceRelation"]
-            summaries = relation_payload.get("summaries", [])
-        else:
-            relation_payload = row["receipt"]
-            summaries = []
-        return {
-            "rowId": row["id"],
-            "invoiceId": row["invoiceId"],
-            "kind": normalized_kind,
-            "detailAvailable": normalized_kind != "receipt" and relation_payload.get("detailMode") != "none",
-            "relationCount": relation_payload.get("relationCount", 0),
-            "hasMultiple": relation_payload.get("hasMultiple", False),
-            "summaries": summaries,
-            "sourceAvailable": bool(relation_payload.get("sourceAvailable", normalized_kind != "receipt")),
-            "relations": context.relation_summaries_for_row(row["invoiceId"]),
-        }
+        return output_invoice_collection_relation_details_from_row(
+            row,
+            kind=normalized_kind,
+            relations=context.relation_summaries_for_row(row["invoiceId"]),
+        )
 
     def status_rules(self) -> dict[str, Any]:
         return self._status_overlay_service.status_rules_payload(self._status_rule_service.rules_payload())
@@ -1936,6 +1915,44 @@ def _today() -> str:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def output_invoice_collection_relation_details_from_row(
+    row: dict[str, Any],
+    *,
+    kind: str,
+    relations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized_kind = str(kind or "").strip()
+    if normalized_kind not in {"oa", "bank", "invoice", "red_invoice", "receipt"}:
+        raise ValueError("kind must be oa, bank, invoice, red_invoice or receipt.")
+    if normalized_kind == "oa":
+        relation_payload = row.get("oa")
+        summaries = relation_payload.get("summaries", []) if isinstance(relation_payload, dict) else []
+    elif normalized_kind == "bank":
+        relation_payload = row.get("bankTransactions")
+        summaries = relation_payload.get("summaries", []) if isinstance(relation_payload, dict) else []
+    elif normalized_kind == "invoice":
+        relation_payload = row.get("invoiceRelations")
+        summaries = relation_payload.get("summaries", []) if isinstance(relation_payload, dict) else []
+    elif normalized_kind == "red_invoice":
+        relation_payload = row.get("redInvoiceRelation")
+        summaries = relation_payload.get("summaries", []) if isinstance(relation_payload, dict) else []
+    else:
+        relation_payload = row.get("receipt")
+        summaries = []
+    relation_payload = relation_payload if isinstance(relation_payload, dict) else {}
+    return {
+        "rowId": row.get("id"),
+        "invoiceId": row.get("invoiceId"),
+        "kind": normalized_kind,
+        "detailAvailable": normalized_kind != "receipt" and relation_payload.get("detailMode") != "none",
+        "relationCount": relation_payload.get("relationCount", 0),
+        "hasMultiple": relation_payload.get("hasMultiple", False),
+        "summaries": summaries,
+        "sourceAvailable": bool(relation_payload.get("sourceAvailable", normalized_kind != "receipt")),
+        "relations": list(relations or []),
+    }
 
 
 def _uppercase_rmb(value: Any) -> str:

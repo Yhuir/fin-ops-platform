@@ -1,11 +1,11 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit` slice.
+Continue the autonomous modular IO refactor after the `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit`
+- Last completed boundary: `read-models:output-invoice-collection-relation-detail-production-repository-fail-closed`
 - Last status: `implementation-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - `output_invoice_collection` is the sixth non-Go read model pilot.
@@ -15,6 +15,10 @@ Continue the autonomous modular IO refactor after the `read-models:output-invoic
   - frontend lifecycle, receipt and red/blue relation write-after-read flows prefer concrete month targets over fan-out-only `all`;
   - `output_invoice_collection:all` remains fan-out control scope;
   - unused `Application` output projection helpers were removed and guarded.
+- Output collection relation detail production fail-closed support is locally implemented:
+  - `OutputInvoiceCollectionReadModelDetailService` reads fresh SQL read-model rows for relation details;
+  - production SQL runtime returns `202`/refreshing and enqueues `output_invoice_collection:all` when the SQL repository/detail lookup is unavailable;
+  - relation detail no longer falls back to live query in production SQL runtime.
 - `output_invoice_collection` is not globally closed. Local closure accounting and real PostgreSQL/worker/App Status/high-row/browser evidence remain open or deferred.
 - No module is globally closed.
 - Go hot-path candidates remain `blocked-by-prerequisite`.
@@ -52,14 +56,14 @@ Target:
 
 - Account for local `output_invoice_collection` implementation support after:
   - repository port extraction;
-  - rows/filter/export fresh gate and production fail-closed behavior;
+  - rows/filter/export/detail fresh gate and production fail-closed behavior;
   - source-version proof;
   - scope policy validation;
   - worker `all` fan-out/month shard behavior;
   - lifecycle/receipt/red relation operation barrier target contract;
   - app-level projection helper removal;
   - tests/docs coverage.
-- Classify any remaining output collection live/detail support, especially `/rows/{row_id}/relation-details`, as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
+- Classify remaining output collection live/detail support after relation detail production fail-closed as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
 - Decide whether local implementation support can move to `production-evidence-deferred` or whether another concrete local gap must be split before defer.
 - Produce/update an analysis/accounting file.
 - Update `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, `prompts/04-master-goal-controller.md`, and affected module docs/tests.

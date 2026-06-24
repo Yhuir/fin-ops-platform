@@ -47,6 +47,7 @@
 - fresh：`read_model.app_status_readiness` 或等价 repository 状态证明 `output_invoice_collection` scope fresh；rows route 返回 `200` 并可叠加 lifecycle overlay。
 - missing/stale/source version mismatch：rows route 返回 `202`、`read_model_status=refreshing`，enqueue `output_invoice_collection` refresh；不得同步 live rebuild。
 - schema stale：SQL payload 缺少 `oa` 或 `invoiceRelations` 等统一关系字段时，视为 schema stale 并 enqueue refresh；旧 read model 不得作为 fresh rows 返回。
+- relation detail unavailable：生产 PostgreSQL runtime 下缺少 SQL read repository 或 row detail lookup 时，`/rows/{row_id}/relation-details` 返回 `202`、`read_model_status=refreshing` 并 enqueue `output_invoice_collection:all`；不得 live rebuild detail 并伪装 fresh。
 - refreshing：dirty/outbox 或 readiness 显示 scope 正在刷新；页面保持 busy/auto retry。
 - failed/unavailable：App Status domain 进入 blocked 或 unavailable；页面不能伪装数据 ready。
 - refresh 触发来源：
@@ -63,6 +64,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-24 | 补齐 relation detail 生产 fail-closed | 不改变 relation detail payload shape；生产 SQL runtime 缺 detail repository 时返回 refreshing/enqueue，fresh SQL detail row 直接构造详情，不回退 live query | `tests.test_output_invoice_collection_api`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_read_model_manifest` |
 | 2026-06-24 | 补齐写后 freshness target 合同并删除 app-level output projection helper | 不改变收款/红蓝票/收据业务状态；mutation response 增加 `read_model_scope_keys` 和 `freshness_targets`，前端写后等待具体月份 operation barrier；`Application.list_output_invoice_collection_scope_shards`、`mark_output_invoice_collection_scope_empty`、`rebuild_output_invoice_collection_read_model_scope` 被删除，worker projection owner 保持在 `InvoiceUsageCollectionSqlProjectionBuilder` | `tests.test_output_invoice_collection_lifecycle`、`tests.test_output_invoice_collection_api`、`tests.test_read_model_architecture_guards`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变销项发票收款业务/UI/read model/worker 状态；锁定 `output_invoice_collection` 为 scoped incremental、fan-out `all`、自管 freshness，并保持 query owner、permission owner 和 repository ports 不与 `invoice_lifecycle` / `input_invoice_usage` 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_invoice_lifecycle_and_usage_manifest_preserve_scoped_contracts` |
 | 2026-06-23 | 统一关系 OA/流水/发票项 `+N` 展示 | 不新增收款业务状态；新增 relation list UI 状态和 SQL payload schema stale 条件；销项发票多项显示合计和额外项 `+N` | `python -m pytest tests/test_output_invoice_collection_service.py tests/test_invoice_usage_collection_sql_runtime.py -q`、`npm --prefix web test -- OutputInvoiceCollectionsPage.test.tsx --run` |

@@ -22,6 +22,25 @@ from fin_ops_platform.services.output_invoice_collection_service import OutputIn
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
+class FailingOutputInvoiceCollectionQueryService:
+    def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("relation detail must be served from output_invoice_collection read model")
+
+
+class RecordingReadModelRefreshQueue:
+    def __init__(self) -> None:
+        self.refreshes: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.refreshes.append(
+            (
+                str(kwargs.get("scope_type") or ""),
+                str(kwargs.get("scope_key") or ""),
+                str(kwargs.get("reason") or ""),
+            )
+        )
+
+
 class FakeOutputRelationFacade:
     def __init__(self, relations: list[dict[str, Any]]) -> None:
         self.relations = [dict(relation) for relation in relations]
@@ -250,6 +269,90 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(
             {summary["invoiceId"] for summary in payload["summaries"]},
             {"out-relation-a", "out-relation-b", "out-relation-c"},
+        )
+
+    def test_relation_details_require_sql_repository_in_production_without_live_rebuild(self) -> None:
+        queue = RecordingReadModelRefreshQueue()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[self._invoice("out-prod-detail", "3101", "生产客户")])
+            app._bootstrap_mode = "production"
+            app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+            app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+            app._output_invoice_collection_sql_read_repository = None
+            app._output_invoice_collection_query_service.row_relation_details = (  # type: ignore[method-assign]
+                FailingOutputInvoiceCollectionQueryService().row_relation_details
+            )
+
+            response = app._handle_api_output_invoice_collections_relation_details(
+                "output-row-missing-repository",
+                {"kind": ["invoice"]},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["readModelStatus"], "refreshing")
+        self.assertEqual(payload["detailAvailable"], False)
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(
+            queue.refreshes,
+            [("output_invoice_collection", "all", "api_detail_sql_repository_unavailable")],
+        )
+
+    def test_relation_details_use_fresh_sql_read_model_row_without_live_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[self._invoice("out-prod-detail", "3101", "生产客户")])
+            app._bootstrap_mode = "production"
+            app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+            app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": RecordingReadModelRefreshQueue()})()
+            app._output_invoice_collection_query_service.row_relation_details = (  # type: ignore[method-assign]
+                FailingOutputInvoiceCollectionQueryService().row_relation_details
+            )
+            app._output_invoice_collection_sql_read_repository = type(
+                "OutputCollectionReadRepository",
+                (),
+                {
+                    "get_output_invoice_collection_row_by_row_id": lambda _self, _row_id: {
+                        "row": {
+                            "id": "output-row-read-model",
+                            "invoiceId": "out-relation-read-model",
+                            "oa": {"relationCount": 0, "hasMultiple": False, "summaries": []},
+                            "bankTransactions": {"relationCount": 0, "hasMultiple": False, "summaries": []},
+                            "invoiceRelations": {
+                                "relationCount": 2,
+                                "hasMultiple": True,
+                                "detailMode": "list",
+                                "summaries": [
+                                    {"invoiceId": "out-related-a", "digitalInvoiceNo": "3001"},
+                                    {"invoiceId": "out-related-b", "digitalInvoiceNo": "3002"},
+                                ],
+                            },
+                            "redInvoiceRelation": {"relationCount": 0, "hasMultiple": False, "summaries": []},
+                            "receipt": {"sourceAvailable": False},
+                        },
+                        "refresh_status": "fresh",
+                        "source_versions": output_invoice_collection_source_versions(),
+                        "read_model_scope_key": "2026-05",
+                    },
+                },
+            )()
+
+            response = app._handle_api_output_invoice_collections_relation_details(
+                "output-row-read-model",
+                {"kind": ["invoice"]},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(payload["rowId"], "output-row-read-model")
+        self.assertEqual(payload["relationCount"], 2)
+        self.assertEqual(
+            [summary["invoiceId"] for summary in payload["summaries"]],
+            ["out-related-a", "out-related-b"],
         )
 
     def test_detail_routes_require_output_collection_read_session(self) -> None:

@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:output-invoice-collection-repository-port-extraction.
+- Last completed boundary: read-models:output-invoice-collection-relation-detail-production-repository-fail-closed.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -97,6 +97,7 @@ Current state expected on start:
 - output_invoice_collection shares the invoice-usage-collection worker/projection family with input_invoice_usage and oa_pending_payment.
 - `OutputInvoiceCollectionReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
 - output_invoice_collection freshness, force-refresh, all fan-out/month proof, operation-barrier and app-level helper audit work is implemented locally: mutation responses expose `read_model_scope_keys`/`freshness_targets`, frontend flows wait on concrete month targets, and unused app-level output projection helpers were removed from `Application`.
+- output_invoice_collection production SQL runtime relation detail now returns `202`/refreshing and enqueues `output_invoice_collection:all` when the SQL read repository/detail lookup is unavailable, instead of falling back to live detail rebuild.
 - output_invoice_collection still has open local implementation closure accounting and real PostgreSQL/worker/App Status/high-row/browser evidence defer work.
 - No module is globally closed.
 - The next pending boundary is read-models:output-invoice-collection-local-implementation-closure-audit.
@@ -198,10 +199,10 @@ Immediate next boundary:
 Start with read-models:output-invoice-collection-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
 For read-models:output-invoice-collection-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, and `docs/modules/output-invoice-collections/implementation-notes.md`.
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-relation-detail-production-repository-fail-closed.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, and `docs/modules/output-invoice-collections/implementation-notes.md`.
 - Use CodeGraph for structural lookup before implementation or closure accounting edits.
-- Account for local output collection implementation support after repository port, rows/filter/export fresh gate, source-version proof, scope policy, worker all fan-out, mutation operation barrier targets and app-level projection helper removal.
-- Classify any remaining output collection live/detail support, especially `/rows/{row_id}/relation-details`, as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
+- Account for local output collection implementation support after repository port, rows/filter/export/detail fresh gates, source-version proof, scope policy, worker all fan-out, mutation operation barrier targets and app-level projection helper removal.
+- Classify remaining output collection live/detail support after relation detail production fail-closed as implemented, compat-only, out of read-model scope, or requiring another narrow implementation slice.
 - Decide whether local implementation support can move to `production-evidence-deferred` or whether another concrete local gap must be split before defer.
 - Do not change lifecycle write business rules, receipt numbering/history behavior, red/blue relation semantics, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
 - Do not declare `output_invoice_collection` globally closed unless every full closure requirement is proven.

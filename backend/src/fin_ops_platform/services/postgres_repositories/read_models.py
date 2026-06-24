@@ -1361,6 +1361,32 @@ class PostgresReadModelRepository:
             summary_kind="output",
         )
 
+    def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.output_invoice_collection_rows
+            where row_id = %s
+            order by generated_at desc, scope_key desc, row_id
+            limit 1
+            """,
+            (text(row_id),),
+        )
+        if not isinstance(row, dict):
+            return None
+        payload = _read_model_payload(row)
+        scope_key = text(row.get("scope_key")) or "all"
+        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        return {
+            "row": payload if isinstance(payload, dict) else None,
+            "refresh_status": self._invoice_relation_refresh_status(
+                scope_type="output_invoice_collection",
+                scope_key=scope_key,
+            ),
+            "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
+        }
+
     def save_output_invoice_collection_rows(
         self,
         *,

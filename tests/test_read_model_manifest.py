@@ -260,6 +260,7 @@ class ReadModelManifestTests(unittest.TestCase):
         }
         required_output_ports = {
             "list_output_invoice_collection_rows",
+            "get_output_invoice_collection_row_by_row_id",
             "save_output_invoice_collection_rows",
             "mark_output_invoice_collection_scope",
             "prune_output_invoice_collection_scope_shards",

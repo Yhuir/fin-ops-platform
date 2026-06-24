@@ -774,6 +774,10 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
                 self.calls.append(("list_output_invoice_collection_rows", dict(kwargs)))
                 return {"rows": [{"id": "output-1"}], "refresh_status": "fresh"}
 
+            def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, object]:
+                self.calls.append(("get_output_invoice_collection_row_by_row_id", row_id))
+                return {"row": {"id": row_id}, "refresh_status": "fresh"}
+
             def save_output_invoice_collection_rows(self, **kwargs: object) -> None:
                 self.calls.append(("save_output_invoice_collection_rows", dict(kwargs)))
 
@@ -802,6 +806,10 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
             port.list_output_invoice_collection_rows(month="2026-05", page=1, page_size=50)["rows"][0]["id"],
             "output-1",
         )
+        self.assertEqual(
+            port.get_output_invoice_collection_row_by_row_id("output-1")["row"]["id"],
+            "output-1",
+        )
         port.save_output_invoice_collection_rows(
             scope_key="2026-05",
             rows=[{"id": "output-1"}],
@@ -822,6 +830,7 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
             [name for name, _payload in underlying.calls],
             [
                 "list_output_invoice_collection_rows",
+                "get_output_invoice_collection_row_by_row_id",
                 "save_output_invoice_collection_rows",
                 "mark_output_invoice_collection_scope",
                 "prune_output_invoice_collection_scope_shards",
