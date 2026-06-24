@@ -69,14 +69,14 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: production:post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep.
-- Last status: production-controlled.
+- Last completed boundary: planning:post-production-baseline-module-closure-wave-selection.
+- Last status: planning-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - Parallel orchestration is documented in `12-PARALLEL-ORCHESTRATION.md`; this master prompt remains the single-thread controller entry. Do not run multiple copies of this master prompt against `dev`.
 - T0 accepted T1-T8 parallel handoffs and integrated them in commit `b60a343a`.
 - `server-py:workbench-group-detail-route-owner-extraction` is now implementation-closed locally.
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
-- The next pending boundary is `planning:post-production-baseline-module-closure-wave-selection`.
+- The next pending boundary is `production:read-model-production-evidence-matrix-read-only-sweep`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -306,18 +306,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:post-production-baseline-module-closure-wave-selection`.
+Start with `production:read-model-production-evidence-matrix-read-only-sweep`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-2026-06-25.md`, `analysis/planning-post-historical-dead-letter-resolution-next-boundary-selection-2026-06-25.md`, and `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
-- Use row243 evidence as context: `/health` and `/health/ready` ready and release-consistent; required worker missing/stale/mismatch counts all 0; API, dispatcher and 20 worker units active/running with `NRestarts=0`; outbox only `done=203169`; dirty scopes all done; readiness all fresh; no read-model dead-letter groups; covered-dead-letter dry-run zero candidates; recent worker error grep clean.
-- Select the next highest-risk safe module-specific closure/evidence wave from `production-evidence-deferred` / `not-module-closed` rows.
-- Decide whether the next wave is T0-only production evidence, bounded worker audits, or a planning/accounting reconciliation.
-- Do not claim module/global closure from the clean global baseline alone.
+- Read `analysis/planning-post-production-baseline-module-closure-wave-selection-2026-06-25.md`, `analysis/production-post-dead-letter-resolution-global-readiness-worker-db-evidence-sweep-2026-06-25.md`, `analysis/commit-backed-state-reconciliation-2026-06-25.md`, and `docs/modules/read-models/README.md`.
+- Use row244 selection as context: final closure is premature, Go remains blocked, worker waves are deferred until production DB/readiness/scope/source-version facts are matrixed.
+- Collect non-secret read-only production evidence for registered read models: readiness counts, dirty-scope counts, outbox event counts, safe row-count/source-version signals, and worker/heartbeat coverage mapped to read-model keys.
+- Do not deploy, restart, requeue, repair, replay workers, mutate DB/readiness/dirty scopes or print secrets in this read-only matrix.
+- Do not claim module/global closure from matrix evidence alone.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:
