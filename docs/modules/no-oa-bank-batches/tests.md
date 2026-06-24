@@ -18,6 +18,13 @@
 
 ## 现有测试入口
 
+## 2026-06-24 - Modular IO read model pilot selection
+
+- 变更类型：analysis/accounting only。
+- 当前测试决策：本轮目标测试发现并覆盖一个 no-OA refresh-service 构造兼容问题；下一边界必须以 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership 为核心，至少复核 service-layer、read model/cache/background job 和 existing feature regression tests。
+- 下一边界建议目标测试：`tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_application_service`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_no_oa_bank_batch_api`、`tests.test_runtime_worker_registry`、`tests.test_app_status_overview_service`。若实现抽取触及前端 operation barrier 或 list/detail freshness shape，同步运行 `web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/NoOaBankBatchPage.test.tsx` 和 `web/src/test/OperationBarrierApi.test.ts`。
+- 不适用项：本选择 slice 不触发 business core、API contract、frontend interaction 或 E2E 新测试；这些在下一实现 slice 按实际改动重新判断。
+
 后端核心和服务层：
 
 - `tests/test_no_oa_bank_batch_service.py`

@@ -30,6 +30,13 @@
 
 ## 场景覆盖清单
 
+## 2026-06-24 - No-OA bank batch next-pilot selection
+
+- 变更类型：analysis/accounting only。
+- 覆盖证据：`read_model_manifest.py`、`runtime_worker_registry.py`、`read_model_scope_policy.py`、`NoOaBankBatchReadModelRefreshService`、`SearchPendingReadModelRefreshService`、`BankAccountBalanceReadModelRefreshService` 和对应测试入口用于候选比较。
+- 七类测试决策：本轮主要是 selection/accounting，但目标 no-OA refresh tests 暴露并覆盖了一个旧构造参数断裂；下一 no-OA 边界需要覆盖 service-layer、read model/cache/background job 和 existing feature regression categories。如果触及 HTTP response freshness shape 或前端 operation barrier，则 API contract 和 frontend interaction tests 也适用。
+- 下一验证重点：`tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_application_service`、`tests.test_no_oa_bank_batch_workbench_integration`、manifest/worker registry、docs verify 和 app check。
+
 | 场景 | 是否适用 | 现有测试 | 缺口 | 优先级 |
 | --- | --- | --- | --- | --- |
 | happy path | 适用 | `tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_readiness_reporter.py` | 各业务 read model happy path 由对应模块测试覆盖 | P1 |
@@ -118,7 +125,7 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - 未新增测试：本轮不改运行时代码，复用 producer/query/refresh/API、manifest、runtime worker registry、operation barrier 和 platform boundary guard 作为证据。
 - 剩余风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred；该状态不是 module closed。
 
-下一 slice 是 `read-models:next-pilot-selection-after-turnover-ledger`，必须从 `no_oa_bank_batch`、`search`、`bank_account_balance` 中选择下一个非 Go read model pilot。
+下一 slice 已由 `read-models:next-pilot-selection-after-turnover-ledger` 选定为 `read-models:no-oa-bank-batch-repository-state-store-boundary-audit`；`search` 和 `bank_account_balance` 保持后续候选。
 
 ## 历史 bug 回归库
 

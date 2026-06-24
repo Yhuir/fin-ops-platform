@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchApplicationService
+from fin_ops_platform.services.no_oa_bank_batch_application_service import (
+    NoOaBankBatchApplicationService,
+    NoOaPairRelationSnapshotPort,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -34,7 +37,7 @@ class NoOaBankBatchReadModelRefreshService:
             no_oa_bank_batch_service=no_oa_bank_batch_service,
             app_settings_service=app_settings_service,
             bank_transaction_category_service=bank_transaction_category_service,
-            pair_relation_service=pair_relation_service,
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_relation_service),
             workbench_read_model_service=workbench_read_model_service,
             state_store=state_store,
             workbench_matching_source_versions_provider=workbench_matching_source_versions_provider,

@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - No-OA bank batch selected after turnover ledger
+
+- 目标：执行 `read-models:next-pilot-selection-after-turnover-ledger`，在 `turnover_ledger` 本地支持 accounted 后选择下一个非 Go modular IO/read model pilot。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/no-oa 模块实施记录和测试矩阵；不改运行时代码。
+- 关键决策：选择 `no_oa_bank_batch`。理由是免 OA 批次是用户可见页面 read model，包含 draft/submitted/withdrawn 生命周期、Bank Detail 依赖、Workbench relation 写邻接、public snapshot 持久化、operation barrier 和旧异常状态清理，最能代表“一个页面更新但另一个页面仍读旧状态”的剩余高风险。
+- 首切范围：下一边界为 `read-models:no-oa-bank-batch-repository-state-store-boundary-audit`。先审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，再决定是否抽 `NoOaBankBatchReadModelRepositoryPort`、refresh projection/state-store boundary、public snapshot persistence quarantine 或更小前置 slice。
+- 文档影响：新增 next-pilot selection analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt和 no-OA 模块文档。
+- 测试覆盖：本轮主要是 analysis/accounting；目标 no-OA refresh tests 暴露并覆盖了一个旧构造参数断裂，`NoOaBankBatchReadModelRefreshService` 现在按当前 application service 合同传入 `NoOaPairRelationSnapshotPort`。下一轮仍必须覆盖 service-layer、read model/cache/background job 和 existing feature regression categories。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-turnover-ledger.md`。
+- 未测风险：本轮不连接真实 PostgreSQL，不验证 no-OA worker drain、App Status、高行数分页或真实浏览器 smoke；Go/Fiber/Go Worker admission 继续 blocked。
+
 ## 2026-06-24 - Turnover ledger local implementation closure audit
 
 - 目标：执行 `read-models:turnover-ledger-local-implementation-closure-audit`，复核外部往来台账在 repository port、freshness/barrier 和 refresh producer/clear 抽取后是否仍有本地 implementation gap。
@@ -38,7 +49,7 @@
 - 测试覆盖：本轮是 analysis/accounting only，复用 turnover producer/query/refresh/API、manifest、runtime worker registry、operation barrier 和 platform boundary guard 作为证据。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-local-implementation-closure-audit.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；`turnover_ledger` 是 `production-evidence-deferred`，不是 module closed。
-- 后续事项：执行 `read-models:next-pilot-selection-after-turnover-ledger`，从 `no_oa_bank_batch`、`search`、`bank_account_balance` 选择下一个非 Go read model pilot；Go admission 继续 blocked。
+- 后续事项：`read-models:next-pilot-selection-after-turnover-ledger` 已选择 `no_oa_bank_batch`；下一边界是 `read-models:no-oa-bank-batch-repository-state-store-boundary-audit`，`search` 和 `bank_account_balance` 保持后续候选，Go admission 继续 blocked。
 
 ## 2026-06-24 - Turnover ledger refresh producer and clear port extraction
 

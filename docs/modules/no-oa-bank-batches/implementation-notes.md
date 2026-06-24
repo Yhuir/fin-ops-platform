@@ -21,6 +21,17 @@
 - `status=stale,status_bucket=unsubmitted` 表示旧 submitted batch 的源流水或分类漂移后已失去 active no-OA relation，不属于可提交 draft；该状态现在属于内部兼容/诊断状态，不得进入主列表、summary 或分页 total。生产历史行需通过公开 snapshot 或 `repair_no_oa_bank_batch_lifecycle` 清理。
 - submitted/withdrawn 批次的行级标签是提交事实的一部分。提交时必须冻结 `row_tag_snapshot`，并写入 no-OA batch snapshot 与 Workbench relation `special_metadata`；详情接口对 submitted/withdrawn 优先用冻结标签，银行明细后续标签变化只影响 draft 候选。
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
+- 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
+
+## 2026-06-24 - Modular IO read model pilot selection
+
+- 目标：在 `turnover_ledger` 本地支持 accounted 后，把 `no_oa_bank_batch` 选为下一个非 Go read model 模块化试点。
+- 理由：免 OA 批次有页面级 stale-read 风险、Bank Detail 依赖、Workbench relation 写邻接、public snapshot 持久化、operation barrier 和旧异常状态清理；它比 `search` 更适合作为页面级下一试点，也比 `bank_account_balance` 更高风险。
+- 下一边界：`read-models:no-oa-bank-batch-repository-state-store-boundary-audit`。
+- 审计范围：`NoOaBankBatchReadModelRefreshService`、`NoOaBankBatchApplicationService`、`NoOaBankBatchService.public_snapshot()`、`PostgresStateStore.load_no_oa_bank_batches(...)`、`PostgresStateStore.save_no_oa_bank_batches(...)`、`PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)`、route/list/detail/tag-selection read model 行为和 local/state-store snapshot 兼容路径。
+- 兼容修复：目标测试发现 `NoOaBankBatchReadModelRefreshService` 仍用旧 `pair_relation_service=` keyword 构造 application service；已改为传入 `pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(...)`，与当前 `Application._no_oa_bank_batch_application_service(...)` factory 保持一致。
+- 非目标：本选择 slice 不改业务规则、API shape、worker event、queue schema、Redis/cache、权限、审计、前端或 Go/Fiber/Go Worker，也不做 repository port 抽取。
+- 测试决策：`tests.test_no_oa_bank_batch_read_model_refresh` 覆盖上述构造兼容修复；下一实现/审计 slice 必须至少评估 service-layer、read model/cache/background job 和 existing feature regression categories；若触及 response freshness shape 或前端 barrier，则补 API/frontend 测试。
 
 ## 2026-06-23 - 提交后批次行级标签冻结
 

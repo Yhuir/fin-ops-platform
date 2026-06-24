@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:turnover-ledger-local-implementation-closure-audit.
+- Last completed boundary: read-models:next-pilot-selection-after-turnover-ledger.
 - Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -136,9 +136,11 @@ Current state expected on start:
 - Turnover ledger freshness/barrier audit is analysis-closed: SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence exist, but app-owned clear/refresh helpers remain a local implementation gap.
 - Turnover ledger refresh producer/clear extraction is complete: `TurnoverLedgerReadModelRefreshProducer` owns non-transactional turnover refresh enqueue and best-effort clear, enqueue stays behind `ReadModelRefreshGateway`, and clear uses the turnover-specific read repository port instead of broad `_workbench_sql_read_repository`.
 - Turnover ledger local implementation support is accounted for after repository port, freshness/barrier audit and refresh producer/clear extraction, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
-- Remaining later non-Go read model candidates include `no_oa_bank_batch`, `search` and `bank_account_balance`.
+- `no_oa_bank_batch` is selected as the eleventh non-Go read model implementation pilot because it has the highest remaining page-level stale-read, Workbench relation adjacency, public snapshot persistence and operation-barrier risk.
+- Target verification fixed a stale no-OA refresh-service constructor keyword: `NoOaBankBatchReadModelRefreshService` now passes `pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(...)` to match the current application service contract.
+- Remaining later non-Go read model candidates include `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:next-pilot-selection-after-turnover-ledger.
+- The next pending boundary is read-models:no-oa-bank-batch-repository-state-store-boundary-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -234,18 +236,18 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:next-pilot-selection-after-turnover-ledger unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:no-oa-bank-batch-repository-state-store-boundary-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:next-pilot-selection-after-turnover-ledger:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-cost-statistics.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/runtime_worker_registry.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, target module docs for `no_oa_bank_batch`, `search` and `bank_account_balance`, and relevant tests for those candidates.
-- Use CodeGraph for structural lookup before selecting the next pilot.
-- Compare `no_oa_bank_batch`, `search` and `bank_account_balance` by stale-read risk, user-visible impact, repository-port narrowness, freshness/operation-barrier gaps, worker/App Status contract and test coverage.
-- Select exactly one next non-Go read model pilot.
-- Insert the selected pilot's first narrow implementation boundary before Go/Fiber/Go Worker admission items.
-- Do not implement repository-port extraction in the selection slice.
+For read-models:no-oa-bank-batch-repository-state-store-boundary-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-turnover-ledger.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-search-and-no-oa-bank-batch-contract.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `docs/product-specs/bank-turnover-and-no-oa.md`, `docs/app-architecture/runtime-and-ownership.md`, `docs/operations/runtime-worker-governance.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/runtime_worker_registry.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`, `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`, and relevant no-OA tests.
+- Use CodeGraph for structural lookup before choosing an implementation extraction.
+- Audit no-OA read model repository/state-store/public-snapshot/refresh-worker ownership.
+- Classify relevant surfaces as explicit boundary, compat-only, removed candidate or blocked-by-human-gate.
+- Determine whether the next implementation slice should be a narrow `NoOaBankBatchReadModelRepositoryPort`, a refresh projection/state-store boundary extraction, public snapshot persistence quarantine or a smaller prerequisite split.
 - Do not implement Go/Fiber/Go Worker.
+- Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted static evidence collection, app check, docs verification and diff checks.
+- Run targeted static evidence collection, app check, no-OA target tests where applicable, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the selected first implementation boundary if verification passes.
 
