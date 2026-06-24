@@ -1,7 +1,7 @@
 # Production Write-Flow Scenario Discovery Read-Only Runbook - 2026-06-25
 
 **Boundary:** `production:write-flow-scenario-discovery-read-only-runbook`
-**Status:** `pending-execution`
+**Status:** `production-controlled`
 **Module closure:** `not-module-closed`
 **Production mutation:** none; read-only PostgreSQL scenario discovery only
 **Active release expected:** `dev-turnover-source-version-persistence-20260625`
@@ -121,7 +121,102 @@ Repeat command 1 after discovery. Counts should remain unchanged.
 
 ## Execution Evidence
 
-Pending. The runbook must be committed and pushed before production execution.
+The runbook was committed and pushed before production execution in commit `53c80e62`.
+
+### Precheck
+
+Release and health:
+
+```text
+release_src=/opt/fin-ops/releases/dev-turnover-source-version-persistence-20260625/src
+release_name=dev-turnover-source-version-persistence-20260625
+git_commit=8f525563e10972168014356ff410c4fc8456f377
+{'status': 'ready'}
+```
+
+Aggregate precheck:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+### Sanitized Discovery
+
+Read-only discovery succeeded and printed only aggregate classes/counts/safety flags:
+
+```json
+{
+  "available_operation_classes": [
+    "no_oa_bank_batch_withdraw_context",
+    "turnover_manual_closure_or_withdraw",
+    "workbench_pair_withdraw_context"
+  ],
+  "candidate_counts": {
+    "no_oa_bank_batch_withdraw_context": 10,
+    "turnover_manual_closure_or_withdraw": 6,
+    "workbench_pair_withdraw_context": 10
+  },
+  "identifiers_printed": false,
+  "mode": "read_only_sanitized_write_operation_discovery",
+  "operation_classes": [
+    "no_oa_bank_batch_withdraw_context",
+    "turnover_manual_closure_or_withdraw",
+    "workbench_pair_withdraw_context"
+  ],
+  "safety": {
+    "mutates_data": false,
+    "notes": [
+      "Discovery is read-only and does not call mutating HTTP endpoints.",
+      "Generated scenarios withdraw existing turnover, Workbench, or no-OA relations; use only on reviewed test or reversible objects.",
+      "Every generated scenario remains blocked for --apply until real OA/Admin auth and manual approval are supplied."
+    ],
+    "requires_manual_approval_before_apply": true,
+    "requires_real_auth_to_apply": true
+  },
+  "scenario_count": 26,
+  "scenario_file_written": false,
+  "status": "ready",
+  "version": 1,
+  "write_apply_executed": false
+}
+```
+
+No candidate identifiers, scenario names, endpoint paths, payload rows, response bodies, tokens, cookies or environment values were printed or stored.
+
+### Postcheck
+
+Health remained ready:
+
+```text
+release_src=/opt/fin-ops/releases/dev-turnover-source-version-persistence-20260625/src
+release_name=dev-turnover-source-version-persistence-20260625
+git_commit=8f525563e10972168014356ff410c4fc8456f377
+{'status': 'ready'}
+```
+
+Aggregate postcheck was unchanged:
+
+```text
+dirty_scopes [{'status': 'done', 'count': 187061}]
+readiness [{'status': 'fresh', 'count': 498}]
+read_model_outbox [{'status': 'done', 'count': 202956}]
+read_model_dead_letters 0
+```
+
+## Result
+
+`production-controlled`.
+
+Read-only production discovery proves that all three known candidate operation classes currently have candidate counts and would produce 26 scenarios if an approved future scenario file were generated. This boundary did not generate a scenario file, did not run `write_operation_e2e_smoke --apply`, did not call any HTTP endpoint, and did not mutate production state.
+
+Controlled write apply remains blocked until a separate boundary has explicit approval, a reviewed reversible business object, rollback/idempotency/audit acceptance, convergence expectations and suitable auth. Browser and admin production evidence remain deferred.
+
+Next boundary:
+
+`planning:post-write-flow-discovery-closure-selection`
 
 ## Seven Test Category Assessment
 

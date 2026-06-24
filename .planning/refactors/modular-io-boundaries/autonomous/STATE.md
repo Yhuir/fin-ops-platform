@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `controlled-write-flow-read-only-discovery-selected`
+Current state: `write-flow-read-only-discovery-completed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:controlled-write-flow-evidence-scenario-selection` as `planning-closed` in `analysis/planning-controlled-write-flow-evidence-scenario-selection-2026-06-25.md`. T0 selected `production:write-flow-scenario-discovery-read-only-runbook` as the next boundary. Controlled write apply remains forbidden without explicit approval, a reviewed reversible business object, rollback/idempotency/audit acceptance and appropriate auth. Browser/admin evidence remains deferred and global/module closure remains open.
+Completed `production:write-flow-scenario-discovery-read-only-runbook` as `production-controlled` in `analysis/production-write-flow-scenario-discovery-read-only-runbook-2026-06-25.md`. T0 committed/pushed the runbook before execution, then ran read-only sanitized production discovery: all three known operation classes had candidate counts (`turnover_manual_closure_or_withdraw=6`, `workbench_pair_withdraw_context=10`, `no_oa_bank_batch_withdraw_context=10`) and `scenario_count=26`. No identifiers, scenario file, HTTP write, `--apply`, browser/admin probe, secret output or production mutation occurred; pre/post health, dirty scopes, readiness, read-model outbox and dead letters were unchanged. Controlled write apply remains forbidden without explicit approval, a reviewed reversible business object, rollback/idempotency/audit acceptance and appropriate auth. Browser/admin evidence remains deferred and global/module closure remains open.
 
 ## Closed Or Deferred Slices
 
