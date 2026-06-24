@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:read-model-full-user-scope-api-metadata-smoke-after-no-oa-fix`
+`production:turnover-ledger-user-scope-hidden-refresh-enqueue-diagnosis`
 
 ## Next Prompt
 
-`production:turnover-ledger-user-scope-hidden-refresh-enqueue-diagnosis`
+`read-models:turnover-ledger-grouped-query-metadata-boundary-fix`
