@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-readiness-worker-status-runbook-pending`
+Current state: `production-postgres-shared-memory-read-only-diagnosis-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-parallel-handoff-next-boundary-selection` as `planning-closed` in `analysis/planning-post-parallel-handoff-next-boundary-selection-2026-06-25.md`. T0 selected `production:readiness-and-worker-status-controlled-read-only-runbook` as the next boundary because accepted T6 evidence found `/health/ready` timeouts and Workbench worker `activating/auto-restart`. This is T0-only, read-only, and must not print secrets or mutate production.
+Completed `production:readiness-and-worker-status-controlled-read-only-runbook` as `production-evidence-deferred` in `analysis/production-readiness-worker-status-controlled-read-only-2026-06-25.md`. T0 used only non-secret read-only SSH checks. `/health` was ready, `/health/ready` still timed out, selected workers/dispatcher were active but had high restart counts, and Workbench worker logs showed PostgreSQL pool timeout plus local shared-memory errors. The next T0-only boundary is `production:postgres-shared-memory-read-only-diagnosis`.
 
 ## Closed Or Deferred Slices
 

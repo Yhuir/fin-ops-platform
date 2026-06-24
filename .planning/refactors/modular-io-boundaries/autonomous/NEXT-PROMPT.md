@@ -1,12 +1,12 @@
 # Next Prompt
 
-Continue after the `planning:post-parallel-handoff-next-boundary-selection` slice.
+Continue after the `production:readiness-and-worker-status-controlled-read-only-runbook` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `planning:post-parallel-handoff-next-boundary-selection`
-- Last status: `planning-closed`
+- Last completed boundary: `production:readiness-and-worker-status-controlled-read-only-runbook`
+- Last status: `production-evidence-deferred`
 - Queue semantics remain corrected: slice status is not module closure.
 - Parallel orchestration is now controller-led.
 - Worker prompts may auto-progress inside assigned workstreams, but they do not own global state or global closure.
@@ -21,11 +21,14 @@ Continue after the `planning:post-parallel-handoff-next-boundary-selection` slic
 - Boundary selection report: `analysis/planning-post-parallel-handoff-next-boundary-selection-2026-06-25.md`.
 - Queue evidence after reconciliation: 124 local proof/guard rows, 79 docs/analysis-only rows, 22 deferred rows and one remaining pending row.
 - No product module has `Module Closure = closed`; production evidence closure and Go admission remain 0%.
-- Next boundary is T0-only because it uses the controlled production gate in read-only mode.
+- Production readiness evidence file: `analysis/production-readiness-worker-status-controlled-read-only-2026-06-25.md`.
+- `/health` is ready, but `/health/ready` still times out.
+- Selected workers/dispatcher are active but have high restart counts.
+- Workbench worker logs show PostgreSQL pool timeout and local shared-memory errors.
 
 ## Next Boundary
 
-`production:readiness-and-worker-status-controlled-read-only-runbook`
+`production:postgres-shared-memory-read-only-diagnosis`
 
 ## Options
 
@@ -33,15 +36,17 @@ Recommended autonomous continuation:
 
 - Use `prompts/06-t0-meta-orchestrator-goal.md`.
 - Start exactly one T0 `/goal` thread.
-- T0 will execute `production:readiness-and-worker-status-controlled-read-only-runbook`.
-- T0 must write a controlled production runbook/evidence file before any production command, then use only non-secret read-only root SSH checks.
+- T0 will execute `production:postgres-shared-memory-read-only-diagnosis`.
+- T0 must write a new controlled production runbook/evidence file before any production command, focused on PostgreSQL service/resource/shared-memory evidence.
+- Allowed checks are read-only systemd, process/resource, filesystem, memory/shared-memory and sanitized log checks.
+- Do not restart PostgreSQL or app services, connect with secret-bearing DSNs, mutate DB/readiness/queue/worker state, deploy, or print secrets.
 - Do not create worker threads for this boundary; workers must not execute the controlled production gate.
 - Do not manually start old T1-T9 worker prompts unless T0 explicitly instructs that fallback.
 
 Single-thread fallback:
 
 - Use `prompts/04-master-goal-controller.md`.
-- Start with `production:readiness-and-worker-status-controlled-read-only-runbook`.
+- Start with `production:postgres-shared-memory-read-only-diagnosis`.
 
 Manual parallel fallback:
 
@@ -58,7 +63,7 @@ Manual parallel fallback:
 4. Read `analysis/commit-backed-state-reconciliation-2026-06-25.md`, `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, this prompt, and `12-PARALLEL-ORCHESTRATION.md`.
 5. If running parallel, enforce the direct-dev write lease before any worker edits files.
 6. Use the completed commit-backed audit as the progress baseline; do not recalculate from memory or raw row counts alone.
-7. For the selected boundary, write the production runbook/evidence file before using SSH; allowed checks are read-only health, worker status, active release and sanitized logs only.
+7. For the selected boundary, write the production runbook/evidence file before using SSH; allowed checks are read-only PostgreSQL/systemd/resource/shared-memory status and sanitized logs only.
 
 ## Stop Condition
 
