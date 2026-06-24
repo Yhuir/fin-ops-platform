@@ -119,3 +119,6 @@ class WorkbenchActionApiRoutes:
         request_id: str | None = None,
     ) -> Any:
         return self._write_facade_provider().cancel_cash_special(payload, request_id=request_id)
+
+    def update_bank_exception(self, payload: dict[str, Any]) -> Any:
+        return self._write_facade_provider().update_bank_exception(payload)
