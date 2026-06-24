@@ -306,18 +306,19 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan`.
+Start with `production:historical-dead-letter-covered-resolution-apply-runbook`.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/planning-post-workbench-matching-production-convergence-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`, and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
-- Write a bounded read-only production evidence file before SSH collection.
-- Classify the 24 historical dead-letter rows using read-only inspect/dry-run evidence: dead-letter row groups and last errors, later same-dedupe done/fresh coverage, readiness fresh evidence, no active dirty scope evidence, and dry-run `resolve-covered-dead-letters` output if safe.
-- Produce a bounded apply-or-defer decision, but do not execute cleanup in this boundary.
-- Do not execute `resolve-covered-dead-letters --execute`, requeue, resolve, repair, run worker replay, mutate readiness or print secrets.
+- Read `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`, `analysis/production-workbench-matching-constructor-fix-deploy-and-convergence-runbook-2026-06-25.md`, and `analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`.
+- Write a bounded production apply runbook before any mutation.
+- Recheck `/health/ready`, no active dirty scopes, all readiness fresh, and `resolve-covered-dead-letters --dry-run`.
+- Execute `resolve-covered-dead-letters --execute` only if dry-run still reports all current candidates eligible.
+- Post-check dead-letter count, health/readiness/dirty scopes, and record whether historical dead-letter residue decreased without readiness regression.
+- Do not requeue, republish, repair, run worker replay, mutate readiness or print secrets.
 - Update `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and this master prompt with the result and next boundary.
 
 Parallel execution:

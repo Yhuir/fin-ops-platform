@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-pending`
+Current state: `production-historical-dead-letter-covered-resolution-apply-runbook-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-workbench-matching-production-convergence-next-boundary-selection` as `planning-closed` in `analysis/planning-post-workbench-matching-production-convergence-next-boundary-selection-2026-06-25.md`. T0 reconciled the no-OA and workbench-matching production-controlled evidence, confirmed current health/readiness/dirty scopes are clean, and selected `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan` as the next safe boundary. Historical dead-letter rows remain unchanged and no global/module closure is claimed.
+Completed `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan` as `analysis-closed` in `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`. T0 classified the 24 historical read-model dead-letter rows with read-only production evidence and dry-run; all 24 were eligible with fresh readiness plus later done coverage and `active_dirty_count=0`. No cleanup or DB/queue/readiness mutation occurred. The next boundary is `production:historical-dead-letter-covered-resolution-apply-runbook`; no global/module closure is claimed.
 
 ## Closed Or Deferred Slices
 

@@ -1,12 +1,12 @@
 # Next Prompt
 
-Continue after the `planning:post-workbench-matching-production-convergence-next-boundary-selection` slice.
+Continue after the `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `planning:post-workbench-matching-production-convergence-next-boundary-selection`
-- Last status: `planning-closed`
+- Last completed boundary: `production:historical-dead-letter-covered-resolution-read-only-maintenance-plan`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - Latest deployed production release: `dev-workbench-matching-port-20260625020818`.
 - No-OA FK production blocker was fixed and converged:
@@ -21,12 +21,17 @@ Continue after the `planning:post-workbench-matching-production-convergence-next
   - `/health` and `/health/ready` returned ready;
   - dirty scopes are all done, readiness rows are all fresh;
   - post-deploy workbench-matching logs have no constructor `TypeError`.
-- Row239 selected the next safe boundary as read-only historical dead-letter classification; do not execute cleanup in that boundary.
+- Row240 classified all 24 historical read-model dead-letter rows:
+  - dry-run `candidate_count=24`;
+  - `eligible_count=24`;
+  - `resolved_count=0`;
+  - every candidate has fresh readiness, later done and `active_dirty_count=0` proof.
+- No cleanup or DB/queue/readiness mutation has been executed yet.
 - No global module closure is claimed.
 
 ## Next Boundary
 
-`production:historical-dead-letter-covered-resolution-read-only-maintenance-plan`
+`production:historical-dead-letter-covered-resolution-apply-runbook`
 
 ## Required First Steps On Resume
 
@@ -40,19 +45,15 @@ Continue after the `planning:post-workbench-matching-production-convergence-next
    - `JOURNAL.md`
    - this prompt
    - `12-PARALLEL-ORCHESTRATION.md`
-4. Read `analysis/planning-post-workbench-matching-production-convergence-next-boundary-selection-2026-06-25.md`.
-5. Write a bounded read-only production evidence file before SSH collection.
-6. Classify the 24 historical dead-letter rows using read-only inspect/dry-run evidence:
-   - dead-letter row groups and last errors;
-   - later same-dedupe done/fresh coverage where available;
-   - readiness fresh evidence;
-   - no active dirty scope evidence;
-   - dry-run `resolve-covered-dead-letters` output if safe.
-7. Produce a bounded apply-or-defer decision, but do not execute cleanup in this boundary.
+4. Read `analysis/production-historical-dead-letter-covered-resolution-read-only-maintenance-plan-2026-06-25.md`.
+5. Write a bounded production apply runbook before any mutation.
+6. Recheck `/health/ready`, no active dirty scopes, all readiness fresh, and `resolve-covered-dead-letters --dry-run`.
+7. Execute `resolve-covered-dead-letters --execute` only if dry-run still reports all current candidates eligible.
+8. Post-check dead-letter count, health/readiness/dirty scopes, and record whether historical dead-letter residue decreased without readiness regression.
 
 ## Stop Gates
 
-- Do not execute `resolve-covered-dead-letters --execute`.
-- Do not requeue, resolve, repair, run worker replay or mutate readiness.
+- Do not requeue, republish, repair, run worker replay or mutate readiness.
+- Do not execute cleanup unless the apply runbook pre-checks prove all current candidates eligible.
 - No secret/env/DSN output.
-- Stop if dead-letter coverage cannot be proven from read-only evidence.
+- Stop if `/health/ready` regresses, active dirty scopes appear, readiness is non-fresh, or dry-run eligibility differs from the apply plan.
