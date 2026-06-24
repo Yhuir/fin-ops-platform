@@ -106,6 +106,15 @@
 - Existing feature regression tests：扩展 `tests/test_platform_runtime_boundary_guards.py`，证明 derived lifecycle registry 使用 `NoOaBankBatchDerivedLifecycleExecutor`，且 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 不再作为 app-owned helper 存在。
 - 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变提交/撤回规则、HTTP shape、页面 operation barrier targets 或用户流程。
 
+## 2026-06-24 - Modular IO mutation persistence fallback quarantine test note
+
+`read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 `test_after_mutation_without_atomic_persistence_boundary_fails_fast`，证明缺少 `save_no_oa_bank_batch_mutation(...)` 时 service fail fast，并且不会调用 broad state-store fallback。
+- Read model/cache/background job tests：新增 `StateStoreTests.test_save_no_oa_bank_batch_mutation_uses_explicit_local_boundary`，证明 local state store 通过同名 explicit boundary 保存 pair relation、no-OA batch 和 Workbench read model snapshots。
+- Existing feature regression tests：新增 platform guard，证明 `NoOaBankBatchApplicationService.persist_mutation(...)` 只依赖 `save_no_oa_bank_batch_mutation(...)`，不再包含 broad `save_workbench_pair_relations(...)`、`save_no_oa_bank_batches(...)`、`save_workbench_read_models(...)` fallback。
+- 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变提交/撤回业务规则、HTTP shape、权限、前端 operation barrier 或用户流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

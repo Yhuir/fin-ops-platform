@@ -6,6 +6,7 @@ import unittest
 
 from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
+    NoOaBankBatchPersistenceError,
     NoOaPairRelationSnapshotPort,
 )
 from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
@@ -632,6 +633,38 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(saved["pair_relation_snapshot"], {"relations": ["case-001", "case-002"]})
         self.assertEqual(saved["no_oa_bank_batch_snapshot"], {"batches": {}})
         self.assertEqual(saved["workbench_read_model_snapshot"], {"workbench": "snapshot"})
+
+    def test_after_mutation_without_atomic_persistence_boundary_fails_fast(self) -> None:
+        class BroadOnlyStateStore:
+            def save_workbench_pair_relations(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("no-OA mutation must not fall back to broad pair relation persistence")
+
+            def save_no_oa_bank_batches(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("no-OA mutation must not fall back to broad no-OA batch persistence")
+
+            def save_workbench_read_models(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("no-OA mutation must not fall back to broad workbench read model persistence")
+
+        service = NoOaBankBatchApplicationService(
+            import_service=SimpleNamespace(),
+            effective_category_provider=SimpleNamespace(),
+            no_oa_bank_batch_service=SimpleNamespace(snapshot=lambda: {"batches": {}}),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace(
+                snapshot=lambda: {"relations": "all"},
+                snapshot_case_ids=lambda case_ids: {"relations": list(case_ids)},
+            )),
+            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
+            state_store=BroadOnlyStateStore(),
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+        )
+
+        with self.assertRaisesRegex(
+            NoOaBankBatchPersistenceError,
+            "save_no_oa_bank_batch_mutation",
+        ):
+            service.after_mutation(["2026-05"], changed_case_ids=["case-001"], persist=True)
 
     def test_after_mutation_without_persist_only_emits_lifecycle_event(self) -> None:
         lifecycle_events: list[dict[str, object]] = []

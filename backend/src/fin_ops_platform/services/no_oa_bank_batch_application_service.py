@@ -1022,27 +1022,17 @@ class NoOaBankBatchApplicationService:
         try:
             self._search_cache_clearer()
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
-            if callable(save_mutation):
-                save_mutation(
-                    pair_relation_snapshot=self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids)
-                    if changed_case_ids
-                    else self._pair_relation_snapshot_port.snapshot(),
-                    no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
-                    workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
-                    changed_case_ids=changed_case_ids,
-                    changed_scope_keys=changed_scope_keys,
-                )
-            else:
-                if changed_case_ids:
-                    self._state_store.save_workbench_pair_relations(
-                        self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids),
-                        changed_case_ids=changed_case_ids,
-                    )
-                self._state_store.save_no_oa_bank_batches(self._no_oa_public_snapshot())
-                self._state_store.save_workbench_read_models(
-                    self._workbench_read_model_service.snapshot(),
-                    changed_scope_keys=changed_scope_keys,
-                )
+            if not callable(save_mutation):
+                raise RuntimeError("No-OA mutation persistence requires save_no_oa_bank_batch_mutation.")
+            save_mutation(
+                pair_relation_snapshot=self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids)
+                if changed_case_ids
+                else self._pair_relation_snapshot_port.snapshot(),
+                no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
+                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
+                changed_case_ids=changed_case_ids,
+                changed_scope_keys=changed_scope_keys,
+            )
         except Exception as exc:
             raise NoOaBankBatchPersistenceError(str(exc)) from exc
 

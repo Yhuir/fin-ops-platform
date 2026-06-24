@@ -61,6 +61,15 @@
 - 测试覆盖：新增 executor service-layer tests 和 platform boundary guard，防止 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 回归。
 - 下一步：执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`，处理 `persist_mutation(...)` 中缺少 atomic mutation boundary 时的 broad state-store fallback。
 
+## 2026-06-24 - Modular IO mutation persistence fallback quarantine
+
+- 目标：移除 no-OA mutation persistence 在 service 层的 broad state-store fallback，强制写入通过明确 `save_no_oa_bank_batch_mutation(...)` boundary。
+- 影响范围：`NoOaBankBatchApplicationService.persist_mutation(...)`、`ApplicationStateStore.save_no_oa_bank_batch_mutation(...)`、no-OA application tests、state-store tests、platform guard 和 modular IO state；不改变 API shape、业务规则、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 关键决策：生产 PostgreSQL 继续使用 `PostgresStateStore.save_no_oa_bank_batch_mutation(...)`；local/Mongo 通过新增 `ApplicationStateStore.save_no_oa_bank_batch_mutation(...)` 保持同名显式边界；service 若拿不到该 boundary 就 fail fast 为 `NoOaBankBatchPersistenceError`。
+- 旧路径分类：`persist_mutation(...)` 不再直接调用 `save_workbench_pair_relations(...)`、`save_no_oa_bank_batches(...)`、`save_workbench_read_models(...)`。
+- 测试覆盖：新增缺少 atomic boundary 的 fail-fast service test、本地 state-store mutation boundary test、platform guard 防止 broad fallback 回归。
+- 下一步：执行 `read-models:no-oa-bank-batch-local-implementation-closure-audit`，复核 no-OA 是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred。
+
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 
 - 目标：审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，确定第一个实现抽取边界。

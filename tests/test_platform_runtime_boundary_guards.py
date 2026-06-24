@@ -1985,6 +1985,25 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_mutation_persistence_requires_atomic_boundary(self) -> None:
+        path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        persist_source = _function_source(tree, source, "persist_mutation")
+
+        violations: list[str] = []
+        if "save_no_oa_bank_batch_mutation" not in persist_source:
+            violations.append("No-OA mutation persistence must call the explicit atomic mutation boundary")
+        for forbidden in (
+            "save_workbench_pair_relations",
+            "save_no_oa_bank_batches",
+            "save_workbench_read_models",
+        ):
+            if forbidden in persist_source:
+                violations.append(f"No-OA mutation persistence still falls back to broad state-store write {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

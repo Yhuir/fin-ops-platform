@@ -51,6 +51,17 @@
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
 - 后续事项：执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`。
 
+## 2026-06-24 - No-OA bank batch mutation persistence fallback quarantine
+
+- 目标：执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`，移除 no-OA service-layer broad state-store fallback writes。
+- 影响范围：`NoOaBankBatchApplicationService.persist_mutation(...)`、`ApplicationStateStore.save_no_oa_bank_batch_mutation(...)`、no-OA application/state-store/platform guard tests、modular IO state 和 no-OA/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
+- 关键决策：no-OA mutation persistence 的应用侧合同是 `save_no_oa_bank_batch_mutation(...)`；生产 SQL、local 和 Mongo 都必须通过同名显式 boundary。缺少 boundary 时 service fail fast，不再直接调用 broad state-store save methods。
+- 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 fail-fast service test、本地 state-store explicit boundary test 和 platform guard，防止 `persist_mutation(...)` 回退到 broad pair/no-OA/workbench writes。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-mutation-persistence-fallback-quarantine.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:no-oa-bank-batch-local-implementation-closure-audit`。
+
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，把 no-OA list/query read path 从 broad `workbench_sql_read_repository` 收敛到专属 repository port。

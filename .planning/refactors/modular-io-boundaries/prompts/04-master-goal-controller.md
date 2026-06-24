@@ -69,7 +69,7 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction.
+- Last completed boundary: read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine.
 - Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
@@ -144,8 +144,8 @@ Current state expected on start:
 - The no-OA read model repository port boundary is implemented: `NoOaBankBatchReadModelRepositoryPort` owns no-OA list/query read model repository access, `PostgresStateStore.no_oa_bank_batch_sql_read_repository` exposes the port, and `NoOaBankBatchApplicationService.list_batches_payload(...)` no longer reads through broad `workbench_sql_read_repository`.
 - The no-OA freshness/derived lifecycle audit is analysis-closed: refresh enqueue, scope policy, manifest/App Status/worker registration and frontend operation barrier evidence are locally accounted for.
 - The no-OA derived lifecycle executor extraction is implemented: `NoOaBankBatchDerivedLifecycleExecutor` owns target scope selection, refresh metadata forwarding and enqueued-job accounting; `Application` only assembles the explicit enqueue dependency.
-- The remaining no-OA local implementation gap is mutation persistence fallback broad state-store writes.
-- The next pending boundary is read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine.
+- The no-OA mutation persistence fallback quarantine is implemented: `NoOaBankBatchApplicationService.persist_mutation(...)` requires `save_no_oa_bank_batch_mutation(...)`, `ApplicationStateStore` exposes the same explicit boundary, and the service-layer broad state-store fallback is guarded from returning.
+- The next pending boundary is read-models:no-oa-bank-batch-local-implementation-closure-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -241,21 +241,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:no-oa-bank-batch-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/state_store.py`, and relevant no-OA mutation/persistence tests.
-- Use CodeGraph for structural lookup before editing.
-- Remove or quarantine the `NoOaBankBatchApplicationService.persist_mutation(...)` fallback that directly calls broad state-store `save_workbench_pair_relations(...)`, `save_no_oa_bank_batches(...)`, and `save_workbench_read_models(...)` when `save_no_oa_bank_batch_mutation(...)` is missing.
-- Preserve the primary atomic mutation boundary `save_no_oa_bank_batch_mutation(...)`.
-- Decide from current code whether local/non-PostgreSQL stores need an explicit narrow mutation port or should fail fast when the atomic boundary is absent; do not add speculative compatibility.
-- Add focused tests/guards proving mutation persistence no longer falls back to broad state-store writes.
+For read-models:no-oa-bank-batch-local-implementation-closure-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-mutation-persistence-fallback-quarantine.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_repository.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_derived_lifecycle_executor.py`, `backend/src/fin_ops_platform/services/state_store.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, and relevant no-OA/read model/frontend operation barrier tests.
+- Use CodeGraph for structural lookup before deciding closure.
+- Audit no-OA local route/service/repository/read model/worker/frontend/API surfaces after the implemented slices.
+- Classify remaining old no-OA route/service/repository/read model/frontend API/worker paths as removed, quarantined, compat-only, production-evidence-deferred, or implementation-gap-open.
+- Verify no local app-owned helper still owns read model refresh persistence, list repository access, derived lifecycle execution, or mutation persistence fallback.
+- If a concrete local implementation gap remains, split and execute the first narrow implementation boundary.
+- If no local implementation gap remains, record `production-evidence-deferred` for real PostgreSQL/worker/App Status/high-row/browser evidence only; do not mark the module globally closed.
 - Do not implement Go/Fiber/Go Worker.
 - Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior unless a verified gap requires it and tests are updated.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted app check, no-OA mutation/persistence tests, relevant no-OA/read model regression tests, docs verification and diff checks.
+- Run targeted app check, no-OA application/read model/workbench integration tests, relevant platform/read model boundary guards, docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to no-OA local implementation closure audit if verification passes.
+- Continue to the next selected boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
