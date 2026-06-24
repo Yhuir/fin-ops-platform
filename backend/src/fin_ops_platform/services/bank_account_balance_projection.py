@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
+from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, text
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
@@ -19,10 +20,12 @@ class BankAccountBalanceProjectionBuilder:
         self,
         *,
         connection: Any,
-        read_model_repository: PostgresReadModelRepository | None = None,
+        read_model_repository: Any | None = None,
     ) -> None:
         self._connection = connection
-        self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._read_model_repository = BankAccountBalanceReadModelRepositoryPort(
+            read_model_repository or PostgresReadModelRepository(connection)
+        )
 
     def rebuild_bank_account_balance_read_model(self, *, source_version: int | None = None) -> dict[str, Any]:
         rows = [self._normalize_transaction_row(row) for row in self._load_transaction_rows()]

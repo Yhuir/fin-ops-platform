@@ -28,3 +28,4 @@
 | 日期 | 变更 | 状态机影响 | 测试/验证 |
 | --- | --- | --- | --- |
 | 2026-06-24 | 建立模块维护骨架，并选择为 Search 后的下一 read model pilot | 不改变运行时状态定义；记录当前 all-only worker/storage contract 和 repository port gap | `bash scripts/verify.sh docs` |
+| 2026-06-24 | Repository port extraction | 不改变运行时状态定义；账户余额 projection save 和 Bank Details accounts SQL read path 收敛到 `BankAccountBalanceReadModelRepositoryPort` | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli tests.test_read_model_manifest tests.test_runtime_worker_registry -v` |

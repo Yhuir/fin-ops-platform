@@ -331,6 +331,13 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-06-24 - bank account balance repository port extraction test note
+
+- 新增 service-layer/read-model guard：`tests/test_bank_account_balance_read_model.py::BankAccountBalanceProjectionTests::test_port_excludes_unrelated_read_model_methods`。
+- 新增 Bank Details service regression：`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_application_accounts_uses_account_balance_repository_port`。
+- 覆盖：账户余额 projection save 和 Bank Details accounts SQL read path 走显式 `BankAccountBalanceReadModelRepositoryPort`，同时保留 API shape 和旧兼容 fallback。
+- 下一步：审计 refresh/freshness/operation-barrier、all-only scope contract 和剩余 compat fallback。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

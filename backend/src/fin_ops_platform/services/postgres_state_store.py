@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
@@ -145,6 +146,7 @@ class PostgresStateStore:
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._cost_statistics_sql_read_repository = CostStatisticsReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_read_model_repository = TaxOffsetReadModelRepositoryPort(self._read_model_repository)
+        self._bank_account_balance_sql_read_repository = BankAccountBalanceReadModelRepositoryPort(self._sql_read_model_repository)
         self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
         self._pending_invoice_sql_read_repository = PendingInvoiceReadModelRepositoryPort(self._sql_read_model_repository)
         self._search_sql_read_repository = SearchReadModelRepositoryPort(self._sql_read_model_repository)
@@ -780,6 +782,10 @@ class PostgresStateStore:
     @property
     def pending_invoice_sql_read_repository(self) -> PendingInvoiceReadModelRepositoryPort:
         return self._pending_invoice_sql_read_repository
+
+    @property
+    def bank_account_balance_sql_read_repository(self) -> BankAccountBalanceReadModelRepositoryPort:
+        return self._bank_account_balance_sql_read_repository
 
     @property
     def bank_detail_sql_read_repository(self) -> BankDetailReadModelRepositoryPort:

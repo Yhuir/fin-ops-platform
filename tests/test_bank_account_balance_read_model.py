@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
+from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -44,7 +45,48 @@ class CaptureAccountBalanceRepository:
         self.saved_rows = list(rows)
 
 
+class _UnderlyingBankAccountBalanceRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def bank_account_balance_scope_summary(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("bank_account_balance_scope_summary", dict(kwargs)))
+        return {"read_model_status": "fresh", "read_model_scope_keys": ["all"]}
+
+    def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_bank_account_balances", dict(kwargs)))
+        return {"accounts": [{"account_key": "acct:one"}], "balance_read_model_status": "fresh"}
+
+    def save_bank_account_balances(self, **kwargs: object) -> None:
+        self.calls.append(("save_bank_account_balances", dict(kwargs)))
+
+    def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("bank_account_balance port must not expose bank detail repository methods")
+
+    def search_index(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("bank_account_balance port must not expose search repository methods")
+
+
 class BankAccountBalanceProjectionTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        underlying = _UnderlyingBankAccountBalanceRepository()
+        port = BankAccountBalanceReadModelRepositoryPort(underlying)
+
+        self.assertEqual(port.bank_account_balance_scope_summary()["read_model_status"], "fresh")
+        self.assertEqual(port.list_bank_account_balances(date_from=None, date_to=None)["balance_read_model_status"], "fresh")
+        port.save_bank_account_balances(rows=[])
+
+        self.assertFalse(hasattr(port, "list_bank_detail_transactions"))
+        self.assertFalse(hasattr(port, "search_index"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "bank_account_balance_scope_summary",
+                "list_bank_account_balances",
+                "save_bank_account_balances",
+            ],
+        )
+
     def test_projection_uses_latest_non_empty_balance_with_stable_account_identity(self) -> None:
         repository = CaptureAccountBalanceRepository()
         connection = FakeConnection(

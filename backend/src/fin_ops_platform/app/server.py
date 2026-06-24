@@ -820,6 +820,7 @@ class Application:
         self._turnover_ledger_sql_read_repository = getattr(self._state_store, "turnover_ledger_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
+        self._bank_account_balance_sql_read_repository = getattr(self._state_store, "bank_account_balance_sql_read_repository", None)
         self._bank_detail_sql_read_repository = getattr(self._state_store, "bank_detail_sql_read_repository", None)
         self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
         self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
@@ -13002,6 +13003,7 @@ class Application:
             audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
             state_store=self._state_store,
             bank_detail_sql_read_repository=getattr(self, "_bank_detail_sql_read_repository", None),
+            bank_account_balance_read_model_repository=getattr(self, "_bank_account_balance_sql_read_repository", None),
             runtime_repositories=getattr(self, "_runtime_repositories", None),
             requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),

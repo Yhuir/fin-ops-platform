@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `autonomous-continue-after-read-models-next-pilot-selection-after-search`
+Current state: `autonomous-continue-after-read-models-bank-account-balance-repository-port-extraction`
 
 Go hot-path state: `blocked-by-read-model-implementation-prerequisites`
 
@@ -31,7 +31,7 @@ Queue semantics state: `slice-status-corrected`
 
 ## Current Module
 
-Completed `read-models:next-pilot-selection-after-search`. `bank_account_balance` is selected as the next non-Go read model pilot after Search local support moved to `production-evidence-deferred`. The first executable boundary is `read-models:bank-account-balance-repository-port-extraction`, focused on adding a narrow account-balance repository port and removing or classifying the current Bank Detail read port transition dependency. Go hot-path admission remains blocked.
+Completed `read-models:bank-account-balance-repository-port-extraction`. `BankAccountBalanceReadModelRepositoryPort` now owns manifest-listed scope summary/list/save methods; projection save and Bank Details accounts SQL read paths use the explicit account-balance port, while the Bank Detail port balance method remains only as transition compatibility fallback. The next executable boundary is `read-models:bank-account-balance-refresh-freshness-operation-barrier-audit`. Go hot-path admission remains blocked.
 
 ## Closed Or Deferred Slices
 
@@ -206,6 +206,7 @@ Completed `read-models:next-pilot-selection-after-search`. `bank_account_balance
 - `read-models:search-all-scope-worker-fanout-producer-boundary-extraction` -> `implementation-closed`
 - `read-models:search-post-all-scope-worker-fanout-local-implementation-closure-audit` -> `production-evidence-deferred`
 - `read-models:next-pilot-selection-after-search` -> `analysis-closed`
+- `read-models:bank-account-balance-repository-port-extraction` -> `implementation-closed`
 
 ## Open Implementation Closure Work
 
@@ -226,8 +227,8 @@ Completed `read-models:next-pilot-selection-after-search`. `bank_account_balance
 - `turnover_ledger` is now the tenth non-Go read model implementation pilot. Repository port extraction is implemented: `TurnoverLedgerReadModelRepositoryPort` exposes only manifest-listed `list_turnover_ledger_view`, `save_turnover_ledger_rows` and `clear_turnover_ledger_rows`; PostgreSQL state-store read wiring, `TurnoverLedgerQueryService` app injection and worker projection paths now use the narrow port; unrelated read model method exposure is guarded. Freshness/barrier audit found existing SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence. Refresh producer/clear extraction is implemented: app-owned turnover enqueue/clear helpers are removed, enqueue goes through `TurnoverLedgerReadModelRefreshProducer` and clear uses the turnover-specific repository port. Local closure audit found no remaining local implementation gap; local support is accounted for, but the module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `no_oa_bank_batch` is now the eleventh non-Go read model implementation pilot and local implementation support is accounted for after repository/state-store audit, refresh persistence boundary extraction, read model repository port extraction, freshness/derived lifecycle audit, derived lifecycle executor extraction, mutation persistence fallback quarantine, local closure audit, full-state snapshot quarantine and post-full-state local closure audit. The module is not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - `search` is now selected as the twelfth non-Go read model implementation pilot. Repository port extraction is implemented: `SearchReadModelRepositoryPort` exposes only manifest-listed `search_index(...)` and `save_search_index_rows(...)`; PostgreSQL state-store search read wiring and `SearchPendingSqlProjectionBuilder` search save paths now use the narrow port. App-owned rebuild helpers were removed, so search rebuild ownership stays with `SearchPendingSqlProjectionBuilder`. Query freshness service extraction is implemented: `SearchQueryFreshnessService` owns `/api/search` SQL miss/stale/source-version payload assembly and `SearchIndexSourceVersionsProvider` owns search expected source versions. Refresh producer extraction is implemented: `SearchReadModelRefreshProducer` owns search refresh enqueue and invalidation scope normalization. Production repository-unavailable fail-closed behavior is implemented. OA projection sync Search fan-out now uses `SearchReadModelRefreshProducer` instead of direct generic `enqueue_many("search", ...)`. Runtime import-state Search fan-out now also uses `SearchReadModelRefreshProducer` instead of generic `_enqueue_scopes("search", ...)`. Search worker `search:all` shard fan-out now uses `SearchReadModelRefreshProducer.enqueue_scope_keys(...)` instead of direct `ReadModelRefreshGateway.enqueue_many("search", ...)`. Post-all-scope local closure audit found no remaining local implementation gap, so Search local support is accounted for; the module is still not globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Existing manifest/worker/backfill/projection tests prove a separate read model exists, but local implementation gaps remain: projection save path uses broad `PostgresReadModelRepository`, Bank Details accounts SQL read path uses `BankDetailReadModelRepositoryPort.list_bank_account_balances(...)`, app-owned refresh/derived lifecycle helpers remain, and scope policy month/all allowance does not match the current all-only worker/storage contract. The first boundary is repository port extraction.
-- The next pending boundary is `read-models:bank-account-balance-repository-port-extraction`.
+- `bank_account_balance` is now selected as the thirteenth non-Go read model implementation pilot. Repository port extraction is implemented: projection save and Bank Details accounts SQL read paths use `BankAccountBalanceReadModelRepositoryPort`, and manifest owner names the account-balance port. Remaining local implementation gaps include app-owned refresh/derived lifecycle helpers, all-only worker/storage vs month/all scope policy accounting, operation barrier evidence and Bank Detail port compatibility fallback classification/removal.
+- The next pending boundary is `read-models:bank-account-balance-refresh-freshness-operation-barrier-audit`.
 - Go hot-path admission remains blocked until the relevant module IO contract, legacy isolation, freshness proof, tests, performance evidence, shadow-run plan and rollback gate exist.
 
 ## Deferred Modules
@@ -251,8 +252,8 @@ No Go candidate has passed admission. No Go candidate should be selected next wh
 
 ## Last Prompt
 
-`read-models:next-pilot-selection-after-search`
+`read-models:bank-account-balance-repository-port-extraction`
 
 ## Next Prompt
 
-`read-models:bank-account-balance-repository-port-extraction`
+`read-models:bank-account-balance-refresh-freshness-operation-barrier-audit`

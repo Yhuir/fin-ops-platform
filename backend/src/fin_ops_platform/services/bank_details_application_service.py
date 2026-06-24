@@ -47,6 +47,7 @@ class BankDetailsApplicationService:
         audit_service: AuditTrailService,
         state_store: Any | None,
         bank_detail_sql_read_repository: Any | None,
+        bank_account_balance_read_model_repository: Any | None = None,
         runtime_repositories: Any | None,
         requires_sql_read_model_runtime: Callable[[], bool],
         affected_months_provider: Callable[[list[str]], list[str]],
@@ -68,6 +69,7 @@ class BankDetailsApplicationService:
         self._audit_service = audit_service
         self._state_store = state_store
         self._bank_detail_sql_read_repository = bank_detail_sql_read_repository
+        self._bank_account_balance_read_model_repository = bank_account_balance_read_model_repository
         self._runtime_repositories = runtime_repositories
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
         self._affected_months_provider = affected_months_provider
@@ -392,7 +394,7 @@ class BankDetailsApplicationService:
         )
 
     def _accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
-        repository = self._bank_detail_sql_read_repository
+        repository = self._bank_account_balance_read_model_repository or self._bank_detail_sql_read_repository
         if repository is None:
             enqueued = self._enqueue_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
             return self._accounts_refreshing_payload(

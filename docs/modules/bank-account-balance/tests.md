@@ -22,6 +22,13 @@
 - `tests/test_read_model_slo_smoke.py`
 - `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`
 
+## 2026-06-24 - repository port extraction
+
+- 新增：`tests/test_bank_account_balance_read_model.py::BankAccountBalanceProjectionTests::test_port_excludes_unrelated_read_model_methods`。
+- 新增：`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_application_accounts_uses_account_balance_repository_port`。
+- 覆盖：账户余额 repository port 只暴露 manifest-listed 方法；Bank Details accounts SQL read path 优先使用显式 account-balance port，不再把 Bank Detail read port 当作正常 owner。
+- 保持不变：余额计算、account identity、API shape、worker event、scope、queue、权限、审计和前端行为。
+
 ## 下一 slice 必跑建议
 
 ```bash

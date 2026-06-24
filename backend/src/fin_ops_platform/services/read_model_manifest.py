@@ -117,7 +117,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "save_bank_account_balances",
         ),
         query_owner="BankDetailsApplicationService",
-        repository_owner="PostgresReadModelRepository.bank_account_balance",
+        repository_owner="BankAccountBalanceReadModelRepositoryPort",
         permission_owner="bank_details_api_session",
         test_owner="tests/test_bank_account_balance_read_model.py",
     ),

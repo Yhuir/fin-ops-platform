@@ -17,6 +17,7 @@
 ## 代码入口
 
 - `backend/src/fin_ops_platform/services/bank_account_balance_projection.py`：账户余额 projection builder。
+- `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`：账户余额 read model repository port。
 - `backend/src/fin_ops_platform/services/bank_account_balance_read_model_refresh.py`：`bank_account_balance.read_model.refresh` worker handler。
 - `backend/src/fin_ops_platform/services/bank_details_application_service.py`：Bank Details accounts API 的 query/freshness 映射。
 - `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`：当前过渡期仍暴露 `list_bank_account_balances(...)`。
@@ -33,8 +34,8 @@
 
 ## 当前缺口
 
-- Projection save path 直接依赖 broad `PostgresReadModelRepository`，还没有 `BankAccountBalanceReadModelRepositoryPort`。
-- Bank Details accounts SQL read path 仍通过 `BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 暴露账户余额。
+- Projection save path 已通过 `BankAccountBalanceReadModelRepositoryPort.save_bank_account_balances(...)` 写入。
+- Bank Details accounts SQL read path 已优先通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 仍作为过渡兼容 fallback，后续必须审计移除或加固为 compat-only。
 - `Application._enqueue_bank_account_balance_read_model_refresh(...)` 和 `_derived_lifecycle_bank_account_balance_executor(...)` 仍是 app-owned refresh/derived lifecycle helper。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
 

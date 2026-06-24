@@ -1007,6 +1007,52 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         ).hexdigest()
         self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
 
+    def test_application_accounts_uses_account_balance_repository_port(self) -> None:
+        class BankDetailRepository:
+            def list_bank_account_balances(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("accounts query should use the account balance repository port")
+
+        class AccountBalanceRepository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "accounts": [{"account_key": "acct:one"}],
+                    "balance_read_model_status": "fresh",
+                }
+
+        account_balance_repository = AccountBalanceRepository()
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(list_accounts=lambda **_kwargs: {"accounts": []}),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=BankDetailRepository(),
+            bank_account_balance_read_model_repository=account_balance_repository,
+            runtime_repositories=SimpleNamespace(),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        payload = service.accounts_payload(date_from="2026-05-01", date_to="2026-05-31")
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(
+            account_balance_repository.calls,
+            [{"date_from": "2026-05-01", "date_to": "2026-05-31"}],
+        )
+
     def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:
         class SqlReadRepository:
             def __init__(self) -> None:

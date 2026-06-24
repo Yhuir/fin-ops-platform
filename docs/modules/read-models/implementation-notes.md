@@ -1301,3 +1301,11 @@
 - 首切范围：新增 `BankAccountBalanceReadModelRepositoryPort`，只暴露 manifest 登记的 `bank_account_balance_scope_summary(...)`、`list_bank_account_balances(...)` 和 `save_bank_account_balances(...)`，并让 projection save 与 Bank Details accounts SQL read path 使用该 port。
 - 关键风险：当前 worker/storage 只接受 `bank_account_balance:all`，而 scope policy 仍允许 month/all；后续不能直接引入 month/account scope，必须先做 scope contract 设计。
 - 状态：Go/Fiber/Go Worker admission 继续 blocked；`bank_account_balance` 为 `implementation-gap-open`。
+
+## 2026-06-24 - bank account balance repository port extraction
+
+- 目标：为 `bank_account_balance` 建立窄 read model repository port，先收敛 projection save 和 Bank Details accounts SQL read path 的 owner。
+- 改动：新增 `BankAccountBalanceReadModelRepositoryPort`，只暴露 `bank_account_balance_scope_summary(...)`、`list_bank_account_balances(...)` 和 `save_bank_account_balances(...)`；`PostgresStateStore` 暴露 `bank_account_balance_sql_read_repository`；`Application` 注入该 port；`BankDetailsApplicationService` 优先通过显式 account-balance port 读取。
+- 保留兼容：`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 暂时保留为 compatibility fallback，但不再是正常 `Application` 装配 owner。
+- 测试覆盖：新增 account-balance port guard 和 Bank Details accounts explicit-port regression；复跑 account balance、Bank Details SQL runtime、backfill CLI、manifest 和 worker registry 测试。
+- 下一步：`read-models:bank-account-balance-refresh-freshness-operation-barrier-audit`。
