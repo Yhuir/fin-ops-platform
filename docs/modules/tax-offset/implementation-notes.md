@@ -33,6 +33,15 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO local closure audit found worker rebuild gap
+
+- 目标：执行 `read-models:tax-offset-local-implementation-closure-audit`，判断税金抵扣本地实现支持是否可进入 production evidence defer。
+- 结论：不能进入 defer。`Application.rebuild_tax_offset_read_model_scope(...)` 仍包含 tax offset worker rebuild、read model persistence 和 fresh Redis month/summary cache publish 逻辑，属于 app-owned implementation surface。
+- 关键决策：新增下一条边界 `read-models:tax-offset-worker-rebuild-executor-port-extraction`，先把该 worker rebuild 行为迁出 `Application`，让 `Application` 只保留依赖组装/薄委托；`_derived_lifecycle_tax_offset_executor(...)` 和 month cache executor 暂不在同一切片移除，后续单独复审。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：本轮为 analysis/accounting only，未改业务代码；下一实现切片必须新增 executor/service 测试和静态 guard，并复跑 tax offset runtime/API/read model 目标测试。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍不能用于弥补本地 app-owned rebuild gap。
+
 ## 2026-06-24 - Modular IO freshness and OA attachment invoice fallback
 
 - 目标：执行 `read-models:tax-offset-refresh-freshness-operation-barrier-audit`，确认税金抵扣 read model fresh gate、force refresh、all fan-out、operation barrier 和 legacy/app-owned helper 分类，并处理审计中发现的窄缺口。

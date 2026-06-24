@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset local closure audit found worker rebuild gap
+
+- 目标：执行 `read-models:tax-offset-local-implementation-closure-audit`，确认税金抵扣本地实现支持是否可进入 production evidence defer。
+- 影响范围：modular IO analysis/state/queue/next prompt、read-models/tax-offset 实施记录和测试矩阵；不改 tax business/API/UI/worker event/queue/Redis 合同。
+- 关键决策：不能 defer。`Application.rebuild_tax_offset_read_model_scope(...)` 仍包含 app-owned worker rebuild、read model persistence 和 fresh Redis month/summary cache publish 行为；这比普通 compat wrapper 更重，必须先抽成显式 executor/service boundary。
+- 文档影响：新增 local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only，无运行时代码变化；下一轮 `read-models:tax-offset-worker-rebuild-executor-port-extraction` 必须新增 executor/service 测试和静态 guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred，但不能用于绕过本地 app-owned rebuild gap。
+- 后续事项：执行 `read-models:tax-offset-worker-rebuild-executor-port-extraction`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Tax offset freshness / operation barrier audit
 
 - 目标：执行 `read-models:tax-offset-refresh-freshness-operation-barrier-audit`，审计 `tax_offset` fresh gate、force refresh、all fan-out、operation barrier 和 legacy/app-owned helper 分类。
