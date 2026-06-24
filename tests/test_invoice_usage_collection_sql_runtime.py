@@ -22,6 +22,7 @@ from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusR
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
+from fin_ops_platform.services.output_invoice_collection_read_model_repository import OutputInvoiceCollectionReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueEvent
@@ -759,6 +760,71 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
                 "save_input_invoice_usage_rows",
                 "mark_input_invoice_usage_scope",
                 "prune_input_invoice_usage_scope_shards",
+            ],
+        )
+
+
+class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
+    def test_port_excludes_unrelated_read_model_methods(self) -> None:
+        class Underlying:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, object]] = []
+
+            def list_output_invoice_collection_rows(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("list_output_invoice_collection_rows", dict(kwargs)))
+                return {"rows": [{"id": "output-1"}], "refresh_status": "fresh"}
+
+            def save_output_invoice_collection_rows(self, **kwargs: object) -> None:
+                self.calls.append(("save_output_invoice_collection_rows", dict(kwargs)))
+
+            def mark_output_invoice_collection_scope(self, **kwargs: object) -> None:
+                self.calls.append(("mark_output_invoice_collection_scope", dict(kwargs)))
+
+            def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+                self.calls.append(("prune_output_invoice_collection_scope_shards", list(current_scope_keys)))
+
+            def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("output collection port must not expose input usage reads")
+
+            def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("output collection port must not expose OA pending payment reads")
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("output collection port must not expose pending invoice reads")
+
+            def workbench_relation_source_versions(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("output collection port must not expose workbench relation source versions")
+
+        underlying = Underlying()
+        port = OutputInvoiceCollectionReadModelRepositoryPort(underlying)
+
+        self.assertEqual(
+            port.list_output_invoice_collection_rows(month="2026-05", page=1, page_size=50)["rows"][0]["id"],
+            "output-1",
+        )
+        port.save_output_invoice_collection_rows(
+            scope_key="2026-05",
+            rows=[{"id": "output-1"}],
+            source_versions={"schema": "v1"},
+        )
+        port.mark_output_invoice_collection_scope(
+            scope_key="2026-05",
+            row_count=1,
+            source_versions={"schema": "v1"},
+        )
+        port.prune_output_invoice_collection_scope_shards(["2026-05"])
+
+        self.assertFalse(hasattr(port, "list_input_invoice_usage_rows"))
+        self.assertFalse(hasattr(port, "list_oa_pending_payment_rows"))
+        self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
+        self.assertFalse(hasattr(port, "workbench_relation_source_versions"))
+        self.assertEqual(
+            [name for name, _payload in underlying.calls],
+            [
+                "list_output_invoice_collection_rows",
+                "save_output_invoice_collection_rows",
+                "mark_output_invoice_collection_scope",
+                "prune_output_invoice_collection_scope_shards",
             ],
         )
 
@@ -1713,6 +1779,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._oa_projection_repository = EmptyOAProjectionRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
@@ -1758,6 +1825,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = StaticOAProjectionRepository([
@@ -1817,6 +1885,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
         builder._workbench_repository = EmptyWorkbenchRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = oa_source_adapter
 
@@ -1860,6 +1929,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -1891,6 +1961,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -1923,6 +1994,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -1952,6 +2024,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         builder._core_repository = ProjectionCoreRepository()
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
         builder._oa_projection_repository = StaticOAProjectionRepository([
             self._oa("oa-completed-unified", "张三", "80.00", workflow_status="completed"),
@@ -1970,6 +2043,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 
@@ -1985,6 +2059,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
         builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
 

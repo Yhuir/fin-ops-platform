@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Output invoice collection repository port extraction
+
+- 目标：执行 `read-models:output-invoice-collection-repository-port-extraction`，为销项发票收款 read model 建立窄 repository port。
+- 影响范围：`OutputInvoiceCollectionReadModelRepositoryPort`、`PostgresStateStore.output_invoice_collection_sql_read_repository`、`InvoiceUsageCollectionSqlProjectionBuilder` output collection save/mark/prune wiring、invoice usage collection SQL runtime tests 和 output/read-models 测试矩阵。
+- 关键决策：`OutputInvoiceCollectionReadModelRepositoryPort` 只暴露 manifest-listed output 方法，不能暴露 input usage、OA pending payment、pending invoice 或 Workbench relation source-version 方法。app-level output projection helper 暂不在本 repository-port slice 删除，进入下一条 freshness/helper audit 分类。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/output-invoice-collections 实施记录和测试矩阵；状态机定义不变。
+- 测试覆盖：新增 `OutputInvoiceCollectionReadModelRepositoryPortTests.test_port_excludes_unrelated_read_model_methods`；复跑 invoice usage collection SQL runtime、output API、Postgres state-store read connection 和 app check。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`。
+- 未测风险：output freshness/helper audit、真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 pending/deferred；模块未全局关闭。
+
 ## 2026-06-24 - Output invoice collection next pilot selection
 
 - 目标：执行 `read-models:next-pilot-selection-after-input-invoice-usage`，在进项发票使用本地实现支持 accounted 后选择下一个非 Go read model 试点。

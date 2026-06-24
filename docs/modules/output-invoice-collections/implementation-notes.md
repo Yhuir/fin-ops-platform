@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Read model repository port extraction
+
+- 目标：为 `output_invoice_collection` read model 建立窄 repository port，避免 shared `PostgresReadModelRepository` 直接污染销项收款投影/读取边界。
+- 影响范围：新增 `OutputInvoiceCollectionReadModelRepositoryPort`，PostgreSQL state-store read wiring 返回窄 port，`InvoiceUsageCollectionSqlProjectionBuilder` 的 output save/mark/prune 走窄 port；不改 lifecycle 写入、receipt、红蓝票、UI、worker runtime 或 API response shape。
+- 关键决策：port 只暴露 `list_output_invoice_collection_rows`、`save_output_invoice_collection_rows`、`mark_output_invoice_collection_scope`、`prune_output_invoice_collection_scope_shards`。freshness/helper audit 和 retained app-level projection helper removal/quarantine 是下一条独立边界。
+- 文档影响：同步 read-models 实施记录、测试矩阵、modular IO analysis/state/queue/next prompt 和主控 prompt；模块状态机定义不变。
+- 测试覆盖：新增 output port guard；复跑 `tests.test_invoice_usage_collection_sql_runtime`、`tests.test_output_invoice_collection_api`、Postgres state-store optional read connection、app check。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；本记录不声明 output invoice collection 模块闭环。
+
 ## 2026-06-24 - Read model modular IO next pilot selection
 
 - 目标：把 `output_invoice_collection` 登记为 input usage 之后的第六个非 Go read model 实现试点。

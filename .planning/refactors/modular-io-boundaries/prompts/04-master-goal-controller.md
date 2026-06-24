@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:next-pilot-selection-after-input-invoice-usage.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:output-invoice-collection-repository-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -93,11 +93,12 @@ Current state expected on start:
 - `input_invoice_usage:all` remains fan-out control scope; all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
 - Unused app-level input usage projection helpers were removed from `Application`: `list_input_invoice_usage_scope_shards(...)`, `mark_input_invoice_usage_scope_empty(...)`, and `rebuild_input_invoice_usage_read_model_scope(...)`.
 - input_invoice_usage local implementation support is accounted for after repository port, fresh gate, relation-detail fresh gate, source-version proof, scope policy, worker fan-out, operation barrier, legacy contamination and tests/docs; real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
-- output_invoice_collection is selected as the sixth non-Go read model implementation pilot.
+- output_invoice_collection is the sixth non-Go read model implementation pilot.
 - output_invoice_collection shares the invoice-usage-collection worker/projection family with input_invoice_usage and oa_pending_payment.
-- output_invoice_collection has high stale-read/export/lifecycle-overlay risk and still lacks a narrow repository port.
+- `OutputInvoiceCollectionReadModelRepositoryPort` is wired for PostgreSQL state-store reads and projection save/mark/prune paths.
+- output_invoice_collection still has open freshness, force-refresh, all fan-out/month proof, operation-barrier and app-level helper audit work.
 - No module is globally closed.
-- The next pending boundary is read-models:output-invoice-collection-repository-port-extraction.
+- The next pending boundary is read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -193,22 +194,22 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:output-invoice-collection-repository-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:output-invoice-collection-repository-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-local-implementation-closure-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, `docs/modules/output-invoice-collections/implementation-notes.md`, `backend/src/fin_ops_platform/services/read_model_manifest.py`, `backend/src/fin_ops_platform/services/read_model_scope_policy.py`, `backend/src/fin_ops_platform/services/runtime_worker_registry.py`, `backend/src/fin_ops_platform/repositories/postgres_state_store.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`, `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, and relevant output invoice collection tests.
+For read-models:output-invoice-collection-refresh-freshness-operation-barrier-audit:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-output-invoice-collection-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-next-pilot-selection-after-input-invoice-usage.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/output-invoice-collections/README.md`, `docs/modules/output-invoice-collections/state-machine.md`, `docs/modules/output-invoice-collections/tests.md`, `docs/modules/output-invoice-collections/implementation-notes.md`, `backend/src/fin_ops_platform/services/output_invoice_collection_read_model_repository.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`, `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`, `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`, `tests/test_invoice_usage_collection_sql_runtime.py`, `tests/test_output_invoice_collection_api.py`, and `tests/test_read_model_architecture_guards.py`.
 - Use CodeGraph for structural lookup before implementation edits.
-- Add a narrow `OutputInvoiceCollectionReadModelRepositoryPort` exposing only output invoice collection read model methods: `list_output_invoice_collection_rows(...)`, `save_output_invoice_collection_rows(...)`, `mark_output_invoice_collection_scope(...)`, and `prune_output_invoice_collection_scope_shards(...)`.
-- Wire PostgreSQL state-store output collection read repository and output portions of `InvoiceUsageCollectionSqlProjectionBuilder` through the narrow port.
-- Preserve existing rows/filter/export/detail response shapes, freshness gates, `all` fan-out semantics, lifecycle overlay behavior, receipt facts, red/blue relation behavior and source-version checks.
-- Add or update tests proving the port excludes unrelated read model methods and the output projection/read paths still use the expected behavior.
-- Do not change lifecycle write behavior, receipt service behavior, red/blue relation commands, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
-- Do not remove output app-level projection helpers in this repository-port slice unless a concrete unused unsafe helper is found; otherwise leave helper removal for the freshness/helper audit.
-- Do not declare `output_invoice_collection` globally closed.
-- Produce/update an implementation analysis file.
+- Audit output collection fresh gates for rows, filter options, export and relation details.
+- Confirm force refresh and operation barrier targets for lifecycle, receipt and red/blue relation writes.
+- Confirm `output_invoice_collection:all` remains fan-out control scope and all-query freshness proof comes from concrete month rows/scopes plus active dirty/outbox state.
+- Classify retained app-level output projection helpers: `Application.list_output_invoice_collection_scope_shards(...)`, `Application.mark_output_invoice_collection_scope_empty(...)`, and `Application.rebuild_output_invoice_collection_read_model_scope(...)`.
+- Remove unused unsafe helpers if call graph and tests prove they are dead; otherwise quarantine them as compat-only/gateway-backed with owner, caller list, deletion condition and forbidden writes.
+- Do not change lifecycle write business rules, receipt numbering/history behavior, red/blue relation semantics, UI behavior, worker runtime, Go/Fiber/Go Worker or production state.
+- Do not declare `output_invoice_collection` globally closed unless every local support surface is accounted for.
+- Produce/update an analysis file.
 - Update MODULE-QUEUE.md, STATE.md, JOURNAL.md, and NEXT-PROMPT.md.
 - Update prompts/04-master-goal-controller.md and affected module docs/tests.
-- Run targeted backend tests, app check, docs verification and diff checks.
+- Run targeted backend tests, app check if app wiring changes, docs verification and diff checks.
 - Commit and push to origin/dev.
 - Continue to the next safe boundary if verification passes.
 

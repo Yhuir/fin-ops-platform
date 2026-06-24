@@ -199,6 +199,7 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertIs(store.workbench_sql_read_repository._connection, read_connection)
         self.assertIs(store.search_sql_read_repository._connection, read_connection)
         self.assertIs(store.tax_offset_sql_read_repository._connection, read_connection)
+        self.assertIs(store.output_invoice_collection_sql_read_repository._repository._connection, read_connection)
         self.assertIs(store._read_model_repository._connection, write_connection)
 
     def test_ready_health_summary_uses_lightweight_runtime_summary(self) -> None:
