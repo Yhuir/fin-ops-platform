@@ -419,7 +419,8 @@ class TurnoverLedgerApiRoutes:
                     group["pending_direction"] = "closed"
                     group["pending_direction_label"] = "已闭合"
                     group["group_tone"] = "muted"
-        return {
+        result = {key: value for key, value in dict(payload).items() if key != "rows"}
+        result.update({
             "summary": payload.get("summary") or {},
             "family_summaries": list(payload.get("family_summaries") or []),
             "groups": groups,
@@ -428,7 +429,8 @@ class TurnoverLedgerApiRoutes:
                 "total": len(groups),
             },
             "filters": dict(payload.get("filters") or {}),
-        }
+        })
+        return result
 
     @classmethod
     def _normalize_grouped_payload(cls, payload: dict[str, object]) -> dict[str, object]:

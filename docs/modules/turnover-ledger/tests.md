@@ -110,6 +110,20 @@
 
 结论：本地实现支持已 accounted，剩余是 production evidence deferred；仍需真实 PostgreSQL/worker/App Status/high-row/browser evidence，不能把本结论理解为模块全局 closed。
 
+## 2026-06-25 - grouped query metadata boundary fix test note
+
+`read-models:turnover-ledger-grouped-query-metadata-boundary-fix` 修复了 `view=grouped` 把 SQL/read-model payload 转 grouped payload 时丢弃顶层 freshness metadata 的问题。
+
+- Business core unit tests：不适用；本 slice 不改外部往来金额、标签、闭环、撤回、extra 或分组业务规则。
+- Service-layer tests：适用；复跑 `tests/test_turnover_ledger_query_service.py`，保护 `TurnoverLedgerQueryService` 的 fresh/stale/missing gateway 合同。
+- API contract tests：适用；新增 `tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_get_turnover_ledger_grouped_preserves_fresh_sql_read_model_metadata` 和 `test_get_turnover_ledger_grouped_preserves_stale_sql_refresh_metadata`，证明 grouped GET 保留 `read_model_status`、`refresh_enqueued`、`refresh_reason`、`source_versions` 等顶层 metadata，避免生产 API smoke 无法观测 refresh enqueue。
+- Read model/cache/background job tests：适用；stale grouped read model 用例证明 source-version mismatch 仍通过 `ReadModelQueryGateway` enqueue `turnover_ledger:all`，但 response 不再隐藏 enqueue metadata。
+- Frontend component and interaction tests：本 slice 未改前端；现有前端 stale grouped warning/operation barrier 测试仍是消费侧保护。若后续调整前端对 metadata 的展示，再补 Vitest/Playwright。
+- End-to-end business-flow integration tests：不适用；本 slice 不改 confirm/withdraw/tag-selection/extra 写链路。
+- Existing feature regression tests：适用；保留 `test_get_turnover_ledger_grouped_view_returns_groups`，证明 grouped shape 仍有 `groups`、`summary_row`、`flow_rows`、`allocation_lots`。
+
+生产 Row286 已证明当前 release 的 grouped GET 可以隐藏 enqueue；本地修复后仍需要单独 deploy/re-smoke 边界验证生产 `turnover_ledger_grouped` response metadata 和 aggregate no-hidden-enqueue 行为。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

@@ -18,6 +18,7 @@ from fin_ops_platform.app.server import Application, build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.turnover_ledger_write_adapters import TurnoverLedgerDirtyOutboxWriter
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
@@ -624,6 +625,97 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
         self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
         self.assertIsNone(repository.saved_payload)
+
+    def test_get_turnover_ledger_grouped_preserves_fresh_sql_read_model_metadata(self) -> None:
+        class FreshTurnoverReadRepository:
+            def __init__(self, source_versions: dict[str, object]) -> None:
+                self.source_versions = source_versions
+
+            def list_turnover_ledger_view(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {"pending_repayment_amount": "100000.00", "row_count": 1},
+                    "family_summaries": [],
+                    "rows": [
+                        {
+                            "relation_id": "fresh_sql_relation",
+                            "counterparty_name": "SQL对方",
+                            "family": "company",
+                            "family_label": "公司往来",
+                            "status": "suggested",
+                            "amount": "100000.00",
+                            "pending_repayment_amount": "100000.00",
+                            "source_versions": dict(self.source_versions),
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "filters": {},
+                    "read_model_status": "fresh",
+                    "source_versions": dict(self.source_versions),
+                }
+
+            def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
+                raise AssertionError("GET must not save turnover ledger rows")
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            source_versions = app._turnover_ledger_source_versions()
+            repository = FreshTurnoverReadRepository(source_versions)
+            queue = _QueueRecorder()
+            app._turnover_ledger_query_service._read_repository = repository
+            app._turnover_ledger_query_service._refresh_queue_repository = queue
+
+            response = app.handle_request("GET", "/api/turnover-ledger?view=grouped&family=company")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(payload["source_versions"], normalize_source_versions(source_versions))
+        self.assertIn("groups", payload)
+        self.assertEqual(payload["groups"][0]["counterparty_name"], "SQL对方")
+        self.assertEqual(queue.enqueued, [])
+
+    def test_get_turnover_ledger_grouped_preserves_stale_sql_refresh_metadata(self) -> None:
+        class StaleTurnoverReadRepository:
+            def list_turnover_ledger_view(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {"row_count": 1},
+                    "family_summaries": [],
+                    "rows": [
+                        {
+                            "relation_id": "stale_sql_relation",
+                            "counterparty_name": "旧SQL对方",
+                            "family": "company",
+                            "family_label": "公司往来",
+                            "status": "suggested",
+                            "amount": "100000.00",
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "filters": {},
+                    "read_model_status": "fresh",
+                    "source_versions": {"turnover_ledger_schema_version": "old"},
+                }
+
+            def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
+                raise AssertionError("GET must not save turnover ledger rows")
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            repository = StaleTurnoverReadRepository()
+            queue = _QueueRecorder()
+            app._turnover_ledger_query_service._read_repository = repository
+            app._turnover_ledger_query_service._refresh_queue_repository = queue
+
+            response = app.handle_request("GET", "/api/turnover-ledger?view=grouped&family=company")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertEqual(payload["groups"][0]["counterparty_name"], "旧SQL对方")
+        self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
 
     def test_get_turnover_ledger_grouped_view_returns_groups(self) -> None:
         with TemporaryDirectory() as temp_dir:

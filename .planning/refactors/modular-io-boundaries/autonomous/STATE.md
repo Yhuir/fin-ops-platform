@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-source-version-provider-fix-deploy-selected`
+Current state: `turnover-ledger-grouped-metadata-fix-implemented`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:no-oa-bank-batches-api-stale-reasons-sanitized-probe` as `implementation-closed` in `analysis/production-no-oa-bank-batches-api-stale-reasons-sanitized-probe-2026-06-25.md`. T0 collected only sanitized API freshness metadata and proved the live no-OA API stale reason is `workbench_read_model_schema_version_mismatch`; the GET-triggered refresh converged done/fresh. Root cause was API expected source versions using legacy `WORKBENCH_READ_MODEL_SCHEMA_VERSION` while worker rows use `WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`. T0 added a no-OA-specific API source-version provider, wired `_no_oa_bank_batch_application_service()` to it, added a regression test, and ran no-OA focused tests. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-source-version-provider-fix-deploy-and-convergence`.
+Completed `read-models:turnover-ledger-grouped-query-metadata-boundary-fix` as `implementation-closed` in `analysis/read-model-turnover-ledger-grouped-query-metadata-boundary-fix-2026-06-25.md`. T0 fixed grouped turnover ledger API conversion so SQL/read-model payload metadata survives `view=grouped`, added fresh/stale grouped API regressions, updated turnover ledger docs, and verified targeted plus broader turnover ledger suites. Full user-scope API, production deploy/re-smoke, browser/admin/write and global/module closure remain open. Next boundary is `production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:turnover-ledger-user-scope-hidden-refresh-enqueue-diagnosis`
+`read-models:turnover-ledger-grouped-query-metadata-boundary-fix`
 
 ## Next Prompt
 
-`read-models:turnover-ledger-grouped-query-metadata-boundary-fix`
+`production:turnover-ledger-grouped-metadata-fix-deploy-and-resmoke`

@@ -423,3 +423,11 @@ git diff --check
 - 理由：外部往来 grouped read model 直接影响用户确认/撤回闭环前看到的业务事实，并向 Workbench relation、Workbench、成本统计和搜索产生跨页一致性影响；它已有 `ReadModelQueryGateway`、worker refresh service 和清晰的 manifest repository contract，适合先抽窄 repository port。
 - 首切范围：新增 `TurnoverLedgerReadModelRepositoryPort`，只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`，并让 query/projection read model 路径使用该 port。
 - 非目标：不改变外部往来业务状态、grouped payload shape、manual closure/withdraw 语义、Workbench relation command 写路径、API shape、worker event、queue、Redis/cache、权限、审计、前端行为或 Go/Fiber/Go Worker 状态。
+
+## 2026-06-25 - grouped query metadata preservation
+
+- 触发事实：生产 Row285/Row286 证明 `GET /api/turnover-ledger?view=grouped&page=1&page_size=50` 返回 HTTP 200 和 grouped data，但顶层 `read_model_status`、`refresh_enqueued`、`refresh_reason` 等 metadata 全部缺失；同一次 GET 仍创建 `turnover_ledger.read_model.refresh` / `turnover_ledger:all` dirty scope，且正常收敛到 done。
+- 根因：`TurnoverLedgerQueryService` / `ReadModelQueryGateway` 可生成 freshness/enqueue metadata，但 `TurnoverLedgerApiRoutes._flat_payload_to_grouped(...)` 重组 grouped payload 时只返回 `summary/family_summaries/groups/pagination/filters`，丢弃了 SQL/read-model payload 的顶层 metadata。
+- 决策：保持 grouped 业务 shape 不变，但 `_flat_payload_to_grouped(...)` 必须保留除 legacy `rows` 外的原顶层字段，再覆盖 grouped 相关字段。这样 fresh SQL payload 继续返回 grouped data，同时 stale/source-version mismatch payload 的 `refresh_enqueued` 可被 API smoke 和前端 stale 逻辑观测。
+- 测试：新增 grouped fresh/stale API 回归；stale grouped SQL read model 仍 enqueue `turnover_ledger:all`，但 response 不再隐藏 `refresh_enqueued=true` 和 `refresh_reason=source_version_mismatch`。
+- 非目标：本 slice 不改变 legacy local fallback、manual closure/withdraw/tag-selection/extra 写链路，不运行生产 deploy。生产复验需独立 runbook。
