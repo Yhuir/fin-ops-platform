@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `planning:post-full-deterministic-e2e-smoke-next-boundary-selection`.
+Continue after `production:read-model-auth-preflight-and-api-smoke-runbook`.
 
 ## Current State
 
@@ -18,18 +18,22 @@ Continue after `planning:post-full-deterministic-e2e-smoke-next-boundary-selecti
 - Row267 result: `175 passed` in `7.6m`.
 - Row267 required no product code, Playwright spec, smoke membership or runtime configuration change.
 - Row268 reconciled full local smoke against remaining external-risk gaps and selected an auth preflight plus metadata-only production API smoke runbook.
+- Row269 confirmed production `/health/ready` ready and `http_slo_auth_configured=no`.
+- Row269 did not run authenticated API smoke because the stop gate fired.
+- Row269 post-checks kept dirty scopes done, readiness fresh and read-model outbox done.
 - Local deterministic browser evidence is not production browser/API/high-row/worker closure.
 - Authenticated production API/browser smoke, production high-row browser, worker drain and module/global closure remain open.
 
 ## Next Boundary
 
-`production:read-model-auth-preflight-and-api-smoke-runbook`
+`planning:post-auth-preflight-next-boundary-selection`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` is clean and branch is `dev`.
 2. Fetch `origin` and verify local `HEAD == origin/dev`.
 3. Read:
+   - `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`
    - `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`
    - `analysis/browser-read-model-full-deterministic-e2e-smoke-runbook-2026-06-25.md`
    - `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`
@@ -38,12 +42,10 @@ Continue after `planning:post-full-deterministic-e2e-smoke-next-boundary-selecti
    - `autonomous/MODULE-QUEUE.md`
    - `autonomous/STATE.md`
    - `autonomous/JOURNAL.md`
-4. Execute the selected runbook:
-   - precheck `/health/ready`;
-   - check whether `FIN_OPS_HTTP_SLO_BEARER_TOKEN`, `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` or `FIN_OPS_HTTP_SLO_COOKIE` is configured without printing values;
-   - if absent, stop and record `production-evidence-deferred`;
-   - if present, run bounded GET-only metadata `http_slo_probe --no-default-page-probe --json`;
-   - run post-check aggregates for readiness/dirty scopes/outbox.
+4. Reconcile Row269 auth-missing classification and select the next smallest safe boundary:
+   - human gate package for production auth/write approval;
+   - broader local/internal API harness coverage while production auth remains unavailable;
+   - or another independent non-secret production evidence route.
 
 ## Stop Gates
 

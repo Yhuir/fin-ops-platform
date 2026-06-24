@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `auth-preflight-api-smoke-selected`
+Current state: `post-auth-preflight-selection-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-full-deterministic-e2e-smoke-next-boundary-selection` as `planning-closed` in `analysis/planning-post-full-deterministic-e2e-smoke-next-boundary-selection-2026-06-25.md`. T0 reconciled Row267 full local smoke evidence against remaining external-risk gaps and selected `production:read-model-auth-preflight-and-api-smoke-runbook` as the next boundary. No production command, runtime mutation or closure claim occurred.
+Completed `production:read-model-auth-preflight-and-api-smoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-auth-preflight-and-api-smoke-runbook-2026-06-25.md`. T0 confirmed `/health/ready` was ready, classified HTTP SLO auth config as absent without printing values, skipped authenticated API smoke, and confirmed dirty scopes done, readiness fresh and read-model outbox done. No secrets, response bodies, production mutation or closure claim occurred.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`planning:post-full-deterministic-e2e-smoke-next-boundary-selection`
+`production:read-model-auth-preflight-and-api-smoke-runbook`
 
 ## Next Prompt
 
-`production:read-model-auth-preflight-and-api-smoke-runbook`
+`planning:post-auth-preflight-next-boundary-selection`
