@@ -1,58 +1,43 @@
 # Next Prompt
 
-Continue after `production:admin-scope-auth-seam-read-only-classification`.
+Continue after `planning:controlled-write-flow-evidence-scenario-selection`.
 
 ## Current State
 
 - Branch: `dev`.
 - Active production release is `dev-turnover-source-version-persistence-20260625` at git commit `8f525563e10972168014356ff410c4fc8456f377`.
 - Row292 full non-admin user-scope API smoke passed all 37 default non-admin probes with 0 failed, 0 non-fresh and 0 refresh-enqueued probes; pre/post dirty scopes, readiness, read-model outbox and dead letters were unchanged.
-- Browser production evidence remains deferred:
-  - deployed production source lacks `web/e2e/production-route-shell.spec.ts` and Playwright runtime;
-  - packaging `node_modules` or browser binaries into release is too broad;
-  - installing/downloading Playwright on production and copying target OA tokens locally remain forbidden.
-- Admin production evidence remains deferred:
-  - no `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`;
-  - no `FIN_OPS_HTTP_SLO_COOKIE`;
-  - 2 configured target OA applicant live sessions are `full_access` non-admin;
-  - `can_admin_access_count=0`;
-  - no admin API probe was run.
-- Row297 pre/post health and aggregates stayed clean:
-  - `/health/ready=ready`;
-  - dirty scopes `done=187061`;
-  - readiness `fresh=498`;
-  - read-model outbox `done=202956`;
-  - read-model dead letters `0`.
-- Write-flow production evidence and global/module closure remain open.
+- Browser evidence remains deferred because no approved production browser runner/runtime exists.
+- Admin evidence remains deferred because no admin HTTP SLO token/cookie seam exists and target OA applicant sessions are full-access non-admin.
+- Row298 selected read-only write-flow scenario discovery as the next safe boundary.
+- Controlled write apply remains forbidden without explicit approval, a reviewed reversible business object, rollback/idempotency/audit acceptance and suitable auth.
+- Global/module closure remains open.
 
 ## Next Boundary
 
-`planning:controlled-write-flow-evidence-scenario-selection`
+`production:write-flow-scenario-discovery-read-only-runbook`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row297 evidence if it is not already committed.
-3. Reconcile write-flow evidence requirements against existing tools/docs:
-   - `backend/src/fin_ops_platform/tools/write_operation_scenario_discovery.py`;
-   - `backend/src/fin_ops_platform/tools/write_operation_e2e_smoke.py`;
-   - `docs/operations/runtime-sync-stage7-2026-06-13.md`;
-   - `docs/operations/runtime-sync-stage8-2026-06-13.md`;
-   - `docs/operations/runtime-sync-stage9-2026-06-13.md`.
-4. Select exactly one next bounded boundary:
-   - write-flow scenario discovery/planning only;
-   - controlled write runbook only if an approved low-risk scenario, rollback/idempotency/audit expectations and auth seam exist;
-   - or explicit write-flow evidence defer if approval/auth/rollback prerequisites are missing.
-5. Do not run production write commands in this planning slice.
+2. Commit/push Row298 planning evidence if it is not already committed.
+3. Write a runbook before any production command.
+4. Use only read-only discovery:
+   - do not call `write_operation_e2e_smoke --apply`;
+   - do not write scenario files containing business identifiers;
+   - print only candidate counts, operation classes and safety flags;
+   - run pre/post health, dirty scope, readiness, outbox and dead-letter checks.
+5. Do not run browser/admin probes or production writes in this boundary.
 
 ## Required Verification
 
+- Commit/push runbook before production execution if the boundary proceeds to production read-only discovery.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
-- Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
-- Do not execute production writes in the planning slice.
-- Do not run browser/admin probes.
-- Do not claim module/global closure while write-flow evidence is open or deferred without accepted stop gates.
+- Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows, scenario identifiers or business identifiers.
+- Do not execute production writes.
+- Do not generate or store scenario JSON with identifiers in this boundary.
+- Do not claim module/global closure from read-only discovery alone.

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `admin-scope-auth-seam-production-evidence-deferred`
+Current state: `controlled-write-flow-read-only-discovery-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:admin-scope-auth-seam-read-only-classification` as `production-evidence-deferred` in `analysis/production-admin-scope-auth-seam-read-only-classification-2026-06-25.md`. No HTTP SLO admin token or cookie seam is configured, and the two configured target OA applicant live sessions are full-access non-admin with `can_admin_access=false`; the optional admin endpoint probe was not run. Pre/post health, dirty scopes, readiness, read-model outbox and dead letters stayed clean. Next boundary is `planning:controlled-write-flow-evidence-scenario-selection`.
+Completed `planning:controlled-write-flow-evidence-scenario-selection` as `planning-closed` in `analysis/planning-controlled-write-flow-evidence-scenario-selection-2026-06-25.md`. T0 selected `production:write-flow-scenario-discovery-read-only-runbook` as the next boundary. Controlled write apply remains forbidden without explicit approval, a reviewed reversible business object, rollback/idempotency/audit acceptance and appropriate auth. Browser/admin evidence remains deferred and global/module closure remains open.
 
 ## Closed Or Deferred Slices
 
