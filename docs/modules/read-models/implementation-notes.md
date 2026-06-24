@@ -1329,3 +1329,10 @@
 - 改动：新增 `BankAccountBalanceDerivedLifecycleExecutor`，registry 改为 executor `.execute`，删除 app-owned helper。
 - 保持不变：all-only invalidated scope 和 enqueued-job payload shape。
 - 下一步：`read-models:bank-account-balance-all-only-scope-contract`。
+
+## 2026-06-24 - bank account balance all-only scope contract
+
+- 目标：让 `bank_account_balance` scope policy 与 worker/storage all-only contract 一致。
+- 改动：`DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY["bank_account_balance"]` 改为 all-only policy；gateway 现在拒绝 month/account/active scope，不让无效 refresh 进入 durable queue。
+- 保持不变：producer 继续 normalize 为 `["all"]`；不引入 month/account projection；API、worker event、queue schema 和 frontend behavior 不变。
+- 下一步：`read-models:bank-account-balance-operation-barrier-regression`。

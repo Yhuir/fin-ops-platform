@@ -38,3 +38,10 @@
 - 改动：新增 `BankAccountBalanceDerivedLifecycleExecutor`；derived lifecycle registry 改为 `self._bank_account_balance_derived_lifecycle_executor().execute`；旧 `_derived_lifecycle_bank_account_balance_executor(...)` 删除。
 - 保持不变：`deleted_counts={"bank_account_balance_read_models": 0}`、`invalidated_scopes=["all"]`、enqueue 成功时返回 `bank_account_balance.read_model.refresh`。
 - 下一步：`read-models:bank-account-balance-all-only-scope-contract`，收敛 gateway scope policy 与 worker/storage all-only contract 的不一致。
+
+## 2026-06-24 - all-only scope contract
+
+- 目标：让账户余额 gateway scope policy 与 worker/storage all-only contract 一致。
+- 改动：`DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY["bank_account_balance"]` 改为 all-only policy；`ReadModelRefreshGateway` 现在在 durable enqueue 前拒绝 `2026-03`、`account:*`、`active:*` 等非 `all` scope。
+- 保持不变：producer 仍 normalize 为 `["all"]`；不引入 month/account projection shard；API、worker event、queue schema、余额计算、权限、审计和前端行为不变。
+- 下一步：`read-models:bank-account-balance-operation-barrier-regression`，补齐 `bank_account_balance:all` operation barrier 回归。

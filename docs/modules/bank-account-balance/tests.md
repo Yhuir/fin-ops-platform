@@ -50,10 +50,15 @@
 - 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary`。
 - 覆盖：`BankAccountBalanceDerivedLifecycleExecutor` 保持 `deleted_counts`、`invalidated_scopes=["all"]` 和 enqueue 成功/失败的 `enqueued_jobs` payload shape，且 Application 不再拥有旧 helper。
 
+## 2026-06-24 - all-only scope contract
+
+- 新增：`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_account_balance_policy_accepts_only_all_scope`。
+- 覆盖：`ReadModelRefreshGateway` 对 `bank_account_balance` 只接受 `all`，拒绝 month/account/active scope，且拒绝发生在 durable enqueue 前。
+
 ## 下一 slice 必跑建议
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_bank_account_balance_read_model tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_refresh_producer_helpers_stay_out_of_application tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_read_model_refresh_gateway -v
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 bash scripts/verify.sh docs
 git diff --check
@@ -62,4 +67,4 @@ git diff --check
 ## 未测风险
 
 - 当前没有本地 `PGSQL_URL` 或 staging DB，真实 PostgreSQL worker drain、App Status readiness、high-row performance 和 Browser smoke evidence 仍需后续生产/环境验证。
-- 当前 worker/storage 只支持 `bank_account_balance:all`；scope policy 的 month/all 允许范围需要在后续边界中收敛或明确兼容解释。
+- 当前 worker/storage 只支持 `bank_account_balance:all`；gateway 已拒绝非 all scope，但 dedicated operation barrier regression 和 Bank Detail fallback quarantine 仍需后续闭环。

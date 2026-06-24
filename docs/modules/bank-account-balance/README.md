@@ -30,7 +30,7 @@
 
 `bank_account_balance` 是 Bank Details accounts 视图使用的独立 read model。余额金额、余额 freshness 和 balance read model status 不能由 `bank_detail` rows 替代；交易数量可以在页面筛选范围内参考 bank detail rows。
 
-当前 worker 和 storage 只支持 `bank_account_balance:all`。虽然 scope policy 目前允许 month/all，后续不能直接引入 month/account scope，除非先完成 scope contract 设计、worker/storage/operation-barrier/test 更新。
+当前 worker、storage 和 gateway scope policy 只支持 `bank_account_balance:all`。后续不能直接引入 month/account scope，除非先完成新的 scope contract 设计、worker/storage/operation-barrier/test 更新。
 
 ## 当前缺口
 
@@ -38,7 +38,7 @@
 - Bank Details accounts SQL read path 已优先通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort.list_bank_account_balances(...)` 仍作为过渡兼容 fallback，后续必须审计移除或加固为 compat-only。
 - Refresh producer 已通过 `BankAccountBalanceReadModelRefreshProducer` 收敛；Application、Bank Details service injection、runtime import-state fan-out、runtime derived lifecycle fan-out 和 backfill enqueue 均走该 producer。
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
-- `bank_account_balance:all` 是当前唯一 publish scope；scope policy 的 month/all 允许范围需要在 producer 后续 scope-contract slice 中收敛或明确拒绝。
+- `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。
 - dedicated `bank_account_balance:all` operation barrier regression 尚未补齐。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
 

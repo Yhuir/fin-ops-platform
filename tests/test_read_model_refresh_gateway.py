@@ -75,7 +75,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 
         registered_scope_types = [
-            "bank_account_balance",
             "bank_detail",
             "input_invoice_usage",
             "invoice_lifecycle",
@@ -98,6 +97,33 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 self.assertEqual(enqueued, ["2026-03", "all"])
                 with self.assertRaises(ReadModelScopeError):
                     gateway.enqueue_many(scope_type, ["active:2026-03"], reason="unit_test")
+
+    def test_bank_account_balance_policy_accepts_only_all_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "bank_account_balance",
+            ["all", "all"],
+            reason="unit_test",
+        )
+
+        self.assertEqual(enqueued, ["all"])
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "bank_account_balance", "scope_key": "all", "reason": "unit_test"}],
+        )
+        for invalid_scope_key in ["2026-03", "account:legacy", "active:2026-03"]:
+            with self.subTest(invalid_scope_key=invalid_scope_key):
+                with self.assertRaises(ReadModelScopeError):
+                    gateway.enqueue_many("bank_account_balance", [invalid_scope_key], reason="unit_test")
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "bank_account_balance", "scope_key": "all", "reason": "unit_test"}],
+        )
 
     def test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway

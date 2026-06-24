@@ -357,6 +357,11 @@ git diff --check
 - 新增 static guard：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary`。
 - 覆盖：derived lifecycle response assembly 不再由 Application 持有，并保持 all-only payload shape。
 
+## 2026-06-24 - bank account balance all-only scope contract test note
+
+- 新增 gateway/scope-policy test：`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_account_balance_policy_accepts_only_all_scope`。
+- 覆盖：gateway 只允许 `bank_account_balance:all` 入 durable queue，拒绝 month/account/active scope。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

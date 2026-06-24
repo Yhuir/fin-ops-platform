@@ -69,6 +69,14 @@ def _month_or_all_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     )
 
 
+def _all_only_scope_policy(scope_type: str) -> ReadModelScopePolicy:
+    return ReadModelScopePolicy(
+        scope_type=scope_type,
+        normalize_many=_dedupe_text,
+        validate_one=lambda scope_key: _validate_all_only_scope_key(scope_type, scope_key),
+    )
+
+
 def _pending_invoice_scope_policy() -> ReadModelScopePolicy:
     return ReadModelScopePolicy(
         scope_type="pending_invoice",
@@ -110,6 +118,13 @@ def _validate_month_or_all_scope_key(scope_type: str, scope_key: str) -> None:
     raise ReadModelScopeError(f"Invalid {scope_type} read model scope_key: {scope_key}")
 
 
+def _validate_all_only_scope_key(scope_type: str, scope_key: str) -> None:
+    normalized_scope_key = str(scope_key or "").strip()
+    if normalized_scope_key == "all":
+        return
+    raise ReadModelScopeError(f"Invalid {scope_type} read model scope_key: {scope_key}; only 'all' is supported.")
+
+
 def _validate_pending_invoice_scope_key(scope_key: str) -> None:
     normalized_scope_key = str(scope_key or "").strip()
     parts = [part.strip() for part in normalized_scope_key.split(":")]
@@ -145,7 +160,7 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
-        "bank_account_balance": _month_or_all_scope_policy("bank_account_balance"),
+        "bank_account_balance": _all_only_scope_policy("bank_account_balance"),
         "bank_detail": _month_or_all_scope_policy("bank_detail"),
         "cost_statistics": _cost_statistics_scope_policy(),
         "input_invoice_usage": _month_or_all_scope_policy("input_invoice_usage"),
