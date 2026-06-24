@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `authenticated-browser-page-smoke-production-evidence-deferred`
+Current state: `post-browser-harness-missing-packaging-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:read-model-authenticated-browser-page-smoke-runbook` as `production-evidence-deferred` in `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`. T0 committed/pushed the runbook before execution, prechecked `/health/ready`, dirty scopes, readiness, read-model outbox and read-model dead letters clean, then stopped before browser execution because the deployed production release lacks both `web/node_modules/.bin/playwright` and `web/e2e/production-route-shell.spec.ts`. No package install, browser download, token copy, local Playwright, admin probe, write-flow probe or mutation occurred; postcheck stayed clean. Next boundary is `planning:post-authenticated-browser-harness-missing-next-boundary-selection`.
+Completed `planning:post-authenticated-browser-harness-missing-next-boundary-selection` as `planning-closed` in `analysis/planning-post-authenticated-browser-harness-missing-next-boundary-selection-2026-06-25.md`. T0 reconciled Row294's browser evidence defer as a deploy artifact/harness gap: production release archive contains backend, `web/dist`, scripts and deploy assets, excludes `node_modules`, and does not package `web/e2e` or Playwright config. The next boundary is `deployment:production-browser-smoke-harness-packaging-feasibility-audit`. Browser/admin/write production evidence and global/module closure remain open.
 
 ## Closed Or Deferred Slices
 

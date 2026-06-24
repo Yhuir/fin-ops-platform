@@ -1,51 +1,40 @@
 # Next Prompt
 
-Continue after `production:read-model-authenticated-browser-page-smoke-runbook`.
+Continue after `planning:post-authenticated-browser-harness-missing-next-boundary-selection`.
 
 ## Current State
 
 - Branch: `dev`.
 - Active production release is `dev-turnover-source-version-persistence-20260625` at git commit `8f525563e10972168014356ff410c4fc8456f377`.
 - Row292 full non-admin user-scope API smoke passed all 37 default non-admin probes with 0 failed, 0 non-fresh and 0 refresh-enqueued probes; pre/post dirty scopes, readiness, read-model outbox and dead letters were unchanged.
-- Row293 selected read-only authenticated production browser page smoke as the next lowest-risk evidence boundary; admin and write-flow evidence remain deferred.
-- Row294 wrote and committed the browser runbook before execution, then ran production prechecks:
-  - `/health/ready=ready`;
-  - dirty scopes `done=187061`;
-  - readiness `fresh=498`;
-  - read-model outbox `done=202956`;
-  - read-model dead letters `0`.
-- Row294 browser harness check found:
-  - `playwright_bin=missing`;
-  - `production_route_shell_spec=missing`.
-- Per runbook stop gate, no browser command ran. T0 did not install packages, download browser binaries, copy tokens, run local Playwright with production token, run admin probes, run write-flow probes, deploy, restart, requeue, repair, replay, mutate DB/readiness/dirty scopes or run `--apply`.
-- Row294 postcheck stayed clean:
-  - `/health/ready=ready`;
-  - dirty scopes `done=187061`;
-  - readiness `fresh=498`;
-  - read-model outbox `done=202956`;
-  - read-model dead letters `0`.
+- Row294 browser evidence deferred because deployed production source lacks both `web/node_modules/.bin/playwright` and `web/e2e/production-route-shell.spec.ts`; production health/dirty/readiness/outbox/dead-letter pre/post checks stayed clean.
+- Row295 reconciled that gap against deploy artifacts:
+  - `scripts/deploy_oa.py` packages `backend`, `web/dist`, `scripts`, `deploy/oa` and selected root docs;
+  - `_tar_filter(...)` excludes `node_modules`;
+  - release validation requires `web/dist/index.html`, not e2e specs or Playwright config;
+  - packaging the spec alone would not solve the missing Playwright/browser runtime.
 - Browser/admin/write production evidence and global/module closure remain open.
 
 ## Next Boundary
 
-`planning:post-authenticated-browser-harness-missing-next-boundary-selection`
+`deployment:production-browser-smoke-harness-packaging-feasibility-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row294 evidence if it is not already committed.
-3. Reconcile the harness gap:
-   - production deploy source currently excludes Playwright binary and e2e spec files;
-   - token-safe local Playwright remains forbidden unless a non-secret token/session seam is provided;
-   - production browser evidence cannot be claimed from Row294.
-4. Select exactly one next bounded boundary.
-5. Do not run production browser/admin/write commands in this planning boundary.
+2. Commit/push Row295 planning evidence if it is not already committed.
+3. Audit production browser smoke harness options before editing deploy code:
+   - package a minimal production-only browser smoke harness in release artifacts;
+   - run from a separate trusted runner without copying tokens;
+   - keep browser evidence deferred and move to admin seam or write-flow planning.
+4. Classify Playwright spec availability separately from Playwright/browser runtime availability.
+5. Do not run production browser/admin/write probes in this audit boundary.
 
-## Candidate Directions
+## Audit Requirements
 
-- Package or retain a production-safe read-only browser smoke harness in source/deploy, with no package install/download at execution time.
-- If packaging is too invasive for the current goal, select admin seam classification or write-flow planning as evidence accounting only.
-- Do not claim global/module closure until browser/admin/write evidence is either collected or explicitly classified with accepted stop gates.
+- Inspect `scripts/deploy_oa.py`, `deploy/oa/README.md`, `docs/operations/deployment.md`, `docs/dev/testing.md`, `web/package.json`, `web/playwright.config.ts`, `web/e2e/production-route-shell.spec.ts`.
+- If an implementation is selected, define minimum files, security posture, release-size impact, no-install/no-download execution requirement, and docs impact before editing.
+- If no implementation is safe, classify the exact blocker and select the next evidence boundary.
 
 ## Required Verification
 
@@ -55,6 +44,7 @@ Continue after `production:read-model-authenticated-browser-page-smoke-runbook`.
 ## Stop Gates
 
 - Do not print or store secrets, tokens, cookies, passwords, env values, response bodies, payload rows, grouped rows or business identifiers.
-- Do not execute production browser/admin/write probes in the planning slice.
-- Do not add deploy/package changes without first reading deploy docs and assessing docs impact.
-- Do not claim module/global closure from harness-missing evidence alone.
+- Do not execute production browser/admin/write probes in this audit boundary.
+- Do not install packages or download browser binaries on production.
+- Do not change deploy artifact policy without updating relevant deploy/testing docs.
+- Do not claim module/global closure from harness feasibility alone.
