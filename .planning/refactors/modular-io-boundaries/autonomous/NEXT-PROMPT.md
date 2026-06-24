@@ -1,6 +1,6 @@
 # Next Prompt
 
-Continue after `contract:read-model-internal-api-contract-harness-implementation`.
+Continue after `planning:post-internal-api-contract-harness-next-boundary-selection`.
 
 ## Current State
 
@@ -49,12 +49,17 @@ Continue after `contract:read-model-internal-api-contract-harness-implementation
   - covered representative session, Workbench, pending invoice, input usage, output collection, tax, cost and search GET envelopes;
   - kept explicit auth guard negatives with `FIN_OPS_TEST_DEFAULT_AUTH=0`;
   - targeted verification passed with 2 tests and 51 subtests.
+- Row263 reconciled Row262:
+  - local API harness evidence is useful but not production/browser closure;
+  - authenticated production HTTP retry and final closure remain premature;
+  - broadening every API probe is deferred until browser evidence is mapped;
+  - full e2e smoke should not be run blindly before a committed coverage map.
 - Authenticated API, browser hydration/data, high-row and module-specific closure audits remain open.
 - No global or module closure is claimed.
 
 ## Next Boundary
 
-`planning:post-internal-api-contract-harness-next-boundary-selection`
+`planning:read-model-browser-data-harness-coverage-map`
 
 ## Required First Steps On Resume
 
@@ -76,8 +81,10 @@ Continue after `contract:read-model-internal-api-contract-harness-implementation
 10. Read `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`.
 11. Read `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`.
 12. Read `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`.
-13. Reconcile Row262 and choose the next safe path: broaden local contract harness coverage, design browser data harness, or select another bounded production/read-only evidence route.
-14. Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers, route-owner classes or existing tests.
+13. Read `analysis/planning-post-internal-api-contract-harness-next-boundary-selection-2026-06-25.md`.
+14. Produce a browser data harness coverage map for read-model-heavy modules, using existing deterministic Playwright/Vitest evidence, Row262 API harness evidence, production evidence rows and external-risk labels.
+15. Recommend the next smallest executable boundary after the map.
+16. Use CodeGraph before any implementation-oriented decision about frontend API clients, route-owner classes or existing tests.
 
 ## Stop Gates
 
@@ -86,4 +93,5 @@ Continue after `contract:read-model-internal-api-contract-harness-implementation
 - Do not implement a production auth bypass or print/store cookies, tokens, DSNs, env values or secrets.
 - Do not introduce a Flask test client; this backend uses `Application` plus `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
+- Do not run full e2e smoke until the coverage map identifies the target and verification value.
 - Do not claim module/global closure from public page-shell smoke.
