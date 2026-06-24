@@ -120,6 +120,9 @@ from fin_ops_platform.services.health_payload_compaction import compact_ready_pa
 from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor import (
     InvoiceLifecycleDerivedLifecycleExecutor,
 )
+from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor import (
+    NoOaBankBatchDerivedLifecycleExecutor,
+)
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
@@ -19254,7 +19257,7 @@ class Application:
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
                 "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
                 "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
-                "no_oa_bank_batch_read_model": self._derived_lifecycle_no_oa_bank_batch_executor,
+                "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
                 "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -19419,20 +19422,10 @@ class Application:
             clear_month_cache=self._tax_offset_service.clear_month_cache,
         )
 
-    def _derived_lifecycle_no_oa_bank_batch_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        months = self._months_from_lifecycle_scope_keys(scope_keys)
-        target_scope_keys = months if months else ["all"]
-        enqueued = self._enqueue_no_oa_bank_batch_read_model_refreshes(
-            target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch"),
-            metadata=self._read_model_refresh_metadata(domain_plan),
+    def _no_oa_bank_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
+        return NoOaBankBatchDerivedLifecycleExecutor(
+            enqueue_refresh=self._enqueue_no_oa_bank_batch_read_model_refreshes,
         )
-        return {
-            "deleted_counts": {"no_oa_bank_batch_read_models": 0},
-            "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["no_oa_bank_batch.read_model.refresh"] if enqueued else [],
-        }
 
     def _derived_lifecycle_bank_account_balance_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         enqueued = self._enqueue_bank_account_balance_read_model_refresh(reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_account_balance"))

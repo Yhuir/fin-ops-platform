@@ -97,6 +97,15 @@
 - 下一实现测试要求：`read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 必须新增 focused service-layer executor tests，并补 static/runtime guard 证明 `Application` 不再拥有 no-OA derived lifecycle target/enqueue behavior；还需复跑 no-OA application/read model/workbench integration、manifest、refresh gateway 和相关 platform guard。
 - 后续风险：`NoOaBankBatchApplicationService.persist_mutation(...)` 的 broad state-store fallback 仍需单独 quarantine/removal slice 覆盖。
 
+## 2026-06-24 - Modular IO derived lifecycle executor test note
+
+`read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 `tests/test_no_oa_bank_batch_derived_lifecycle_executor.py`，覆盖 explicit month scope extraction、non-month fallback to `all`、默认 reason、metadata allowlist forwarding 和 result shape。
+- Read model/cache/background job tests：executor 测试证明 derived lifecycle refresh target 和 `no_oa_bank_batch.read_model.refresh` job accounting 不变；scope policy 和 worker handler 仍由现有 no-OA/read model tests 保护。
+- Existing feature regression tests：扩展 `tests/test_platform_runtime_boundary_guards.py`，证明 derived lifecycle registry 使用 `NoOaBankBatchDerivedLifecycleExecutor`，且 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 不再作为 app-owned helper 存在。
+- 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变提交/撤回规则、HTTP shape、页面 operation barrier targets 或用户流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

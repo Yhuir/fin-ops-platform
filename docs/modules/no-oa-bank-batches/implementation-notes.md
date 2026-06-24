@@ -52,6 +52,15 @@
 - 文档影响：本轮不改变业务状态、UI 状态、API shape、worker event、queue schema、operation barrier 状态、权限或审计含义；`state-machine.md` 定义不变。
 - 测试决策：本轮是 analysis/accounting only；下一实现 slice 必须新增 executor service-layer/static guard，并复跑 no-OA application/read model/workbench integration 与相关 lifecycle 回归。
 
+## 2026-06-24 - Modular IO derived lifecycle executor extraction
+
+- 目标：把 no-OA derived lifecycle target scope 选择、refresh metadata forwarding 和 enqueued-job accounting 从 `Application` 移到显式 service executor。
+- 影响范围：`NoOaBankBatchDerivedLifecycleExecutor`、`Application` derived lifecycle target map/wiring、executor unit tests、platform runtime boundary guard、modular IO state；不改变 API shape、业务规则、worker event、queue schema、Redis/cache、权限、审计或前端行为。
+- 关键决策：`NoOaBankBatchDerivedLifecycleExecutor` 是 no-OA derived lifecycle 行为 owner；`Application._no_oa_bank_batch_derived_lifecycle_executor(...)` 只负责依赖组装并注入 no-OA refresh enqueue callback。
+- 保留语义：月份 scope 继续成为具体月份 refresh target；非月份/空 scope 继续 fan out 到 `all`；默认 reason 仍为 `derived_lifecycle_no_oa_bank_batch`；result 仍返回 `deleted_counts`、`invalidated_scopes`、`enqueued_jobs`。
+- 测试覆盖：新增 executor service-layer tests 和 platform boundary guard，防止 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 回归。
+- 下一步：执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`，处理 `persist_mutation(...)` 中缺少 atomic mutation boundary 时的 broad state-store fallback。
+
 ## 2026-06-24 - Modular IO repository/state-store boundary audit
 
 - 目标：审计 no-OA read model repository/state-store/public-snapshot/refresh-worker ownership，确定第一个实现抽取边界。

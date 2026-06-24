@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.
-- Last status: analysis-closed.
+- Last completed boundary: read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction.
+- Last status: implementation-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -142,8 +142,10 @@ Current state expected on start:
 - No module is globally closed.
 - The no-OA refresh persistence boundary is implemented: `NoOaBankBatchReadModelPersistencePort` owns public snapshot persistence delegation for the worker refresh path, and `NoOaBankBatchReadModelRefreshService.handle_runtime_event(...)` no longer directly calls broad `state_store.save_no_oa_bank_batches(...)`.
 - The no-OA read model repository port boundary is implemented: `NoOaBankBatchReadModelRepositoryPort` owns no-OA list/query read model repository access, `PostgresStateStore.no_oa_bank_batch_sql_read_repository` exposes the port, and `NoOaBankBatchApplicationService.list_batches_payload(...)` no longer reads through broad `workbench_sql_read_repository`.
-- The no-OA freshness/derived lifecycle audit is analysis-closed: refresh enqueue, scope policy, manifest/App Status/worker registration and frontend operation barrier evidence are locally accounted for, but app-owned derived lifecycle executor behavior and mutation persistence fallback broad state-store writes remain implementation gaps.
-- The next pending boundary is read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction.
+- The no-OA freshness/derived lifecycle audit is analysis-closed: refresh enqueue, scope policy, manifest/App Status/worker registration and frontend operation barrier evidence are locally accounted for.
+- The no-OA derived lifecycle executor extraction is implemented: `NoOaBankBatchDerivedLifecycleExecutor` owns target scope selection, refresh metadata forwarding and enqueued-job accounting; `Application` only assembles the explicit enqueue dependency.
+- The remaining no-OA local implementation gap is mutation persistence fallback broad state-store writes.
+- The next pending boundary is read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -239,22 +241,21 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-read-model-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-refresh-persistence-boundary-extraction.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/read_model_refresh_gateway.py`, and relevant derived lifecycle executor patterns/tests.
+For read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine:
+- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/no-oa-bank-batches/README.md`, `docs/modules/no-oa-bank-batches/state-machine.md`, `docs/modules/no-oa-bank-batches/implementation-notes.md`, `docs/modules/no-oa-bank-batches/tests.md`, `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`, `backend/src/fin_ops_platform/services/postgres_state_store.py`, `backend/src/fin_ops_platform/services/state_store.py`, and relevant no-OA mutation/persistence tests.
 - Use CodeGraph for structural lookup before editing.
-- Add a narrow `NoOaBankBatchDerivedLifecycleExecutor` service that owns derived lifecycle target scope selection and enqueue result assembly.
-- Wire `Application` so the derived lifecycle target map calls the new executor with an explicit no-OA enqueue dependency instead of owning no-OA target/enqueue behavior in `Application._derived_lifecycle_no_oa_bank_batch_executor(...)`.
-- Preserve current semantics exactly: month lifecycle scopes become month target scopes; empty/non-month/default scopes fan out to `all`; default reason remains `derived_lifecycle_no_oa_bank_batch`; metadata still comes from `_read_model_refresh_metadata(domain_plan)`; result shape still contains `deleted_counts`, `invalidated_scopes`, and `enqueued_jobs`.
-- Add focused service-layer tests for the executor and a static/runtime guard proving the old app-owned helper no longer contains authoritative target/enqueue behavior.
-- Do not touch no-OA mutation persistence fallback in this slice except to keep it recorded as the next pending boundary.
+- Remove or quarantine the `NoOaBankBatchApplicationService.persist_mutation(...)` fallback that directly calls broad state-store `save_workbench_pair_relations(...)`, `save_no_oa_bank_batches(...)`, and `save_workbench_read_models(...)` when `save_no_oa_bank_batch_mutation(...)` is missing.
+- Preserve the primary atomic mutation boundary `save_no_oa_bank_batch_mutation(...)`.
+- Decide from current code whether local/non-PostgreSQL stores need an explicit narrow mutation port or should fail fast when the atomic boundary is absent; do not add speculative compatibility.
+- Add focused tests/guards proving mutation persistence no longer falls back to broad state-store writes.
 - Do not implement Go/Fiber/Go Worker.
 - Do not change business rules, API shapes, worker event names, queue schema, Redis/cache behavior, permissions, audit meaning or frontend behavior unless a verified gap requires it and tests are updated.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted app check, no-OA derived lifecycle/executor tests, relevant no-OA/read model regression tests, docs verification and diff checks.
+- Run targeted app check, no-OA mutation/persistence tests, relevant no-OA/read model regression tests, docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine` if verification passes.
+- Continue to no-OA local implementation closure audit if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.

@@ -140,6 +140,15 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 - 下一 slice `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 必须新增 executor service-layer tests 和 platform/static guard，证明 no-OA derived lifecycle target scope selection、reason/metadata forwarding 和 enqueued-job accounting 已移出 `Application`。
 - `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine` 是之后的独立测试边界，必须覆盖 broad state-store fallback 被隔离或删除。
 
+## 2026-06-24 - no-OA bank batch derived lifecycle executor test note
+
+`read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 no-OA derived lifecycle executor tests，覆盖 month/all target semantics、reason default、metadata forwarding 和 response accounting。
+- Read model/cache/background job tests：保持 no-OA refresh job type、scope target 和 enqueue result shape；现有 manifest/refresh gateway/worker tests 继续覆盖 registry、scope policy 和 dirty scope completion。
+- Existing feature regression tests：新增 platform boundary guard，防止 no-OA derived lifecycle behavior 回到 `Application`。
+- Business core、API contract、frontend interaction 和 E2E tests 未新增，因为本 slice 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
+
 ## 2026-06-24 - turnover ledger freshness/barrier audit note
 
 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice。结论：

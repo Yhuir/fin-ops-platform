@@ -40,6 +40,17 @@
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
 - 后续事项：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，随后处理 mutation persistence fallback quarantine。
 
+## 2026-06-24 - No-OA bank batch derived lifecycle executor extraction
+
+- 目标：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，将 no-OA derived lifecycle target/enqueue behavior 从 `Application` 收敛到显式 executor。
+- 影响范围：`NoOaBankBatchDerivedLifecycleExecutor`、`Application` derived lifecycle wiring、executor tests、platform guard、modular IO state 和 no-OA/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
+- 关键决策：`NoOaBankBatchDerivedLifecycleExecutor` 拥有 scope extraction、month/all target selection、reason default、metadata forwarding 和 `enqueued_jobs` accounting；`Application` 只组装 `self._enqueue_no_oa_bank_batch_read_model_refreshes` 依赖。
+- 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
+- 测试覆盖：新增 `tests/test_no_oa_bank_batch_derived_lifecycle_executor.py`；扩展 platform runtime boundary guard，防止 removed app-owned helper 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；Go/Fiber/Go Worker admission 继续 blocked。
+- 后续事项：执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`。
+
 ## 2026-06-24 - No-OA bank batch read model repository port extraction
 
 - 目标：执行 `read-models:no-oa-bank-batch-read-model-repository-port-extraction`，把 no-OA list/query read path 从 broad `workbench_sql_read_repository` 收敛到专属 repository port。
