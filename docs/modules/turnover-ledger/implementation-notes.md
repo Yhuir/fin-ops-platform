@@ -17,6 +17,15 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-24 - Read model freshness and barrier audit
+
+- 目标：执行 modular IO slice `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 read model fresh gate、force refresh、operation barrier 和旧链路污染。
+- 影响范围：外部往来 SQL fresh gate、scope policy、manifest/App Status/worker registry、Workbench relation source-version proof、operation barrier tests 和 `Application` turnover read model clear/refresh helper；不改变运行时代码。
+- 关键决策：现有 `TurnoverLedgerQueryService` 已走 `ReadModelQueryGateway`，`turnover_ledger` scope policy 是 month/all，manifest/App Status/worker registry 已登记，projection 在 Workbench relation 不 fresh 时不保存半成品，写后 barrier 已有 `turnover_ledger:all` 阻断证据。但 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 和 `_clear_turnover_ledger_read_model_best_effort(...)` 仍是 app-owned helper，且 clear 仍通过 broad workbench SQL repository，必须先抽出或改走 turnover-specific port。
+- 测试覆盖：本轮是 analysis/accounting only；下一实现 slice 必须新增/更新 refresh producer / clear port guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；`turnover_ledger` 不能声明 local closure。
+
 ## 2026-06-24 - Read model repository port extraction
 
 - 目标：执行 modular IO slice `read-models:turnover-ledger-repository-port-extraction`，让外部往来台账 read model 的查询和 projection 保存通过窄 repository port。

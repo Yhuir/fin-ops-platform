@@ -76,6 +76,14 @@
 
 下一 slice 是 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，需要审计 fresh gate、force refresh、all fan-out/query proof、Workbench relation source-version proof、operation barrier targets、legacy read contamination 和 app-owned helper 分类。
 
+## 2026-06-24 - freshness/barrier audit test note
+
+`read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice：
+
+- 复用现有 turnover query/read model refresh/API/UoW/operation barrier 测试作为 fresh gate、source-version proof、worker complete dirty scope、write response target 和 outbox-blocking 证据。
+- 未新增测试，因为本轮不改运行时代码。
+- 审计发现下一轮必须补 producer/clear boundary 测试：`Application._enqueue_turnover_ledger_read_model_refreshes(...)` 与 `_clear_turnover_ledger_read_model_best_effort(...)` 不能继续作为 app-owned authoritative behavior，且 clear 不应再经 broad workbench SQL repository。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

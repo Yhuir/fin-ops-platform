@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:turnover-ledger-repository-port-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:turnover-ledger-refresh-freshness-operation-barrier-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -133,10 +133,10 @@ Current state expected on start:
 - Cost statistics post-full-state local closure audit is complete: no remaining local implementation gap was found, local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred and the module is not globally closed.
 - `turnover_ledger` is selected as the tenth non-Go read model implementation pilot because it has high user-visible stale grouped-ledger risk, direct Workbench/cost/search fan-out impact and a narrow manifest-listed repository-port first slice.
 - Turnover ledger repository port extraction is complete: `TurnoverLedgerReadModelRepositoryPort` owns manifest-listed list/save/clear methods, PostgreSQL state-store turnover read wiring returns the port, `TurnoverLedgerQueryService` app injection uses the turnover-specific port instead of the broad workbench SQL read repository, and worker projection save paths receive the port.
-- Turnover ledger remains implementation-gap-open; freshness/barrier, force refresh, all fan-out/query proof, Workbench relation source-version proof, operation barrier targets and legacy contamination still need audit.
+- Turnover ledger freshness/barrier audit is analysis-closed: SQL fresh gate, month/all scope policy, manifest/App Status/worker registration, Workbench relation source-version proof and operation barrier evidence exist, but app-owned clear/refresh helpers remain a local implementation gap.
 - Remaining later non-Go read model candidates include `no_oa_bank_batch`, `search` and `bank_account_balance`.
 - No module is globally closed.
-- The next pending boundary is read-models:turnover-ledger-refresh-freshness-operation-barrier-audit.
+- The next pending boundary is read-models:turnover-ledger-refresh-producer-clear-port-extraction.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:

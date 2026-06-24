@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Turnover ledger freshness and barrier audit
+
+- 目标：执行 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 fresh gate、force refresh、all scope、Workbench relation source-version、operation barrier 和旧链路污染风险。
+- 影响范围：`TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService`、scope policy、manifest、App Status/worker registry、`Application` turnover clear/refresh helpers 和 modular IO state；不改变运行时代码。
+- 关键决策：已有本地证据证明 SQL fresh gate、month/all scope policy、manifest/App Status/worker 注册、Workbench relation source-version proof 和 operation barrier blocking 行为。但 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 仍拥有 refresh producer 行为，`Application._clear_turnover_ledger_read_model_best_effort(...)` 仍通过 broad `_workbench_sql_read_repository` 清理 turnover rows，因此不能进入 local closure/defer。
+- 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 read-models/turnover-ledger 实施记录。
+- 测试覆盖：本轮是 analysis/accounting only；下一轮实现必须新增/更新 producer/clear boundary guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；但不能用生产证据缺口绕过本地 app-owned clear/refresh gap。
+- 后续事项：执行 `read-models:turnover-ledger-refresh-producer-clear-port-extraction`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Turnover ledger repository port extraction
 
 - 目标：执行 `read-models:turnover-ledger-repository-port-extraction`，为外部往来台账 read model 建立窄 repository port。
