@@ -12925,7 +12925,7 @@ class Application:
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
             no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
-            workbench_matching_source_versions_provider=self._workbench_matching_source_versions,
+            workbench_matching_source_versions_provider=self._no_oa_bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
@@ -15576,6 +15576,11 @@ class Application:
             payload["oa_attachment_invoice_parser_version"] = parser_version
         if projection_sync_version:
             payload["oa_projection_sync_version"] = projection_sync_version
+        return payload
+
+    def _no_oa_bank_batch_workbench_source_versions(self) -> dict[str, object]:
+        payload = dict(self._workbench_matching_source_versions())
+        payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         return payload
 
     def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:

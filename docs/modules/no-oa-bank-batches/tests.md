@@ -18,6 +18,15 @@
 
 ## 现有测试入口
 
+## 2026-06-25 - Production API source-version schema alignment
+
+- 变更类型：narrow implementation slice。
+- 背景：生产 `GET /api/no-oa-bank-batches?month=2026-06&bucket=unsubmitted&page=1&page_size=200` 持续返回 `read_model_status=stale`，sanitized stale-reasons probe 证明原因是 `workbench_read_model_schema_version_mismatch`。API expected 使用 legacy `WORKBENCH_READ_MODEL_SCHEMA_VERSION`，而 no-OA worker 持久化 rows 使用 SQL projection contract `WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_no_oa_api_source_versions_use_sql_workbench_schema_version`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖，因为变更修正 no-OA API service source-version provider 与 worker writer contract 的一致性；API contract 通过 production sanitized probe 和 no-OA application/workbench integration 回归保护，但未新增 HTTP shape 测试；business core/frontend/E2E 不适用，因为没有改变批次生命周期、提交/撤回规则、前端交互或页面 barrier。
+- 验证结果：`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_workbench_integration.py` 和 targeted platform guard 通过。
+- 下一边界建议目标测试：生产 deploy/convergence 后必须 rerun focused `no_oa_bank_batches` API metadata probe，目标是 HTTP 200、`read_model_status=fresh`、`refresh_enqueued_count=0`。
+
 ## 2026-06-24 - Modular IO read model repository port extraction
 
 - 变更类型：narrow implementation slice。

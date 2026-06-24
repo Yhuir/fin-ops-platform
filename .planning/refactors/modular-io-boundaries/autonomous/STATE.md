@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batches-api-stale-reasons-sanitized-probe-selected`
+Current state: `no-oa-source-version-provider-fix-deploy-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:no-oa-bank-batches-focused-api-freshness-recheck` as `production-evidence-deferred` in `analysis/production-no-oa-bank-batches-focused-api-freshness-recheck-2026-06-25.md`. T0 reused the Row280 in-process target OA applicant credential seam without printing credentials/tokens and ran only the focused `no_oa_bank_batches` probe. The endpoint returned HTTP 200 and p95 `165.274ms`, but still reported `read_model_status=stale` with `refresh_enqueued_count=1`; full user-scope/browser/admin/write probes were not run. Postcheck showed `/health/ready` ready, dirty scopes done, readiness fresh, read-model outbox done, no dead letters, and the GET-triggered no-OA refresh converged to done/fresh. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-bank-batches-api-stale-reasons-sanitized-probe`.
+Completed `production:no-oa-bank-batches-api-stale-reasons-sanitized-probe` as `implementation-closed` in `analysis/production-no-oa-bank-batches-api-stale-reasons-sanitized-probe-2026-06-25.md`. T0 collected only sanitized API freshness metadata and proved the live no-OA API stale reason is `workbench_read_model_schema_version_mismatch`; the GET-triggered refresh converged done/fresh. Root cause was API expected source versions using legacy `WORKBENCH_READ_MODEL_SCHEMA_VERSION` while worker rows use `WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`. T0 added a no-OA-specific API source-version provider, wired `_no_oa_bank_batch_application_service()` to it, added a regression test, and ran no-OA focused tests. Full user-scope API, browser/admin/write and global/module closure remain open. Next boundary is `production:no-oa-source-version-provider-fix-deploy-and-convergence`.
 
 ## Closed Or Deferred Slices
 

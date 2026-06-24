@@ -10,9 +10,20 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
+    def test_no_oa_api_source_versions_use_sql_workbench_schema_version(self) -> None:
+        app = build_application()
+
+        source_versions = app._no_oa_bank_batch_application_service().no_oa_bank_batch_source_versions()
+
+        self.assertEqual(
+            source_versions["workbench_read_model_schema_version"],
+            WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+        )
+
     def test_persistence_port_delegates_to_store_snapshot_save(self) -> None:
         class StateStore:
             def __init__(self) -> None:
