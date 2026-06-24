@@ -16669,27 +16669,11 @@ class Application:
             "entry_count": self._tax_offset_month_entry_count(payload),
         }
 
-    def list_input_invoice_usage_scope_shards(self, scope_key: str) -> list[str]:
-        normalized = str(scope_key or "").strip()
-        if SEARCH_MONTH_RE.match(normalized):
-            return [normalized]
-        return self._list_search_months()
-
     def list_output_invoice_collection_scope_shards(self, scope_key: str) -> list[str]:
         normalized = str(scope_key or "").strip()
         if SEARCH_MONTH_RE.match(normalized):
             return [normalized]
         return self._list_search_months()
-
-    def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
-        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        mark_scope = getattr(repository, "mark_input_invoice_usage_scope", None)
-        if callable(mark_scope):
-            mark_scope(
-                scope_key=str(scope_key or "all").strip() or "all",
-                row_count=0,
-                source_versions=self._input_invoice_usage_expected_source_versions(),
-            )
 
     def mark_output_invoice_collection_scope_empty(self, scope_key: str) -> None:
         repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
@@ -16700,22 +16684,6 @@ class Application:
                 row_count=0,
                 source_versions=self._output_invoice_collection_expected_source_versions(),
             )
-
-    def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        month = str(scope_key or "").strip()
-        if month != "all" and not SEARCH_MONTH_RE.match(month):
-            raise ValueError("input invoice usage read model scope_key must be all or YYYY-MM.")
-        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        save_rows = getattr(repository, "save_input_invoice_usage_rows", None)
-        if not callable(save_rows):
-            raise RuntimeError("Input invoice usage SQL read repository is not configured.")
-        rows = self._invoice_relation_live_rows(
-            lambda **kwargs: self._input_invoice_usage_service().list_rows(**kwargs),
-            month=None if month == "all" else month,
-        )
-        source_versions = self._input_invoice_usage_expected_source_versions()
-        save_rows(scope_key=month, rows=rows, source_versions=source_versions)
-        return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
 
     def rebuild_output_invoice_collection_read_model_scope(self, scope_key: str) -> dict[str, object]:
         month = str(scope_key or "").strip()

@@ -265,6 +265,16 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
 
 
 class ReadModelArchitectureGuardTests(unittest.TestCase):
+    def test_input_invoice_usage_app_level_projection_helpers_do_not_return(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        forbidden_helpers = {
+            "def list_input_invoice_usage_scope_shards(",
+            "def mark_input_invoice_usage_scope_empty(",
+            "def rebuild_input_invoice_usage_read_model_scope(",
+        }
+
+        self.assertEqual([helper for helper in sorted(forbidden_helpers) if helper in server_source], [])
+
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []
         for path in SOURCE_ROOT.rglob("*.py"):

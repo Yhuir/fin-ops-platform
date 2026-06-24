@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Input invoice usage freshness / operation barrier audit
+
+- 目标：执行 `read-models:input-invoice-usage-refresh-freshness-operation-barrier-audit`，核对进项发票使用 read model fresh gate、force refresh、all fan-out、source-version proof、operation barrier 和旧 helper 分类。
+- 影响范围：删除 `Application` 上未使用的 input usage rebuild/list/mark projection helper；真实 worker/projection 路径继续由 `InvoiceUsageCollectionReadModelRefreshService`、`InvoiceUsageCollectionSqlProjectionBuilder` 和 `InputInvoiceUsageReadModelRepositoryPort` 承担。
+- 关键决策：旧 app-level rebuild 路径没有运行时调用者且会绕开 worker projection builder 直接 live query/save read model，删除优于 compat-only 保留。`input_invoice_usage:all` 继续是 fan-out control scope；all-query freshness proof 来自 month rows/scopes 和 dirty/outbox 状态。
+- 文档影响：新增 modular IO analysis，更新 read-models/input-invoice-usage 实施记录、input usage 测试矩阵和 autonomous state/queue/next prompt；共享 read model 状态定义不变。
+- 测试覆盖：`tests/test_read_model_architecture_guards.py` 新增 removed-helper guard；invoice usage collection SQL runtime 和 input usage API tests 继续覆盖真实 worker builder、fresh gate、source-version、all fan-out 和 relation detail 行为。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
+
 ## 2026-06-24 - Input invoice usage repository port extraction
 
 - 目标：执行 `read-models:input-invoice-usage-repository-port-extraction`，为进项发票使用 read model 建立窄 repository port。
