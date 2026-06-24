@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: server-py:workbench-row-detail-route-owner-extraction.
-- Last status: implementation-closed.
+- Last completed boundary: server-py:workbench-group-detail-route-owner-audit.
+- Last status: analysis-closed.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -194,7 +194,8 @@ Current state expected on start:
 - `server-py:modern-workbench-action-route-owner-local-closure-audit` is complete as an analysis slice: it found local closure evidence for the audited modern Workbench action route-owner surface, confirmed no direct `_workbench_write_facade().` action call sites remain in app route files, and selected row detail route ownership as the next bounded server.py slice.
 - `server-py:workbench-row-detail-route-owner-audit` is complete as an analysis slice: it confirmed the row detail live/cache/SQL fallback and no-write relation boundary are locally tested, found `Application` still owns fallback orchestration, and selected row detail route-owner extraction next.
 - `server-py:workbench-row-detail-route-owner-extraction` is complete as an implementation slice: it moved row detail payload/fallback orchestration behind `WorkbenchRowDetailApiRoutes` while preserving response shape, fallback order, row override behavior and production PostgreSQL fallback blocking.
-- The next pending boundary is `server-py:workbench-group-detail-route-owner-audit`.
+- `server-py:workbench-group-detail-route-owner-audit` is complete as an analysis slice: it confirmed `WorkbenchQueryFacade.group_detail(...)` owns freshness/source-version/read-model-status proof and stale refresh enqueue behavior, found `Application._handle_api_workbench_group_detail(...)` still owns HTTP validation and response mapping, and selected group detail route-owner extraction next.
+- The next pending boundary is `server-py:workbench-group-detail-route-owner-extraction`.
 - Go/Fiber/Go Worker implementation remains blocked until candidate-specific performance evidence, shadow-run proof, rollback gates and admission review pass.
 
 Completion semantics:
@@ -290,14 +291,14 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:workbench-group-detail-route-owner-audit` unless planning-state reconciliation finds an inconsistency first.
+Start with `server-py:workbench-group-detail-route-owner-extraction` unless planning-state reconciliation finds an inconsistency first.
 
-For `server-py:workbench-group-detail-route-owner-audit`:
-- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-row-detail-route-owner-extraction.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
-- Audit `GET /api/workbench/groups/detail` ownership.
-- Verify current HTTP parameter validation, `WorkbenchQueryFacade.group_detail(...)` delegation and freshness/status proof contract.
-- Classify `Application._handle_api_workbench_group_detail(...)` responsibilities and identify whether a narrow route-owner extraction is safe.
-- Select the next bounded group-detail route-owner implementation or follow-up audit boundary based on evidence.
+For `server-py:workbench-group-detail-route-owner-extraction`:
+- Read `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-detail-route-owner-audit.md`, `docs/modules/reconciliation-workbench/README.md`, `docs/modules/reconciliation-workbench/tests.md`, `docs/modules/workbench-relations/implementation-notes.md`, `backend/src/fin_ops_platform/app/server.py`, `backend/src/fin_ops_platform/app/routes_workbench.py`, `backend/src/fin_ops_platform/services/workbench_query_facade.py`, `tests/test_workbench_query_facade.py`, `tests/test_workbench_sql_runtime.py`, and `tests/test_platform_runtime_boundary_guards.py`.
+- Extract `GET /api/workbench/groups/detail` HTTP validation and facade response mapping behind an explicit read-only route owner.
+- Preserve `Application` as HTTP route registration/dependency assembly owner.
+- Preserve `WorkbenchQueryFacade.group_detail(...)` as the freshness/source-version/read-model-status proof boundary.
+- Preserve status codes, response payloads, stale behavior, source-version proof and refresh enqueue behavior.
 - Do not change group detail response shape, status codes, freshness/stale behavior, source-version proof, read model refresh enqueue behavior, frontend group drawer behavior or existing API tests.
 - Do not change Workbench row detail, groups page, refresh status, settings, active generation publishing, matching worker, read model queue, legacy `/workbench/actions/*`, relation write behavior or modern Workbench action behavior.
 - Do not implement Go, Go Fiber or Go Worker in this slice.

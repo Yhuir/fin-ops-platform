@@ -1,22 +1,22 @@
 # Next Prompt
 
-Continue the autonomous modular IO refactor after the `server-py:workbench-row-detail-route-owner-extraction` slice.
+Continue the autonomous modular IO refactor after the `server-py:workbench-group-detail-route-owner-audit` slice.
 
 ## Current State
 
 - Branch: `dev`
-- Last completed boundary: `server-py:workbench-row-detail-route-owner-extraction`
-- Last status: `implementation-closed`
+- Last completed boundary: `server-py:workbench-group-detail-route-owner-audit`
+- Last status: `analysis-closed`
 - Queue semantics remain corrected: slice status is not module closure.
 - No module is globally closed because real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred where unavailable.
 - No Go/Fiber/Go Worker candidate has passed admission.
-- `WorkbenchRowDetailApiRoutes` owns `GET /api/workbench/rows/{row_id}` payload/fallback orchestration.
-- `Application._get_api_workbench_row_detail_payload(...)` is now a thin delegate; `Application` keeps dependency assembly and HTTP response mapping.
+- `GET /api/workbench/groups/detail` freshness/source-version/read-model-status proof is already owned by `WorkbenchQueryFacade.group_detail(...)`.
+- `Application._handle_api_workbench_group_detail(...)` still owns HTTP-level zone/group-id validation and response mapping.
 - Workbench/server.py/read model/global module closure remains open.
 
 ## Next Boundary
 
-`server-py:workbench-group-detail-route-owner-audit`
+`server-py:workbench-group-detail-route-owner-extraction`
 
 ## Required First Steps On Resume
 
@@ -25,11 +25,12 @@ Continue the autonomous modular IO refactor after the `server-py:workbench-row-d
 3. Merge `origin/main` into `dev` only if conflict-free.
 4. Reconcile `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, and this prompt.
 5. Read target evidence:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-row-detail-route-owner-extraction.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-detail-route-owner-audit.md`
    - `docs/modules/reconciliation-workbench/README.md`
    - `docs/modules/reconciliation-workbench/tests.md`
    - `docs/modules/workbench-relations/implementation-notes.md`
    - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/app/routes_workbench.py`
    - `backend/src/fin_ops_platform/services/workbench_query_facade.py`
    - `tests/test_workbench_query_facade.py`
    - `tests/test_workbench_sql_runtime.py`
@@ -39,10 +40,11 @@ Continue the autonomous modular IO refactor after the `server-py:workbench-row-d
 
 Target:
 
-- Audit `GET /api/workbench/groups/detail` ownership.
-- Verify current HTTP parameter validation, `WorkbenchQueryFacade.group_detail(...)` delegation and freshness/status proof contract.
-- Classify `Application._handle_api_workbench_group_detail(...)` responsibilities and identify whether a narrow route-owner extraction is safe.
-- Select the next bounded group-detail route-owner implementation or follow-up audit boundary based on evidence.
+- Extract `GET /api/workbench/groups/detail` HTTP validation and facade response mapping behind an explicit route owner.
+- Preserve `Application` as HTTP route registration/dependency assembly owner.
+- Preserve `WorkbenchQueryFacade.group_detail(...)` as the freshness/source-version/read-model-status proof boundary.
+- Preserve status codes, response payloads, stale behavior, source-version proof and refresh enqueue behavior.
+- Keep the route owner read-only.
 
 Do not:
 
@@ -54,11 +56,12 @@ Do not:
 
 Expected output:
 
-- New analysis file documenting group detail route-owner evidence, remaining gaps and selected next boundary.
+- Runtime extraction in `routes_workbench.py` / `server.py`.
+- Updated analysis file documenting the implementation and preserved contract.
 - Updated `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `prompts/04-master-goal-controller.md`.
 - Updated module implementation notes if ownership facts change.
 - Targeted static/API verification, `bash scripts/verify.sh docs`, and `git diff --check`.
 
 ## Stop Condition
 
-Complete one verified group-detail route-owner audit slice: group detail route/freshness/no-write evidence is documented, remaining gaps and next boundary are explicit, state-machine accounting is current, verification passes, the slice is committed and pushed to `origin/dev`, then continue to the selected next boundary unless a hard stop gate is hit.
+Complete one verified group-detail route-owner extraction slice: group detail HTTP validation/facade response mapping is behind an explicit read-only route owner, freshness/status behavior remains delegated to `WorkbenchQueryFacade.group_detail(...)`, state-machine accounting is current, verification passes, the slice is committed and pushed to `origin/dev`, then continue to the selected next boundary unless a hard stop gate is hit.

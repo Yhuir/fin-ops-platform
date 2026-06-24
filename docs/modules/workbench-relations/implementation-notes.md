@@ -1,5 +1,31 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-24 - Workbench group detail route-owner audit
+
+目标：审计 `GET /api/workbench/groups/detail` 的 route ownership、freshness/source-version/read-model-status proof 和 no-write relation 边界。
+
+结论：
+
+- `Application._handle_api_workbench_group_detail(...)` 当前只拥有 HTTP 层职责：`month` 默认值、`zone` 校验、`group_id` 必填校验、调用 `WorkbenchQueryFacade.group_detail(...)` 和 JSON response mapping。
+- `WorkbenchQueryFacade.group_detail(...)` 是 group detail freshness 边界：缺 repository / 缺 migration 返回 `read_model_unavailable`，缺 group 返回 `workbench_group_not_found`，source version stale 或 `read_model_status` 非 fresh 时补投 Workbench refresh 且不把旧 group 作为 fresh 返回。
+- `PostgresReadModelRepository.get_workbench_group_detail(...)` 是 SQL active generation reader，现有测试覆盖 active generation `source_versions`、`read_model_status` 和 `read_model_version` contract。
+- 当前 route 不写 relation、dirty scope、outbox、readiness、active generation、Redis cache 或 App Status。
+
+未关闭：
+
+- group detail 的 HTTP 参数校验和 facade response mapping 仍在 `Application`，需要抽到显式 read-only route owner。
+
+下一条边界：`server-py:workbench-group-detail-route-owner-extraction`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_group_detail_route_owner_audit_selects_extraction tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_row_detail_route_owner_extraction_updates_queue tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_group_detail_stale_source_versions_do_not_return_stale_group tests.test_workbench_query_facade.WorkbenchQueryFacadeTests.test_group_detail_refreshing_status_does_not_return_stale_group tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_group_detail_includes_active_generation_freshness_contract -v
+python3 -m py_compile tests/test_platform_runtime_boundary_guards.py
+bash scripts/verify.sh docs
+git diff --check
+```
+
 ## 2026-06-24 - Workbench row detail route-owner extraction
 
 目标：把 `GET /api/workbench/rows/{row_id}` 的 payload/fallback 编排从 `Application` 抽到显式 read-only route owner。

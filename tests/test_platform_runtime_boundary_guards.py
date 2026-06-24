@@ -3269,10 +3269,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench row detail route-owner extraction is not closed as implementation")
         if (
-            "| 216 | `server-py:workbench-group-detail-route-owner-audit` | pending"
+            "| 216 | `server-py:workbench-group-detail-route-owner-audit`"
             not in queue_source
         ):
-            violations.append("Next pending slice should audit Workbench group detail route ownership")
+            violations.append("Workbench row detail extraction no longer records group detail audit follow-up")
         if "class WorkbenchRowDetailApiRoutes" not in routes_source:
             violations.append("WorkbenchRowDetailApiRoutes is missing")
         if "self._workbench_row_detail_routes().get_payload(row_id, month=month)" not in wrapper_source:
@@ -3305,12 +3305,56 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in row_detail_route_source:
                 violations.append(f"WorkbenchRowDetailApiRoutes should stay read-only but contains {forbidden}")
-        if "`server-py:workbench-group-detail-route-owner-audit`" not in next_prompt_source:
-            violations.append("Next prompt no longer points at Workbench group detail route owner audit")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
-            violations.append("Next prompt no longer forbids Go implementation during group detail audit")
         if "WorkbenchRowDetailApiRoutes" not in analysis_source:
             violations.append("Row detail extraction analysis does not record the new route owner")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_group_detail_route_owner_audit_selects_extraction(self) -> None:
+        queue_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
+        ).read_text(encoding="utf-8")
+        next_prompt_source = (
+            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
+        ).read_text(encoding="utf-8")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-detail-route-owner-audit.md"
+        ).read_text(encoding="utf-8")
+        notes_source = (REPO_ROOT / "docs/modules/workbench-relations/implementation-notes.md").read_text(
+            encoding="utf-8"
+        )
+        violations: list[str] = []
+
+        if (
+            "| 216 | `server-py:workbench-group-detail-route-owner-audit` | analysis-closed"
+            not in queue_source
+        ):
+            violations.append("Workbench group detail route-owner audit is not closed as analysis")
+        if (
+            "| 217 | `server-py:workbench-group-detail-route-owner-extraction` | pending"
+            not in queue_source
+        ):
+            violations.append("Workbench group detail route-owner audit no longer records extraction follow-up")
+        for marker in (
+            "GET /api/workbench/groups/detail",
+            "Application._handle_api_workbench_group_detail",
+            "WorkbenchQueryFacade.group_detail",
+            "PostgresReadModelRepository.get_workbench_group_detail",
+            "source_versions",
+            "read_model_status",
+            "read_model_version",
+            "`server-py:workbench-group-detail-route-owner-extraction`",
+            "Do not implement Go, Go Fiber or Go Worker.",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench group detail route-owner audit missing marker: {marker}")
+        if "`server-py:workbench-group-detail-route-owner-extraction`" not in next_prompt_source:
+            violations.append("Next prompt no longer points at Workbench group detail route-owner extraction")
+        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+            violations.append("Next prompt no longer forbids Go implementation during group detail extraction")
+        if "Workbench group detail route-owner audit" not in notes_source:
+            violations.append("Workbench relations implementation notes missing group detail route-owner audit record")
 
         self.assertEqual(violations, [])
 
