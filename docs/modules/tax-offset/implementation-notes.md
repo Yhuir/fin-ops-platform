@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO post-full-state local closure audit
+
+- 目标：执行 `read-models:tax-offset-post-full-state-local-implementation-closure-audit`，确认 broad full-state snapshot quarantine 后，税金抵扣本地实现支持是否只剩真实生产证据缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：未发现新的本地 implementation gap。税金抵扣本地支持已在 repository port、fresh gate、force refresh、operation barrier、worker rebuild executor、derived lifecycle executor、cache warmup executor、explicit persistence 和 broad full-state snapshot quarantine 方面 accounted；`TaxOffsetReadModelService.from_snapshot(...)` 仍是 compat-only load path。模块仍不标记 closed。
+- 文档影响：新增 modular IO post-full-state local closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：本轮为 analysis/accounting only；本地证据来自既有 SQL runtime、worker rebuild executor、derived lifecycle executor、cache warmup executor、platform boundary guard 和 read model architecture guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-full-state-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据、高行数性能和浏览器生产样本 evidence 仍 deferred。
+- 后续事项：执行 `read-models:next-pilot-selection-after-tax-offset`；Go/Fiber/Go Worker admission 继续 blocked。
+
 ## 2026-06-24 - Modular IO full-state snapshot quarantine
 
 - 目标：执行 `read-models:tax-offset-full-state-read-model-snapshot-quarantine`，移除税金抵扣 read model 在 broad `_persist_state(...)` 里的旧全量状态写入路径。

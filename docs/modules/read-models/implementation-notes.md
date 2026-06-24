@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset post-full-state local closure audit
+
+- 目标：执行 `read-models:tax-offset-post-full-state-local-implementation-closure-audit`，复核 full-state snapshot quarantine 后 `tax_offset` 是否还存在本地 implementation gap。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；不改变 tax business/API/UI/worker event/queue/Redis 合同。
+- 关键决策：未发现新的本地 implementation gap。`tax_offset` 本地支持在 repository port、fresh gate、force refresh、operation barrier、worker rebuild executor、derived lifecycle executor、cache warmup executor、explicit persistence 和 full-state snapshot quarantine 方面已 accounted；但模块不标记 closed。
+- 文档影响：新增 post-full-state local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
+- 测试覆盖：本轮是 analysis/accounting only，无运行时代码变化；既有 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_worker_rebuild_executor.py`、`tests/test_tax_offset_derived_lifecycle_executor.py`、`tests/test_tax_offset_cache_warmup_executor.py`、`tests/test_platform_runtime_boundary_guards.py` 和 `tests/test_read_model_architecture_guards.py` 构成本地证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-full-state-local-implementation-closure-audit.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；这不是 module closure。
+- 后续事项：执行 `read-models:next-pilot-selection-after-tax-offset`，选择下一个非 Go modular IO/read model pilot；Go admission 继续 blocked。
+
 ## 2026-06-24 - Tax offset full-state snapshot quarantine
 
 - 目标：执行 `read-models:tax-offset-full-state-read-model-snapshot-quarantine`，移除 broad `_persist_state(...)` 对 `tax_offset_read_models` 的旧全量状态写入。

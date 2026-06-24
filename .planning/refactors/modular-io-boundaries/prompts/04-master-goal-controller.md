@@ -69,8 +69,8 @@ Do not collapse these sources into one unqualified completion percentage.
 
 Current state expected on start:
 - Branch: dev.
-- Last completed boundary: read-models:tax-offset-full-state-read-model-snapshot-quarantine.
-- Last status: implementation-closed.
+- Last completed boundary: read-models:tax-offset-post-full-state-local-implementation-closure-audit.
+- Last status: production-evidence-deferred.
 - Queue semantics are corrected: Status is slice status; Module Closure is broader module closure.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -123,9 +123,9 @@ Current state expected on start:
 - `Application._run_tax_offset_cache_warmup_job(...)` and `_tax_offset_cache_warmup_enabled(...)` are removed and guarded from returning.
 - Tax offset final local closure audit found a remaining local implementation gap: broad `Application._persist_state(...)` still serializes `tax_offset_read_models` into the legacy full-state snapshot path.
 - Tax offset full-state snapshot quarantine is complete: broad `Application._persist_state(...)` no longer serializes `tax_offset_read_models`, while explicit runtime/executor persistence through `_persist_tax_offset_read_models_best_effort(...)` remains available.
-- `tax_offset` cannot move to `production-evidence-deferred` until the post-quarantine local closure audit proves no local implementation gap remains.
+- Tax offset post-full-state local closure audit is complete: no remaining local implementation gap was found after full-state snapshot quarantine. Local support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser evidence remains deferred.
 - No module is globally closed.
-- The next pending boundary is read-models:tax-offset-post-full-state-local-implementation-closure-audit.
+- The next pending boundary is read-models:next-pilot-selection-after-tax-offset.
 - Go/Fiber/Go Worker candidates remain blocked-by-prerequisite and must not be selected next.
 
 Completion semantics:
@@ -221,21 +221,20 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with read-models:tax-offset-post-full-state-local-implementation-closure-audit unless planning-state reconciliation finds an inconsistency first.
+Start with read-models:next-pilot-selection-after-tax-offset unless planning-state reconciliation finds an inconsistency first.
 
-For read-models:tax-offset-post-full-state-local-implementation-closure-audit:
-- Read `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-repository-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-worker-rebuild-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-derived-lifecycle-executor-boundary-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-cache-warmup-executor-port-extraction.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-final-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-full-state-read-model-snapshot-quarantine.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, `docs/modules/read-models/tests.md`, `docs/modules/tax-offset/README.md`, `docs/modules/tax-offset/implementation-notes.md`, `docs/modules/tax-offset/state-machine.md`, and `docs/modules/tax-offset/tests.md`.
-- Use CodeGraph for structural lookup before any implementation decision.
-- Re-audit `tax_offset` after full-state snapshot quarantine across IO contract, boundary ownership, repository/query owner, fresh gate, force refresh, operation barrier, worker rebuild, derived lifecycle, optional cache warmup, full-state persistence quarantine, legacy path removal/quarantine, permissions, audit, tests and docs.
-- If no local implementation gap remains, move only local implementation support to production-evidence-deferred and explicitly list missing real PostgreSQL/worker/App Status/high-row/browser evidence.
-- If a local implementation gap remains, keep `tax_offset` implementation-gap-open, insert the next narrow implementation boundary before Go candidates, and do not defer.
-- Preserve lifecycle event semantics, refresh scope selection, operation names, metadata shape, response shape, cache behavior, gateway-backed enqueue behavior and tax offset API behavior.
-- Do not select Go hot-path admission while modular IO/read model implementation-pending or implementation-gap-open work remains.
-- Produce/update an analysis file documenting implementation evidence, legacy/pollution classification, state-machine impact, seven-category test applicability, verification and next boundary.
+For read-models:next-pilot-selection-after-tax-offset:
+- Read `.planning/ROADMAP.md`, `.planning/refactors/modular-io-boundaries/00-REQUIREMENTS.md`, `.planning/refactors/modular-io-boundaries/03-REFACTOR-STATE-MACHINE.md`, `.planning/refactors/modular-io-boundaries/04-IMPLEMENTATION-ROADMAP.md`, `.planning/refactors/modular-io-boundaries/11-GO-HOT-PATH-CARVE-OUT.md`, `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-post-full-state-local-implementation-closure-audit.md`, `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`, `docs/modules/read-models/README.md`, `docs/modules/read-models/implementation-notes.md`, and `docs/modules/read-models/tests.md`.
+- Read candidate module docs for remaining implementation-gap-open read models, including `cost-statistics`, `turnover-ledger`, `no-oa-bank-batches`, `search` if present, and `bank-details` / `bank-account-balance` adjacent docs as needed.
+- Use CodeGraph for structural lookup before selecting a pilot.
+- Select exactly one next non-Go modular IO/read model pilot from remaining implementation-gap-open candidates.
+- Compare candidates by user-visible stale-read risk, canonical fact owner clarity, freshness/status boundary, worker/outbox/readiness contract, legacy/live fallback risk, narrow first slice availability, test coverage, regression blast radius, and dependency order after `bank_detail`, `workbench_relation`, `pending_invoice`, `oa_pending_payment`, `input_invoice_usage`, `output_invoice_collection`, `invoice_lifecycle`, and `tax_offset`.
+- Do not select Go/Fiber/Go Worker while non-Go modular IO/read model implementation-pending or implementation-gap-open work remains.
+- Produce an analysis file documenting the selected pilot and first narrow implementation boundary.
 - Update STATE.md, MODULE-QUEUE.md, JOURNAL.md, NEXT-PROMPT.md, prompts/04-master-goal-controller.md, and affected module docs/tests as applicable.
-- Run targeted static guard/tax offset tests when evidence depends on executable behavior, plus docs verification and diff checks.
+- Run docs verification and diff checks.
 - Commit and push to origin/dev.
-- Continue to the next selected boundary if verification passes.
+- Continue to the selected first implementation boundary if verification passes.
 
 Go/Fiber/Go Worker rules:
 - Do not implement Go/Fiber/Go Worker unless the candidate is listed in 11-GO-HOT-PATH-CARVE-OUT.md and admission gates pass.
