@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-app-worker-controlled-restart-readiness-runbook-pending`
+Current state: `production-no-oa-bank-batch-dead-letter-read-only-diagnosis-pending`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `production:postgres-controlled-restart-runbook` as `production-evidence-deferred` in `analysis/production-postgres-controlled-restart-runbook-2026-06-25.md`. T0 executed one bounded PostgreSQL restart without reading secrets or mutating DB/queue/readiness/business data. PostgreSQL returned active/running and `/dev/shm/PostgreSQL.*` objects reappeared, but `/health/ready` still timed out and selected workers/dispatcher were still recently restarting. The next T0-only boundary is `production:app-worker-controlled-restart-readiness-runbook`.
+Completed `production:app-worker-controlled-restart-readiness-runbook` as `production-evidence-deferred` in `analysis/production-app-worker-controlled-restart-readiness-runbook-2026-06-25.md`. T0 executed one bounded restart of `fin-ops.service`, `fin-ops-rabbitmq-dispatcher.service` and 20 explicit `fin-ops-worker@*.service` units without reading secrets or mutating DB/queue/readiness/business data. All selected units returned active/running with `NRestarts=0`, `/health/ready` returned ready, and no new PoolTimeout/shared-memory errors appeared in sampled post-restart logs. The remaining production blocker is one stale `no_oa_bank_batch:all` dirty scope and one dead-lettered `no_oa_bank_batch.read_model.refresh` event with an FK violation. The next T0-only boundary is `production:no-oa-bank-batch-dead-letter-read-only-diagnosis`.
 
 ## Closed Or Deferred Slices
 
