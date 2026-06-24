@@ -14084,7 +14084,7 @@ class Application:
         actor_id: str | None = None,
         tenant_id: str | None = None,
     ) -> Response:
-        result = self._workbench_write_facade().cancel_link(
+        result = self._workbench_action_api_routes.cancel_link(
             payload,
             request_id=request_id,
             actor_id=actor_id,

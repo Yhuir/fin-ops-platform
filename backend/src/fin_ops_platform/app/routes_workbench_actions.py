@@ -65,3 +65,18 @@ class WorkbenchActionApiRoutes:
 
     def mark_exception(self, payload: dict[str, Any]) -> Any:
         return self._write_facade_provider().mark_exception(payload)
+
+    def cancel_link(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> Any:
+        return self._write_facade_provider().cancel_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
