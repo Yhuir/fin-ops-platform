@@ -90,6 +90,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-24 | 成本统计 full-state snapshot quarantine | 不改变成本统计业务/UI/read model/worker 状态流转；仅移除 broad `_persist_state(...)` 对 `cost_statistics_read_models` 的旧全状态写入，保留显式 runtime/query persistence 和 startup compatibility load | `tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_cost_and_tax_read_models_are_not_written_by_broad_full_state_persist` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变成本统计业务/UI/read model/worker 状态；锁定 `cost_statistics` 为 `partitioned_scoped_parent_rollup` 与 queryable parent aggregate，避免 `active:all` / `all:all` 被误改为 fan-out-only scope | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
 | 2026-06-18 | 成本统计 explorer 接入 read model payload contract validator | App Health 显示成本统计 fresh 时，API 仍会校验 explorer payload 必须包含当前前端 mapper 需要的 summary/time/project/expense type rows；旧 Redis cache 不直接返回，旧 SQL payload 返回 refreshing 并入队 `api_payload_shape_invalid`，避免页面泛化加载失败 | `PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime tests.test_read_model_query_gateway -v`；`cd web && npm test -- --run src/test/CostStatisticsApi.test.ts src/test/CostStatisticsPage.test.tsx` |
 | 2026-06-18 | Browser e2e 补齐 Workbench 成本关系 fan-out | 真实 Chromium 证明 open/proposed candidate 不进入成本项目、金额或明细；确认 OA+bank+invoice 成本关系后，成本页重新读取并展示对应项目、金额、流水和详情；不改变业务/read model 状态机 | `cd web && npx playwright test e2e/cost-statistics-relation-fanout.spec.ts` |

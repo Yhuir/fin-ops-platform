@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-24 - Cost statistics full-state snapshot quarantine
+
+- 目标：执行 `read-models:cost-statistics-full-state-read-model-snapshot-quarantine`，移除 broad `_persist_state(...)` 对 `cost_statistics_read_models` 的旧全状态写入。
+- 影响范围：`Application._persist_state(...)`、read model architecture guard、modular IO state；不改变成本统计业务/API/UI/worker event/queue/Redis 合同。
+- 关键决策：`_persist_state(...)` 不再 serializes `cost_statistics_read_models`，避免 broad full-state snapshot 成为 read model 第二写入路径。显式 `_persist_cost_statistics_read_models_best_effort(...)` 仍作为 runtime/query persistence dependency 保留；`CostStatisticsReadModelService.from_snapshot(...)` 仍作为 local compatibility load path 保留。
+- 文档影响：新增 full-state snapshot quarantine analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵。
+- 测试覆盖：扩展 `tests/test_read_model_architecture_guards.py`，证明 `_persist_state(...)` 不再包含 `cost_statistics_read_models` / `_cost_statistics_read_model_service.snapshot()`，同时继续证明 broad full-state writer 不写 `tax_offset_read_models`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-full-state-read-model-snapshot-quarantine.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一轮必须执行 post-full-state local closure audit，不能直接进入 Go admission。
+- 后续事项：执行 `read-models:cost-statistics-post-full-state-local-implementation-closure-audit`；Go admission 继续 blocked。
+
 ## 2026-06-24 - Cost statistics post-derived local closure audit
 
 - 目标：执行 `read-models:cost-statistics-post-derived-local-implementation-closure-audit`，复核成本统计是否已能进入 production evidence defer。

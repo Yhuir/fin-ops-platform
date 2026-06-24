@@ -16167,11 +16167,6 @@ class Application:
         self._search_service.clear_cache()
         if self._state_store is None:
             return
-        cost_statistics_snapshot = (
-            self._cost_statistics_read_model_service.snapshot()
-            if self._cost_statistics_read_model_service is not None
-            else {}
-        )
         self._state_store.save(
             {
                 "imports": self._import_service.snapshot(),
@@ -16186,7 +16181,6 @@ class Application:
                 "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),
                 "turnover_relations": self._turnover_relation_service.snapshot(),
                 "turnover_ledger_extras": self._turnover_ledger_api_routes.extras_snapshot(),
-                "cost_statistics_read_models": cost_statistics_snapshot,
                 "pending_invoice_commands": dict(getattr(self, "_pending_invoice_commands", {}) or {}),
             }
         )
