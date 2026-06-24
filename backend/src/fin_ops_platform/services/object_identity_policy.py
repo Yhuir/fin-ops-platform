@@ -268,7 +268,7 @@ class FinancialObjectIdentityPolicy:
             return True
         if evidence_type:
             return False
-        document_kind = self._clean_identity_part(evidence.get("document_kind"))
+        document_kind = self._clean_identity_part(evidence.get("document_kind") or evidence.get("invoice_type"))
         return self._is_formal_oa_attachment_document_kind(document_kind) and bool(
             evidence.get("invoice_no") or evidence.get("digital_invoice_no") or evidence.get("invoice_code")
         )

@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Tax offset freshness / operation barrier audit
+
+- 目标：执行 `read-models:tax-offset-refresh-freshness-operation-barrier-audit`，审计 `tax_offset` fresh gate、force refresh、all fan-out、operation barrier 和 legacy/app-owned helper 分类。
+- 影响范围：`TaxOffsetQueryService`、`TaxOffsetReadModelRefreshService`、scope policy/manifest/worker registration、`TaxOffsetPlanService`、`TaxOffsetPage` operation barrier flow、`FinancialObjectIdentityPolicy` OA 附件发票证据分类和相关测试。
+- 关键决策：`tax_offset` SQL reads 继续走 `ReadModelQueryGateway` schema/source-version fresh gate；生产 SQL repository 缺失 fail-closed 为 refreshing/enqueue；`all` 只 fan-out 到月份 shard；计划保存和认证导入前端等待当前月份 operation barrier。审计中发现并修复 OA 附件正式发票 payload 缺 `evidence_type` 时不被 promotion 的缺口：中心 identity policy 现在用 `document_kind` 或 `invoice_type` 判断 formal invoice fallback，显式 receipt/unknown 仍排除。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；共享 read model 状态机定义不变。
+- 测试覆盖：新增/更新 `tests/test_object_identity_policy.py`；复跑 tax offset service/API/read model/runtime、refresh gateway、runtime worker scope 和 manifest 目标测试。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：无 local `PGSQL_URL`/staging DB；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。下一条边界是 `read-models:tax-offset-local-implementation-closure-audit`。
+
 ## 2026-06-24 - Tax offset repository port extraction
 
 - 目标：执行 `read-models:tax-offset-repository-port-extraction`，为 `tax_offset` read model 建立窄 repository port。

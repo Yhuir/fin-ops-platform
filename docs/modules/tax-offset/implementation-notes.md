@@ -33,6 +33,16 @@
 
 ## 历史记录
 
+## 2026-06-24 - Modular IO freshness and OA attachment invoice fallback
+
+- 目标：执行 `read-models:tax-offset-refresh-freshness-operation-barrier-audit`，确认税金抵扣 read model fresh gate、force refresh、all fan-out、operation barrier 和 legacy/app-owned helper 分类，并处理审计中发现的窄缺口。
+- 影响范围：`FinancialObjectIdentityPolicy` OA 附件发票证据分类、税金抵扣 API/service 回归测试、modular IO state；不改变税额试算、认证导入、计划保存 API shape、worker event、Redis 或前端 UI。
+- 关键决策：`invoice_type=进项发票` / `销项发票` 且有发票号时，在缺少 `evidence_type` 的 OA 附件 payload 中应被视为正式发票证据；显式 `payment_receipt`、`non_tax_receipt`、`unknown` 仍不得进入 invoice identity。该修复恢复 OA 附件正式发票进入 canonical invoice facts 后被 `/api/tax-offset` 纳入进项计划行的合同。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/tax-offset 实施记录和测试矩阵；税金抵扣状态机定义不变。
+- 测试覆盖：`tests/test_object_identity_policy.py` 新增 invoice_type fallback；`tests/test_tax_offset_service.py` 覆盖正式 OA 附件发票进入计划和 receipt/unknown 排除；`tests/test_tax_offset_api.py::TaxOffsetApiTests.test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` 恢复通过。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-tax-offset-refresh-freshness-operation-barrier-audit.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据和浏览器高行数证据仍为后续 production-evidence/defer 范围。
+
 ## 2026-06-24 - Modular IO tax offset repository port extraction
 
 - 目标：执行 `read-models:tax-offset-repository-port-extraction`，把税金抵扣 read model load/get/save 消费侧收敛到窄 repository port。

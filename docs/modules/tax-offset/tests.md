@@ -30,7 +30,7 @@ Spec-first Browser e2e 审计入口：
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | 税金试算核心规则 | P0 | `tests/test_tax_offset_service.py` | covered | 销项/进项/已认证/计划选择、锁定已认证进项、应纳/留抵结果。 |
-| 真实导入发票进入计划 | P0 | `tests/test_tax_offset_service.py`、`tests/test_tax_offset_api.py` | covered | 导入进项票、OA 附件发票 canonical promotion、空真实数据不返回硬编码计划行。 |
+| 真实导入发票进入计划 | P0 | `tests/test_object_identity_policy.py`、`tests/test_tax_offset_service.py`、`tests/test_tax_offset_api.py` | covered | 导入进项票、OA 附件发票 canonical promotion、缺少 `evidence_type` 但带 `invoice_type=进项发票` 的正式附件发票、空真实数据不返回硬编码计划行。 |
 | 已认证导入解析与去重 | P0 | `tests/test_tax_certified_import_service.py`、`tests/test_tax_offset_api.py` | covered | 文件解析、行级状态、唯一键 fallback、重复导入幂等。 |
 | 已认证 preview/confirm/job polling API | P0 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts` | covered | preview 权限、confirm 幂等、job payload contract、modal queued/running/completed；前端 confirm/job 成功后等待当前月份 `tax_offset` operation barrier，再刷新页面数据。 |
 | 权限 | P0 | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/tax-offset-flow.spec.ts` | covered | read endpoint 访问控制、preview/save 写权限、只读用户隐藏导入/保存；Browser 覆盖 read-export 可读不可写、forbidden/expired 零 tax protected API 和 admin 写入口可见。 |
@@ -48,7 +48,7 @@ Spec-first Browser e2e 审计入口：
 
 ## 七类测试适用性
 
-2026-06-24 modular IO 更新：`read-models:tax-offset-repository-port-extraction` 已新增/更新 repository port guard，证明 tax offset port 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，并复跑 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_read_model_service.py`、`tests/test_postgres_state_store.py` 和 read model manifest 目标测试。下一条 `read-models:tax-offset-refresh-freshness-operation-barrier-audit` 必须审计 freshness、force refresh、all fan-out/month proof、operation barrier、legacy/live fallback 和 app-owned helper contamination；其中更宽的 OA 附件发票 API 回归失败已记录为待判定风险。
+2026-06-24 modular IO 更新：`read-models:tax-offset-repository-port-extraction` 已新增/更新 repository port guard，证明 tax offset port 只暴露 `load_tax_offset_read_models`、`get_tax_offset_view`、`save_tax_offset_read_models`，并复跑 `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_read_model_service.py`、`tests/test_postgres_state_store.py` 和 read model manifest 目标测试。`read-models:tax-offset-refresh-freshness-operation-barrier-audit` 已审计 SQL fresh gate、force refresh、`all` fan-out/month proof、operation barrier、legacy/live fallback 和 app-owned helper contamination；审计中确认 OA 附件发票 API 回归是对象身份策略缺口，已补充 `invoice_type=进项发票` / `销项发票` 且缺少 `evidence_type` 时的正式发票 fallback，同时保持 receipt/unknown 排除。下一条边界是 `read-models:tax-offset-local-implementation-closure-audit`。
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ Spec-first Browser e2e 审计入口：
 | 长期 | 保存税金抵扣计划时没有校验 read model source version，导致基于旧数据保存。 | `tests/test_tax_offset_api.py::test_tax_offset_plan_save_rejects_stale_source_versions`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 税金认证导入确认后页面不刷新税金 read model。 | `tests/test_tax_offset_api.py::test_tax_certified_confirm_invalidates_tax_offset_month_cache`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 银行流水导入误刷新税金抵扣。 | `tests/test_tax_offset_api.py::test_bank_import_confirm_does_not_invalidate_tax_offset_cache` | covered |
-| 2026-06-13 | 税金抵扣从 OA 附件 parser cache/Workbench 临时行读取发票，绕过统一 Invoice repository。 | `tests/test_tax_offset_service.py::test_month_payload_includes_oa_attachment_invoices_by_issue_month`、`tests/test_tax_offset_api.py::test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` | covered |
+| 2026-06-13 / 2026-06-24 | 税金抵扣从 OA 附件 parser cache/Workbench 临时行读取发票，绕过统一 Invoice repository；或 OA 附件 payload 缺少 `evidence_type` 但带 `invoice_type=进项发票` 时未 promotion 成 canonical invoice facts。 | `tests/test_object_identity_policy.py::FinancialObjectIdentityPolicyTests::test_oa_attachment_invoice_evidence_classification_is_centralized`、`tests/test_tax_offset_service.py::test_month_payload_includes_oa_attachment_invoices_by_issue_month`、`tests/test_tax_offset_api.py::test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` | covered |
 | 2026-06-17 | React StrictMode effect replay 后，已认证导入 modal mounted guard 停留为 false，confirm 200 后直接 return，页面不关闭 modal、不刷新 tax offset。 | `web/e2e/tax-offset-flow.spec.ts` | covered |
 | 2026-06-19 | Workbench relation 写入后，税金抵扣页没有重新读取 fresh tax offset read model，导致 relation 影响后的进项计划行不可见或误报读模型错误。 | `web/e2e/workbench-relations-tax-offset-fanout.spec.ts` | covered |
 | 2026-06-19 | 税金抵扣页只识别 `refreshing/stale`，`missing/failed/unavailable` read model 可能落入普通空态或允许基于非 fresh 数据保存计划。 | `web/e2e/tax-offset-flow.spec.ts`、`web/src/test/TaxOffsetPage.test.tsx` | covered |

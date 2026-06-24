@@ -196,6 +196,14 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
                 }
             )
         )
+        self.assertTrue(
+            self.policy.is_oa_attachment_invoice_evidence(
+                {
+                    "invoice_type": "进项发票",
+                    "invoice_no": "40512344",
+                }
+            )
+        )
         self.assertFalse(self.policy.is_oa_attachment_invoice_evidence({"digital_invoice_no": "26372000000990000001"}))
         self.assertFalse(self.policy.is_oa_attachment_invoice_evidence({"invoice_code": "053002200111"}))
         self.assertFalse(
