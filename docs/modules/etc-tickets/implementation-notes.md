@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC legacy batch delete side-effect service
+
+- 目标：把 legacy `/api/etc/batches/{batch_id}` DELETE 的非 business-batch 副作用从 `Application` 抽到显式 service，继续收窄 `server.py` 的业务所有权。
+- 影响范围：新增 `EtcLegacyBatchDeleteService`；`server.py` 新增 service factory，并把 legacy batch DELETE handler 收缩为 business-batch fallback、service 调用、refresh/persist event 映射和 HTTP 错误映射。
+- 关键决策：service 不接收整个 `Application`，不 import `app.server`/`app.auth`，不构造 HTTP response；它返回 `EtcLegacyBatchDeleteResult.refresh_events`，由 `Application` 继续负责 `_refresh_after_etc_invoice_link(...)` 和 `_persist_state()`。business-batch v2 删除路径本轮不迁移。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `tests/test_etc_legacy_batch_delete_service.py` service-layer 测试，新增 `test_etc_legacy_batch_delete_side_effects_use_service_boundary` 静态 guard，并回归 targeted legacy batch DELETE/draft repair API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`。
+- 未测风险：legacy batch draft/create/confirm/mark-not-submitted callbacks 仍在 `Application`；business-batch v2 delete side-effect orchestration 仍在 `Application`；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计剩余 legacy batch draft/confirm callbacks，选择 route-owner migration、operation-result service extraction 或更窄 callback quarantine。
+
 ## 2026-06-25 - ETC legacy batch compat route owner
 
 - 目标：把 legacy `/api/etc/batches*` 兼容路由的 URL 分发从 `Application` 迁入显式 route owner，继续收窄 `server.py` 的 route ownership。

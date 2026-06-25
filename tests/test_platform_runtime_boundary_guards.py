@@ -1935,6 +1935,47 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_legacy_batch_delete_side_effects_use_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "etc_legacy_batch_delete_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+
+        delete_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_delete")
+        service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_delete_service")
+        service_imports = _imported_modules(service_tree)
+
+        violations: list[str] = []
+        if "EtcLegacyBatchDeleteService(" not in service_factory:
+            violations.append("server.py does not construct EtcLegacyBatchDeleteService")
+        if "cleanup_service=self._etc_reconciliation_import_cleanup_service()" not in service_factory:
+            violations.append("legacy batch delete service lacks explicit cleanup service dependency")
+        if "delete_non_business_batch(batch_id)" not in delete_handler:
+            violations.append("legacy batch delete handler does not delegate non-business side effects")
+        for forbidden_marker in (
+            "delete_etc_import_batch_sources",
+            "delete_unsubmitted_submission_batch",
+            "clear_task_import_after_batch_delete",
+            "remove_etc_invoices_by_import_batch_id",
+            "record_oa_draft_deleted",
+        ):
+            if forbidden_marker in delete_handler:
+                violations.append(f"legacy batch delete handler still performs {forbidden_marker}")
+        forbidden_imports = {
+            "fin_ops_platform.app.server",
+            "fin_ops_platform.app.auth",
+            "http.cookies",
+        }
+        leaked_imports = sorted(forbidden_imports.intersection(service_imports))
+        if leaked_imports:
+            violations.append(f"legacy batch delete service imports forbidden modules: {leaked_imports}")
+        if "Response" in service_source or "_json_response" in service_source:
+            violations.append("legacy batch delete service constructs HTTP response details")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
