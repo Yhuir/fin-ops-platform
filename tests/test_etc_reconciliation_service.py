@@ -23,6 +23,10 @@ from fin_ops_platform.services.etc_reconciliation_models import (
     SourceFileKind,
 )
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
+from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
+    EtcReconciliationSourceUpload,
+    EtcReconciliationSourceUploadService,
+)
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     StaleReconciliationPreviewError,
     preview_etc_zip_for_task,
@@ -274,6 +278,31 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             self.audit_counter = int(snapshot.get("audit_counter", 0) or 0)
             for task_id, payload in dict(snapshot.get("tasks") or {}).items():
                 self.rows[str(task_id)] = payload
+
+    def test_source_upload_service_imports_ticket_root_text_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            task_service = EtcReconciliationTaskService(data_dir=Path(temp_dir))
+            task = task_service.create_task(title="ETC", created_by="alice")
+            source_upload_service = EtcReconciliationSourceUploadService(task_service=task_service)
+
+            updated = source_upload_service.upload_sources(
+                task_id=task.task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                expected_version=task.version,
+                actor="alice",
+                uploads=[
+                    EtcReconciliationSourceUpload(
+                        file_name="云ADA0381.txt",
+                        content=TICKET_ROOT_CLIPBOARD_TEXT.encode("utf-8"),
+                    )
+                ],
+            )
+
+        self.assertEqual(updated.source_files[0].source_kind, SourceFileKind.TICKET_ROOT)
+        self.assertEqual(updated.source_files[0].content_type, "text/plain; charset=utf-8")
+        self.assertEqual(updated.ticket_root_items[0].vehicle_plate, "云ADA0381")
+        self.assertEqual(updated.ticket_root_items[0].amount, Decimal("71.25"))
+        self.assertEqual(updated.parse_results[0].parser_code, TicketRootClipboardTextParser.parser_code)
 
     def _parsed_task(self, *, ticket_text: str = TICKET_ROOT_TEXT) -> tuple[EtcReconciliationTaskService, str]:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-source-upload-service-extraction-selected`
+Current state: `etc-reconciliation-ticket-root-text-callback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-source-upload-parser-boundary-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-source-upload-parser-boundary-audit-2026-06-25.md`. T0 found generic source upload still owns store+parse+apply orchestration plus ticket-root wrong-slot/source-mode/content-type policy in `Application`, and selected `server-py:etc-reconciliation-source-upload-service-extraction` as the next narrow implementation boundary. Ticket-root text remains a separate boundary. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-source-upload-service-extraction` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-source-upload-service-extraction-2026-06-25.md`. T0 added `EtcReconciliationSourceUploadService` and moved generic source upload store+parse+apply orchestration plus ticket-root wrong-slot/source-mode/content-type policy out of `Application`. The remaining ticket-root text callback is selected for audit next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 

@@ -2011,7 +2011,7 @@ class EtcApiTests(unittest.TestCase):
             )
 
             with patch(
-                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                "fin_ops_platform.services.etc_reconciliation_source_upload_service.TicketRootDocumentParser.parse_file",
                 return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
             ) as document_parse:
                 response = app.handle_request(
@@ -2058,7 +2058,7 @@ class EtcApiTests(unittest.TestCase):
             )
 
             with patch(
-                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                "fin_ops_platform.services.etc_reconciliation_source_upload_service.TicketRootDocumentParser.parse_file",
                 return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
             ) as document_parse:
                 response = app.handle_request(
@@ -2093,7 +2093,7 @@ class EtcApiTests(unittest.TestCase):
             )
 
             with patch(
-                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                "fin_ops_platform.services.etc_reconciliation_source_upload_service.TicketRootDocumentParser.parse_file",
                 return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
             ) as document_parse:
                 response = app.handle_request(
@@ -3896,6 +3896,29 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "reconciliation_file_storage_unavailable")
         self.assertIn("文件存储", payload["message"])
         self.assertEqual(stored_task.source_files, [])
+
+    def test_reconciliation_task_level_supplement_upload_parses_evidence(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="2026-03 ETC", created_by="alice")
+            body, headers = multipart(
+                {"parking.txt": "商户 停车场\n付款时间 2026年3月3日\n金额 23.00".encode("utf-8")},
+                fields={"expectedVersion": str(task.version), "evidenceKind": "non_etc_invoice"},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/supplement-evidences",
+                body=body,
+                headers=headers,
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "supplement_evidence")
+        self.assertEqual(payload["supplementEvidences"][0]["source_name"], "parking.txt")
+        self.assertEqual(payload["supplementEvidences"][0]["amount"], "23.00")
+        self.assertEqual(payload["parseIssues"], [])
 
     def test_reconciliation_item_supplement_upload_requires_note_for_amount_delta(self) -> None:
         with TemporaryDirectory() as temp_dir:

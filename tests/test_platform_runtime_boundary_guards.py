@@ -1756,9 +1756,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_path = APP_ROOT / "routes_etc_reconciliation.py"
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
+        source_upload_path = SERVICES_ROOT / "etc_reconciliation_source_upload_service.py"
+        source_upload_source = source_upload_path.read_text(encoding="utf-8")
 
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_reconciliation_routes")
+        upload_handler = _function_source(server_tree, server_source, "_handle_api_etc_reconciliation_upload")
+        source_upload_factory = _function_source(server_tree, server_source, "_etc_reconciliation_source_upload_service")
         route_owner_names = [
             node.name
             for node in ast.walk(route_tree)
@@ -1795,6 +1799,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner lacks explicit storage error mapper")
         if "persist_state=self._persist_state" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit persist callback")
+        if "EtcReconciliationSourceUploadService(task_service=self._etc_reconciliation_task_service)" not in source_upload_factory:
+            violations.append("ETC reconciliation source upload service is not explicitly assembled from task service")
+        if "self._etc_reconciliation_source_upload_service().upload_sources(" not in upload_handler:
+            violations.append("ETC reconciliation upload handler no longer delegates parser orchestration to source upload service")
+        for forbidden_upload_parser_detail in (
+            "CcbCreditCardStatementParser",
+            "TicketRootDocumentParser",
+            "SupplementEvidenceParser",
+            "_reconciliation_wrong_slot_message",
+            "_validate_ticket_root_upload_source_mode",
+            "_ticket_root_upload_source_mode",
+            "_ticket_root_text_file_not_trip_result",
+        ):
+            if forbidden_upload_parser_detail in server_source:
+                violations.append(f"server.py reintroduced ETC reconciliation source upload parser detail {forbidden_upload_parser_detail}")
+        for required_service_detail in (
+            "class EtcReconciliationSourceUploadService",
+            "def upload_sources(",
+            "reconciliation_wrong_slot_message(",
+            "validate_ticket_root_upload_source_mode(",
+            "TicketRootDocumentParser().parse_file(",
+            "SupplementEvidenceParser().parse_text(",
+        ):
+            if required_service_detail not in source_upload_source:
+                violations.append(f"ETC reconciliation source upload service lacks {required_service_detail}")
         for upload_callback in (
             "upload_source=self._handle_api_etc_reconciliation_upload",
             "submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts",

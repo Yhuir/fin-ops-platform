@@ -610,3 +610,13 @@
 - 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 service 层测试、API 回归和静态 Guard。
 - 验证命令：只读审计 `server.py` callback/helper、`EtcReconciliationTaskService`、parser classes 和 targeted tests；未运行测试。
 - 未测风险：通用 source upload callback 仍在 `Application`，等待 source upload service extraction。
+
+## 2026-06-25 - ETC reconciliation通用source upload service抽取
+
+- 目标：把信用卡账单、票根文件和任务级补充凭证上传的 store+parse+apply 编排，以及票根 wrong-slot/source-mode/content-type 策略，从 `Application` 移到显式 service 边界。
+- 影响范围：`EtcReconciliationSourceUploadService`、`Application._handle_api_etc_reconciliation_upload(...)`、票根 TXT/PDF/手工粘贴互斥策略、source upload API、runtime boundary Guard。
+- 关键决策：新增 `EtcReconciliationSourceUploadService` 接收明确 `task_service` 依赖，不接收 `Application`；`Application` 保留 multipart/expected-version/HTTP error mapping 薄 wrapper；ticket-root text submission 不混入本 slice，下一步单独审计。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：新增 source upload service 层 TXT 票根导入测试；新增任务级 supplement evidence API 回归；扩展 static Guard，禁止 parser/source-mode 细节回到 `server.py`；重跑票根 TXT/GB18030/存储错误/wrong-slot/source-mode conflict 和信用卡上传存储错误回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_etc_reconciliation.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_reconciliation_service.EtcReconciliationServiceTests.test_source_upload_service_imports_ticket_root_text_file -v`；targeted ETC source upload API 回归共 11 条通过。
+- 未测风险：两条依赖本地真实票根样例的 conflict 回归因样例缺失按既有逻辑 skipped；ticket-root text callback 仍在 `Application`，等待下一边界审计。
