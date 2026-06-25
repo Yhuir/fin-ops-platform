@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:cost-statistics-route-owner-local-closure-audit-selected` after cost statistics route callback collapse.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:turnover-ledger-route-owner-audit-selected` after cost statistics route-owner local closure audit.
 
 ```text
 $gsd-autonomous --auto

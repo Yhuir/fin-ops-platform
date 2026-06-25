@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - cost statistics route-owner local closure audit
+
+- 目标：执行 `server-py:cost-statistics-route-owner-local-closure-audit`，确认 route callback collapse 后 `server.py` 剩余 cost statistics surface 是否仍有本地 route-owner 缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、cost-statistics 实施记录；不改变成本归因、项目范围、read model freshness、parent aggregate、cache、worker、导出或前端行为。
+- 关键决策：`server.py` 已无 `_handle_api_cost_statistics*` callback；剩余 cost statistics 方法被归类为组合根、query/runtime、source-version、persistence、cache、worker、warmup、import-scope 或 platform adapter 端口。本地 route-owner 支持 accounted，但不声明模块/生产闭环。
+- 文档影响：新增 modular IO cost statistics route-owner local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；成本统计状态机定义不变。
+- 测试覆盖：本轮为分析/状态机闭合，未改运行时代码；沿用 Row376 的 `tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_sql_runtime.py` 和 `tests/test_platform_runtime_boundary_guards.py` route-owner Guard。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `cost-statistics` worker drain、真实生产高行数、真实浏览器生产样本和 admin/write evidence 仍为最终验证范围。
+- 后续事项：执行 `server-py:turnover-ledger-route-owner-audit`。
+
 ## 2026-06-25 - cost statistics route callback collapse
 
 - 目标：执行 `server-py:cost-statistics-route-callback-collapse`，把 `/api/cost-statistics*` HTTP dispatch/query parsing 从 `server.py` 迁入 `CostStatisticsApiRoutes.route(...)`。
