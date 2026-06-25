@@ -1761,8 +1761,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_reconciliation_routes")
-        upload_handler = _function_source(server_tree, server_source, "_handle_api_etc_reconciliation_upload")
-        ticket_root_text_handler = _function_source(server_tree, server_source, "_handle_api_etc_reconciliation_ticket_root_texts")
         source_upload_factory = _function_source(server_tree, server_source, "_etc_reconciliation_source_upload_service")
         route_owner_names = [
             node.name
@@ -1778,6 +1776,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_owner_confirm_task = _function_source(route_tree, route_source, "confirm_task")
         route_owner_reopen_task = _function_source(route_tree, route_source, "reopen_task")
         route_owner_refresh_matches = _function_source(route_tree, route_source, "refresh_matches")
+        route_owner_upload_source = _function_source(route_tree, route_source, "upload_source")
+        route_owner_ticket_root_texts = _function_source(route_tree, route_source, "submit_ticket_root_texts")
 
         violations: list[str] = []
         if "EtcReconciliationTaskApiRoutes" not in server_source:
@@ -1800,12 +1800,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner lacks explicit storage error mapper")
         if "persist_state=self._persist_state" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit persist callback")
+        if "source_upload_service=self._etc_reconciliation_source_upload_service()" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit source upload service injection")
         if "EtcReconciliationSourceUploadService(task_service=self._etc_reconciliation_task_service)" not in source_upload_factory:
             violations.append("ETC reconciliation source upload service is not explicitly assembled from task service")
-        if "self._etc_reconciliation_source_upload_service().upload_sources(" not in upload_handler:
-            violations.append("ETC reconciliation upload handler no longer delegates parser orchestration to source upload service")
-        if "self._etc_reconciliation_source_upload_service().submit_ticket_root_texts(" not in ticket_root_text_handler:
-            violations.append("ETC reconciliation ticket-root text handler no longer delegates parser orchestration to source upload service")
+        if "self._source_upload_service.upload_sources(" not in route_owner_upload_source:
+            violations.append("ETC reconciliation route owner upload handler no longer delegates parser orchestration to source upload service")
+        if "self._source_upload_service.submit_ticket_root_texts(" not in route_owner_ticket_root_texts:
+            violations.append("ETC reconciliation route owner ticket-root text handler no longer delegates parser orchestration to source upload service")
         for forbidden_upload_parser_detail in (
             "CcbCreditCardStatementParser",
             "TicketRootClipboardTextParser",
@@ -1822,8 +1824,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "store_uploaded_source_file(",
             "apply_parse_result(",
         ):
-            if forbidden_ticket_text_detail in ticket_root_text_handler:
-                violations.append(f"server.py reintroduced ticket-root text persistence/parser detail {forbidden_ticket_text_detail}")
+            if forbidden_ticket_text_detail in route_owner_ticket_root_texts:
+                violations.append(f"ETC reconciliation route owner reintroduced ticket-root text persistence/parser detail {forbidden_ticket_text_detail}")
         for required_service_detail in (
             "class EtcReconciliationSourceUploadService",
             "def upload_sources(",
@@ -1836,17 +1838,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required_service_detail not in source_upload_source:
                 violations.append(f"ETC reconciliation source upload service lacks {required_service_detail}")
-        for upload_callback in (
-            "upload_source=self._handle_api_etc_reconciliation_upload",
-            "submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts",
-        ):
-            if upload_callback not in route_factory:
-                violations.append(f"ETC reconciliation route owner lost upload/parser callback {upload_callback}")
         if "_handle_api_etc_reconciliation_task_delete" in server_source:
             violations.append("server.py reintroduced ETC reconciliation task delete HTTP callback")
         if "_handle_api_etc_reconciliation_imported_invoices_delete" in server_source:
             violations.append("server.py reintroduced ETC reconciliation imported-invoices delete HTTP callback")
         for removed_callback in (
+            "_handle_api_etc_reconciliation_upload",
+            "_handle_api_etc_reconciliation_ticket_root_texts",
             "_handle_api_etc_reconciliation_source_file_delete",
             "_handle_api_etc_reconciliation_item_patch",
             "_handle_api_etc_reconciliation_confirm",

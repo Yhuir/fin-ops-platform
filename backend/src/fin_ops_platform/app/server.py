@@ -167,9 +167,7 @@ from fin_ops_platform.services.etc_legacy_batch_read_facade import EtcLegacyBatc
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
-    EtcReconciliationSourceUpload,
     EtcReconciliationSourceUploadService,
-    EtcReconciliationWrongSourceSlotError,
 )
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     EtcZipFilterPreview,
@@ -4914,98 +4912,10 @@ class Application:
                 reason=reason,
             ),
             persist_state=self._persist_state,
-            upload_source=self._handle_api_etc_reconciliation_upload,
-            submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts,
+            source_upload_service=self._etc_reconciliation_source_upload_service(),
         )
         self._etc_reconciliation_task_api_routes = routes
         return routes
-
-    def _handle_api_etc_reconciliation_upload(
-        self,
-        *,
-        task_id: str,
-        source_kind: SourceFileKind,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        fields, files, error = self._load_multipart_body(body, headers)
-        if error is not None:
-            return error
-        if not files:
-            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_reconciliation_upload", "message": "file is required."})
-        actor = (fields.get("actor") or ["web_finance_user"])[0]
-        try:
-            expected_version = self._expected_version_from_fields(fields)
-            task = self._etc_reconciliation_source_upload_service().upload_sources(
-                task_id=task_id,
-                source_kind=source_kind,
-                expected_version=expected_version,
-                actor=actor,
-                uploads=[
-                    EtcReconciliationSourceUpload(
-                        file_name=upload.file_name,
-                        content=upload.content,
-                    )
-                    for upload in files
-                ],
-                evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except EtcReconciliationWrongSourceSlotError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "wrong_reconciliation_source_kind", "message": error.message},
-            )
-        except ObjectStorageWriteError as error:
-            return self._reconciliation_storage_error_response(error)
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_ticket_root_texts(
-        self,
-        task_id: str,
-        body: str | bytes | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        entries = payload.get("entries")
-        if not isinstance(entries, list) or not entries:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ticket_root_text_entries", "message": "entries is required."},
-            )
-        actor = str(payload.get("actor") or "web_finance_user")
-        try:
-            texts: list[str] = []
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    return self._json_response(
-                        HTTPStatus.BAD_REQUEST,
-                        {"error": "invalid_ticket_root_text_entry", "message": "entry must be an object."},
-                    )
-                text = str(entry.get("text") or "")
-                if not text.strip():
-                    return self._json_response(
-                        HTTPStatus.BAD_REQUEST,
-                        {"error": "invalid_ticket_root_text_entry", "message": "text is required."},
-                    )
-                texts.append(text)
-            task = self._etc_reconciliation_source_upload_service().submit_ticket_root_texts(
-                task_id=task_id,
-                expected_version=self._expected_version_from_payload(payload),
-                actor=actor,
-                texts=texts,
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except ObjectStorageWriteError as error:
-            return self._reconciliation_storage_error_response(error)
-        except ValueError as value_error:
-            return self._reconciliation_error_response(value_error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
 
     def _etc_reconciliation_source_upload_service(self) -> EtcReconciliationSourceUploadService:
         service = getattr(self, "_etc_reconciliation_source_upload", None)

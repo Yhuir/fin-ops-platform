@@ -640,3 +640,13 @@
 - 测试覆盖：新增 ticket-root manual text service 层测试；扩展 static Guard，禁止 parser/persistence 细节回到 `server.py`；重跑 ticket-root text 创建、PDF 冲突、TXT 冲突和存储错误 API 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_reconciliation_service.EtcReconciliationServiceTests.test_source_upload_service_submits_ticket_root_manual_text -v`；ticket-root text targeted API 回归 4 条中 3 passed、1 条因本地真实样例缺失 skipped。
 - 未测风险：剩余 upload/text callbacks 已经很薄，但仍在 `Application`；下一步应折叠到 `EtcReconciliationTaskApiRoutes`。
+
+## 2026-06-25 - ETC reconciliation upload/text route callback收敛
+
+- 目标：把已经变薄的 generic source upload 和 ticket-root text HTTP callback 从 `Application` 收敛到 `EtcReconciliationTaskApiRoutes`。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`Application._etc_reconciliation_routes(...)`、`EtcReconciliationSourceUploadService` wiring、source upload/text API、runtime boundary Guard。
+- 关键决策：route owner 负责 multipart/JSON HTTP 映射、错误映射和 task payload response；source upload service 继续负责 store+parse+apply 与票根 source-mode 策略；`server.py` 只做依赖组装。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：扩展 route-owner Guard，禁止 `_handle_api_etc_reconciliation_upload(...)` 和 `_handle_api_etc_reconciliation_ticket_root_texts(...)` 回流到 `server.py`；重跑 source upload 和 ticket-root text API 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；source upload/text targeted API 回归 9 条通过。
+- 未测风险：需要下一步 reconciliation route-owner local closure audit 确认是否还有 app-owned residual。

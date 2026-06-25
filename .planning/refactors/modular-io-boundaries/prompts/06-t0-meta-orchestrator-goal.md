@@ -129,8 +129,8 @@ Current known state to verify, not blindly trust:
   - Many route owners, services, repository ports, read model gateways, scope policies and static guards already exist. Reuse and extend them rather than creating parallel abstractions.
 - Latest local-first progress to verify from `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md` and `NEXT-PROMPT.md`:
   - `planning:local-modular-code-closure-reconciliation` reopened local modular implementation before production validation.
-  - ETC reconciliation task, import, legacy batch and invoice route-owner/service/facade slices through `server-py:etc-reconciliation-ticket-root-text-service-extraction` are expected to be complete.
-  - The next expected local boundary is `server-py:etc-reconciliation-upload-route-callback-collapse`.
+  - ETC reconciliation task, import, legacy batch and invoice route-owner/service/facade slices through `server-py:etc-reconciliation-upload-route-callback-collapse` are expected to be complete.
+  - The next expected local boundary is `server-py:etc-reconciliation-route-owner-local-closure-audit`.
 - The current controller boundary should come from `autonomous/NEXT-PROMPT.md` and the first pending queue row, not production browser/admin/write validation.
 - Verify all facts from git, CodeGraph, current files and `MODULE-QUEUE.md` before acting.
 
