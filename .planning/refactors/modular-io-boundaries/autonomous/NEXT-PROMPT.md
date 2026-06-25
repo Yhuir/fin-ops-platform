@@ -5,11 +5,12 @@ Continue the user-authorized `main-read-model-closure` run.
 ## Current State
 
 - Branch: `main`.
-- Current main commit: `2c7a9eac64c1758e5f7e6bf0de1a6667b3b50f1b`.
+- Current main commit: `9c47f55a02ed1aaf548865d6637bd871e3168ce1`.
 - Backup branch: `codex/backup-main-before-read-model-closure-20260625-230543`.
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
-- Latest completed boundary: `main-read-model-closure:production-or-equivalent-freshness-performance-evidence`.
+- Latest completed boundary: `main-read-model-closure:controlled-main-deploy-and-post-deploy-read-model-evidence-runbook`.
 - Evidence gap report: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`.
+- Controlled deploy/evidence runbook: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md`.
 - Local closure audit: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`.
 - Local PSCIP-L3 owner split is complete for all known non-Workbench App Status read models.
 - Workbench remains the documented active-generation exception and must not be mechanically converted.
@@ -27,6 +28,7 @@ Continue the user-authorized `main-read-model-closure` run.
   - Fresh gates did not report sampled stale/mismatched payloads as fresh.
 - Local SSH-tunnel latency is not acceptable as production performance evidence.
 - No production DB write, deploy, queue mutation, readiness mutation, worker replay, service restart or secret output occurred.
+- A controlled deploy/evidence runbook now exists, but deploy/restart/apply/write-smoke operations still require explicit approval.
 
 ## Required First Steps On Resume
 
@@ -35,6 +37,7 @@ Continue the user-authorized `main-read-model-closure` run.
 3. Read:
    - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`
    - `deploy/oa/README.md`
    - `scripts/deploy-oa.sh`
@@ -44,13 +47,15 @@ Continue the user-authorized `main-read-model-closure` run.
 
 ## Next Boundary
 
-`main-read-model-closure:controlled-main-deploy-and-post-deploy-read-model-evidence-runbook`
+`main-read-model-closure:approval-gated-current-main-deploy-or-hard-stop`
 
 Goal:
-- Prepare the minimal safe path to deploy current `main` and collect post-deploy PSCIP-L4 evidence.
-- Do not deploy until the runbook is explicit and the operator has approved production deploy/restart operations.
+- If explicit production rollout approval is available, deploy current `main` using `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md` and collect PSCIP-L4 evidence.
+- If explicit approval is not available, do not deploy. Record a precise hard-stop/deferred evidence report and keep PSCIP-L4 unclaimed.
 
 Acceptance:
+- First run only pre-approval read-only checks from the runbook.
+- Deployment approval must name target commit, release name, allowed operation class, rollback path, and whether read model SLO `--apply` and mutating write-operation smoke are allowed.
 - If deployment is approved, deploy current `main` using the repository production entrypoint and collect post-deploy evidence:
   - release identity equals current `main`;
   - `/health` and `/health/ready` are ready;
