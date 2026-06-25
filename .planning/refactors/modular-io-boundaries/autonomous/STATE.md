@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-route-owner-local-closure-audit-selected`
+Current state: `input-invoice-usage-read-model-fresh-gate-service-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-payment-rules-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`. Payment-status-rules PUT HTTP mapping now lives in `InputInvoiceUsageApiRoutes` with explicit settings/body/error/refresh ports, and the app-owned PUT handler was removed. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`. Input usage route ownership is locally accounted for after route callback collapse, but `server.py` still owns input usage SQL read-model fresh gate/source-version/export row-page helper logic, so T0 selected read-model fresh gate service extraction next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-payment-rules-route-callback-collapse`
+`server-py:input-invoice-usage-route-owner-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`

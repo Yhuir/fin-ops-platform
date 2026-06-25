@@ -159,6 +159,7 @@ Current state expected on start:
 - `server-py:input-invoice-usage-export-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`; export preview/download mapping now lives in `InputInvoiceUsageApiRoutes`, and the app-owned export handlers were removed.
 - `server-py:input-invoice-usage-payment-rules-write-boundary-audit` is complete as `analysis-closed` in `analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`; selected payment rules PUT route callback collapse with explicit settings/body/error/refresh ports.
 - `server-py:input-invoice-usage-payment-rules-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`; payment-status-rules PUT mapping now lives in `InputInvoiceUsageApiRoutes`.
+- `server-py:input-invoice-usage-route-owner-local-closure-audit` is complete as `analysis-closed` in `analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`; selected input usage read-model fresh gate service extraction because SQL fresh gate/source-version/export row-page logic remains app-owned.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -403,7 +404,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:input-invoice-usage-route-owner-local-closure-audit`.
+Start with `server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -445,7 +446,8 @@ Current local-first state:
 - `server-py:input-invoice-usage-export-route-callback-collapse` is complete in `analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`.
 - `server-py:input-invoice-usage-payment-rules-write-boundary-audit` is complete in `analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`.
 - `server-py:input-invoice-usage-payment-rules-route-callback-collapse` is complete in `analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`.
-- Row354 is the next local boundary: audit remaining input usage `server.py` helper/port surfaces after route-owner callback collapse.
+- `server-py:input-invoice-usage-route-owner-local-closure-audit` is complete in `analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`.
+- Row355 is the next local boundary: extract input usage SQL read-model fresh gate/source-version/export row-page helper logic out of `Application`.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

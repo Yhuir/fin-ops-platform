@@ -1,62 +1,54 @@
 # Next Prompt
 
-Continue after `server-py:input-invoice-usage-payment-rules-route-callback-collapse`.
+Continue after `server-py:input-invoice-usage-route-owner-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:input-invoice-usage-payment-rules-route-callback-collapse`.
-- Row353 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`.
-- `InputInvoiceUsageApiRoutes` owns input usage rows/filter/detail/relation/payment GET, export preview/download and payment rules PUT HTTP mapping.
-- `server.py` no longer owns the input usage export or payment rules PUT callbacks.
+- Last completed boundary: `server-py:input-invoice-usage-route-owner-local-closure-audit`.
+- Row354 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`.
+- Input usage route callback ownership is locally accounted for.
+- `server.py` still owns input usage SQL read-model fresh gate/source-version/export row-page helper logic.
 - Input usage module/global closure is not claimed.
 
 ## Previous Prompt Completion
 
-`server-py:input-invoice-usage-payment-rules-route-callback-collapse` is locally implemented:
+`server-py:input-invoice-usage-route-owner-local-closure-audit` is complete:
 
-- payment rules PUT moved into `InputInvoiceUsageApiRoutes`;
-- explicit settings/body/error/refresh ports are injected from `Application`;
-- payment rules save regression now uses the public route;
-- route-owner Guard prevents the private handler from returning.
+- no audited input usage route callbacks remain in `server.py`;
+- route owner factories and HTTP/platform ports are accounted for;
+- remaining implementation gap is read-model fresh gate/query/export row-page logic still living in `Application`;
+- next safe local implementation is a focused extraction, not production validation.
 
 ## Next Boundary
 
-`server-py:input-invoice-usage-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`
 
 ## Required First Steps On Resume
 
-1. Confirm `git status --short --branch` and classify any dirty files.
+1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`
+   - `backend/src/fin_ops_platform/app/server.py` around input usage read-model helpers
    - `backend/src/fin_ops_platform/app/routes_input_invoice_usage.py`
-   - `backend/src/fin_ops_platform/app/routes_input_invoice_usage_oa_reverse.py`
-   - `backend/src/fin_ops_platform/app/server.py` input usage helper/factory/dispatch surfaces
+   - existing input usage read-model/detail services and tests
+   - `tests/test_input_invoice_usage_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-   - `docs/modules/input-invoice-usage/implementation-notes.md`
-3. Use CodeGraph before classifying residual `Application` methods.
-4. Audit remaining input usage surfaces in `server.py`:
-   - route dispatch and route owner factory;
-   - query/export/payment helper ports;
-   - SQL read-model fresh-gate/detail helper ports;
-   - payment rules refresh producer;
-   - OA reverse provider/client/platform helper ports;
-   - error response mappers and response serializers.
-5. Classify each residual as:
-   - dependency assembly;
-   - HTTP/platform mapping;
-   - read-model/freshness port;
-   - refresh producer port;
-   - external/OA platform port;
-   - compat-only wrapper;
-   - implementation gap.
-6. Write the analysis file and update state/docs.
-7. If the audit finds a concrete implementation gap, generate and execute that next bounded slice immediately.
+3. Use CodeGraph before editing.
+4. Implement narrowly:
+   - extract input usage SQL read-model rows fresh gate out of `Application`;
+   - include all-rows aggregation and relation detail fresh gate only if they can share the same explicit adapter without pulling output collection behavior into the slice;
+   - route export row-page loading through the extracted adapter/service;
+   - preserve production SQL-repository-unavailable fail-closed behavior;
+   - keep output invoice collection behavior unchanged.
+5. Update static Guard and targeted API/export/refreshing regressions.
+6. Update analysis/state/docs and commit/push if verification passes.
 
 ## Stop Gates
 
-- Do not claim whole input usage module/global closure from route-owner support alone.
-- Do not move read-model fresh-gate helpers or OA provider/client helpers without a dedicated boundary.
-- Do not run production validation or perform production mutation.
-- Do not weaken static Guard coverage for input usage route ownership.
+- Do not change output invoice collection behavior unless a targeted shared-helper regression proves it is preserved.
+- Do not weaken stale/source-version/schema/fail-closed checks.
+- Do not change export response shape or refreshing semantics.
+- Do not run production validation or mutation.
+- Do not claim input usage module/global closure from this extraction alone.

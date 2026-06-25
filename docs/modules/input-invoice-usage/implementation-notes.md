@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Input usage route owner local closure audit
+
+- 目标：审计 route callback collapse 后 `server.py` 中剩余 input usage helper/port surface。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：`InputInvoiceUsageApiRoutes` 和 `InputInvoiceUsageOaReverseApiRoutes` 已覆盖当前 input usage route callback ownership；`server.py` 中 route factory、HTTP response/error ports、OA platform ports 和 refresh producer ports 可作为显式端口保留。但 SQL read-model fresh gate、source-version proof、schema stale detection、relation detail fresh gate 和 export row-page loading 仍是 app-owned module-specific 实现逻辑，需要下一步提取。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需覆盖 rows/filter/export/refreshing/source-version/fail-closed regressions 和 static Guard。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status、browser/admin/write 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`。
+
 ## 2026-06-25 - Payment rules PUT route callback collapse
 
 - 目标：把 `PUT /api/input-invoice-usage/payment-status-rules` HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。
