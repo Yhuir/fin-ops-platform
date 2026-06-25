@@ -85,6 +85,39 @@ class EtcReconciliationSourceUploadService:
             task = self._task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
         return task
 
+    def submit_ticket_root_texts(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        actor: str,
+        texts: list[str],
+    ) -> Any:
+        task = self._task_service.get_task(task_id)
+        if task.version != expected_version:
+            raise ValueError("task_version_conflict")
+        if has_ticket_root_text_file_source(task):
+            raise ValueError("ticket_root_source_mode_conflict_text_file")
+        if has_ticket_root_document_source(task):
+            raise ValueError("ticket_root_source_mode_conflict_pdf")
+        parser = TicketRootClipboardTextParser()
+        for index, text in enumerate(texts, start=1):
+            source_file = self._task_service.store_uploaded_source_file(
+                task_id=task.task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                original_name=ticket_root_clipboard_source_name(text, index=index),
+                content_type="text/plain; charset=utf-8",
+                content=text.encode("utf-8"),
+                created_by=actor,
+            )
+            parse_result = parser.parse_text(file_id=source_file.file_id, text=text)
+            task = self._task_service.apply_parse_result(
+                task_id=task_id,
+                parse_result=parse_result,
+                actor=actor,
+            )
+        return task
+
     def _ticket_root_upload_modes(
         self,
         *,

@@ -1762,6 +1762,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_reconciliation_routes")
         upload_handler = _function_source(server_tree, server_source, "_handle_api_etc_reconciliation_upload")
+        ticket_root_text_handler = _function_source(server_tree, server_source, "_handle_api_etc_reconciliation_ticket_root_texts")
         source_upload_factory = _function_source(server_tree, server_source, "_etc_reconciliation_source_upload_service")
         route_owner_names = [
             node.name
@@ -1803,8 +1804,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation source upload service is not explicitly assembled from task service")
         if "self._etc_reconciliation_source_upload_service().upload_sources(" not in upload_handler:
             violations.append("ETC reconciliation upload handler no longer delegates parser orchestration to source upload service")
+        if "self._etc_reconciliation_source_upload_service().submit_ticket_root_texts(" not in ticket_root_text_handler:
+            violations.append("ETC reconciliation ticket-root text handler no longer delegates parser orchestration to source upload service")
         for forbidden_upload_parser_detail in (
             "CcbCreditCardStatementParser",
+            "TicketRootClipboardTextParser",
             "TicketRootDocumentParser",
             "SupplementEvidenceParser",
             "_reconciliation_wrong_slot_message",
@@ -1814,12 +1818,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden_upload_parser_detail in server_source:
                 violations.append(f"server.py reintroduced ETC reconciliation source upload parser detail {forbidden_upload_parser_detail}")
+        for forbidden_ticket_text_detail in (
+            "store_uploaded_source_file(",
+            "apply_parse_result(",
+        ):
+            if forbidden_ticket_text_detail in ticket_root_text_handler:
+                violations.append(f"server.py reintroduced ticket-root text persistence/parser detail {forbidden_ticket_text_detail}")
         for required_service_detail in (
             "class EtcReconciliationSourceUploadService",
             "def upload_sources(",
+            "def submit_ticket_root_texts(",
             "reconciliation_wrong_slot_message(",
             "validate_ticket_root_upload_source_mode(",
             "TicketRootDocumentParser().parse_file(",
+            "TicketRootClipboardTextParser().parse_text(",
             "SupplementEvidenceParser().parse_text(",
         ):
             if required_service_detail not in source_upload_source:

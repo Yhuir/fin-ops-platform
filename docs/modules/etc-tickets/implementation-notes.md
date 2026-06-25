@@ -630,3 +630,13 @@
 - 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 service 层测试、API 回归和静态 Guard。
 - 验证命令：只读审计 `server.py` callback、source upload service、task service 和 ticket-root text tests；未运行测试。
 - 未测风险：ticket-root text callback 仍在 `Application`，等待 service extraction。
+
+## 2026-06-25 - ETC reconciliation ticket-root text service抽取
+
+- 目标：把 ticket-root text 的 source-file persistence、source naming、clipboard parser dispatch 和 parse-result apply 从 `Application` 移到 `EtcReconciliationSourceUploadService`。
+- 影响范围：`EtcReconciliationSourceUploadService.submit_ticket_root_texts(...)`、`Application._handle_api_etc_reconciliation_ticket_root_texts(...)`、ticket-root text route、runtime boundary Guard。
+- 关键决策：复用 source upload service，不新增平行 text service；`Application` 只保留 JSON body/entry 400 映射、actor fallback、service 调用和 HTTP error mapping。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：新增 ticket-root manual text service 层测试；扩展 static Guard，禁止 parser/persistence 细节回到 `server.py`；重跑 ticket-root text 创建、PDF 冲突、TXT 冲突和存储错误 API 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_reconciliation_service.EtcReconciliationServiceTests.test_source_upload_service_submits_ticket_root_manual_text -v`；ticket-root text targeted API 回归 4 条中 3 passed、1 条因本地真实样例缺失 skipped。
+- 未测风险：剩余 upload/text callbacks 已经很薄，但仍在 `Application`；下一步应折叠到 `EtcReconciliationTaskApiRoutes`。

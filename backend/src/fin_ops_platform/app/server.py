@@ -160,7 +160,6 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
-from fin_ops_platform.services.etc_document_parsers import TicketRootClipboardTextParser
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_legacy_batch_delete_service import EtcLegacyBatchDeleteService
 from fin_ops_platform.services.etc_legacy_batch_lifecycle_service import EtcLegacyBatchLifecycleService
@@ -171,9 +170,6 @@ from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
     EtcReconciliationSourceUpload,
     EtcReconciliationSourceUploadService,
     EtcReconciliationWrongSourceSlotError,
-    has_ticket_root_document_source,
-    has_ticket_root_text_file_source,
-    ticket_root_clipboard_source_name,
 )
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     EtcZipFilterPreview,
@@ -4981,24 +4977,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_ticket_root_text_entries", "message": "entries is required."},
             )
-        try:
-            task = self._etc_reconciliation_task_service.get_task(task_id)
-            expected_version = self._expected_version_from_payload(payload)
-            if task.version != expected_version:
-                raise ValueError("task_version_conflict")
-            if has_ticket_root_text_file_source(task):
-                raise ValueError("ticket_root_source_mode_conflict_text_file")
-            if has_ticket_root_document_source(task):
-                raise ValueError("ticket_root_source_mode_conflict_pdf")
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except ValueError as value_error:
-            return self._reconciliation_error_response(value_error)
-
         actor = str(payload.get("actor") or "web_finance_user")
-        parser = TicketRootClipboardTextParser()
         try:
-            for index, entry in enumerate(entries, start=1):
+            texts: list[str] = []
+            for entry in entries:
                 if not isinstance(entry, dict):
                     return self._json_response(
                         HTTPStatus.BAD_REQUEST,
@@ -5010,20 +4992,15 @@ class Application:
                         HTTPStatus.BAD_REQUEST,
                         {"error": "invalid_ticket_root_text_entry", "message": "text is required."},
                     )
-                source_file = self._etc_reconciliation_task_service.store_uploaded_source_file(
-                    task_id=task.task_id,
-                    source_kind=SourceFileKind.TICKET_ROOT,
-                    original_name=ticket_root_clipboard_source_name(text, index=index),
-                    content_type="text/plain; charset=utf-8",
-                    content=text.encode("utf-8"),
-                    created_by=actor,
-                )
-                parse_result = parser.parse_text(file_id=source_file.file_id, text=text)
-                task = self._etc_reconciliation_task_service.apply_parse_result(
-                    task_id=task_id,
-                    parse_result=parse_result,
-                    actor=actor,
-                )
+                texts.append(text)
+            task = self._etc_reconciliation_source_upload_service().submit_ticket_root_texts(
+                task_id=task_id,
+                expected_version=self._expected_version_from_payload(payload),
+                actor=actor,
+                texts=texts,
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ObjectStorageWriteError as error:
             return self._reconciliation_storage_error_response(error)
         except ValueError as value_error:

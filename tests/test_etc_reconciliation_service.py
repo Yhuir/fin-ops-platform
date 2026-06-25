@@ -304,6 +304,26 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(updated.ticket_root_items[0].amount, Decimal("71.25"))
         self.assertEqual(updated.parse_results[0].parser_code, TicketRootClipboardTextParser.parser_code)
 
+    def test_source_upload_service_submits_ticket_root_manual_text(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            task_service = EtcReconciliationTaskService(data_dir=Path(temp_dir))
+            task = task_service.create_task(title="ETC", created_by="alice")
+            source_upload_service = EtcReconciliationSourceUploadService(task_service=task_service)
+
+            updated = source_upload_service.submit_ticket_root_texts(
+                task_id=task.task_id,
+                expected_version=task.version,
+                actor="alice",
+                texts=[TICKET_ROOT_CLIPBOARD_TEXT],
+            )
+
+        self.assertEqual(updated.source_files[0].source_kind, SourceFileKind.TICKET_ROOT)
+        self.assertEqual(updated.source_files[0].content_type, "text/plain; charset=utf-8")
+        self.assertIn("票根网手工粘贴-云ADA0381-202604", updated.source_files[0].original_name)
+        self.assertEqual(updated.ticket_root_items[0].vehicle_plate, "云ADA0381")
+        self.assertEqual(updated.ticket_root_items[0].amount, Decimal("71.25"))
+        self.assertEqual(updated.parse_results[0].parser_code, TicketRootClipboardTextParser.parser_code)
+
     def _parsed_task(self, *, ticket_text: str = TICKET_ROOT_TEXT) -> tuple[EtcReconciliationTaskService, str]:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="ETC", created_by="alice")
