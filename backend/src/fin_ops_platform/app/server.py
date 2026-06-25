@@ -277,6 +277,9 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh_producer impo
 from fin_ops_platform.services.no_oa_bank_batch_tag_selection_service import (
     NoOaBankBatchTagSelectionApplicationService,
 )
+from fin_ops_platform.services.no_oa_bank_batch_workbench_payload_decorator import (
+    NoOaBankBatchWorkbenchPayloadDecorator,
+)
 from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_MANAGED_BATCH_TYPE_ORDER,
     NO_OA_MANAGED_LABELS,
@@ -9371,6 +9374,9 @@ class Application:
     def _no_oa_bank_batch_read_model_refresh_producer(self) -> NoOaBankBatchReadModelRefreshProducer:
         return NoOaBankBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
+    def _no_oa_bank_batch_workbench_payload_decorator(self) -> NoOaBankBatchWorkbenchPayloadDecorator:
+        return NoOaBankBatchWorkbenchPayloadDecorator(batch_provider=self._no_oa_bank_batch_service.get_batch)
+
     def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
         return TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=self._read_model_refresh_gateway,
@@ -14452,7 +14458,7 @@ class Application:
         relation_field = self._workbench_override_service.relation_field_name(str(payload["type"]))
         relation_mode = str(relation.get("relation_mode", ""))
         relation_payload = (
-            self._relation_with_no_oa_bank_batch_metadata(relation)
+            self._no_oa_bank_batch_workbench_payload_decorator().relation_with_batch_metadata(relation)
             if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE
             else relation
         )
@@ -14495,41 +14501,14 @@ class Application:
             self._apply_internal_transfer_pair_metadata(payload, relation)
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             payload["relation_mode"] = NO_OA_BANK_BATCH_RELATION_MODE
-            self._apply_no_oa_bank_batch_pair_metadata(payload, relation_payload)
+            self._no_oa_bank_batch_workbench_payload_decorator().apply_pair_metadata(payload, relation_payload)
         self._apply_cash_special_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
-            self._apply_no_oa_bank_batch_available_actions(payload)
+            self._no_oa_bank_batch_workbench_payload_decorator().apply_available_actions(payload)
         self._apply_cash_special_available_actions(payload, relation)
         payload["handled_exception"] = False
         return payload
-
-    def _relation_with_no_oa_bank_batch_metadata(self, relation: dict[str, object]) -> dict[str, object]:
-        special_metadata = relation.get("special_metadata")
-        if not isinstance(special_metadata, dict):
-            return relation
-        source_batch_id = str(special_metadata.get("source_batch_id") or "").strip()
-        if not source_batch_id:
-            return relation
-        try:
-            batch = self._no_oa_bank_batch_service.get_batch(source_batch_id)
-        except KeyError:
-            return relation
-        enriched_relation = dict(relation)
-        enriched_metadata = dict(special_metadata)
-        for metadata_key, batch_key in (
-            ("batch_version", "version"),
-            ("batch_type", "batch_type"),
-            ("batch_label", "batch_label"),
-            ("row_count", "row_count"),
-            ("total_amount", "total_amount"),
-            ("withdrawable", "can_withdraw"),
-        ):
-            value = batch.get(batch_key)
-            if value not in (None, ""):
-                enriched_metadata[metadata_key] = value
-        enriched_relation["special_metadata"] = enriched_metadata
-        return enriched_relation
 
     def _execute_derived_data_lifecycle_event(
         self,
@@ -16179,61 +16158,6 @@ class Application:
                     fields["成本统计"] = "不计入"
                 elif cost_policy == "include_ticket_cost_only":
                     fields["成本统计"] = f"仅计入买票成本 {special_metadata.get('ticket_cost_amount') or '0.00'}"
-
-    @staticmethod
-    def _apply_no_oa_bank_batch_pair_metadata(payload: dict[str, object], relation: dict[str, object]) -> None:
-        special_metadata = relation.get("special_metadata")
-        if not isinstance(special_metadata, dict):
-            special_metadata = {}
-        payload["special_metadata"] = dict(special_metadata)
-
-        display_tags = [
-            str(tag).strip()
-            for tag in list(relation.get("display_tags") or special_metadata.get("display_tags") or [])
-            if str(tag).strip()
-        ]
-        batch_label = str(special_metadata.get("batch_label") or "").strip()
-        if not display_tags:
-            display_tags = ["免OA"]
-            if batch_label:
-                display_tags.append(batch_label)
-
-        tags = [str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()]
-        for tag in display_tags:
-            if tag not in tags:
-                tags.append(tag)
-        payload["tags"] = tags
-        payload["display_tags"] = display_tags
-
-        cost_policy = str(special_metadata.get("cost_policy") or "").strip()
-        if cost_policy == "exclude_all":
-            payload["cost_excluded"] = True
-        for fields_key in ("summary_fields", "detail_fields"):
-            fields = payload.get(fields_key)
-            if isinstance(fields, dict):
-                fields["免OA批次"] = batch_label or "免OA流水"
-                if cost_policy == "exclude_all":
-                    fields["成本统计"] = "不计入"
-
-    @staticmethod
-    def _apply_no_oa_bank_batch_available_actions(payload: dict[str, object]) -> None:
-        special_metadata = payload.get("special_metadata")
-        if not isinstance(special_metadata, dict):
-            return
-        source_batch_id = str(special_metadata.get("source_batch_id") or "").strip()
-        withdrawable = (
-            bool(special_metadata.get("withdrawable"))
-            if "withdrawable" in special_metadata
-            else bool(source_batch_id)
-        )
-        if not source_batch_id or not withdrawable:
-            return
-        actions = [str(action).strip() for action in list(payload.get("available_actions") or []) if str(action).strip()]
-        if "detail" not in actions:
-            actions.insert(0, "detail")
-        if "withdraw_no_oa_batch" not in actions:
-            actions.append("withdraw_no_oa_batch")
-        payload["available_actions"] = actions
 
     @staticmethod
     def _apply_cash_special_available_actions(payload: dict[str, object], relation: dict[str, object]) -> None:

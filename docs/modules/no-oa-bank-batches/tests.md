@@ -225,6 +225,16 @@ git diff --check
 - 下一实现 slice 必须新增或扩展 static Guard，防止 `_relation_with_no_oa_bank_batch_metadata(...)`、`_apply_no_oa_bank_batch_pair_metadata(...)` 和 `_apply_no_oa_bank_batch_available_actions(...)` 作为 app-owned helper 回到 `Application`。
 - Business core、API contract、frontend interaction 和 E2E 是否需要新增测试由下一实现 diff 决定；若只抽出 decorator 且 Workbench row payload shape 不变，优先用 service unit + existing feature regression + static Guard 保护。
 
+## 2026-06-25 - Modular IO Workbench payload decorator extraction test note
+
+`server-py:no-oa-bank-batch-workbench-payload-decorator-extraction` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 `tests/test_no_oa_bank_batch_workbench_payload_decorator.py`，覆盖 no-OA source batch metadata enrichment、tags/display_tags、`cost_excluded`、`summary_fields/detail_fields` 和 `withdraw_no_oa_batch` action。
+- API contract regression：复跑 no-OA Workbench integration 目标测试，保护 Workbench payload 中 no-OA relation mode、summary row、special metadata 和 withdraw action shape。
+- End-to-end business-flow integration regression：复跑 no-OA salary/internal-transfer/fee Workbench integration 目标测试，保护提交后 Workbench 配对展示和撤回入口。
+- Existing feature regression tests：复跑 Workbench candidate grouping no-OA collapsed summary/display tags regressions，并新增 static Guard 防止 no-OA payload decoration helpers 回到 `Application`。
+- 未新增 Business core、read model/cache/background job、frontend component 或 Browser E2E 测试，因为本 slice 不改变 no-OA 批次业务规则、read model/worker 行为、页面交互或真实浏览器流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

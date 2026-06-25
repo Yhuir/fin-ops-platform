@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batch-workbench-payload-decorator-extraction-selected`
+Current state: `no-oa-bank-batch-post-decorator-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit` as `analysis-closed` in `analysis/server-py-no-oa-bank-batch-post-refresh-producer-local-closure-audit-2026-06-25.md`. Route, refresh, factory, session and source-version surfaces are accounted for, but no-OA Workbench relation payload decoration still lives in `Application`. T0 selected `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction` next; no no-OA module/global closure is claimed.
+Completed `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction` as `local-implementation-closed` in `analysis/server-py-no-oa-bank-batch-workbench-payload-decorator-extraction-2026-06-25.md`. `NoOaBankBatchWorkbenchPayloadDecorator` now owns no-OA relation metadata enrichment, tag/display tag/cost field decoration and `withdraw_no_oa_batch` action injection. T0 selected `server-py:no-oa-bank-batch-post-decorator-local-closure-audit` next; no no-OA module/global closure is claimed.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`
+`server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`
 
 ## Next Prompt
 
-`server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`
+`server-py:no-oa-bank-batch-post-decorator-local-closure-audit`

@@ -46,6 +46,18 @@
 - 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
 
+## 2026-06-25 - Workbench payload decorator extraction
+
+- 目标：执行 `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`，把 no-OA relation payload decoration 从 `Application` 移到专用 decorator service。
+- 影响范围：`NoOaBankBatchWorkbenchPayloadDecorator`、`Application._apply_pair_relation_to_row(...)` 的 no-OA delegation、decorator tests、platform Guard 和 targeted Workbench/no-OA regressions；不改变 Workbench API shape、no-OA 业务状态机、read model schema、dirty/outbox schema、权限、审计、前端行为或生产数据。
+- 关键决策：no-OA relation payload 的 batch metadata enrichment、tag/display tag 注入、`cost_excluded`/`成本统计` 字段和 `withdraw_no_oa_batch` action injection 由 decorator service 拥有；`Application` 保留通用 Workbench row decoration dispatcher。
+- 保留语义：`source_batch_id` 能查到当前 batch 时继续补 `batch_version/batch_type/batch_label/row_count/total_amount/withdrawable`；缺失 batch 保持 relation 不变；不可撤回 batch 不加撤回 action。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 decorator unit tests 和 static Guard，复跑 no-OA Workbench integration 与 Workbench grouping 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-workbench-payload-decorator-extraction-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:no-oa-bank-batch-post-decorator-local-closure-audit`。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。

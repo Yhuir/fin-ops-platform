@@ -4030,6 +4030,46 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_bank_batch_workbench_payload_decoration_uses_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "no_oa_bank_batch_workbench_payload_decorator.py"
+        service_source = service_path.read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        for removed_helper in (
+            "_relation_with_no_oa_bank_batch_metadata",
+            "_apply_no_oa_bank_batch_pair_metadata",
+            "_apply_no_oa_bank_batch_available_actions",
+        ):
+            if _function_source(server_tree, server_source, removed_helper):
+                violations.append(f"server.py still owns no-OA Workbench payload helper {removed_helper}")
+
+        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_workbench_payload_decorator")
+        if "NoOaBankBatchWorkbenchPayloadDecorator" not in app_factory_source:
+            violations.append("Application no longer assembles NoOaBankBatchWorkbenchPayloadDecorator")
+        for expected_delegate in (
+            ".relation_with_batch_metadata(relation)",
+            ".apply_pair_metadata(payload, relation_payload)",
+            ".apply_available_actions(payload)",
+        ):
+            if expected_delegate not in server_source:
+                violations.append(f"server.py does not delegate no-OA payload behavior through {expected_delegate}")
+
+        for service_marker in (
+            "class NoOaBankBatchWorkbenchPayloadDecorator",
+            "def relation_with_batch_metadata(",
+            "def apply_pair_metadata(",
+            "def apply_available_actions(",
+            "withdraw_no_oa_batch",
+            "免OA批次",
+        ):
+            if service_marker not in service_source:
+                violations.append(f"NoOaBankBatchWorkbenchPayloadDecorator missing {service_marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_bank_batch_routes_delegate_to_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
