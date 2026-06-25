@@ -475,7 +475,9 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 461 | `server-py:workbench-oa-attachment-context-row-index-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaAttachmentContextRowIndex`, moved raw payload row indexing, attachment context detection and OA id fallback matching out of `Application`. |
 | 462 | `server-py:workbench-raw-payload-row-id-set-helper-audit` | analysis-closed | implementation-gap-open | Audited generic raw payload row-id set extraction; selected extraction into existing row-index owner. |
 | 463 | `server-py:workbench-raw-payload-row-id-set-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaAttachmentContextRowIndex.raw_payload_row_ids(...)`, moved `_raw_workbench_payload_row_ids(...)` logic out of `Application`. |
-| 464 | `server-py:workbench-pair-relation-display-payload-audit` | pending | implementation-gap-open | Audit `_apply_pair_relation_to_row(...)`, `_pair_relation_display_payload(...)`, relation metadata decorators and mode-specific pair metadata calls; select the next narrow local implementation or guard boundary. |
+| 464 | `server-py:workbench-pair-relation-display-payload-audit` | analysis-closed | implementation-gap-open | Audited pair relation row mutation/display responsibilities; selected display policy extraction while deferring row mutation and mode-specific metadata decorators. |
+| 465 | `server-py:workbench-pair-relation-display-policy-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchPairRelationDisplayPolicy`, moved relation display payload mapping out of `Application._pair_relation_display_payload(...)`. |
+| 466 | `server-py:workbench-pair-relation-row-mutation-audit` | pending | implementation-gap-open | Audit `_apply_pair_relation_to_row(...)`, relation metadata propagation, amount check propagation, available actions and mode-specific decorators; select the next narrow local implementation or guard boundary. |
 
 ## Status Values
 

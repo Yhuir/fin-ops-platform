@@ -4249,7 +4249,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Application no longer assembles NoOaBankBatchWorkbenchDisplayPolicy")
         for expected_delegate in (
             ".row_tags(",
-            ".relation_display_payload(special_metadata)",
+            "_no_oa_bank_batch_workbench_display_policy().relation_display_payload",
         ):
             if expected_delegate not in server_source:
                 violations.append(f"server.py does not delegate no-OA display policy through {expected_delegate}")
@@ -4263,6 +4263,82 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if service_marker not in display_policy_source:
                 violations.append(f"NoOaBankBatchWorkbenchDisplayPolicy missing {service_marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_pair_relation_display_policy_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        policy_source = (SERVICES_ROOT / "workbench_pair_relation_display_policy.py").read_text(encoding="utf-8")
+        display_source = _function_source(server_tree, server_source, "_pair_relation_display_payload")
+        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_display_policy")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "_workbench_pair_relation_display_policy().display_payload(" not in display_source:
+            violations.append("Application pair relation display helper does not delegate to display policy")
+        for forbidden in (
+            "internal_transfer_pair",
+            "salary_personal_auto_match",
+            "turnover_manual_closure",
+            "OA_INVOICE_OFFSET_AUTO_MATCH_MODE",
+            "PERSONAL_ADVANCE_REPAYMENT_MODE",
+            "fully_linked",
+            "已匹配：",
+            "完全关联",
+        ):
+            if forbidden in display_source:
+                violations.append(f"Application still owns pair relation display detail: {forbidden}")
+        for marker in (
+            "class WorkbenchPairRelationDisplayPolicy",
+            "def display_payload(",
+            "no_oa_relation_display_payload",
+            "bank_transaction_tag_label",
+            "internal_transfer_pair",
+            "salary_personal_auto_match",
+            "turnover_manual_closure",
+            "oa_invoice_offset_auto_match_mode",
+            "fully_linked",
+        ):
+            if marker not in policy_source:
+                violations.append(f"WorkbenchPairRelationDisplayPolicy missing marker: {marker}")
+        for marker in (
+            "WorkbenchPairRelationDisplayPolicy(",
+            "no_oa_relation_display_payload=self._no_oa_bank_batch_workbench_display_policy().relation_display_payload",
+            "bank_transaction_tag_label=self._bank_transaction_tag_label_current",
+            "no_oa_bank_batch_relation_mode=NO_OA_BANK_BATCH_RELATION_MODE",
+            "personal_advance_repayment_mode=PERSONAL_ADVANCE_REPAYMENT_MODE",
+            "oa_invoice_offset_auto_match_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE",
+        ):
+            if marker not in factory_source:
+                violations.append(f"Application display policy factory missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in policy_source:
+                violations.append(f"WorkbenchPairRelationDisplayPolicy gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-pair-relation-display-policy-extraction",
+            "WorkbenchPairRelationDisplayPolicy",
+            "relation display payload mapping",
+            "mode-specific metadata mutation remains deferred",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench pair relation display policy analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 

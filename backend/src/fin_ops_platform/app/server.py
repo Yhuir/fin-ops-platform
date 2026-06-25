@@ -523,6 +523,9 @@ from fin_ops_platform.services.workbench_oa_attachment_repair_context_executor i
 from fin_ops_platform.services.workbench_oa_attachment_context_row_index import (
     WorkbenchOaAttachmentContextRowIndex,
 )
+from fin_ops_platform.services.workbench_pair_relation_display_policy import (
+    WorkbenchPairRelationDisplayPolicy,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -15318,21 +15321,24 @@ class Application:
         row_type: str = "",
         special_metadata: dict[str, object] | None = None,
     ) -> dict[str, str]:
-        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
-            return self._no_oa_bank_batch_workbench_display_policy().relation_display_payload(special_metadata)
-        if relation_mode == "internal_transfer_pair":
-            return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
-        if relation_mode == "salary_personal_auto_match":
-            return {"code": "salary_personal_auto_match", "label": f"已匹配：{self._bank_transaction_tag_label_current('salary')}", "tone": "success"}
-        if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
-            return {"code": PERSONAL_ADVANCE_REPAYMENT_MODE, "label": "已匹配：还清个人暂借款", "tone": "success"}
-        if relation_mode == "turnover_manual_closure":
-            return {"code": "turnover_manual_closure", "label": "外部往来款闭环", "tone": "success"}
-        if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
-            if row_type == "invoice":
-                return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "已关联OA", "tone": "success"}
-            return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "待找流水与发票", "tone": "warn"}
-        return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
+        return self._workbench_pair_relation_display_policy().display_payload(
+            relation_mode=relation_mode,
+            row_type=row_type,
+            special_metadata=special_metadata,
+        )
+
+    def _workbench_pair_relation_display_policy(self) -> WorkbenchPairRelationDisplayPolicy:
+        policy = getattr(self, "_workbench_pair_relation_display_policy_instance", None)
+        if policy is None:
+            policy = WorkbenchPairRelationDisplayPolicy(
+                no_oa_relation_display_payload=self._no_oa_bank_batch_workbench_display_policy().relation_display_payload,
+                bank_transaction_tag_label=self._bank_transaction_tag_label_current,
+                no_oa_bank_batch_relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
+                personal_advance_repayment_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
+                oa_invoice_offset_auto_match_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
+            )
+            self._workbench_pair_relation_display_policy_instance = policy
+        return policy
 
     @classmethod
     def _apply_oa_invoice_offset_pair_metadata(cls, payload: dict[str, object]) -> None:

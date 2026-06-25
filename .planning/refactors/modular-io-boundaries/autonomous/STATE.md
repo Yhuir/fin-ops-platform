@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-raw-payload-row-id-set-helper-extraction-closed`
+Current state: `workbench-pair-relation-display-policy-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-raw-payload-row-id-set-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-raw-payload-row-id-set-helper-extraction-2026-06-25.md`. `WorkbenchOaAttachmentContextRowIndex` now also owns generic raw payload row-id set extraction; relation display/pair metadata helpers remain deferred. The next local boundary is `server-py:workbench-pair-relation-display-payload-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-pair-relation-display-policy-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md`. `WorkbenchPairRelationDisplayPolicy` now owns relation display payload mapping; pair relation row mutation and mode-specific metadata decorators remain deferred. The next local boundary is `server-py:workbench-pair-relation-row-mutation-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
