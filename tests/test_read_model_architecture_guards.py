@@ -176,12 +176,12 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "repository fact lookup exposes current read-model query result to downstream freshness facade."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_invoice_lifecycle_rows_by_subject_ids",
+        "PostgresPendingInvoiceLifecycleReadModelRepository.get_invoice_lifecycle_rows_by_subject_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes matched rows from an already materialized read model."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_invoice_lifecycle_rows_by_identity_keys",
+        "PostgresPendingInvoiceLifecycleReadModelRepository.get_invoice_lifecycle_rows_by_identity_keys",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes matched rows from an already materialized read model."),
     (

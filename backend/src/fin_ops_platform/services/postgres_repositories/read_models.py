@@ -1041,10 +1041,955 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
 
 
 
+class PostgresPendingInvoiceLifecycleReadModelRepository:
+    def __init__(self, connection: Any, *, bank_detail_scope_summary: Any) -> None:
+        self._connection = connection
+        self._bank_detail_scope_summary = bank_detail_scope_summary
+
+    def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
+        executor = connection or self._connection
+        dirty_row = executor.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type, scope_key),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    def list_pending_invoice_rows(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        page_number = max(int_value(page, 1), 1)
+        page_limit = min(max(int_value(page_size, 50), 1), 200)
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            clause, clause_params = _pending_invoice_visible_filter_clause(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+            )
+            where.append(clause)
+            params.extend(clause_params)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        order_sql = _pending_invoice_order_sql(sort_field=sort_field, sort_direction=sort_direction)
+        scope_key = f"{normalized_direction}:{normalized_filter}"
+        with self._connection.transaction() as connection:
+            total_row = connection.fetch_one(
+                f"select count(*) as count from read_model.pending_invoice_rows where {where_sql}",
+                tuple(params),
+            )
+            total = int_value(total_row.get("count") if isinstance(total_row, dict) else 0, 0)
+            if normalized_direction == "all":
+                direction_scope_rows = [
+                    self._pending_invoice_scope_row("expense:all", connection=connection),
+                    self._pending_invoice_scope_row("income:all", connection=connection),
+                ]
+                direction_refresh_statuses = [
+                    self._refresh_status(scope_type="pending_invoice", scope_key="expense:all", connection=connection),
+                    self._refresh_status(scope_type="pending_invoice", scope_key="income:all", connection=connection),
+                ]
+                refresh_status = "refreshing" if "refreshing" in direction_refresh_statuses else ("stale" if "stale" in direction_refresh_statuses else "fresh")
+                scope_row = next((row for row in direction_scope_rows if isinstance(row, dict)), None)
+            else:
+                refresh_status = self._refresh_status(
+                    scope_type="pending_invoice",
+                    scope_key=scope_key,
+                    connection=connection,
+                )
+                scope_row = self._pending_invoice_scope_row(scope_key, connection=connection)
+            source_versions = (
+                scope_row.get("source_versions")
+                if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+                else {}
+            )
+            if total == 0:
+                if scope_row is None:
+                    return None
+                return {
+                    "direction": normalized_direction,
+                    "filter": normalized_filter,
+                    "rows": [],
+                    "pagination": {"page": page_number, "page_size": page_limit, "total": 0},
+                    "summary": {
+                        "total_rows": 0,
+                        "missing_invoice_rows": 0,
+                        "create_invoice_available_rows": 0,
+                        "source_summary": self._pending_invoice_source_summary(
+                            direction=normalized_direction,
+                            date_from=date_from,
+                            date_to=date_to,
+                            connection=connection,
+                        ),
+                    },
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": refresh_status,
+                    "source_versions": source_versions,
+                }
+            rows = connection.fetch_all(
+                f"""
+                select payload, raw_payload, missing_invoice, can_create_invoice
+                from read_model.pending_invoice_rows
+                where {where_sql}
+                order by {order_sql}
+                limit %s offset %s
+                """,
+                tuple([*params, page_limit, (page_number - 1) * page_limit]),
+            )
+            payload_rows = [_read_model_payload(row) for row in rows]
+            normalized_rows = [row for row in payload_rows if isinstance(row, dict)]
+            return {
+                "direction": normalized_direction,
+                "filter": normalized_filter,
+                "rows": normalized_rows,
+                "pagination": {"page": page_number, "page_size": page_limit, "total": total},
+                "summary": {
+                    "total_rows": total,
+                    "missing_invoice_rows": sum(1 for row in rows if bool(row.get("missing_invoice"))),
+                    "create_invoice_available_rows": sum(1 for row in rows if bool(row.get("can_create_invoice"))),
+                    "source_summary": self._pending_invoice_source_summary(
+                        direction=normalized_direction,
+                        date_from=date_from,
+                        date_to=date_to,
+                        connection=connection,
+                    ),
+                },
+                "bank_transaction_tags": {},
+                "bank_transaction_tags_version": 1,
+                "refresh_status": refresh_status,
+                "source_versions": source_versions,
+            }
+
+
+    def list_pending_invoice_filter_options(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            clause, clause_params = _pending_invoice_visible_filter_clause(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+            )
+            where.append(clause)
+            params.extend(clause_params)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        option_values = ",\n                    ".join(
+            f"('{field}', {_pending_invoice_option_expression(field)})"
+            for field in PENDING_INVOICE_FILTER_FIELDS
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            with filtered_rows as (
+                select
+                    direction,
+                    filter_group,
+                    trade_date,
+                    counterparty_name,
+                    amount,
+                    status_code,
+                    seller_name,
+                    invoice_total,
+                    oa_applicant,
+                    project_name,
+                    payload
+                from read_model.pending_invoice_rows
+                where {where_sql}
+            ),
+            option_values(field, value) as (
+                select option_value.field, nullif(btrim(option_value.value), '') as value
+                from filtered_rows
+                cross join lateral (
+                    values
+                    {option_values}
+                ) as option_value(field, value)
+            ),
+            option_counts as (
+                select field, value, count(*)::integer as option_count
+                from option_values
+                where value is not null
+                group by field, value
+            ),
+            ranked_options as (
+                select
+                    field,
+                    value,
+                    option_count,
+                    row_number() over (partition by field order by option_count desc, value) as option_rank
+                from option_counts
+            )
+            select field, value, option_count
+            from ranked_options
+            where option_rank <= 50
+            order by field, option_rank
+            """,
+            tuple(params),
+        )
+        options: dict[str, list[dict[str, Any]]] = {field: [] for field in PENDING_INVOICE_FILTER_FIELDS}
+        for row in rows:
+            field = text(row.get("field")) or ""
+            value = text(row.get("value")) or ""
+            if field not in options or not value:
+                continue
+            count = int_value(row.get("option_count"), 0)
+            options[field].append({"value": value, "label": value, "count": count})
+        return {"direction": normalized_direction, "filter": normalized_filter, "options": options}
+
+
+    def save_pending_invoice_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
+        rows_to_save = list(rows or [])
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            if scope_month:
+                connection.execute(
+                    """
+                    delete from read_model.pending_invoice_rows
+                    where direction = %s
+                      and scope_month = %s::date
+                      and (%s = 'all' or filter_group = %s)
+                    """,
+                    (normalized_direction, scope_month, normalized_filter, normalized_filter),
+                )
+            else:
+                connection.execute(
+                    "delete from read_model.pending_invoice_rows where direction = %s and (%s = 'all' or filter_group = %s)",
+                    (normalized_direction, normalized_filter, normalized_filter),
+                )
+            for row in rows_to_save:
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["source_versions"] = normalized_source_versions
+                payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
+                bank_transaction = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
+                status = payload.get("invoice_acquisition_status") if isinstance(payload.get("invoice_acquisition_status"), dict) else {}
+                input_invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
+                primary_invoice = (
+                    input_invoices.get("primary")
+                    if isinstance(input_invoices.get("primary"), dict)
+                    else {}
+                )
+                payment_summary = (
+                    input_invoices.get("payment_summary")
+                    if isinstance(input_invoices.get("payment_summary"), dict)
+                    else {}
+                )
+                oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+                primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
+                row_scope_month = scope_month or month_start(bank_transaction.get("trade_time"))
+                row_filter_group = text(row_payload.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
+                row_scope_key = _pending_invoice_row_scope_key(
+                    direction=normalized_direction,
+                    filter_group=row_filter_group,
+                    scope_month=row_scope_month,
+                )
+                connection.execute(
+                    """
+                    insert into read_model.pending_invoice_rows(
+                        row_id, direction, filter_group, scope_month, trade_date, counterparty_name,
+                        amount, status_code, seller_name, invoice_total, oa_applicant, project_name,
+                        missing_invoice, can_create_invoice, searchable_text, scope_key, generated_at, payload, raw_payload
+                    )
+                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
+                    on conflict (row_id, direction) do update set
+                        filter_group = excluded.filter_group,
+                        scope_month = excluded.scope_month,
+                        trade_date = excluded.trade_date,
+                        counterparty_name = excluded.counterparty_name,
+                        amount = excluded.amount,
+                        status_code = excluded.status_code,
+                        seller_name = excluded.seller_name,
+                        invoice_total = excluded.invoice_total,
+                        oa_applicant = excluded.oa_applicant,
+                        project_name = excluded.project_name,
+                        missing_invoice = excluded.missing_invoice,
+                        can_create_invoice = excluded.can_create_invoice,
+                        searchable_text = excluded.searchable_text,
+                        scope_key = excluded.scope_key,
+                        generated_at = excluded.generated_at,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        text(payload.get("id")),
+                        normalized_direction,
+                        row_filter_group,
+                        row_scope_month,
+                        text(bank_transaction.get("trade_time"))[:10] if text(bank_transaction.get("trade_time")) else None,
+                        text(bank_transaction.get("counterparty_name")),
+                        decimal_text(bank_transaction.get("amount")),
+                        text(status.get("code")),
+                        text(primary_invoice.get("seller_name")),
+                        decimal_text(payment_summary.get("invoice_total") or primary_invoice.get("total_with_tax")),
+                        text(primary_oa.get("applicant") or payload.get("oa_applicant")),
+                        text(primary_oa.get("project_name")),
+                        not bool(payload.get("invoices")),
+                        bool(payload.get("can_create_invoice")),
+                        text(row_payload.get("searchable_text") or payload),
+                        row_scope_key,
+                        text(row_payload.get("generated_at")),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload}),
+                    ),
+                )
+            self._upsert_pending_invoice_scope(
+                connection,
+                scope_key=scope_key,
+                direction=normalized_direction,
+                filter_group=normalized_filter,
+                row_count=len(rows_to_save),
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def mark_pending_invoice_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_direction, normalized_filter, _scope_month = _parse_pending_invoice_scope_key(scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            self._upsert_pending_invoice_scope(
+                connection,
+                scope_key=str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}",
+                direction=normalized_direction,
+                filter_group=normalized_filter,
+                row_count=max(int_value(row_count, 0), 0),
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def save_invoice_lifecycle_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        normalized_scope_key = text(scope_key) or ""
+        if not normalized_scope_key:
+            raise ValueError("invoice lifecycle scope_key is required.")
+        scope_month = month_start(normalized_scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+        rows_to_save = [row for row in list(rows or []) if isinstance(row, dict)]
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
+                (tenant_id, normalized_scope_key),
+            )
+            insert_rows: list[tuple[Any, ...]] = []
+            for row in rows_to_save:
+                payload = _invoice_lifecycle_row_payload(row)
+                row_scope_month = month_start(payload.get("scope_month") or normalized_scope_key) or scope_month
+                insert_rows.append(
+                    (
+                        tenant_id,
+                        text(payload.get("subject_id")),
+                        text(payload.get("subject_type")),
+                        normalized_scope_key,
+                        row_scope_month,
+                        text(payload.get("invoice_identity_key")),
+                        text(payload.get("lifecycle_status")) or "unknown",
+                        jsonb(payload.get("acquisition_status") if isinstance(payload.get("acquisition_status"), dict) else {}),
+                        jsonb(payload.get("payment_status") if isinstance(payload.get("payment_status"), dict) else {}),
+                        jsonb(payload.get("collection_status") if isinstance(payload.get("collection_status"), dict) else {}),
+                        jsonb(payload.get("certification_status") if isinstance(payload.get("certification_status"), dict) else {}),
+                        jsonb(normalized_source_versions),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload, "source_versions": normalized_source_versions}),
+                        text(row.get("generated_at")),
+                    )
+                )
+            _execute_many(
+                connection,
+                """
+                    insert into read_model.invoice_lifecycle_rows(
+                        tenant_id, subject_id, subject_type, scope_key, scope_month, invoice_identity_key,
+                        lifecycle_status, acquisition_status, payment_status, collection_status, certification_status,
+                        source_versions, payload, raw_payload, generated_at
+                    )
+                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
+                    on conflict (tenant_id, subject_type, subject_id) do update set
+                        scope_key = excluded.scope_key,
+                        scope_month = excluded.scope_month,
+                        invoice_identity_key = excluded.invoice_identity_key,
+                        lifecycle_status = excluded.lifecycle_status,
+                        acquisition_status = excluded.acquisition_status,
+                        payment_status = excluded.payment_status,
+                        collection_status = excluded.collection_status,
+                        certification_status = excluded.certification_status,
+                        source_versions = excluded.source_versions,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        generated_at = excluded.generated_at,
+                        updated_at = now()
+                """,
+                insert_rows,
+            )
+            self._upsert_invoice_lifecycle_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=scope_month,
+                row_count=len(rows_to_save),
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def mark_invoice_lifecycle_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        normalized_scope_key = text(scope_key) or ""
+        if not normalized_scope_key:
+            raise ValueError("invoice lifecycle scope_key is required.")
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
+                (tenant_id, normalized_scope_key),
+            )
+            self._upsert_invoice_lifecycle_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=month_start(normalized_scope_key),
+                row_count=row_count,
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def get_invoice_lifecycle_rows_by_subject_ids(
+        self,
+        subject_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_ids = _dedupe_preserve_order(text(subject_id) for subject_id in list(subject_ids or []))
+        if not normalized_ids:
+            return {
+                "read_model_status": "fresh",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "stale_reasons": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where tenant_id = %s
+              and subject_id = any(%s)
+            order by array_position(%s::text[], subject_id), subject_type
+            """,
+            (tenant_id, normalized_ids, normalized_ids),
+        )
+        if not rows:
+            return None
+        returned_ids = {text(row.get("subject_id")) for row in rows if text(row.get("subject_id"))}
+        if len(returned_ids) < len(normalized_ids):
+            return {
+                "read_model_status": "missing",
+                "rows": [],
+                "source_versions": _source_versions_from_relation_records(rows),
+                "read_model_scope_keys": _dedupe_preserve_order(text(row.get("scope_key")) for row in rows),
+                "stale_reasons": ["missing_invoice_lifecycle_rows"],
+            }
+        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
+
+
+    def get_invoice_lifecycle_rows_by_identity_keys(
+        self,
+        invoice_identity_keys: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_keys = _dedupe_preserve_order(text(key) for key in list(invoice_identity_keys or []))
+        if not normalized_keys:
+            return {
+                "read_model_status": "fresh",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "stale_reasons": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where tenant_id = %s
+              and invoice_identity_key = any(%s)
+            order by array_position(%s::text[], invoice_identity_key), subject_type, subject_id
+            """,
+            (tenant_id, normalized_keys, normalized_keys),
+        )
+        if not rows:
+            return None
+        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
+
+
+    def list_invoice_lifecycle_rows(
+        self,
+        *,
+        month: str,
+        subject_types: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month) or ""
+        if not normalized_month:
+            return None
+        scope_row = self._invoice_lifecycle_scope_row(scope_key=normalized_month, tenant_id=tenant_id)
+        if scope_row is None:
+            return None
+        where = ["tenant_id = %s", "scope_key = %s"]
+        params: list[Any] = [tenant_id, normalized_month]
+        normalized_subject_types = _dedupe_preserve_order(text(subject_type) for subject_type in list(subject_types or []))
+        if normalized_subject_types:
+            where.append("subject_type = any(%s)")
+            params.append(normalized_subject_types)
+        rows = self._connection.fetch_all(
+            f"""
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where {" and ".join(where)}
+            order by subject_type, subject_id
+            """,
+            tuple(params),
+        )
+        return self._invoice_lifecycle_payload_from_rows(
+            rows=rows,
+            tenant_id=tenant_id,
+            fallback_source_versions=scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
+            fallback_scope_keys=[normalized_month],
+        )
+
+
+    def _invoice_lifecycle_scope_row(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        executor = connection or self._connection
+        return executor.fetch_one(
+            """
+            select scope_key, row_count, source_versions, cache_status
+            from read_model.invoice_lifecycle_scopes
+            where tenant_id = %s
+              and scope_key = %s
+            """,
+            (tenant_id, scope_key),
+        )
+
+
+    def _invoice_lifecycle_payload_from_rows(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        tenant_id: str,
+        fallback_source_versions: dict[str, Any] | None = None,
+        fallback_scope_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
+        scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows) or list(fallback_scope_keys or [])
+        status = "fresh"
+        stale_reasons: list[str] = []
+        source_versions = dict(fallback_source_versions or {})
+        for scope_key in scope_keys:
+            scope_row = self._invoice_lifecycle_scope_row(scope_key=scope_key, tenant_id=tenant_id)
+            if scope_row is None:
+                status = "missing"
+                stale_reasons.append(f"missing_scope:{scope_key}")
+                continue
+            scope_status = self._refresh_status(scope_type="invoice_lifecycle", scope_key=scope_key)
+            if scope_status != "fresh":
+                status = "refreshing" if scope_status == "refreshing" else "stale"
+                stale_reasons.append(f"{scope_status}:{scope_key}")
+            if not source_versions and isinstance(scope_row.get("source_versions"), dict):
+                source_versions = dict(scope_row.get("source_versions"))
+        if not source_versions:
+            source_versions = _source_versions_from_relation_records(rows)
+        return {
+            "read_model_status": status,
+            "rows": [_invoice_lifecycle_row_payload(row) for row in rows],
+            "source_versions": source_versions,
+            "read_model_scope_keys": scope_keys,
+            "stale_reasons": stale_reasons,
+        }
+
+
+    def _upsert_invoice_lifecycle_scope(
+        connection: Any,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        scope_month: date | str | None,
+        row_count: int,
+        source_versions: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            insert into read_model.invoice_lifecycle_scopes(
+                tenant_id, scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
+            )
+            values (%s, %s, %s::date, %s, now(), 'fresh', %s, %s)
+            on conflict (tenant_id, scope_key) do update set
+                scope_month = excluded.scope_month,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                tenant_id,
+                scope_key,
+                scope_month,
+                max(int_value(row_count, 0), 0),
+                jsonb(source_versions),
+                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+            ),
+        )
+
+
+    def pending_invoice_source_summary(
+        self,
+        *,
+        direction: str,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, int]:
+        return self._pending_invoice_source_summary(
+            direction=direction,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+
+    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            select scope_key, row_count, source_versions
+            from read_model.pending_invoice_scopes
+            where scope_key = %s
+               or scope_key like %s
+            order by scope_key
+            """,
+            (scope_key, f"{scope_key}:%"),
+        )
+        return _pending_invoice_scope_source_versions_row(scope_key=scope_key, rows=rows)
+
+
+    def pending_invoice_bank_detail_source_versions(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            where.append("filter_group = %s")
+            params.append(normalized_filter)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        with self._connection.transaction() as connection:
+            month_rows = connection.fetch_all(
+                f"""
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from read_model.pending_invoice_rows
+                where {where_sql}
+                  and scope_month is not null
+                order by scope_key
+                """,
+                tuple(params),
+            )
+            scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in month_rows)
+            if not scope_keys:
+                return {}
+            scope_summary = self._bank_detail_scope_summary(
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+        return _source_versions_from_scope_summary(scope_summary)
+
+
+    def pending_invoice_workbench_relation_source_versions(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            where.append("filter_group = %s")
+            params.append(normalized_filter)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        with self._connection.transaction() as connection:
+            month_rows = connection.fetch_all(
+                f"""
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from read_model.pending_invoice_rows
+                where {where_sql}
+                  and scope_month is not null
+                order by scope_key
+                """,
+                tuple(params),
+            )
+            scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in month_rows)
+            if not scope_keys:
+                return {}
+            rows = connection.fetch_all(
+                """
+                select scope_key, source_versions
+                from read_model.workbench_relation_scopes
+                where tenant_id = %s
+                  and scope_key = any(%s)
+                order by scope_key
+                """,
+                (tenant_id, scope_keys),
+            )
+        return _scope_source_versions_by_month(rows)
+
+
+    def _pending_invoice_source_summary(
+        self,
+        *,
+        direction: str,
+        date_from: str | None,
+        date_to: str | None,
+        connection: Any | None = None,
+    ) -> dict[str, int]:
+        where: list[str] = []
+        params: list[Any] = []
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        where_sql = f"where {' and '.join(where)}" if where else ""
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            f"""
+            select direction, count(*) as count
+            from read_model.pending_invoice_rows
+            {where_sql}
+            group by direction
+            """,
+            tuple(params),
+        )
+        counts = {
+            "expense": 0,
+            "income": 0,
+        }
+        for row in rows:
+            row_direction = text(row.get("direction")) or ""
+            if row_direction in counts:
+                counts[row_direction] = int_value(row.get("count"), 0)
+        total = counts["expense"] + counts["income"]
+        current = total if direction == "all" else counts.get(direction, 0)
+        return {
+            "bank_transaction_rows": total,
+            "expense_rows": counts["expense"],
+            "income_rows": counts["income"],
+            "current_direction_rows": current,
+            "excluded_direction_rows": max(total - current, 0),
+        }
+
+
+    def _upsert_pending_invoice_scope(
+        connection: Any,
+        *,
+        scope_key: str,
+        direction: str,
+        filter_group: str,
+        row_count: int,
+        source_versions: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            insert into read_model.pending_invoice_scopes(
+                scope_key, direction, filter_group, row_count, generated_at, cache_status, source_versions, raw_payload
+            )
+            values (%s, %s, %s, %s, now(), 'fresh', %s, %s)
+            on conflict (scope_key) do update set
+                direction = excluded.direction,
+                filter_group = excluded.filter_group,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                scope_key,
+                direction,
+                filter_group,
+                row_count,
+                jsonb(source_versions),
+                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+            ),
+        )
+
+
 class PostgresReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
         self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+        self._pending_invoice_lifecycle_repository = PostgresPendingInvoiceLifecycleReadModelRepository(
+            connection,
+            bank_detail_scope_summary=self.bank_detail_scope_summary,
+        )
 
     def search_index(
         self,
@@ -2133,679 +3078,48 @@ class PostgresReadModelRepository:
     def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_invoice_id(invoice_id)
 
-    def list_pending_invoice_rows(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = None,
-        sort_direction: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-    ) -> dict[str, Any] | None:
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter or "all").strip() or "all"
-        page_number = max(int_value(page, 1), 1)
-        page_limit = min(max(int_value(page_size, 50), 1), 200)
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise ValueError("all direction only supports filter=all.")
-        where: list[str] = []
-        params: list[Any] = []
-        if normalized_direction != "all":
-            where.append("direction = %s")
-            params.append(normalized_direction)
-        if normalized_filter != "all":
-            clause, clause_params = _pending_invoice_visible_filter_clause(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-            )
-            where.append(clause)
-            params.extend(clause_params)
-        if date_from:
-            where.append("trade_date >= %s::date")
-            params.append(date_from)
-        if date_to:
-            where.append("trade_date <= %s::date")
-            params.append(date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _pending_invoice_filter_clauses(filters):
-            where.append(clause)
-            params.extend(clause_params)
-        where_sql = " and ".join(where) if where else "true"
-        order_sql = _pending_invoice_order_sql(sort_field=sort_field, sort_direction=sort_direction)
-        scope_key = f"{normalized_direction}:{normalized_filter}"
-        with self._connection.transaction() as connection:
-            total_row = connection.fetch_one(
-                f"select count(*) as count from read_model.pending_invoice_rows where {where_sql}",
-                tuple(params),
-            )
-            total = int_value(total_row.get("count") if isinstance(total_row, dict) else 0, 0)
-            if normalized_direction == "all":
-                direction_scope_rows = [
-                    self._pending_invoice_scope_row("expense:all", connection=connection),
-                    self._pending_invoice_scope_row("income:all", connection=connection),
-                ]
-                direction_refresh_statuses = [
-                    self._refresh_status(scope_type="pending_invoice", scope_key="expense:all", connection=connection),
-                    self._refresh_status(scope_type="pending_invoice", scope_key="income:all", connection=connection),
-                ]
-                refresh_status = "refreshing" if "refreshing" in direction_refresh_statuses else ("stale" if "stale" in direction_refresh_statuses else "fresh")
-                scope_row = next((row for row in direction_scope_rows if isinstance(row, dict)), None)
-            else:
-                refresh_status = self._refresh_status(
-                    scope_type="pending_invoice",
-                    scope_key=scope_key,
-                    connection=connection,
-                )
-                scope_row = self._pending_invoice_scope_row(scope_key, connection=connection)
-            source_versions = (
-                scope_row.get("source_versions")
-                if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
-                else {}
-            )
-            if total == 0:
-                if scope_row is None:
-                    return None
-                return {
-                    "direction": normalized_direction,
-                    "filter": normalized_filter,
-                    "rows": [],
-                    "pagination": {"page": page_number, "page_size": page_limit, "total": 0},
-                    "summary": {
-                        "total_rows": 0,
-                        "missing_invoice_rows": 0,
-                        "create_invoice_available_rows": 0,
-                        "source_summary": self._pending_invoice_source_summary(
-                            direction=normalized_direction,
-                            date_from=date_from,
-                            date_to=date_to,
-                            connection=connection,
-                        ),
-                    },
-                    "bank_transaction_tags": {},
-                    "bank_transaction_tags_version": 1,
-                    "refresh_status": refresh_status,
-                    "source_versions": source_versions,
-                }
-            rows = connection.fetch_all(
-                f"""
-                select payload, raw_payload, missing_invoice, can_create_invoice
-                from read_model.pending_invoice_rows
-                where {where_sql}
-                order by {order_sql}
-                limit %s offset %s
-                """,
-                tuple([*params, page_limit, (page_number - 1) * page_limit]),
-            )
-            payload_rows = [_read_model_payload(row) for row in rows]
-            normalized_rows = [row for row in payload_rows if isinstance(row, dict)]
-            return {
-                "direction": normalized_direction,
-                "filter": normalized_filter,
-                "rows": normalized_rows,
-                "pagination": {"page": page_number, "page_size": page_limit, "total": total},
-                "summary": {
-                    "total_rows": total,
-                    "missing_invoice_rows": sum(1 for row in rows if bool(row.get("missing_invoice"))),
-                    "create_invoice_available_rows": sum(1 for row in rows if bool(row.get("can_create_invoice"))),
-                    "source_summary": self._pending_invoice_source_summary(
-                        direction=normalized_direction,
-                        date_from=date_from,
-                        date_to=date_to,
-                        connection=connection,
-                    ),
-                },
-                "bank_transaction_tags": {},
-                "bank_transaction_tags_version": 1,
-                "refresh_status": refresh_status,
-                "source_versions": source_versions,
-            }
 
-    def list_pending_invoice_filter_options(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter or "all").strip() or "all"
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise ValueError("all direction only supports filter=all.")
-        where: list[str] = []
-        params: list[Any] = []
-        if normalized_direction != "all":
-            where.append("direction = %s")
-            params.append(normalized_direction)
-        if normalized_filter != "all":
-            clause, clause_params = _pending_invoice_visible_filter_clause(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-            )
-            where.append(clause)
-            params.extend(clause_params)
-        if date_from:
-            where.append("trade_date >= %s::date")
-            params.append(date_from)
-        if date_to:
-            where.append("trade_date <= %s::date")
-            params.append(date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _pending_invoice_filter_clauses(filters):
-            where.append(clause)
-            params.extend(clause_params)
-        where_sql = " and ".join(where) if where else "true"
-        option_values = ",\n                    ".join(
-            f"('{field}', {_pending_invoice_option_expression(field)})"
-            for field in PENDING_INVOICE_FILTER_FIELDS
-        )
-        rows = self._connection.fetch_all(
-            f"""
-            with filtered_rows as (
-                select
-                    direction,
-                    filter_group,
-                    trade_date,
-                    counterparty_name,
-                    amount,
-                    status_code,
-                    seller_name,
-                    invoice_total,
-                    oa_applicant,
-                    project_name,
-                    payload
-                from read_model.pending_invoice_rows
-                where {where_sql}
-            ),
-            option_values(field, value) as (
-                select option_value.field, nullif(btrim(option_value.value), '') as value
-                from filtered_rows
-                cross join lateral (
-                    values
-                    {option_values}
-                ) as option_value(field, value)
-            ),
-            option_counts as (
-                select field, value, count(*)::integer as option_count
-                from option_values
-                where value is not null
-                group by field, value
-            ),
-            ranked_options as (
-                select
-                    field,
-                    value,
-                    option_count,
-                    row_number() over (partition by field order by option_count desc, value) as option_rank
-                from option_counts
-            )
-            select field, value, option_count
-            from ranked_options
-            where option_rank <= 50
-            order by field, option_rank
-            """,
-            tuple(params),
-        )
-        options: dict[str, list[dict[str, Any]]] = {field: [] for field in PENDING_INVOICE_FILTER_FIELDS}
-        for row in rows:
-            field = text(row.get("field")) or ""
-            value = text(row.get("value")) or ""
-            if field not in options or not value:
-                continue
-            count = int_value(row.get("option_count"), 0)
-            options[field].append({"value": value, "label": value, "count": count})
-        return {"direction": normalized_direction, "filter": normalized_filter, "options": options}
+    def list_pending_invoice_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.list_pending_invoice_rows(**kwargs)
 
-    def save_pending_invoice_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
-        rows_to_save = list(rows or [])
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+    def list_pending_invoice_filter_options(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.list_pending_invoice_filter_options(**kwargs)
 
-        def write(connection: Any) -> None:
-            if scope_month:
-                connection.execute(
-                    """
-                    delete from read_model.pending_invoice_rows
-                    where direction = %s
-                      and scope_month = %s::date
-                      and (%s = 'all' or filter_group = %s)
-                    """,
-                    (normalized_direction, scope_month, normalized_filter, normalized_filter),
-                )
-            else:
-                connection.execute(
-                    "delete from read_model.pending_invoice_rows where direction = %s and (%s = 'all' or filter_group = %s)",
-                    (normalized_direction, normalized_filter, normalized_filter),
-                )
-            for row in rows_to_save:
-                row_payload = dict(row) if isinstance(row, dict) else {}
-                row_payload["source_versions"] = normalized_source_versions
-                payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
-                bank_transaction = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
-                status = payload.get("invoice_acquisition_status") if isinstance(payload.get("invoice_acquisition_status"), dict) else {}
-                input_invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
-                primary_invoice = (
-                    input_invoices.get("primary")
-                    if isinstance(input_invoices.get("primary"), dict)
-                    else {}
-                )
-                payment_summary = (
-                    input_invoices.get("payment_summary")
-                    if isinstance(input_invoices.get("payment_summary"), dict)
-                    else {}
-                )
-                oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
-                primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
-                row_scope_month = scope_month or month_start(bank_transaction.get("trade_time"))
-                row_filter_group = text(row_payload.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
-                row_scope_key = _pending_invoice_row_scope_key(
-                    direction=normalized_direction,
-                    filter_group=row_filter_group,
-                    scope_month=row_scope_month,
-                )
-                connection.execute(
-                    """
-                    insert into read_model.pending_invoice_rows(
-                        row_id, direction, filter_group, scope_month, trade_date, counterparty_name,
-                        amount, status_code, seller_name, invoice_total, oa_applicant, project_name,
-                        missing_invoice, can_create_invoice, searchable_text, scope_key, generated_at, payload, raw_payload
-                    )
-                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
-                    on conflict (row_id, direction) do update set
-                        filter_group = excluded.filter_group,
-                        scope_month = excluded.scope_month,
-                        trade_date = excluded.trade_date,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        status_code = excluded.status_code,
-                        seller_name = excluded.seller_name,
-                        invoice_total = excluded.invoice_total,
-                        oa_applicant = excluded.oa_applicant,
-                        project_name = excluded.project_name,
-                        missing_invoice = excluded.missing_invoice,
-                        can_create_invoice = excluded.can_create_invoice,
-                        searchable_text = excluded.searchable_text,
-                        scope_key = excluded.scope_key,
-                        generated_at = excluded.generated_at,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        text(payload.get("id")),
-                        normalized_direction,
-                        row_filter_group,
-                        row_scope_month,
-                        text(bank_transaction.get("trade_time"))[:10] if text(bank_transaction.get("trade_time")) else None,
-                        text(bank_transaction.get("counterparty_name")),
-                        decimal_text(bank_transaction.get("amount")),
-                        text(status.get("code")),
-                        text(primary_invoice.get("seller_name")),
-                        decimal_text(payment_summary.get("invoice_total") or primary_invoice.get("total_with_tax")),
-                        text(primary_oa.get("applicant") or payload.get("oa_applicant")),
-                        text(primary_oa.get("project_name")),
-                        not bool(payload.get("invoices")),
-                        bool(payload.get("can_create_invoice")),
-                        text(row_payload.get("searchable_text") or payload),
-                        row_scope_key,
-                        text(row_payload.get("generated_at")),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-            self._upsert_pending_invoice_scope(
-                connection,
-                scope_key=scope_key,
-                direction=normalized_direction,
-                filter_group=normalized_filter,
-                row_count=len(rows_to_save),
-                source_versions=normalized_source_versions,
-            )
+    def save_pending_invoice_rows(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.save_pending_invoice_rows(**kwargs)
 
-        run_in_transaction(self._connection, write)
+    def mark_pending_invoice_scope(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.mark_pending_invoice_scope(**kwargs)
 
-    def mark_pending_invoice_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        normalized_direction, normalized_filter, _scope_month = _parse_pending_invoice_scope_key(scope_key)
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+    def pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_source_summary(**kwargs)
 
-        def write(connection: Any) -> None:
-            self._upsert_pending_invoice_scope(
-                connection,
-                scope_key=str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}",
-                direction=normalized_direction,
-                filter_group=normalized_filter,
-                row_count=max(int_value(row_count, 0), 0),
-                source_versions=normalized_source_versions,
-            )
+    def pending_invoice_bank_detail_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_bank_detail_source_versions(**kwargs)
 
-        run_in_transaction(self._connection, write)
+    def pending_invoice_workbench_relation_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_workbench_relation_source_versions(**kwargs)
 
-    def save_invoice_lifecycle_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-        tenant_id: str = "default",
-    ) -> None:
-        normalized_scope_key = text(scope_key) or ""
-        if not normalized_scope_key:
-            raise ValueError("invoice lifecycle scope_key is required.")
-        scope_month = month_start(normalized_scope_key)
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
-        rows_to_save = [row for row in list(rows or []) if isinstance(row, dict)]
+    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository._pending_invoice_scope_row(scope_key, connection=connection)
 
-        def write(connection: Any) -> None:
-            connection.execute(
-                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
-                (tenant_id, normalized_scope_key),
-            )
-            insert_rows: list[tuple[Any, ...]] = []
-            for row in rows_to_save:
-                payload = _invoice_lifecycle_row_payload(row)
-                row_scope_month = month_start(payload.get("scope_month") or normalized_scope_key) or scope_month
-                insert_rows.append(
-                    (
-                        tenant_id,
-                        text(payload.get("subject_id")),
-                        text(payload.get("subject_type")),
-                        normalized_scope_key,
-                        row_scope_month,
-                        text(payload.get("invoice_identity_key")),
-                        text(payload.get("lifecycle_status")) or "unknown",
-                        jsonb(payload.get("acquisition_status") if isinstance(payload.get("acquisition_status"), dict) else {}),
-                        jsonb(payload.get("payment_status") if isinstance(payload.get("payment_status"), dict) else {}),
-                        jsonb(payload.get("collection_status") if isinstance(payload.get("collection_status"), dict) else {}),
-                        jsonb(payload.get("certification_status") if isinstance(payload.get("certification_status"), dict) else {}),
-                        jsonb(normalized_source_versions),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload, "source_versions": normalized_source_versions}),
-                        text(row.get("generated_at")),
-                    )
-                )
-            _execute_many(
-                connection,
-                """
-                    insert into read_model.invoice_lifecycle_rows(
-                        tenant_id, subject_id, subject_type, scope_key, scope_month, invoice_identity_key,
-                        lifecycle_status, acquisition_status, payment_status, collection_status, certification_status,
-                        source_versions, payload, raw_payload, generated_at
-                    )
-                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
-                    on conflict (tenant_id, subject_type, subject_id) do update set
-                        scope_key = excluded.scope_key,
-                        scope_month = excluded.scope_month,
-                        invoice_identity_key = excluded.invoice_identity_key,
-                        lifecycle_status = excluded.lifecycle_status,
-                        acquisition_status = excluded.acquisition_status,
-                        payment_status = excluded.payment_status,
-                        collection_status = excluded.collection_status,
-                        certification_status = excluded.certification_status,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        generated_at = excluded.generated_at,
-                        updated_at = now()
-                """,
-                insert_rows,
-            )
-            self._upsert_invoice_lifecycle_scope(
-                connection,
-                tenant_id=tenant_id,
-                scope_key=normalized_scope_key,
-                scope_month=scope_month,
-                row_count=len(rows_to_save),
-                source_versions=normalized_source_versions,
-            )
+    def _pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
+        return self._pending_invoice_lifecycle_repository._pending_invoice_source_summary(**kwargs)
 
-        run_in_transaction(self._connection, write)
+    def save_invoice_lifecycle_rows(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.save_invoice_lifecycle_rows(**kwargs)
 
-    def mark_invoice_lifecycle_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        source_versions: dict[str, Any] | None = None,
-        tenant_id: str = "default",
-    ) -> None:
-        normalized_scope_key = text(scope_key) or ""
-        if not normalized_scope_key:
-            raise ValueError("invoice lifecycle scope_key is required.")
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+    def mark_invoice_lifecycle_scope(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.mark_invoice_lifecycle_scope(**kwargs)
 
-        def write(connection: Any) -> None:
-            connection.execute(
-                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
-                (tenant_id, normalized_scope_key),
-            )
-            self._upsert_invoice_lifecycle_scope(
-                connection,
-                tenant_id=tenant_id,
-                scope_key=normalized_scope_key,
-                scope_month=month_start(normalized_scope_key),
-                row_count=row_count,
-                source_versions=normalized_source_versions,
-            )
+    def get_invoice_lifecycle_rows_by_subject_ids(self, subject_ids: list[str], **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_subject_ids(subject_ids, **kwargs)
 
-        run_in_transaction(self._connection, write)
+    def get_invoice_lifecycle_rows_by_identity_keys(self, invoice_identity_keys: list[str], **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_identity_keys(invoice_identity_keys, **kwargs)
 
-    def get_invoice_lifecycle_rows_by_subject_ids(
-        self,
-        subject_ids: list[str],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_ids = _dedupe_preserve_order(text(subject_id) for subject_id in list(subject_ids or []))
-        if not normalized_ids:
-            return {
-                "read_model_status": "fresh",
-                "rows": [],
-                "source_versions": {},
-                "read_model_scope_keys": [],
-                "stale_reasons": [],
-            }
-        rows = self._connection.fetch_all(
-            """
-            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
-                   acquisition_status, payment_status, collection_status, certification_status,
-                   source_versions, payload, raw_payload
-            from read_model.invoice_lifecycle_rows
-            where tenant_id = %s
-              and subject_id = any(%s)
-            order by array_position(%s::text[], subject_id), subject_type
-            """,
-            (tenant_id, normalized_ids, normalized_ids),
-        )
-        if not rows:
-            return None
-        returned_ids = {text(row.get("subject_id")) for row in rows if text(row.get("subject_id"))}
-        if len(returned_ids) < len(normalized_ids):
-            return {
-                "read_model_status": "missing",
-                "rows": [],
-                "source_versions": _source_versions_from_relation_records(rows),
-                "read_model_scope_keys": _dedupe_preserve_order(text(row.get("scope_key")) for row in rows),
-                "stale_reasons": ["missing_invoice_lifecycle_rows"],
-            }
-        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
-
-    def get_invoice_lifecycle_rows_by_identity_keys(
-        self,
-        invoice_identity_keys: list[str],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_keys = _dedupe_preserve_order(text(key) for key in list(invoice_identity_keys or []))
-        if not normalized_keys:
-            return {
-                "read_model_status": "fresh",
-                "rows": [],
-                "source_versions": {},
-                "read_model_scope_keys": [],
-                "stale_reasons": [],
-            }
-        rows = self._connection.fetch_all(
-            """
-            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
-                   acquisition_status, payment_status, collection_status, certification_status,
-                   source_versions, payload, raw_payload
-            from read_model.invoice_lifecycle_rows
-            where tenant_id = %s
-              and invoice_identity_key = any(%s)
-            order by array_position(%s::text[], invoice_identity_key), subject_type, subject_id
-            """,
-            (tenant_id, normalized_keys, normalized_keys),
-        )
-        if not rows:
-            return None
-        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
-
-    def list_invoice_lifecycle_rows(
-        self,
-        *,
-        month: str,
-        subject_types: list[str] | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_month = text(month) or ""
-        if not normalized_month:
-            return None
-        scope_row = self._invoice_lifecycle_scope_row(scope_key=normalized_month, tenant_id=tenant_id)
-        if scope_row is None:
-            return None
-        where = ["tenant_id = %s", "scope_key = %s"]
-        params: list[Any] = [tenant_id, normalized_month]
-        normalized_subject_types = _dedupe_preserve_order(text(subject_type) for subject_type in list(subject_types or []))
-        if normalized_subject_types:
-            where.append("subject_type = any(%s)")
-            params.append(normalized_subject_types)
-        rows = self._connection.fetch_all(
-            f"""
-            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
-                   acquisition_status, payment_status, collection_status, certification_status,
-                   source_versions, payload, raw_payload
-            from read_model.invoice_lifecycle_rows
-            where {" and ".join(where)}
-            order by subject_type, subject_id
-            """,
-            tuple(params),
-        )
-        return self._invoice_lifecycle_payload_from_rows(
-            rows=rows,
-            tenant_id=tenant_id,
-            fallback_source_versions=scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
-            fallback_scope_keys=[normalized_month],
-        )
-
-    def _invoice_lifecycle_scope_row(
-        self,
-        *,
-        scope_key: str,
-        tenant_id: str = "default",
-        connection: Any | None = None,
-    ) -> dict[str, Any] | None:
-        executor = connection or self._connection
-        return executor.fetch_one(
-            """
-            select scope_key, row_count, source_versions, cache_status
-            from read_model.invoice_lifecycle_scopes
-            where tenant_id = %s
-              and scope_key = %s
-            """,
-            (tenant_id, scope_key),
-        )
-
-    def _invoice_lifecycle_payload_from_rows(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        tenant_id: str,
-        fallback_source_versions: dict[str, Any] | None = None,
-        fallback_scope_keys: list[str] | None = None,
-    ) -> dict[str, Any]:
-        scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows) or list(fallback_scope_keys or [])
-        status = "fresh"
-        stale_reasons: list[str] = []
-        source_versions = dict(fallback_source_versions or {})
-        for scope_key in scope_keys:
-            scope_row = self._invoice_lifecycle_scope_row(scope_key=scope_key, tenant_id=tenant_id)
-            if scope_row is None:
-                status = "missing"
-                stale_reasons.append(f"missing_scope:{scope_key}")
-                continue
-            scope_status = self._refresh_status(scope_type="invoice_lifecycle", scope_key=scope_key)
-            if scope_status != "fresh":
-                status = "refreshing" if scope_status == "refreshing" else "stale"
-                stale_reasons.append(f"{scope_status}:{scope_key}")
-            if not source_versions and isinstance(scope_row.get("source_versions"), dict):
-                source_versions = dict(scope_row.get("source_versions"))
-        if not source_versions:
-            source_versions = _source_versions_from_relation_records(rows)
-        return {
-            "read_model_status": status,
-            "rows": [_invoice_lifecycle_row_payload(row) for row in rows],
-            "source_versions": source_versions,
-            "read_model_scope_keys": scope_keys,
-            "stale_reasons": stale_reasons,
-        }
-
-    @staticmethod
-    def _upsert_invoice_lifecycle_scope(
-        connection: Any,
-        *,
-        tenant_id: str,
-        scope_key: str,
-        scope_month: date | str | None,
-        row_count: int,
-        source_versions: dict[str, Any],
-    ) -> None:
-        connection.execute(
-            """
-            insert into read_model.invoice_lifecycle_scopes(
-                tenant_id, scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
-            )
-            values (%s, %s, %s::date, %s, now(), 'fresh', %s, %s)
-            on conflict (tenant_id, scope_key) do update set
-                scope_month = excluded.scope_month,
-                row_count = excluded.row_count,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                source_versions = excluded.source_versions,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                tenant_id,
-                scope_key,
-                scope_month,
-                max(int_value(row_count, 0), 0),
-                jsonb(source_versions),
-                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
-            ),
-        )
+    def list_invoice_lifecycle_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.list_invoice_lifecycle_rows(**kwargs)
 
     def save_workbench_relation_distribution(
         self,
@@ -3296,233 +3610,6 @@ class PostgresReadModelRepository:
                 max(int_value(group_count, 0), 0),
                 jsonb(source_versions),
                 jsonb({"scope_key": scope_key, "row_count": row_count, "group_count": group_count, "source_versions": source_versions}),
-            ),
-        )
-
-    def pending_invoice_source_summary(
-        self,
-        *,
-        direction: str,
-        date_from: str | None = None,
-        date_to: str | None = None,
-    ) -> dict[str, int]:
-        return self._pending_invoice_source_summary(
-            direction=direction,
-            date_from=date_from,
-            date_to=date_to,
-        )
-
-    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
-        executor = connection or self._connection
-        rows = executor.fetch_all(
-            """
-            select scope_key, row_count, source_versions
-            from read_model.pending_invoice_scopes
-            where scope_key = %s
-               or scope_key like %s
-            order by scope_key
-            """,
-            (scope_key, f"{scope_key}:%"),
-        )
-        return _pending_invoice_scope_source_versions_row(scope_key=scope_key, rows=rows)
-
-    def pending_invoice_bank_detail_source_versions(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter or "all").strip() or "all"
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise ValueError("all direction only supports filter=all.")
-        where: list[str] = []
-        params: list[Any] = []
-        if normalized_direction != "all":
-            where.append("direction = %s")
-            params.append(normalized_direction)
-        if normalized_filter != "all":
-            where.append("filter_group = %s")
-            params.append(normalized_filter)
-        if date_from:
-            where.append("trade_date >= %s::date")
-            params.append(date_from)
-        if date_to:
-            where.append("trade_date <= %s::date")
-            params.append(date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _pending_invoice_filter_clauses(filters):
-            where.append(clause)
-            params.extend(clause_params)
-        where_sql = " and ".join(where) if where else "true"
-        with self._connection.transaction() as connection:
-            month_rows = connection.fetch_all(
-                f"""
-                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-                from read_model.pending_invoice_rows
-                where {where_sql}
-                  and scope_month is not null
-                order by scope_key
-                """,
-                tuple(params),
-            )
-            scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in month_rows)
-            if not scope_keys:
-                return {}
-            scope_summary = self.bank_detail_scope_summary(
-                scope_keys=scope_keys,
-                tenant_id=tenant_id,
-                connection=connection,
-            )
-        return _source_versions_from_scope_summary(scope_summary)
-
-    def pending_invoice_workbench_relation_source_versions(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter or "all").strip() or "all"
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise ValueError("all direction only supports filter=all.")
-        where: list[str] = []
-        params: list[Any] = []
-        if normalized_direction != "all":
-            where.append("direction = %s")
-            params.append(normalized_direction)
-        if normalized_filter != "all":
-            where.append("filter_group = %s")
-            params.append(normalized_filter)
-        if date_from:
-            where.append("trade_date >= %s::date")
-            params.append(date_from)
-        if date_to:
-            where.append("trade_date <= %s::date")
-            params.append(date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _pending_invoice_filter_clauses(filters):
-            where.append(clause)
-            params.extend(clause_params)
-        where_sql = " and ".join(where) if where else "true"
-        with self._connection.transaction() as connection:
-            month_rows = connection.fetch_all(
-                f"""
-                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-                from read_model.pending_invoice_rows
-                where {where_sql}
-                  and scope_month is not null
-                order by scope_key
-                """,
-                tuple(params),
-            )
-            scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in month_rows)
-            if not scope_keys:
-                return {}
-            rows = connection.fetch_all(
-                """
-                select scope_key, source_versions
-                from read_model.workbench_relation_scopes
-                where tenant_id = %s
-                  and scope_key = any(%s)
-                order by scope_key
-                """,
-                (tenant_id, scope_keys),
-            )
-        return _scope_source_versions_by_month(rows)
-
-    def _pending_invoice_source_summary(
-        self,
-        *,
-        direction: str,
-        date_from: str | None,
-        date_to: str | None,
-        connection: Any | None = None,
-    ) -> dict[str, int]:
-        where: list[str] = []
-        params: list[Any] = []
-        if date_from:
-            where.append("trade_date >= %s::date")
-            params.append(date_from)
-        if date_to:
-            where.append("trade_date <= %s::date")
-            params.append(date_to)
-        where_sql = f"where {' and '.join(where)}" if where else ""
-        executor = connection or self._connection
-        rows = executor.fetch_all(
-            f"""
-            select direction, count(*) as count
-            from read_model.pending_invoice_rows
-            {where_sql}
-            group by direction
-            """,
-            tuple(params),
-        )
-        counts = {
-            "expense": 0,
-            "income": 0,
-        }
-        for row in rows:
-            row_direction = text(row.get("direction")) or ""
-            if row_direction in counts:
-                counts[row_direction] = int_value(row.get("count"), 0)
-        total = counts["expense"] + counts["income"]
-        current = total if direction == "all" else counts.get(direction, 0)
-        return {
-            "bank_transaction_rows": total,
-            "expense_rows": counts["expense"],
-            "income_rows": counts["income"],
-            "current_direction_rows": current,
-            "excluded_direction_rows": max(total - current, 0),
-        }
-
-    @staticmethod
-    def _upsert_pending_invoice_scope(
-        connection: Any,
-        *,
-        scope_key: str,
-        direction: str,
-        filter_group: str,
-        row_count: int,
-        source_versions: dict[str, Any],
-    ) -> None:
-        connection.execute(
-            """
-            insert into read_model.pending_invoice_scopes(
-                scope_key, direction, filter_group, row_count, generated_at, cache_status, source_versions, raw_payload
-            )
-            values (%s, %s, %s, %s, now(), 'fresh', %s, %s)
-            on conflict (scope_key) do update set
-                direction = excluded.direction,
-                filter_group = excluded.filter_group,
-                row_count = excluded.row_count,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                source_versions = excluded.source_versions,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                scope_key,
-                direction,
-                filter_group,
-                row_count,
-                jsonb(source_versions),
-                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
             ),
         )
 

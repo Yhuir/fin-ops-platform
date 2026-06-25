@@ -8,6 +8,7 @@ from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_
 from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
 from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
+    PostgresPendingInvoiceLifecycleReadModelRepository,
     PostgresReadModelRepository,
 )
 from fin_ops_platform.services.read_model_manifest import (
@@ -241,6 +242,30 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.input_invoice_usage_rows", shared_source)
                 self.assertNotIn("read_model.output_invoice_collection_rows", shared_source)
                 self.assertNotIn("read_model.oa_pending_payment_rows", shared_source)
+
+    def test_pending_invoice_lifecycle_physical_sql_owner_is_split_from_shared_repository(self) -> None:
+        owned_methods = {
+            "list_pending_invoice_rows",
+            "list_pending_invoice_filter_options",
+            "save_pending_invoice_rows",
+            "mark_pending_invoice_scope",
+            "pending_invoice_source_summary",
+            "pending_invoice_bank_detail_source_versions",
+            "pending_invoice_workbench_relation_source_versions",
+            "save_invoice_lifecycle_rows",
+            "mark_invoice_lifecycle_scope",
+            "get_invoice_lifecycle_rows_by_subject_ids",
+            "get_invoice_lifecycle_rows_by_identity_keys",
+            "list_invoice_lifecycle_rows",
+        }
+
+        for method_name in owned_methods:
+            with self.subTest(method_name=method_name):
+                self.assertTrue(callable(getattr(PostgresPendingInvoiceLifecycleReadModelRepository, method_name, None)))
+                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
+                self.assertIn("_pending_invoice_lifecycle_repository", shared_source)
+                self.assertNotIn("read_model.pending_invoice_rows", shared_source)
+                self.assertNotIn("read_model.invoice_lifecycle_rows", shared_source)
 
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]
