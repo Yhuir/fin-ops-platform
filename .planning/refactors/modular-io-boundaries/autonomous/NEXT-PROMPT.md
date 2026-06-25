@@ -9,20 +9,20 @@ Continue the user-authorized `main-read-model-closure` run from the expanded 202
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
 - Latest reconciliation: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-26.md`.
 - Write target inventory: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-write-target-inventory-2026-06-26.md`.
-- Wave 5 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`.
+- Wave 6 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-6-queued-job-completion-and-legacy-quarantine-2026-06-26.md`.
 - Admin Token was acquired through secure popup for the current controller session. Never print, hash, encode, persist or copy it into prompts, logs, files, docs, shell history, screenshots, test fixtures or worker prompts.
 - User has approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
 - Missing business inverse restore path is not a blocker by itself. It must route into the preapproved bounded DB restore protocol; only missing operation-before snapshot, exact predicate, transaction safety, or post-restore verification can hard-stop sample recovery.
 
 ## Next Boundary
 
-`main-read-model-closure:wave-6-queued-job-completion-and-legacy-quarantine`
+`main-read-model-closure:wave-7-legacy-quarantine-and-production-evidence-runbook`
 
 Goal:
 
-- Close queued import job completion freshness propagation after affected scopes are knowable.
-- Delete old code when caller proof is complete; otherwise hard-quarantine compat-only paths with owner, caller list, deletion condition and static guard.
-- Prepare, but do not prematurely execute, the production evidence wave.
+- Delete old read/write/freshness code where caller proof is complete.
+- Where deletion is not safe, hard-quarantine compat-only paths with owner, caller list, deletion condition and static guard.
+- Prepare the post-rollout production evidence wave without claiming PSCIP-L4 before evidence passes.
 
 Required first steps:
 
@@ -32,29 +32,24 @@ Required first steps:
    - `AGENTS.md`
    - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-write-target-inventory-2026-06-26.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-6-queued-job-completion-and-legacy-quarantine-2026-06-26.md`
    - `docs/modules/read-models/boundary-io.md`
-   - `docs/modules/imports-bank-transactions/boundary-io.md`
-   - `docs/modules/imports-invoices/boundary-io.md`
-   - affected module `boundary-io.md` files for every module touched in this wave.
-4. Use CodeGraph before shared code edits. Use `codegraph_impact` before modifying shared import write flow, job result mapping, frontend import job polling, operation barrier helper, read model registry, route helpers, or compat repository code.
+   - affected module `boundary-io.md` files for every legacy path touched in this wave.
+4. Use CodeGraph before shared code edits. Use `codegraph_impact` before modifying route helpers, legacy Workbench/ETC routes, compat repositories, live-scan fallback, frontend status normalizers, operation barrier helper or read model registry code.
 
 Implementation priorities:
 
-- Queued import job completion:
-  - When a queued import job finishes and the UI consumes job result payload/summary, the result must expose operation barrier targets or a tested non-applicability proof.
-  - Do not fabricate targets on queued admission before the affected scopes are knowable.
-  - Frontend import job completion must wait for operation barrier targets before showing final fresh state when the job result affects read model visibility.
-- Legacy deletion/quarantine:
-  - stale-as-fresh defaults
-  - legacy Workbench action route surfaces
-  - legacy ETC/import route surfaces
-  - direct dirty/outbox SQL writes outside approved gateway/transaction boundaries
+- Legacy deletion/quarantine sweep:
+  - `routes_legacy_workbench_actions.py`
+  - `routes_etc_legacy_batches.py`
   - live-scan fallback that can return fresh-looking payloads
   - compat repository methods callable from normal production paths
+  - frontend missing/unknown status defaults that can still render final fresh
+  - direct dirty/outbox SQL writes outside approved gateway/transaction boundaries
 - Production evidence prep:
-  - Prepare scripts/runbook for post-rollout read/write/freshness/performance samples.
+  - Create or update a bounded runbook/script set for post-rollout read/write/freshness/performance samples.
   - Every mutating sample must have a restore plan before apply: business inverse preferred; otherwise preapproved bounded DB restore with operation-before snapshot, exact predicate, single transaction and post-restore verification.
+  - No Admin Token value or production secret may be written to disk or logs.
 
 Acceptance:
 
@@ -62,8 +57,7 @@ Acceptance:
 - No secret values are printed or written.
 - No production DB write, queue mutation, readiness mutation, force refresh, repair, rollout or mutating HTTP sample unless this wave explicitly transitions into a separate production evidence wave after verified local L3.
 - Existing API response shape remains backward-compatible unless the change is documented and tests are updated.
-- Every write family touched by this wave has tests proving target envelope behavior, deletion/quarantine proof or non-applicability.
-- Frontend touched pages fail closed on missing/unknown/non-fresh status and wait for operation barrier/fresh reload when the write affects read model visibility.
+- Every old path touched by this wave is deleted or has a static guard proving normal production read/write/freshness paths cannot reach it.
 - Docs impact must be handled for every changed module.
 
 Verification:
@@ -85,8 +79,8 @@ Run frontend targeted tests for every touched page/API module. If a broad verifi
 
 End of boundary:
 
-- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-6-queued-job-completion-and-legacy-quarantine-2026-06-26.md`.
+- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-7-legacy-quarantine-and-production-evidence-runbook-2026-06-26.md`.
 - Update `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
 - Update this `NEXT-PROMPT.md` with the next executable wave.
-- Commit verified Wave 6 artifacts on `main`.
+- Commit verified Wave 7 artifacts on `main`.
 - Immediately continue to the next wave if safe implementation work remains.

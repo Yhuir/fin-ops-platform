@@ -40,7 +40,7 @@
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
-| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`，前端同步完成时优先等待 targets |
+| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
 
 ## 持久化与投影
 
@@ -71,6 +71,7 @@
 - `tests/test_import_api.py`
 - `tests/test_import_job_queue.py`
 - `tests/test_import_processing_service.py`
+- `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
 - `web/e2e/imports-bank-transactions-flow.spec.ts`
 

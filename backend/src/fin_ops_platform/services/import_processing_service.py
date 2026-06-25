@@ -344,7 +344,26 @@ class ImportProcessingService:
         changed_months = self._link_etc_import_result_to_existing_invoices(result)
         self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_import_confirm")
         summary = self.etc_import_job_summary(result, total)
-        result_summary = {key: value for key, value in summary.items() if key != "total_current"}
+        changed_scope_keys = normalized_scope_keys(changed_months)
+        result_summary = {
+            key: value
+            for key, value in summary.items()
+            if key != "total_current"
+        }
+        result_summary.update(
+            {
+                "affected_months": changed_scope_keys,
+                **self._import_write_target_envelope(
+                    cost_statistics_scope_keys=changed_scope_keys,
+                    tax_offset_scope_keys=changed_scope_keys,
+                    bank_detail_scope_keys=[],
+                    input_invoice_usage_scope_keys=changed_scope_keys,
+                    output_invoice_collection_scope_keys=[],
+                ),
+            }
+            if changed_scope_keys
+            else {"affected_months": []}
+        )
         status = "partial_success" if result.failed > 0 else "succeeded"
         if status == "partial_success":
             self._etc_reconciliation_task_service.mark_import_failed(

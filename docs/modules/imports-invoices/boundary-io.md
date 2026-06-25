@@ -40,7 +40,7 @@
 | 预览 rows/errors | 前端页面 | 未确认前不作为业务事实 |
 | 导入结果 | state store/repository | 可审计、可幂等 |
 | Dirty scope | derived lifecycle/runtime queue | invoice lifecycle/search/input/output/pending invoice |
-| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`，前端同步完成时优先等待 targets |
+| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
 
 ## 持久化与投影
 
@@ -72,6 +72,7 @@
 - `tests/test_import_preview_audit.py`
 - `tests/test_import_service.py`
 - `tests/test_import_processing_service.py`
+- `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
 - `web/e2e/imports-invoices-flow.spec.ts`
 

@@ -36,7 +36,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察 |
+| Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |
 

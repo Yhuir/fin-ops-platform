@@ -39,11 +39,13 @@
 | ETC ticket/batch payload | 前端页面 | API response shape 稳定 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
+| Completed import job consumption | background job progress / operation barrier | ETC 发票导入 job 完成后，页面必须读取 job `operation_barrier_targets`，等待 targets fresh 后再刷新批次和任务列表 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
+- ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 
 ## 文件范围
@@ -69,6 +71,8 @@
 - `tests/test_etc_backend.py`
 - `tests/test_etc_reconciliation_service.py`
 - `tests/test_etc_legacy_batch_lifecycle_service.py`
+- `tests/test_import_processing_service.py`
+- `web/src/test/EtcTicketManagementPage.test.tsx`
 - `web/e2e/etc-tickets-flow.spec.ts`
 
 ## 当前缺口和删除条件
