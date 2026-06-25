@@ -550,11 +550,30 @@ class NoOaBankBatchApplicationService:
         scope_key: str,
         source_versions: dict[str, object],
     ) -> dict[str, object] | None:
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
+        source_versions_summary_loader = getattr(
+            self._no_oa_bank_batch_read_model_repository,
+            "no_oa_bank_batch_source_versions_summary",
+            None,
+        )
+        if callable(source_versions_summary_loader):
+            summary = source_versions_summary_loader(filters)
+            if not isinstance(summary, dict) or str(summary.get("read_model_status") or "") != "fresh":
+                return None
+            existing_source_versions = summary.get("source_versions")
+            if not isinstance(existing_source_versions, dict) or dict(existing_source_versions) != source_versions:
+                return None
+            return {
+                "scope_key": normalized_scope_key,
+                "batch_count": max(int(summary.get("row_count") or 0), 0),
+                "source_versions": source_versions,
+                "skipped": True,
+                "skip_reason": "source_versions_unchanged",
+            }
         list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
         if not callable(list_read_model_batches):
             return None
-        normalized_scope_key = str(scope_key or "all").strip() or "all"
-        filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
         read_model_rows = list_read_model_batches(filters)
         if not read_model_rows:
             return None
@@ -575,6 +594,20 @@ class NoOaBankBatchApplicationService:
 
     def active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
         return self._workbench_relation_active_relations_for_bank_rows(bank_rows)
+
+    def load_relation_source_versions_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> None:
+        if self._relation_facade is None:
+            return
+        load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
+        if not callable(load_source_versions):
+            self._workbench_relation_active_relations_for_bank_rows(bank_rows)
+            return
+        for month in self._months_for_bank_rows(bank_rows):
+            load_source_versions(
+                month,
+                require_fresh=False,
+                reason="no_oa_bank_batch_source_version_precheck",
+            )
 
     def refresh_batches_from_prepared_rows(
         self,

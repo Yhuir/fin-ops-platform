@@ -166,6 +166,15 @@ class InvoiceLifecycleReadModelRepositoryPortTests(unittest.TestCase):
                 )
                 return {"rows": [{"subject_id": "invoice-1"}], "read_model_status": "fresh"}
 
+            def invoice_lifecycle_scope_summary(self, *, month: str, tenant_id: str = "default") -> dict[str, object]:
+                self.calls.append(
+                    (
+                        "invoice_lifecycle_scope_summary",
+                        {"month": month, "tenant_id": tenant_id},
+                    )
+                )
+                return {"read_model_status": "fresh", "row_count": 1, "source_versions": {"schema": "v1"}}
+
             def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("invoice lifecycle port must not expose input usage reads")
 
@@ -196,6 +205,10 @@ class InvoiceLifecycleReadModelRepositoryPortTests(unittest.TestCase):
             port.list_invoice_lifecycle_rows(month="2026-05", subject_types=["input_invoice"])["rows"][0]["subject_id"],
             "invoice-1",
         )
+        self.assertEqual(
+            port.invoice_lifecycle_scope_summary(month="2026-05", tenant_id="tenant-a")["source_versions"],
+            {"schema": "v1"},
+        )
         port.save_invoice_lifecycle_rows(
             scope_key="2026-05",
             rows=[{"subject_id": "invoice-1"}],
@@ -218,6 +231,7 @@ class InvoiceLifecycleReadModelRepositoryPortTests(unittest.TestCase):
                 "get_invoice_lifecycle_rows_by_subject_ids",
                 "get_invoice_lifecycle_rows_by_identity_keys",
                 "list_invoice_lifecycle_rows",
+                "invoice_lifecycle_scope_summary",
                 "save_invoice_lifecycle_rows",
                 "mark_invoice_lifecycle_scope",
             ],

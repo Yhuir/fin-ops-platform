@@ -205,6 +205,11 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "dict read_model_status=fresh",
     ): (1, "repository returns the turnover ledger view; query service applies source-version freshness gate."),
     (
+        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+        "PostgresSummaryReadModelRepository.no_oa_bank_batch_source_versions_summary",
+        "dict read_model_status=fresh",
+    ): (1, "repository summary exposes source_versions metadata only after no-OA readiness is fresh."),
+    (
         "backend/src/fin_ops_platform/services/read_model_query_gateway.py",
         "build_fresh_cache_envelope",
         "dict read_model_status=fresh",

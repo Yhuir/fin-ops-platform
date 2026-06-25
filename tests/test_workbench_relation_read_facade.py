@@ -357,6 +357,21 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
+    def test_source_versions_for_month_uses_scope_metadata_without_loading_rows(self) -> None:
+        repository = UnderlyingWorkbenchRelationRepository()
+        facade = WorkbenchRelationReadFacade(read_model_repository=repository)
+
+        payload = facade.source_versions_for_month("2026-01")
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["groups"], [])
+        self.assertEqual(payload["source_versions"], {"workbench_relation_schema_version": "test"})
+        self.assertEqual(
+            repository.calls,
+            [("workbench_relation_source_versions", {"scope_key": "2026-01", "tenant_id": "default"})],
+        )
+
     def test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts(self) -> None:
         repository = FakeRelationRepository(
             {

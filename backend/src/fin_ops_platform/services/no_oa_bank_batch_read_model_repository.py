@@ -12,3 +12,10 @@ class NoOaBankBatchReadModelRepositoryPort:
     def list_no_oa_bank_batch_rows(self, filters: dict[str, object] | None = None) -> list[dict[str, Any]] | None:
         rows = self._repository.list_no_oa_bank_batch_rows(filters)
         return list(rows) if rows is not None else None
+
+    def no_oa_bank_batch_source_versions_summary(
+        self,
+        filters: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        payload = self._repository.no_oa_bank_batch_source_versions_summary(filters)
+        return dict(payload) if isinstance(payload, dict) else None

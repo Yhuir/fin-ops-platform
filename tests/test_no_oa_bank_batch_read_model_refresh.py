@@ -450,9 +450,13 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.last_source_versions: dict[str, object] = {}
                 self.calls: list[str] = []
+                self.source_version_calls: list[str] = []
 
             def list_by_month(self, month: str, *_args, **_kwargs) -> dict[str, object]:
-                self.calls.append(month)
+                raise AssertionError("unchanged no-OA scope must not load relation rows")
+
+            def source_versions_for_month(self, month: str, *_args, **_kwargs) -> dict[str, object]:
+                self.source_version_calls.append(month)
                 self.last_source_versions = {
                     "scope_key": month,
                     "source_version": 19,
@@ -471,8 +475,18 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                 self.calls: list[dict[str, object]] = []
 
             def list_no_oa_bank_batch_rows(self, filters: dict[str, object] | None = None) -> list[dict[str, object]]:
+                raise AssertionError("unchanged no-OA scope must not load projected batch rows")
+
+            def no_oa_bank_batch_source_versions_summary(
+                self,
+                filters: dict[str, object] | None = None,
+            ) -> dict[str, object]:
                 self.calls.append(dict(filters or {}))
-                return [dict(row) for row in self.rows]
+                return {
+                    "read_model_status": "fresh",
+                    "row_count": len(self.rows),
+                    "source_versions": dict(self.rows[0]["source_versions"]) if self.rows else {},
+                }
 
         class StateStore:
             def __init__(self, repository: ReadRepository) -> None:
@@ -533,7 +547,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             include_categories=False,
         )
         service._application_service.effective_categories_for_rows(bank_rows)
-        service._application_service.active_relations_for_bank_rows(bank_rows)
+        service._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
         repository.rows = [
             {
                 "batch_id": "existing-batch",
@@ -543,6 +557,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         ]
         provider.calls = []
         relation_facade.calls = []
+        relation_facade.source_version_calls = []
 
         result = service.handle_runtime_event(
             RuntimeQueueEvent(
@@ -567,7 +582,8 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         self.assertEqual(result["bank_row_count"], 1)
         self.assertEqual(result["batch_count"], 1)
         self.assertEqual(provider.calls, [["txn-skip"]])
-        self.assertEqual(relation_facade.calls, ["2026-04"])
+        self.assertEqual(relation_facade.source_version_calls, ["2026-04"])
+        self.assertEqual(relation_facade.calls, [])
         self.assertEqual(repository.calls, [{"month": "2026-04"}])
         self.assertEqual(
             queue_repository.completions,

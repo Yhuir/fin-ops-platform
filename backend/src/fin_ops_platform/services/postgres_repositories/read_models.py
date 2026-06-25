@@ -2599,6 +2599,34 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             fallback_scope_keys=[normalized_month],
         )
 
+    def invoice_lifecycle_scope_summary(
+        self,
+        *,
+        month: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month) or ""
+        if not normalized_month:
+            return None
+        scope_row = self._invoice_lifecycle_scope_row(scope_key=normalized_month, tenant_id=tenant_id)
+        if scope_row is None:
+            return None
+        refresh_status = self._refresh_status(scope_type="invoice_lifecycle", scope_key=normalized_month)
+        read_model_status = "fresh"
+        stale_reasons: list[str] = []
+        if refresh_status != "fresh":
+            read_model_status = "refreshing" if refresh_status == "refreshing" else "stale"
+            stale_reasons.append(f"{refresh_status}:{normalized_month}")
+        source_versions = scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {}
+        return {
+            "read_model_status": read_model_status,
+            "scope_key": normalized_month,
+            "row_count": max(int_value(scope_row.get("row_count"), 0), 0),
+            "source_versions": dict(source_versions),
+            "read_model_scope_keys": [normalized_month],
+            "stale_reasons": stale_reasons,
+        }
+
 
     def _invoice_lifecycle_scope_row(
         self,
@@ -3815,6 +3843,44 @@ class PostgresSummaryReadModelRepository:
                     payload["source_versions"] = row.get("source_versions")
                 result.append(payload)
         return result
+
+    def no_oa_bank_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        resolved_filters = filters if isinstance(filters, dict) else {}
+        where: list[str] = ["status <> 'superseded'"]
+        params: list[Any] = []
+        if value := text(resolved_filters.get("month")):
+            where.append("scope_month = %s::date")
+            params.append(month_start(value))
+        rows = self._connection.fetch_all(
+            f"""
+            select source_versions
+            from read_model.no_oa_bank_batch_rows
+            where {" and ".join(where)}
+            order by scope_month desc nulls last, batch_id
+            """,
+            tuple(params),
+        )
+        normalized_month = text(resolved_filters.get("month"))
+        if not rows:
+            if not self._no_oa_bank_batch_readiness_is_fresh(normalized_month):
+                return None
+            return {
+                "read_model_status": "fresh",
+                "row_count": 0,
+                "source_versions": {},
+            }
+        source_versions_values = [
+            row.get("source_versions")
+            for row in list(rows)
+            if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
+        ]
+        source_versions = dict(source_versions_values[0]) if source_versions_values else {}
+        consistent = bool(source_versions_values) and all(dict(value) == source_versions for value in source_versions_values)
+        return {
+            "read_model_status": "fresh" if self._no_oa_bank_batch_readiness_is_fresh(normalized_month) else "refreshing",
+            "row_count": len(rows),
+            "source_versions": source_versions if consistent else {},
+        }
 
     def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
         normalized_scope_key = text(scope_key)

@@ -210,6 +210,13 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 self.calls.append(dict(filters or {}))
                 return [{"batch_id": "batch-1"}]
 
+            def no_oa_bank_batch_source_versions_summary(
+                self,
+                filters: dict[str, object] | None = None,
+            ) -> dict[str, object]:
+                self.calls.append({"summary_filters": dict(filters or {})})
+                return {"read_model_status": "fresh", "row_count": 1, "source_versions": {"schema": "v1"}}
+
             def list_pending_invoice_rows(self, **_kwargs: object) -> list[dict[str, object]]:
                 raise AssertionError("no-OA port must not expose pending invoice methods")
 
@@ -217,8 +224,12 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         port = NoOaBankBatchReadModelRepositoryPort(repository)
 
         self.assertEqual(port.list_no_oa_bank_batch_rows({"month": "2026-06"}), [{"batch_id": "batch-1"}])
+        self.assertEqual(
+            port.no_oa_bank_batch_source_versions_summary({"month": "2026-06"})["source_versions"],
+            {"schema": "v1"},
+        )
         self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
-        self.assertEqual(repository.calls, [{"month": "2026-06"}])
+        self.assertEqual(repository.calls, [{"month": "2026-06"}, {"summary_filters": {"month": "2026-06"}}])
 
     def test_submit_batch_delegates_relation_write_to_command_service(self) -> None:
         rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]

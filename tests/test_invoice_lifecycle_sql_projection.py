@@ -76,20 +76,17 @@ class FreshInvoiceLifecycleReadModelRepository:
     def __init__(self) -> None:
         self.source_versions: dict[str, object] = {}
         self.listed_months: list[str] = []
+        self.summary_months: list[str] = []
 
     def list_invoice_lifecycle_rows(self, *, month: str) -> dict[str, object]:
-        self.listed_months.append(month)
+        raise AssertionError("unchanged invoice lifecycle scope must not load projected rows")
+
+    def invoice_lifecycle_scope_summary(self, *, month: str) -> dict[str, object]:
+        self.summary_months.append(month)
         return {
             "read_model_status": "fresh",
             "source_versions": dict(self.source_versions),
-            "rows": [
-                {
-                    "subject_id": "input-invoice-1",
-                    "subject_type": "input_invoice",
-                    "scope_key": month,
-                    "lifecycle_status": "paid",
-                }
-            ],
+            "row_count": 1,
         }
 
     def save_invoice_lifecycle_rows(self, **_kwargs: object) -> None:
@@ -154,7 +151,8 @@ def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(
     assert result["row_count"] == 1
     assert result["skipped"] is True
     assert result["skip_reason"] == "source_versions_unchanged"
-    assert invoice_repository.listed_months == ["2026-05"]
+    assert invoice_repository.summary_months == ["2026-05"]
+    assert invoice_repository.listed_months == []
     assert read_repository.relation_calls == ["2026-05"]
     assert not connection.fetch_all_calls
     assert result["source_versions"]["workbench_relation_source_versions"] == {

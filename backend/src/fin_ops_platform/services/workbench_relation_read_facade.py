@@ -103,6 +103,41 @@ class WorkbenchRelationReadFacade:
         self._last_result = result
         return result
 
+    def source_versions_for_month(
+        self,
+        month: str,
+        *,
+        require_fresh: bool = True,
+        reason: str = "downstream_workbench_relation_source_versions",
+    ) -> dict[str, Any]:
+        normalized_month = text(month) or ""
+        reader = getattr(self._read_model_repository, "workbench_relation_source_versions", None)
+        if not callable(reader) or not normalized_month:
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=[normalized_month] if normalized_month else [],
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable" if not callable(reader) else "month_required"],
+            )
+        source_versions = reader(scope_key=normalized_month, tenant_id=self._tenant_id)
+        payload = {
+            "read_model_status": FRESH_WORKBENCH_RELATION_STATUS if isinstance(source_versions, dict) and source_versions else "missing",
+            "rows": [],
+            "groups": [],
+            "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
+            "read_model_scope_keys": [normalized_month],
+            "stale_reasons": [],
+        }
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=[normalized_month],
+        )
+        self._last_result = result
+        return result
+
     def list_unlinked(
         self,
         month: str,

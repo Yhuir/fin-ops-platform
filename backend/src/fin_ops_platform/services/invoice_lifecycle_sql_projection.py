@@ -497,6 +497,21 @@ class InvoiceLifecycleSqlProjectionBuilder:
         scope_key: str,
         source_versions: dict[str, object],
     ) -> dict[str, object] | None:
+        scope_summary_loader = getattr(self._invoice_lifecycle_read_model_repository, "invoice_lifecycle_scope_summary", None)
+        if callable(scope_summary_loader):
+            scope_summary = scope_summary_loader(month=scope_key)
+            if not isinstance(scope_summary, dict) or str(scope_summary.get("read_model_status") or "") != "fresh":
+                return None
+            existing_source_versions = scope_summary.get("source_versions")
+            if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+                return None
+            return {
+                "scope_key": scope_key,
+                "row_count": max(int(scope_summary.get("row_count") or 0), 0),
+                "source_versions": source_versions,
+                "skipped": True,
+                "skip_reason": "source_versions_unchanged",
+            }
         list_rows = getattr(self._invoice_lifecycle_read_model_repository, "list_invoice_lifecycle_rows", None)
         if not callable(list_rows):
             return None

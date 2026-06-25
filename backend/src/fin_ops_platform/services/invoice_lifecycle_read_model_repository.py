@@ -72,3 +72,15 @@ class InvoiceLifecycleReadModelRepositoryPort:
             tenant_id=tenant_id,
         )
         return dict(payload) if isinstance(payload, dict) else None
+
+    def invoice_lifecycle_scope_summary(
+        self,
+        *,
+        month: str,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        payload = self._repository.invoice_lifecycle_scope_summary(
+            month=month,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
