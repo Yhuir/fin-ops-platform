@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
+WEB_SOURCE_ROOT = REPO_ROOT / "web" / "src"
+READ_MODEL_WRITE_TARGET_INVENTORY = (
+    REPO_ROOT
+    / ".planning"
+    / "refactors"
+    / "modular-io-boundaries"
+    / "analysis"
+    / "read-model-main-write-target-inventory-2026-06-26.md"
+)
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
@@ -283,6 +293,85 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
 }
 
+FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
+    (
+        "web/src/features/batchAccounting/api.ts",
+        "helper_default",
+        'readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "fresh"),',
+    ): (1, "legacy API normalizer default; Wave 2 must replace with fail-closed backend status contract."),
+    (
+        "web/src/features/pendingInvoices/api.ts",
+        "helper_default",
+        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRowsResponse["readModelStatus"],',
+    ): (1, "legacy rows normalizer default; Wave 2 must remove default-fresh fallback."),
+    (
+        "web/src/features/pendingInvoices/api.ts",
+        "helper_default",
+        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRulesPayload["readModelStatus"],',
+    ): (1, "legacy rules normalizer default; Wave 2 must remove default-fresh fallback."),
+    (
+        "web/src/features/turnoverLedger/api.ts",
+        "helper_default",
+        'readModelStatus: text(payload.read_model_status, "fresh"),',
+    ): (1, "legacy turnover normalizer default; Wave 2 must require backend status."),
+    (
+        "web/src/features/workbench/api.ts",
+        "nullish_or_logical",
+        'const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";',
+    ): (1, "legacy workbench status fallback; Wave 2 must keep unknown as non-fresh."),
+    (
+        "web/src/pages/BatchAccountingPage.tsx",
+        "object_literal",
+        'readModelStatus: "fresh",',
+    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
+    (
+        "web/src/pages/BatchAccountingPage.tsx",
+        "logical_or",
+        'const readModelStatus = payload.readModelStatus || "fresh";',
+    ): (1, "legacy page fallback; Wave 2 must remove stale-as-fresh default."),
+    (
+        "web/src/pages/NoOaBankBatchPage.tsx",
+        "object_literal",
+        'readModelStatus: "fresh",',
+    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
+    (
+        "web/src/pages/OaPendingPaymentsPage.tsx",
+        "use_state",
+        'const [readModelStatus, setReadModelStatus] = useState("fresh");',
+    ): (1, "initial page state; Wave 2 must make loading/unknown non-fresh until payload arrives."),
+    (
+        "web/src/pages/ReconciliationWorkbenchPage.tsx",
+        "object_literal",
+        'readModelStatus: "fresh",',
+    ): (1, "initial workbench placeholder; Wave 2 must prove backend status gates final display."),
+    (
+        "web/src/pages/TurnoverLedgerPage.tsx",
+        "logical_or",
+        'const readModelStatus = cleanText(ledger?.readModelStatus) || "fresh";',
+    ): (1, "legacy turnover page fallback; Wave 2 must remove default-fresh behavior."),
+    (
+        "web/src/pages/TurnoverLedgerPage.tsx",
+        "logical_or",
+        'if ((cleanText(freshLedger.readModelStatus) || "fresh") !== "fresh") {',
+    ): (1, "legacy turnover post-mutation fallback; Wave 2 must require explicit fresh status."),
+}
+
+REQUIRED_WRITE_TARGET_INVENTORY_MODULES = {
+    "workbench",
+    "batch-accounting",
+    "bank-details",
+    "bank-account-balance",
+    "pending-invoices",
+    "input-invoice-usage",
+    "oa-pending-payments",
+    "output-invoice-collections",
+    "cost-statistics",
+    "tax-offset",
+    "no-oa-bank-batches",
+    "turnover-ledger",
+    "imports-oa-driven",
+}
+
 
 class ReadModelArchitectureGuardTests(unittest.TestCase):
     def test_input_invoice_usage_app_level_projection_helpers_do_not_return(self) -> None:
@@ -468,6 +557,46 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
 
         self.assertEqual(actual, set(DIRECT_REFRESH_ENQUEUE_ALLOWLIST))
 
+    def test_frontend_read_model_status_default_fresh_sites_are_classified(self) -> None:
+        actual: dict[tuple[str, str, str], int] = {}
+        for path in WEB_SOURCE_ROOT.rglob("*"):
+            if path.suffix not in {".ts", ".tsx", ".js", ".jsx"} or self._is_frontend_test_file(path):
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                kind = self._frontend_default_fresh_kind(line)
+                if kind is None:
+                    continue
+                key = (
+                    str(path.relative_to(REPO_ROOT)),
+                    kind,
+                    self._normalized_source_line(line),
+                )
+                actual[key] = actual.get(key, 0) + 1
+
+        expected_counts = {key: count for key, (count, _reason) in FRONTEND_DEFAULT_FRESH_ALLOWLIST.items()}
+        self.assertEqual(actual, expected_counts)
+
+    def test_read_model_write_operation_target_inventory_covers_required_modules(self) -> None:
+        text = READ_MODEL_WRITE_TARGET_INVENTORY.read_text(encoding="utf-8")
+        required_columns = {
+            "| Module |",
+            "| Route/API source |",
+            "| Business writes |",
+            "| Affected read models/scopes |",
+            "| Current response target evidence |",
+            "| Closure status |",
+            "| Restore strategy |",
+        }
+        missing_columns = [column for column in sorted(required_columns) if column not in text]
+        self.assertEqual(missing_columns, [])
+        missing_modules = [
+            module for module in sorted(REQUIRED_WRITE_TARGET_INVENTORY_MODULES) if f"| `{module}` |" not in text
+        ]
+        self.assertEqual(missing_modules, [])
+        self.assertNotRegex(text, r"\b(?:TODO|TBD)\b")
+        self.assertIn("business inverse", text)
+        self.assertIn("bounded DB restore", text)
+
     def _iter_source_trees(self) -> list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]]:
         entries: list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]] = []
         for path in SOURCE_ROOT.rglob("*.py"):
@@ -561,6 +690,36 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         if isinstance(value, ast.Name):
             return value.id in {"read_model_query_gateway"}
         return False
+
+    @staticmethod
+    def _is_frontend_test_file(path: Path) -> bool:
+        parts = set(path.parts)
+        return "test" in parts or path.name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+
+    @staticmethod
+    def _normalized_source_line(line: str) -> str:
+        return " ".join(line.strip().split())
+
+    @staticmethod
+    def _frontend_default_fresh_kind(line: str) -> str | None:
+        has_status = "readModelStatus" in line or "read_model_status" in line
+        if not has_status:
+            return None
+        if re.search(r"\breadModelStatus\s*:\s*['\"]fresh['\"]", line):
+            return "object_literal"
+        if re.search(r"\b(?:text|stringValue)\([^\n]*(?:readModelStatus|read_model_status)[^\n]*,\s*['\"]fresh['\"]", line):
+            return "helper_default"
+        if re.search(r"\breadModelStatus\b.*\buseState\(\s*['\"]fresh['\"]\s*\)", line):
+            return "use_state"
+        has_nullish_default = re.search(r"(?:readModelStatus|read_model_status).*?\?\?\s*['\"]fresh['\"]", line) is not None
+        has_logical_default = re.search(r"(?:readModelStatus|read_model_status).*?\|\|\s*['\"]fresh['\"]", line) is not None
+        if has_nullish_default and has_logical_default:
+            return "nullish_or_logical"
+        if has_nullish_default:
+            return "nullish"
+        if has_logical_default:
+            return "logical_or"
+        return None
 
 
 def _call_name(func: ast.AST) -> str:
