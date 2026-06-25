@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batch-refresh-producer-extraction-selected`
+Current state: `no-oa-bank-batch-post-refresh-producer-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:no-oa-bank-batch-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-no-oa-bank-batch-route-owner-local-closure-audit-2026-06-25.md`. No no-OA route callbacks remain in `server.py`, but `_enqueue_no_oa_bank_batch_read_model_refreshes(...)` still owns no-OA scope normalization and direct gateway enqueue logic in `Application`. T0 selected `server-py:no-oa-bank-batch-refresh-producer-extraction` next; no no-OA module/global closure is claimed.
+Completed `server-py:no-oa-bank-batch-refresh-producer-extraction` as `local-implementation-closed` in `analysis/server-py-no-oa-bank-batch-refresh-producer-extraction-2026-06-25.md`. `NoOaBankBatchReadModelRefreshProducer` now owns no-OA scope normalization and gateway enqueue, while `Application` only assembles the producer for tag selection, application service and derived lifecycle. T0 selected `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit` next; no no-OA module/global closure is claimed.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:no-oa-bank-batch-route-owner-local-closure-audit`
+`server-py:no-oa-bank-batch-refresh-producer-extraction`
 
 ## Next Prompt
 
-`server-py:no-oa-bank-batch-refresh-producer-extraction`
+`server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`

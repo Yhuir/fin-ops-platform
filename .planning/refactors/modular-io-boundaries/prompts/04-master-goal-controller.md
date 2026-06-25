@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:no-oa-bank-batch-refresh-producer-extraction-selected` after no-OA route-owner audit found the remaining app-owned refresh enqueue helper.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit-selected` after no-OA refresh producer extraction moved scope normalization and durable enqueue out of `Application`.
 
 ```text
 $gsd-autonomous --auto

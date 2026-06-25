@@ -271,6 +271,9 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaPairRelationSnapshotPort,
 )
+from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh_producer import (
+    NoOaBankBatchReadModelRefreshProducer,
+)
 from fin_ops_platform.services.no_oa_bank_batch_tag_selection_service import (
     NoOaBankBatchTagSelectionApplicationService,
 )
@@ -985,7 +988,7 @@ class Application:
         )
         self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
             app_settings_service=self._app_settings_service,
-            enqueue_no_oa_bank_batch_refresh=lambda scope_keys: self._enqueue_no_oa_bank_batch_read_model_refreshes(
+            enqueue_no_oa_bank_batch_refresh=lambda scope_keys: self._no_oa_bank_batch_read_model_refresh_producer().enqueue(
                 scope_keys,
                 reason="no_oa_bank_batch_tag_selection_changed",
             ),
@@ -9171,32 +9174,6 @@ class Application:
         except (TypeError, ValueError):
             return None
 
-    def _enqueue_no_oa_bank_batch_read_model_refreshes(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> bool:
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return False
-        normalized_scope_keys = [
-            str(item).strip()
-            for item in list(scope_keys or [])
-            if str(item).strip() and (str(item).strip() == "all" or SEARCH_MONTH_RE.match(str(item).strip()))
-        ]
-        if not normalized_scope_keys:
-            normalized_scope_keys = ["all"]
-        return bool(
-            refresh_gateway.enqueue_many(
-                "no_oa_bank_batch",
-                sorted(dict.fromkeys(normalized_scope_keys)),
-                reason=reason,
-                metadata=metadata,
-            )
-        )
-
     def _handle_api_import_fact_invoices(self, query: dict[str, list[str]]) -> Response:
         repository = getattr(self._state_store, "import_fact_repository", None)
         page_loader = getattr(repository, "list_invoices_page", None)
@@ -9301,6 +9278,7 @@ class Application:
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
             search_cache_clearer=self._search_service.clear_cache,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer(),
             relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(),
         )
@@ -9389,6 +9367,9 @@ class Application:
 
     def _bank_account_balance_read_model_refresh_producer(self) -> BankAccountBalanceReadModelRefreshProducer:
         return BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
+
+    def _no_oa_bank_batch_read_model_refresh_producer(self) -> NoOaBankBatchReadModelRefreshProducer:
+        return NoOaBankBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
     def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
         return TurnoverLedgerReadModelRefreshProducer(
@@ -14767,7 +14748,7 @@ class Application:
 
     def _no_oa_bank_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
         return NoOaBankBatchDerivedLifecycleExecutor(
-            enqueue_refresh=self._enqueue_no_oa_bank_batch_read_model_refreshes,
+            enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue,
         )
 
     def _bank_account_balance_derived_lifecycle_executor(self) -> BankAccountBalanceDerivedLifecycleExecutor:

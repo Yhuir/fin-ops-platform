@@ -206,6 +206,16 @@ git diff --check
 - Existing feature regression tests：新增 `PlatformRuntimeBoundaryGuardTests.test_no_oa_source_version_helpers_stay_out_of_application`，防止 dead app-owned source-version/stale-reason helpers 回到 `Application`。
 - 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 audit 不改变业务状态机、HTTP contract、UI operation barrier 或用户流程。
 
+## 2026-06-25 - Modular IO refresh producer extraction test note
+
+`server-py:no-oa-bank-batch-refresh-producer-extraction` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 `tests/test_no_oa_bank_batch_read_model_refresh_producer.py`，覆盖 `all`/`YYYY-MM` scope normalize、非法 scope fallback、`reason`/`metadata` forwarding 和 gateway unavailable false path；新增 `test_enqueue_background_refresh_uses_injected_refresh_producer`，证明 application service 优先使用注入 producer。
+- Read model/cache/background job tests：producer 测试证明 no-OA refresh enqueue 仍通过 `ReadModelRefreshGateway.enqueue_many("no_oa_bank_batch", ...)`，并复跑 `tests/test_no_oa_bank_batch_derived_lifecycle_executor.py` 保护 derived lifecycle fan-out/result shape。
+- Existing feature regression tests：新增 `PlatformRuntimeBoundaryGuardTests.test_no_oa_bank_batch_refresh_enqueue_uses_producer_boundary`，防止 `Application._enqueue_no_oa_bank_batch_read_model_refreshes(...)` 或 `server.py` direct `enqueue_many("no_oa_bank_batch", ...)` 回归。
+- 保留回归：`test_enqueue_background_refresh_uses_durable_queue_boundary` 继续覆盖非生产/旧本地构造 fallback。
+- 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变 no-OA 提交/撤回规则、HTTP shape、权限、页面 operation barrier 或用户流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

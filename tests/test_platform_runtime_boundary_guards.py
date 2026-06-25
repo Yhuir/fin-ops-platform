@@ -3993,6 +3993,43 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_bank_batch_refresh_enqueue_uses_producer_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        producer_path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh_producer.py"
+        producer_source = producer_path.read_text(encoding="utf-8")
+        app_service_path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
+        app_service_source = app_service_path.read_text(encoding="utf-8")
+        app_service_tree = _parse(app_service_path)
+
+        violations: list[str] = []
+        if _function_source(server_tree, server_source, "_enqueue_no_oa_bank_batch_read_model_refreshes"):
+            violations.append("server.py still owns no-OA bank batch refresh enqueue helper")
+        if 'enqueue_many("no_oa_bank_batch"' in server_source or "enqueue_many('no_oa_bank_batch'" in server_source:
+            violations.append("server.py still directly enqueues no-OA bank batch refresh scopes")
+
+        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_read_model_refresh_producer")
+        if "NoOaBankBatchReadModelRefreshProducer" not in app_factory_source:
+            violations.append("Application no longer assembles NoOaBankBatchReadModelRefreshProducer")
+        if "read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer()" not in server_source:
+            violations.append("NoOaBankBatchApplicationService is not wired with the refresh producer")
+        if "enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue" not in server_source:
+            violations.append("NoOaBankBatchDerivedLifecycleExecutor is not wired with the refresh producer")
+
+        if "class NoOaBankBatchReadModelRefreshProducer" not in producer_source:
+            violations.append("NoOaBankBatchReadModelRefreshProducer is missing")
+        if "def normalize_scope_keys(" not in producer_source:
+            violations.append("NoOaBankBatchReadModelRefreshProducer no longer owns scope normalization")
+        if 'enqueue_many(\n                "no_oa_bank_batch"' not in producer_source:
+            violations.append("NoOaBankBatchReadModelRefreshProducer no longer enqueues through the gateway")
+
+        enqueue_source = _function_source(app_service_tree, app_service_source, "enqueue_background_refresh")
+        if "_read_model_refresh_producer.enqueue(scope_keys, reason=reason)" not in enqueue_source:
+            violations.append("NoOaBankBatchApplicationService does not prefer the injected refresh producer")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_bank_batch_routes_delegate_to_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

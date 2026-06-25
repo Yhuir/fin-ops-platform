@@ -105,6 +105,7 @@ class NoOaBankBatchApplicationService:
         expand_workbench_read_model_scope_keys_for_base_scopes: Callable[[list[str]], list[str]] | None = None,
         search_cache_clearer: Callable[[], Any] | None = None,
         queue_repository: Any | None = None,
+        read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
@@ -132,6 +133,7 @@ class NoOaBankBatchApplicationService:
         )
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
         self._queue_repository = queue_repository
+        self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
 
@@ -1011,6 +1013,8 @@ class NoOaBankBatchApplicationService:
         return bool(normalized_months)
 
     def enqueue_background_refresh(self, scope_keys: list[str], *, reason: str) -> bool:
+        if self._read_model_refresh_producer is not None:
+            return bool(self._read_model_refresh_producer.enqueue(scope_keys, reason=reason))
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return False

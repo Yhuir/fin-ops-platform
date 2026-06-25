@@ -23,6 +23,18 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-25 - refresh producer extraction
+
+- 目标：执行 `server-py:no-oa-bank-batch-refresh-producer-extraction`，把 no-OA read model refresh scope normalize 和 durable queue enqueue 从 `Application` 移到显式 producer service。
+- 影响范围：`NoOaBankBatchReadModelRefreshProducer`、`NoOaBankBatchApplicationService.enqueue_background_refresh(...)`、`Application` 依赖组装、tag selection refresh callback、derived lifecycle executor wiring、producer/service/static Guard tests；不改变 no-OA 业务状态机、HTTP response shape、read model schema、dirty/outbox schema、权限、审计、前端行为或生产数据。
+- 关键决策：`NoOaBankBatchReadModelRefreshProducer` 是 no-OA 非事务 read model refresh enqueue owner；`Application` 只负责组装 producer provider；application service 优先使用注入 producer，保留 `queue_repository` fallback 保护现有本地构造路径。
+- 保留语义：允许 scope 仍为 `all` 和 `YYYY-MM`；非法/空 scope fallback 到 `all`；`reason` 和 `metadata` 继续传给 `ReadModelRefreshGateway`；gateway 不可 enqueue 时返回 false/empty。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 producer unit tests、application service injected-producer regression、platform boundary Guard；复跑 derived lifecycle executor regression。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-refresh-producer-extraction-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。

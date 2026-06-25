@@ -727,6 +727,33 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_enqueue_background_refresh_uses_injected_refresh_producer(self) -> None:
+        class RefreshProducer:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def enqueue(self, scope_keys: list[str], *, reason: str) -> bool:
+                self.calls.append({"scope_keys": list(scope_keys), "reason": reason})
+                return True
+
+        producer = RefreshProducer()
+        service = NoOaBankBatchApplicationService(
+            import_service=SimpleNamespace(),
+            effective_category_provider=SimpleNamespace(),
+            no_oa_bank_batch_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
+            workbench_read_model_service=SimpleNamespace(),
+            state_store=None,
+            read_model_refresh_producer=producer,
+        )
+
+        enqueued = service.enqueue_background_refresh(["bad", "2026-05"], reason="unit_test")
+
+        self.assertTrue(enqueued)
+        self.assertEqual(producer.calls, [{"scope_keys": ["bad", "2026-05"], "reason": "unit_test"}])
+
 
 if __name__ == "__main__":
     unittest.main()
