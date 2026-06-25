@@ -1,53 +1,50 @@
 # Next Prompt
 
-Continue after `server-py:workbench-events-stream-route-owner-extraction`.
+Continue after `server-py:workbench-read-route-owner-post-events-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:workbench-events-stream-route-owner-extraction`.
-- Row411 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-stream-route-owner-extraction-2026-06-25.md`.
-- `WorkbenchEventsApiRoutes` now owns Workbench SSE stream body/header mapping behind explicit ports.
+- Last completed boundary: `server-py:workbench-read-route-owner-post-events-audit`.
+- Row412 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-read-route-owner-post-events-audit-2026-06-25.md`.
+- Selected next local implementation boundary: `server-py:workbench-events-active-stream-registry-extraction`.
 - Refresh-status payload normalization and legacy `/api/workbench` SQL fallback/payload handling remain deferred to dedicated slices.
 - Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
 
 ## Previous Prompt Completion
 
-`server-py:workbench-events-stream-route-owner-extraction` is complete:
+`server-py:workbench-read-route-owner-post-events-audit` is complete:
 
-- added `WorkbenchEventsApiRoutes`;
-- moved `GET /api/workbench/events` stream body/header mapping out of `Application`;
-- preserved heartbeat, no-buffering headers, polling-without-Redis behavior and stream close cleanup;
-- kept refresh-status payload normalization and active stream registry helpers as explicit ports;
-- added static Guard coverage and reused existing Workbench SSE tests;
+- audited remaining Workbench read/support surfaces after events route extraction;
+- selected active stream registry extraction as the next narrow local boundary;
+- deferred refresh-status payload normalization because it is shared by SSE/App Health/API status;
+- deferred legacy `/api/workbench` SQL fallback/payload handling as a larger read-model gateway boundary;
 - avoided production validation.
 
 ## Next Boundary
 
-`server-py:workbench-read-route-owner-post-events-audit`
+`server-py:workbench-events-active-stream-registry-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-stream-route-owner-extraction-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-read-route-owner-post-events-audit-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
    - `backend/src/fin_ops_platform/app/routes_workbench.py`
-   - `backend/src/fin_ops_platform/app/server.py` remaining Workbench read/support surfaces
+   - `backend/src/fin_ops_platform/app/server.py` active stream registry helpers and events route builder
    - `tests/test_workbench_sql_runtime.py` Workbench events tests
    - relevant Workbench static guards in `tests/test_platform_runtime_boundary_guards.py`
-3. Audit remaining Workbench read/support surfaces:
-   - refresh-status payload normalization/helper ownership;
-   - active stream registry helper ownership after events route extraction;
-   - legacy `/api/workbench` SQL fallback and payload builder path.
-4. Select the next narrow local implementation or guard boundary.
-5. If safe, implement with tests/Guard/docs; otherwise close the audit and select the next boundary.
+3. Move active stream count/lock management out of `Application` into a cohesive owner.
+4. Wire `WorkbenchEventsApiRoutes` through explicit `mark_started`/`mark_closed` ports from the new owner.
+5. Preserve stream close cleanup behavior and update tests/static Guard.
+6. Do not move refresh-status payload normalization or legacy `/api/workbench` SQL fallback.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
 - Do not claim global closure from Workbench read route-owner extraction.
 - Do not choose Go implementation; Go admission remains blocked.
-- Do not move legacy `/api/workbench` SQL fallback without a dedicated implementation analysis and freshness tests.
+- Do not move refresh-status payload normalization or legacy `/api/workbench` SQL fallback in this slice.
