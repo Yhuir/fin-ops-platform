@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - route-owner local closure audit
+
+- 目标：审计待找发票 route callback collapse 后 `server.py` 的剩余 pending invoice surface，判断本地 route-owner 支持是否已 accounted。
+- 影响范围：本次仅更新 modular IO autonomous state 和本实施记录；无运行时代码变更。
+- 关键决策：`server.py` 中不再存在 `_handle_api_pending_invoice*` callback；剩余 surface 是 route factory/composition、read/write session、export response/error response、settings lifecycle、read-model invalidation/provider 和 broad local state persistence 端口。待找发票本地 `server.py` route-owner 支持已 accounted，但不声明模块或全局闭环。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：本条为审计 slice，无运行时代码变更；依赖 Row367/Row369 已新增的 platform runtime boundary Guard 防止 pending invoice callback 回归。
+- 验证命令：`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证。
+- 后续事项：转入 `server-py:tax-route-owner-audit`。
+
 ## 2026-06-25 - write route callback collapse
 
 - 目标：把待找发票 rules、attach existing 和 income status 的剩余 HTTP mapping 从 `server.py` 迁入 `PendingInvoiceApiRoutes.route(...)`，完成 pending invoice route-owner callback 收敛。

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-route-owner-local-closure-audit-selected`
+Current state: `tax-route-owner-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:pending-invoice-write-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-pending-invoice-write-route-callback-collapse-2026-06-25.md`. Remaining pending invoice rules, attach-existing and income-status HTTP mapping now lives in `PendingInvoiceApiRoutes.route(...)`; write-session and persist-state are explicit platform ports and migrated app callbacks were removed. T0 selected pending invoice route-owner local closure audit next.
+Completed `server-py:pending-invoice-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-pending-invoice-route-owner-local-closure-audit-2026-06-25.md`. No `_handle_api_pending_invoice*` callbacks remain in `server.py`; remaining surfaces are composition-root/platform/provider ports, so pending invoice local `server.py` route-owner support is accounted for without module/global closure. T0 selected tax route-owner audit next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:pending-invoice-write-route-callback-collapse`
+`server-py:pending-invoice-route-owner-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:pending-invoice-route-owner-local-closure-audit`
+`server-py:tax-route-owner-audit`
