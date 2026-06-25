@@ -1682,11 +1682,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
+        business_delete_path = SERVICES_ROOT / "etc_business_batch_delete_service.py"
+        business_delete_source = business_delete_path.read_text(encoding="utf-8")
+        business_delete_tree = _parse(business_delete_path)
         cleanup_path = SERVICES_ROOT / "etc_reconciliation_import_cleanup_service.py"
         cleanup_source = cleanup_path.read_text(encoding="utf-8")
         cleanup_tree = _parse(cleanup_path)
         cancel_method = _function_source(tree, source, "_cancel_etc_summary_relations_for_batch")
         delete_method = _function_source(tree, source, "_handle_api_etc_business_batch_delete")
+        business_delete_method = _function_source(business_delete_tree, business_delete_source, "delete_business_batch")
         task_delete_method = _function_source(cleanup_tree, cleanup_source, "delete_reconciliation_task_business_batch_sources")
 
         violations: list[str] = []
@@ -1696,8 +1700,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_cancel_etc_summary_relations_for_batch directly mutates pair relation service")
         if "_workbench_pair_relation_service" in cancel_method:
             violations.append("_cancel_etc_summary_relations_for_batch reaches app pair relation service directly")
-        if "_assert_etc_summary_relation_write_precondition_for_batch(batch)" not in delete_method:
-            violations.append("ETC business batch API delete lacks relation freshness preflight before local mutation")
+        if "_etc_business_batch_delete_service().delete_business_batch(" not in delete_method:
+            violations.append("ETC business batch API delete no longer delegates side-effect orchestration to service")
+        if "_assert_etc_summary_relation_write_precondition_for_batch(batch)" not in business_delete_method:
+            violations.append("ETC business batch delete service lacks relation freshness preflight before local mutation")
+        if "_cancel_etc_summary_relations_for_batch(batch)" not in business_delete_method:
+            violations.append("ETC business batch delete service lacks summary relation cancellation")
+        if "delete_reconciliation_task_after_business_batch_delete(task)" not in business_delete_method:
+            violations.append("ETC business batch delete service lacks reconciliation task cleanup")
+        if "_refresh_after_etc_invoice_link(" in business_delete_source:
+            violations.append("ETC business batch delete service performs app refresh directly")
+        if "_persist_state(" in business_delete_source:
+            violations.append("ETC business batch delete service performs app persistence directly")
         if "_assert_etc_summary_relation_write_precondition_for_batch(business_batch)" not in task_delete_method:
             violations.append("ETC reconciliation task delete lacks relation freshness preflight before local mutation")
         if "_delete_reconciliation_task_business_batch_sources" in source:

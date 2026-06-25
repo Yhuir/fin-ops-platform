@@ -139,7 +139,6 @@ from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import (
-    ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
     EtcBatchDeleteError,
     EtcBatchNotFoundError,
     EtcBusinessBatchActiveExistsError,
@@ -160,6 +159,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
+from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_legacy_batch_delete_service import EtcLegacyBatchDeleteService
 from fin_ops_platform.services.etc_legacy_batch_lifecycle_service import EtcLegacyBatchLifecycleService
@@ -4962,6 +4962,24 @@ class Application:
         self._etc_legacy_batch_delete = service
         return service
 
+    def _etc_business_batch_delete_service(self) -> EtcBusinessBatchDeleteService:
+        service = getattr(self, "_etc_business_batch_delete", None)
+        if isinstance(service, EtcBusinessBatchDeleteService):
+            return service
+        service = EtcBusinessBatchDeleteService(
+            etc_service=self._etc_service,
+            import_service=self._import_service,
+            reconciliation_task_service=self._etc_reconciliation_task_service,
+            cleanup_service=self._etc_reconciliation_import_cleanup_service(),
+            existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
+            etc_invoice_changed_months=self._etc_invoice_changed_months,
+            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+            assert_etc_summary_relation_write_precondition_for_batch=self._assert_etc_summary_relation_write_precondition_for_batch,
+            cancel_etc_summary_relations_for_batch=self._cancel_etc_summary_relations_for_batch,
+        )
+        self._etc_business_batch_delete = service
+        return service
+
     def _etc_legacy_batch_lifecycle_service(self) -> EtcLegacyBatchLifecycleService:
         service = getattr(self, "_etc_legacy_batch_lifecycle", None)
         if isinstance(service, EtcLegacyBatchLifecycleService):
@@ -5751,57 +5769,18 @@ class Application:
             if error is not None:
                 return error
         try:
-            batch = self._etc_service.get_business_batch(business_batch_id)
             expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
-            invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
-            import_batch_ids = [
-                str(import_batch_id).strip()
-                for import_batch_id in list(getattr(batch, "import_batch_ids", []) or [])
-                if str(import_batch_id).strip()
-            ]
-            task = None
-            if str(getattr(batch, "task_id", "") or "").strip():
-                try:
-                    task = self._etc_reconciliation_task_service.get_task(str(getattr(batch, "task_id")))
-                except KeyError:
-                    task = None
-            changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
-            if str(getattr(batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
-                self._assert_etc_summary_relation_write_precondition_for_batch(batch)
-            result = self._etc_service.delete_business_batch(
+            delete_result = self._etc_business_batch_delete_service().delete_business_batch(
                 business_batch_id,
                 expected_version=expected_version,
                 reason=str(payload.get("reason") or "").strip() or None,
             )
-            if result.get("kind") == "submitted_business_batch_reset":
-                changed_months.extend(self._cancel_etc_summary_relations_for_batch(batch))
-                refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
-                changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
-                changed_months.extend(self._link_etc_invoices_to_existing_invoices(refreshed_invoices))
-                self._etc_reconciliation_import_cleanup_service().delete_reconciliation_task_after_business_batch_delete(task)
-                if changed_months:
-                    self._refresh_after_etc_invoice_link(
-                        sorted(set(changed_months)),
-                        reason="etc_submitted_business_batch_reset",
-                    )
+            for event in delete_result.refresh_events:
+                if event.changed_months:
+                    self._refresh_after_etc_invoice_link(event.changed_months, reason=event.reason)
+                if event.persist_required:
                     self._persist_state()
-                return self._etc_business_response(HTTPStatus.OK, result)
-            canonical_deleted = 0
-            for import_batch_id in import_batch_ids:
-                canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
-            self._etc_reconciliation_import_cleanup_service().delete_reconciliation_task_after_business_batch_delete(task)
-            if canonical_deleted or changed_months:
-                self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_batch_deleted")
-                self._persist_state()
-        except EtcBusinessBatchNotFoundError:
-            try:
-                result = self._etc_service.delete_business_batch(
-                    business_batch_id,
-                    expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
-                    reason=str(payload.get("reason") or "").strip() or None,
-                )
-            except Exception as error:
-                return self._etc_business_error_response(error)
+            result = delete_result.delete_result
         except Exception as error:
             return self._etc_business_error_response(error)
         return self._etc_business_response(HTTPStatus.OK, result)

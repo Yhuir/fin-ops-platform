@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-business-batch-delete-service-extraction-selected`
+Current state: `etc-business-batch-delete-route-callback-collapse-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-business-batch-delete-fallback-audit` as `analysis-closed` in `analysis/server-py-etc-business-batch-delete-fallback-audit-2026-06-25.md`. T0 confirmed `_handle_api_etc_business_batch_delete(...)` still owns broad business-batch delete side-effect orchestration and selected dedicated delete service extraction next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-business-batch-delete-service-extraction` as `local-implementation-closed` in `analysis/server-py-etc-business-batch-delete-service-extraction-2026-06-25.md`. T0 added `EtcBusinessBatchDeleteService`, moved business-batch delete side-effect orchestration out of `Application`, kept the app callback as a thin HTTP mapper, and added service/API/static Guard coverage. Selected route callback collapse audit next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-business-batch-delete-fallback-audit`
+`server-py:etc-business-batch-delete-service-extraction`
 
 ## Next Prompt
 
-`server-py:etc-business-batch-delete-service-extraction`
+`server-py:etc-business-batch-delete-route-callback-collapse-audit`

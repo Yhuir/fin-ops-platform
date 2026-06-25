@@ -700,3 +700,13 @@
 - 测试覆盖：本 slice 为 analysis-only；下一实现 slice 需要 direct service tests、business batch delete API regressions 和 static Guard。
 - 验证命令：只读审计 `server.py`、business route owner、business application service、legacy delete service、cleanup service、Guard 和 CodeGraph；未运行新增测试。
 - 未测风险：business-batch delete side-effect orchestration 仍在 `Application`，等待 service extraction。
+
+## 2026-06-25 - ETC business-batch delete service抽取
+
+- 目标：把 business-batch DELETE 的副作用编排从 `Application` 抽到显式 service，保持 HTTP response shape 和删除语义不变。
+- 影响范围：`EtcBusinessBatchDeleteService`、`Application._handle_api_etc_business_batch_delete(...)`、submitted reset、summary relation cancellation、canonical ETC invoice cleanup、reconciliation task cleanup、refresh/persist event、static Guard。
+- 关键决策：service 接收显式 etc/import/reconciliation/cleanup/relation/refresh 依赖，返回 `delete_result` 和 refresh/persist events；`Application` 暂时只做 JSON body、错误映射、事件执行和 response mapping。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品/API 长期事实不变，因为 response shape 和业务语义不变。
+- 测试覆盖：新增 direct service tests 覆盖普通删除、submitted reset 和 missing/idempotent fallback；扩展 static Guard；重跑 business batch delete API 和底层 service 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_business_batch_delete_service.py backend/src/fin_ops_platform/app/server.py tests/test_etc_business_batch_delete_service.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_business_batch_delete_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_summary_relation_delete_uses_workbench_relation_command_boundary -v`；business batch delete targeted API regressions 4 条通过；ETC service delete regressions 3 条通过。
+- 未测风险：`Application._handle_api_etc_business_batch_delete(...)` 仍是薄 callback；下一步审计能否 collapse 到 `EtcBusinessBatchApiRoutes`。
