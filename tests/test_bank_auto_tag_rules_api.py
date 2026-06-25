@@ -109,6 +109,9 @@ class _BankDetailStatusRepository:
             "read_model_status": self.status,
         }
 
+    def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
+        return self.list_bank_detail_accounts(**kwargs)
+
 
 class BankAutoTagRulesApiTests(unittest.TestCase):
     def _bank_detail_transactions_payload(
@@ -156,7 +159,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app = build_application()
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules({})
+            response = app.handle_request("GET", "/api/bank-details/auto-tag-rules")
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
@@ -194,7 +197,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._bank_detail_available_month_scope_keys = lambda: ["2026-03", "2026-04"]
+        app._bank_detail_available_month_scope_provider = lambda: SimpleNamespace(
+            scope_keys=lambda: ["2026-03", "2026-04"]
+        )
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
@@ -1102,6 +1107,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         repository = _BankDetailStatusRepository(status="refreshing")
         app._bank_detail_sql_read_repository = repository
+        app._bank_account_balance_sql_read_repository = repository
         app._requires_sql_read_model_runtime = lambda: True
 
         transactions = self._bank_detail_transactions_payload(

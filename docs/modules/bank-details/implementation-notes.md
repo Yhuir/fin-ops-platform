@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - read/export route-owner collapse
+
+- 目标：执行 `server-py:bank-details-read-export-route-callback-collapse`，把银行明细 read/export HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
+- 影响范围：`GET /api/bank-details/accounts`、`GET /api/bank-details/transactions`、`GET /api/bank-details/transactions/export`、`GET /api/bank-details/auto-tag-rules` 的 route-owner 和测试；不改变银行明细业务规则、read model freshness、dirty/outbox、cache、worker、前端行为或写入 side effects。
+- 关键决策：`BankDetailsApiRoutes` 注入 read-session、JSON response、export response ports；`server.py` 只做 `/api/bank-details/...` delegating dispatch。自动标签 PUT/reapply/file replacement 和分类确认/人工补分类写入 callbacks 暂留 `server.py`，后续单独审计。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期产品/API/read model 文档不变。
+- 测试覆盖：新增 route-owner HTTP mapping/port 测试和 platform Guard；更新旧测试调用点，不再依赖删除后的 app callbacks。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_runtime_bootstrap.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api.BankAutoTagRulesApiTests.test_get_returns_system_active_archived_fields_and_permissions tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_transactions_do_not_fallback_to_legacy_service tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_accounts_do_not_fallback_to_legacy_service tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing -v`。
+- 未测风险：完整 bank details 后端回归、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:bank-details-write-route-callback-audit`。
+
 ## 2026-06-24 - Bank detail service factory collaborator closure audit
 
 - 目标：执行 `read-models:bank-detail-service-factory-collaborator-closure-audit`，审计 `Application._bank_details_application_service(...)` 是否仍包含银行明细业务/read model/worker 实现逻辑。

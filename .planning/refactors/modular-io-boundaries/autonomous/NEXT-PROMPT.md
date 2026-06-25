@@ -1,51 +1,53 @@
 # Next Prompt
 
-Continue after `planning:post-turnover-ledger-route-owner-next-boundary-selection`.
+Continue after `server-py:bank-details-read-export-route-callback-collapse`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `planning:post-turnover-ledger-route-owner-next-boundary-selection`.
-- Row389 status: `analysis-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`.
-- Next selected implementation boundary: `server-py:bank-details-read-export-route-callback-collapse`.
-- Scope is local-first: no production validation, no Go hot-path, no global module closure claim.
+- Last completed boundary: `server-py:bank-details-read-export-route-callback-collapse`.
+- Row390 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-read-export-route-callback-collapse-2026-06-25.md`.
+- Bank details accounts, transactions, transactions export and auto-tag-rules GET HTTP mapping now live in `BankDetailsApiRoutes.route(...)`.
+- The migrated read/export app callbacks were removed from `server.py`.
+- Bank details write callbacks remain in `server.py` for a dedicated follow-up audit.
+- Bank-details module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
 
 ## Previous Prompt Completion
 
-`planning:post-turnover-ledger-route-owner-next-boundary-selection` is complete as analysis-only:
+`server-py:bank-details-read-export-route-callback-collapse` is complete:
 
-- compared remaining `server.py` route/support surfaces after turnover ledger route-owner closure;
-- selected bank details read/export route callback collapse as the next bounded local implementation slice;
-- left bank details write callbacks for later slices;
-- avoided runtime code changes and avoided production validation.
+- added `BankDetailsApiRoutes.route(...)` for read/export HTTP mapping;
+- injected explicit read-session, JSON response and export response ports from `Application`;
+- removed read/export callbacks from `server.py`;
+- updated route tests, runtime bootstrap tests and platform Guard coverage;
+- avoided bank details write callback migration and avoided production validation.
 
 ## Next Boundary
 
-`server-py:bank-details-read-export-route-callback-collapse`
+`server-py:bank-details-write-route-callback-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-read-export-route-callback-collapse-2026-06-25.md`
    - `docs/modules/bank-details/README.md`
    - `docs/modules/bank-details/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
    - `backend/src/fin_ops_platform/app/routes_bank_details.py`
-   - `tests/test_bank_details_routes.py`
    - `tests/test_bank_auto_tag_rules_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Implement only the read/export slice:
-   - move `/api/bank-details/accounts`, `/api/bank-details/transactions`, `/api/bank-details/transactions/export` and `GET /api/bank-details/auto-tag-rules` HTTP mapping into `BankDetailsApiRoutes.route(...)`;
-   - inject explicit read-session/json/export ports as needed;
-   - remove corresponding app callbacks from `server.py`;
-   - keep auto-tag PUT/reapply/file-replacement and category confirmation/assignment callbacks in `server.py` for later write slices.
-4. Update tests/Guard/docs/state/queue/next prompt and commit/push if verification passes.
+3. Perform analysis only:
+   - audit remaining bank details write callbacks;
+   - split auto-tag PUT/reapply/file replacement from category confirmation/assignment if risk suggests multiple implementation slices;
+   - identify required route-owner ports for session, JSON body, default bundled rules source, persistence/side-effect preservation and permission behavior;
+   - update queue/state/next prompt with the selected bounded write slice.
+4. Commit/push the audit if verification passes.
 
 ## Stop Gates
 
-- Do not move bank details write callbacks in this slice.
-- Do not change bank detail read model, refresh, dirty/outbox, cache, business rules or frontend behavior.
+- Do not move write callbacks until the audit selects a bounded slice.
+- Do not change bank detail read model, refresh, dirty/outbox, cache, business rules or frontend behavior during audit.
 - Do not run production validation or mutation.
 - Do not claim bank details module/global closure.

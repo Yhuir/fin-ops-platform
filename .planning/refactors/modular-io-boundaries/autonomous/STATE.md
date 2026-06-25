@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `bank-details-read-export-route-callback-collapse-selected`
+Current state: `bank-details-write-route-callback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-turnover-ledger-route-owner-next-boundary-selection` as `analysis-closed` in `analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`. T0 selected `server-py:bank-details-read-export-route-callback-collapse` as the next safe local implementation boundary: move bank details accounts, transactions, transactions export and auto-tag-rules GET HTTP mapping into `BankDetailsApiRoutes.route(...)` while leaving bank details write callbacks for later slices.
+Completed `server-py:bank-details-read-export-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-bank-details-read-export-route-callback-collapse-2026-06-25.md`. Bank details accounts, transactions, transactions export and auto-tag-rules GET HTTP mapping now live in `BankDetailsApiRoutes.route(...)` with explicit read-session/json/export ports; migrated app callbacks were removed and bank details write callbacks remain for a dedicated follow-up audit.
 
 ## Closed Or Deferred Slices
 

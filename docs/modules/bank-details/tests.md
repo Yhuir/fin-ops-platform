@@ -2,6 +2,29 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - read/export route-owner collapse test note
+
+`server-py:bank-details-read-export-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改分类规则、金额、状态流转或业务决策。
+- Service-layer tests：间接适用；未改 service 行为，但保留 `tests/test_runtime_bootstrap.py` 的生产 PostgreSQL no-legacy-fallback 回归。
+- API contract tests：适用；`tests/test_bank_details_routes.py` 新增 route-owner HTTP mapping/port 测试，`tests/test_bank_auto_tag_rules_api.py` 改用 public request 边界验证 GET auto-tag rules 响应。
+- Read model/cache/background job tests：间接适用；本 slice 不改 read model/worker/cache，但保留 runtime bootstrap refreshing/fallback 断言。
+- Frontend component and interaction tests：不适用；前端代码未改。
+- End-to-end business-flow integration tests：不适用；本 slice 只移动后端 HTTP mapping，不改业务流。
+- Existing feature regression tests：适用；新增 platform Guard 防止 read/export callbacks 回流到 `server.py`，并确认写入 callbacks 未提前移动。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_runtime_bootstrap.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api.BankAutoTagRulesApiTests.test_get_returns_system_active_archived_fields_and_permissions tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_transactions_do_not_fallback_to_legacy_service tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_accounts_do_not_fallback_to_legacy_service tests.test_runtime_bootstrap.RuntimeBootstrapTests.test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing -v
+```
+
+未测风险：完整 bank details 后端回归、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；银行明细写入 callbacks 仍待后续 audit/slice。
+
 Spec-first Browser e2e 审计入口：
 
 - `e2e-spec.md`：银行明细页面 Browser e2e 验收合同。

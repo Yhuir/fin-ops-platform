@@ -83,6 +83,66 @@ class BankDetailsRoutesTests(unittest.TestCase):
             [("accounts", {"date_from": "2026-05-01", "date_to": "2026-05-31"})],
         )
 
+    def test_route_owner_handles_read_and_export_http_mapping_with_platform_ports(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        responses: list[tuple[HTTPStatus, object]] = []
+        exports: list[tuple[HTTPStatus, object]] = []
+        session = self._session(username="exporter")
+        routes = BankDetailsApiRoutes(
+            application_service=service,
+            resolve_read_session=lambda _headers: (session, None),
+            json_response=lambda status, payload: responses.append((status, payload)) or {"status": status, "payload": payload},
+            export_response=lambda status, result: exports.append((status, result)) or {"status": status, "filename": result.filename},
+        )
+
+        accounts_response = routes.route(
+            "GET",
+            "/api/bank-details/accounts",
+            {"date_from": ["2026-05-01"], "date_to": ["2026-05-31"]},
+            None,
+            {},
+        )
+        rules_response = routes.route("GET", "/api/bank-details/auto-tag-rules", {}, None, {})
+        export_response = routes.route(
+            "GET",
+            "/api/bank-details/transactions/export",
+            {
+                "mode": ["filtered"],
+                "date_from": ["2026-05-01"],
+                "date_to": ["2026-05-31"],
+                "keyword": ["外部候选"],
+            },
+            None,
+            {},
+        )
+
+        self.assertEqual(accounts_response["status"], HTTPStatus.OK)
+        self.assertTrue(rules_response["payload"]["can_save"])
+        self.assertEqual(export_response, {"status": HTTPStatus.OK, "filename": "bank-details.xlsx"})
+        self.assertEqual(exports[0][1].filename, "bank-details.xlsx")
+        self.assertEqual(
+            service.calls,
+            [
+                ("accounts", {"date_from": "2026-05-01", "date_to": "2026-05-31"}),
+                ("auto_tag_rules", {"can_save": True}),
+                (
+                    "export_transactions",
+                    {
+                        "mode": "filtered",
+                        "account_key": None,
+                        "date_from": "2026-05-01",
+                        "date_to": "2026-05-31",
+                        "keyword": "外部候选",
+                        "category_code": None,
+                        "category_primary_label": None,
+                        "category_sub_label": None,
+                        "category_third_label": None,
+                        "actor_id": "exporter",
+                    },
+                ),
+            ],
+        )
+
     def test_routes_facade_returns_202_only_when_refreshing_payload_has_no_rows(self) -> None:
         service = FakeBankDetailsApplicationService()
         service.transactions_result = {

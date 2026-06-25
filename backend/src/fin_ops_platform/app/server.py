@@ -1862,34 +1862,16 @@ class Application:
             return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
         if method == "GET" and route_path == "/api/workbench/events":
             return self._handle_api_workbench_events(query.get("month", [None])[0])
-        if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
-            return self._handle_api_bank_details_auto_tag_rules(headers)
+        if route_path.startswith("/api/bank-details/"):
+            bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
+            if bank_detail_response is not None:
+                return bank_detail_response
         if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/reapply":
             return self._handle_api_bank_details_auto_tag_rules_reapply(headers)
         if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/file-replacement":
             return self._handle_api_bank_details_auto_tag_rules_file_replacement(body, headers)
         if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
             return self._handle_api_bank_details_auto_tag_rules_update(body, headers)
-        if method == "GET" and route_path == "/api/bank-details/accounts":
-            return self._handle_api_bank_details_accounts(
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-            )
-        if method == "GET" and route_path == "/api/bank-details/transactions/export":
-            return self._handle_api_bank_details_transactions_export(query, headers)
-        if method == "GET" and route_path == "/api/bank-details/transactions":
-            return self._handle_api_bank_details_transactions(
-                account_key=query.get("account_key", [None])[0],
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                category_code=query.get("category_code", [None])[0],
-                category_primary_label=query.get("category_primary_label", [None])[0],
-                category_sub_label=query.get("category_sub_label", [None])[0],
-                category_third_label=query.get("category_third_label", [None])[0],
-                page=query.get("page", [None])[0],
-                page_size=query.get("page_size", [None])[0],
-            )
         bank_detail_confirmation_prefix = "/api/bank-details/transactions/"
         bank_detail_confirmation_suffix = "/category-confirmation"
         bank_detail_assignment_suffix = "/category-assignment"
@@ -9173,17 +9155,6 @@ class Application:
     def _tax_offset_month_entry_count(self, payload: dict[str, object]) -> int:
         return TaxOffsetRuntimeService.month_entry_count(payload)
 
-    def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
-        status, payload = self._bank_details_routes().accounts(date_from=date_from, date_to=date_to)
-        return self._json_response(status, payload)
-
-    def _handle_api_bank_details_auto_tag_rules(self, headers: dict[str, str] | None) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        status, payload = self._bank_details_routes().auto_tag_rules(session=session)
-        return self._json_response(status, payload)
-
     def _handle_api_bank_details_auto_tag_rules_update(
         self,
         body: str | bytes | None,
@@ -9252,34 +9223,6 @@ class Application:
             / "bank_flow_tag_rules_ui2.normalized.json"
         )
         return json.loads(fixture_path.read_text(encoding="utf-8"))
-
-    def _handle_api_bank_details_transactions(
-        self,
-        *,
-        account_key: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        keyword: str | None,
-        category_code: str | None = None,
-        category_primary_label: str | None = None,
-        category_sub_label: str | None = None,
-        category_third_label: str | None = None,
-        page: str | None,
-        page_size: str | None,
-    ) -> Response:
-        status, payload = self._bank_details_routes().transactions(
-            account_key=account_key,
-            date_from=date_from,
-            date_to=date_to,
-            keyword=keyword,
-            category_code=category_code,
-            category_primary_label=category_primary_label,
-            category_sub_label=category_sub_label,
-            category_third_label=category_third_label,
-            page=page,
-            page_size=page_size,
-        )
-        return self._json_response(status, payload)
 
     def _handle_api_bank_detail_category_confirmation(
         self,
@@ -9353,44 +9296,15 @@ class Application:
         status, result = self._bank_details_routes().clear_category_assignment(transaction_id, session=session)
         return self._json_response(status, result)
 
-    def _handle_api_bank_details_transactions_export(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-
-        mode = query.get("mode", ["all"])[0]
-        account_key = query.get("account_key", [None])[0]
-        date_from = query.get("date_from", [None])[0]
-        date_to = query.get("date_to", [None])[0]
-        keyword = query.get("keyword", [None])[0]
-        category_code = query.get("category_code", [None])[0]
-        category_primary_label = query.get("category_primary_label", [None])[0]
-        category_sub_label = query.get("category_sub_label", [None])[0]
-        category_third_label = query.get("category_third_label", [None])[0]
-        status, result = self._bank_details_routes().export_transactions(
-            mode=mode,
-            account_key=account_key,
-            date_from=date_from,
-            date_to=date_to,
-            keyword=keyword,
-            category_code=category_code,
-            category_primary_label=category_primary_label,
-            category_sub_label=category_sub_label,
-            category_third_label=category_third_label,
-            session=session,
-        )
-        if isinstance(result, dict):
-            return self._json_response(status, result)
+    def _bank_details_export_response(self, status: HTTPStatus, result: object) -> Response:
+        content = getattr(result, "content")
+        filename = str(getattr(result, "filename"))
         return Response(
             status_code=int(status),
-            body=result.content,
+            body=content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
-                "Content-Disposition": _build_content_disposition(result.filename),
+                "Content-Disposition": _build_content_disposition(filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -9640,7 +9554,12 @@ class Application:
         )
 
     def _bank_details_routes(self) -> BankDetailsApiRoutes:
-        return BankDetailsApiRoutes(self._bank_details_application_service())
+        return BankDetailsApiRoutes(
+            self._bank_details_application_service(),
+            resolve_read_session=self._resolve_bank_details_read_session,
+            json_response=self._json_response,
+            export_response=self._bank_details_export_response,
+        )
 
     def _bank_detail_read_model_refresh_producer(self) -> BankDetailReadModelRefreshProducer:
         return BankDetailReadModelRefreshProducer(

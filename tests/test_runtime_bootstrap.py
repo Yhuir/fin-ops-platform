@@ -240,13 +240,17 @@ class RuntimeBootstrapTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_bank_details_transactions(
-            account_key=None,
-            date_from="2026-04-01",
-            date_to="2026-04-30",
-            keyword=None,
-            page="1",
-            page_size="100",
+        response = app._bank_details_routes().route(
+            "GET",
+            "/api/bank-details/transactions",
+            {
+                "date_from": ["2026-04-01"],
+                "date_to": ["2026-04-30"],
+                "page": ["1"],
+                "page_size": ["100"],
+            },
+            None,
+            {},
         )
 
         self.assertEqual(response.status_code, 202)
@@ -268,7 +272,13 @@ class RuntimeBootstrapTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_bank_details_accounts(date_from="2026-04-01", date_to="2026-04-30")
+        response = app._bank_details_routes().route(
+            "GET",
+            "/api/bank-details/accounts",
+            {"date_from": ["2026-04-01"], "date_to": ["2026-04-30"]},
+            None,
+            {},
+        )
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("refreshing", response.body)
@@ -291,7 +301,13 @@ class RuntimeBootstrapTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_bank_details_accounts(date_from="2026-04-01", date_to="2026-04-30")
+        response = app._bank_details_routes().route(
+            "GET",
+            "/api/bank-details/accounts",
+            {"date_from": ["2026-04-01"], "date_to": ["2026-04-30"]},
+            None,
+            {},
+        )
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("refreshing", response.body)

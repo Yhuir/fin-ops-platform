@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import (
@@ -17,10 +17,61 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryValidationError,
 )
 
+ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
+JsonResponse = Callable[[HTTPStatus, object], Any]
+ExportResponse = Callable[[HTTPStatus, Any], Any]
+
 
 class BankDetailsApiRoutes:
-    def __init__(self, application_service: BankDetailsApplicationService) -> None:
+    def __init__(
+        self,
+        application_service: BankDetailsApplicationService,
+        *,
+        resolve_read_session: ReadSessionResolver | None = None,
+        json_response: JsonResponse | None = None,
+        export_response: ExportResponse | None = None,
+    ) -> None:
         self._application_service = application_service
+        self._resolve_read_session = resolve_read_session
+        self._json_response = json_response
+        self._export_response = export_response
+
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any | None:
+        del body
+        if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
+            return self._json_read(headers, lambda session: self.auto_tag_rules(session=session))
+        if method == "GET" and route_path == "/api/bank-details/accounts":
+            return self._json_response_for(
+                *self.accounts(
+                    date_from=query.get("date_from", [None])[0],
+                    date_to=query.get("date_to", [None])[0],
+                )
+            )
+        if method == "GET" and route_path == "/api/bank-details/transactions/export":
+            return self._export_read(query, headers)
+        if method == "GET" and route_path == "/api/bank-details/transactions":
+            return self._json_response_for(
+                *self.transactions(
+                    account_key=query.get("account_key", [None])[0],
+                    date_from=query.get("date_from", [None])[0],
+                    date_to=query.get("date_to", [None])[0],
+                    keyword=query.get("keyword", [None])[0],
+                    category_code=query.get("category_code", [None])[0],
+                    category_primary_label=query.get("category_primary_label", [None])[0],
+                    category_sub_label=query.get("category_sub_label", [None])[0],
+                    category_third_label=query.get("category_third_label", [None])[0],
+                    page=query.get("page", [None])[0],
+                    page_size=query.get("page_size", [None])[0],
+                )
+            )
+        return None
 
     def accounts(self, *, date_from: str | None, date_to: str | None) -> tuple[HTTPStatus, dict[str, Any]]:
         payload = self._application_service.accounts_payload(date_from=date_from, date_to=date_to)
@@ -252,3 +303,54 @@ class BankDetailsApiRoutes:
     def _category_error(exc: BankTransactionCategoryValidationError) -> tuple[HTTPStatus, dict[str, Any]]:
         status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
         return status, {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id}
+
+    def _json_read(
+        self,
+        headers: dict[str, str] | None,
+        handler: Callable[[OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]],
+    ) -> Any:
+        session, auth_error = self._resolve_read(headers)
+        if auth_error is not None:
+            return auth_error
+        return self._json_response_for(*handler(session))
+
+    def _export_read(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_read(headers)
+        if auth_error is not None:
+            return auth_error
+        mode = query.get("mode", ["all"])[0]
+        account_key = query.get("account_key", [None])[0]
+        date_from = query.get("date_from", [None])[0]
+        date_to = query.get("date_to", [None])[0]
+        keyword = query.get("keyword", [None])[0]
+        category_code = query.get("category_code", [None])[0]
+        category_primary_label = query.get("category_primary_label", [None])[0]
+        category_sub_label = query.get("category_sub_label", [None])[0]
+        category_third_label = query.get("category_third_label", [None])[0]
+        status, result = self.export_transactions(
+            mode=mode,
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+            session=session,
+        )
+        if isinstance(result, dict):
+            return self._json_response_for(status, result)
+        if self._export_response is None:
+            raise RuntimeError("bank_details_export_response_port_missing")
+        return self._export_response(status, result)
+
+    def _resolve_read(self, headers: dict[str, str] | None) -> tuple[OARequestSession | None, Any | None]:
+        if self._resolve_read_session is None:
+            return None, None
+        return self._resolve_read_session(headers)
+
+    def _json_response_for(self, status: HTTPStatus, payload: object) -> Any:
+        if self._json_response is None:
+            return status, payload
+        return self._json_response(status, payload)

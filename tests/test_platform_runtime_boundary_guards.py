@@ -1395,6 +1395,48 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_details_read_export_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        routes_source = (APP_ROOT / "routes_bank_details.py").read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for removed_handler in (
+            "_handle_api_bank_details_accounts",
+            "_handle_api_bank_details_auto_tag_rules",
+            "_handle_api_bank_details_transactions",
+            "_handle_api_bank_details_transactions_export",
+        ):
+            if f"def {removed_handler}(" in server_source:
+                violations.append(f"server.py still defines migrated bank details read/export handler {removed_handler}")
+
+        for marker in (
+            "def route(",
+            'route_path == "/api/bank-details/accounts"',
+            'route_path == "/api/bank-details/transactions"',
+            'route_path == "/api/bank-details/transactions/export"',
+            'route_path == "/api/bank-details/auto-tag-rules"',
+            "resolve_read_session=",
+            "export_response=",
+            "self._bank_details_routes().route(method, route_path, query, body, headers)",
+        ):
+            if marker not in server_source + routes_source:
+                violations.append(f"bank details route owner is missing marker {marker}")
+
+        for retained_handler in (
+            "_handle_api_bank_details_auto_tag_rules_update",
+            "_handle_api_bank_details_auto_tag_rules_reapply",
+            "_handle_api_bank_details_auto_tag_rules_file_replacement",
+            "_handle_api_bank_detail_category_confirmation",
+            "_handle_api_bank_detail_category_confirmation_delete",
+            "_handle_api_bank_detail_category_assignment",
+            "_handle_api_bank_detail_category_assignment_delete",
+        ):
+            if f"def {retained_handler}" not in server_source:
+                violations.append(f"bank details write handler moved before dedicated write slice {retained_handler}")
+
+        self.assertEqual(violations, [])
+
     def test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
