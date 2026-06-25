@@ -7,6 +7,7 @@ import unittest
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
 from fin_ops_platform.services.postgres_repositories.read_models import (
+    PostgresBankReadModelRepository,
     PostgresInvoiceUsageCollectionReadModelRepository,
     PostgresPendingInvoiceLifecycleReadModelRepository,
     PostgresReadModelRepository,
@@ -266,6 +267,30 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertIn("_pending_invoice_lifecycle_repository", shared_source)
                 self.assertNotIn("read_model.pending_invoice_rows", shared_source)
                 self.assertNotIn("read_model.invoice_lifecycle_rows", shared_source)
+
+    def test_bank_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
+        owned_methods = {
+            "bank_detail_scope_keys_for_range",
+            "bank_detail_scope_summary",
+            "bank_account_balance_scope_summary",
+            "list_bank_detail_transactions",
+            "list_bank_detail_accounts",
+            "get_bank_detail_tagged_rows_by_transaction_ids",
+            "list_bank_detail_tagged_rows_by_month",
+            "list_bank_account_balances",
+            "save_bank_account_balances",
+            "save_bank_detail_rows",
+            "mark_bank_detail_scope",
+        }
+
+        for method_name in owned_methods:
+            with self.subTest(method_name=method_name):
+                self.assertTrue(callable(getattr(PostgresBankReadModelRepository, method_name, None)))
+                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
+                self.assertIn("_bank_read_model_repository", shared_source)
+                self.assertNotIn("read_model.bank_detail_rows", shared_source)
+                self.assertNotIn("read_model.bank_detail_scopes", shared_source)
+                self.assertNotIn("read_model.bank_account_balances", shared_source)
 
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]

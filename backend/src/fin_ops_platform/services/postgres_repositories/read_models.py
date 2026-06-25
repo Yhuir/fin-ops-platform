@@ -1041,6 +1041,932 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
 
 
 
+class PostgresBankReadModelRepository:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
+        executor = connection or self._connection
+        dirty_row = executor.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type, scope_key),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    def bank_detail_scope_keys_for_range(self, *, date_from: str | None = None, date_to: str | None = None) -> list[str]:
+        return self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+
+
+    def _bank_detail_scope_keys_for_range(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        connection: Any | None = None,
+    ) -> list[str]:
+        scope_keys = _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+        if scope_keys == ["all"]:
+            return self._bank_detail_available_month_scope_keys(connection=connection) or ["all"]
+        return scope_keys
+
+
+    def _bank_detail_available_month_scope_keys(self, *, tenant_id: str = "default", connection: Any | None = None) -> list[str]:
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            select scope_key
+            from read_model.bank_detail_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_detail'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key
+            """,
+            (tenant_id,),
+        )
+        return _dedupe_preserve_order(
+            scope_key
+            for row in rows
+            if isinstance(row, dict)
+            for scope_key in [text(row.get("scope_key"))]
+            if scope_key and MONTH_SCOPE_RE.match(scope_key)
+        )
+
+
+    def bank_detail_scope_summary(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        )
+        if not normalized_scope_keys:
+            return {
+                "read_model_status": "missing",
+                "read_model_scope_keys": [],
+                "read_model_generated_at": None,
+                "read_model_scope_signatures": {},
+            }
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            select scope_key, scope_type, schema_version, status, row_count, source_version,
+                   source_versions, generated_at, last_error
+            from read_model.bank_detail_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_detail'
+              and scope_key = any(%s)
+            """,
+            (tenant_id, normalized_scope_keys),
+        )
+        dirty_rows = executor.fetch_all(
+            """
+            select scope_key, status, updated_at::text as updated_at, last_error, source_version
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_detail'
+              and scope_key = any(%s)
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            """,
+            (tenant_id, normalized_scope_keys),
+        )
+        by_scope = {text(row.get("scope_key")): row for row in rows if text(row.get("scope_key"))}
+        dirty_by_scope: dict[str, dict[str, Any]] = {}
+        for row in dirty_rows:
+            scope_key = text(row.get("scope_key"))
+            if scope_key and scope_key not in dirty_by_scope:
+                dirty_by_scope[scope_key] = row
+        dirty_statuses = {text(row.get("status")) for row in dirty_by_scope.values()}
+        if dirty_statuses.intersection({"pending", "processing"}):
+            status = "refreshing"
+        elif "failed" in dirty_statuses:
+            status = "stale"
+        elif any(scope_key not in by_scope for scope_key in normalized_scope_keys):
+            status = "missing"
+        elif any(int_value(by_scope[scope_key].get("schema_version"), 0) != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION for scope_key in normalized_scope_keys):
+            status = "schema_mismatch"
+        elif any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in normalized_scope_keys):
+            status = "stale"
+        else:
+            status = "fresh"
+        generated_values = [
+            text(by_scope[scope_key].get("generated_at"))
+            for scope_key in normalized_scope_keys
+            if scope_key in by_scope and text(by_scope[scope_key].get("generated_at"))
+        ]
+        signatures = {
+            scope_key: {
+                "schema_version": int_value(by_scope[scope_key].get("schema_version"), 0),
+                "status": text(by_scope[scope_key].get("status")) or "",
+                "row_count": int_value(by_scope[scope_key].get("row_count"), 0),
+                "source_version": int_value(by_scope[scope_key].get("source_version"), 0),
+                "source_versions": by_scope[scope_key].get("source_versions") if isinstance(by_scope[scope_key].get("source_versions"), dict) else {},
+                "generated_at": text(by_scope[scope_key].get("generated_at")),
+                "last_error": text(by_scope[scope_key].get("last_error")),
+                "dirty_status": text(dirty_by_scope.get(scope_key, {}).get("status")),
+                "dirty_source_version": int_value(dirty_by_scope.get(scope_key, {}).get("source_version"), 0),
+                "dirty_last_error": text(dirty_by_scope.get(scope_key, {}).get("last_error")),
+            }
+            for scope_key in normalized_scope_keys
+            if scope_key in by_scope
+        }
+        return {
+            "read_model_status": status,
+            "read_model_scope_keys": normalized_scope_keys,
+            "read_model_generated_at": max(generated_values) if generated_values else None,
+            "read_model_scope_signatures": signatures,
+            "dirty_scopes": [
+                {
+                    "scope_key": scope_key,
+                    "status": text(row.get("status")),
+                    "updated_at": text(row.get("updated_at")),
+                    "last_error": text(row.get("last_error")),
+                    "source_version": int_value(row.get("source_version"), 0),
+                }
+                for scope_key, row in dirty_by_scope.items()
+            ],
+        }
+
+
+    def bank_account_balance_scope_summary(
+        self,
+        *,
+        tenant_id: str = "default",
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            select scope_key, scope_type, schema_version, status, row_count, source_version,
+                   source_versions, generated_at, last_error
+            from read_model.bank_detail_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_account_balance'
+              and scope_key = 'all'
+            """,
+            (tenant_id,),
+        )
+        dirty_rows = executor.fetch_all(
+            """
+            select scope_key, status, updated_at::text as updated_at, last_error, source_version
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_account_balance'
+              and scope_key = 'all'
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            """,
+            (tenant_id,),
+        )
+        row = rows[0] if rows else None
+        dirty_row = dirty_rows[0] if dirty_rows else None
+        dirty_status = text((dirty_row or {}).get("status"))
+        if dirty_status in {"pending", "processing"}:
+            status = "refreshing"
+        elif dirty_status == "failed":
+            status = "stale"
+        elif row is None:
+            status = "missing"
+        elif int_value(row.get("schema_version"), 0) != BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION:
+            status = "schema_mismatch"
+        elif text(row.get("status")) != "fresh":
+            status = "stale"
+        else:
+            status = "fresh"
+        return {
+            "read_model_status": status,
+            "read_model_scope_keys": ["all"],
+            "read_model_generated_at": text((row or {}).get("generated_at")),
+            "read_model_scope_signatures": {
+                "all": {
+                    "schema_version": int_value((row or {}).get("schema_version"), 0),
+                    "status": text((row or {}).get("status")) or "",
+                    "row_count": int_value((row or {}).get("row_count"), 0),
+                    "source_version": int_value((row or {}).get("source_version"), 0),
+                    "source_versions": row.get("source_versions") if isinstance((row or {}).get("source_versions"), dict) else {},
+                    "generated_at": text((row or {}).get("generated_at")),
+                    "last_error": text((row or {}).get("last_error")),
+                    "dirty_status": dirty_status,
+                    "dirty_source_version": int_value((dirty_row or {}).get("source_version"), 0),
+                    "dirty_last_error": text((dirty_row or {}).get("last_error")),
+                }
+            } if row is not None else {},
+            "dirty_scopes": [
+                {
+                    "scope_key": text(dirty_row.get("scope_key")) or "all",
+                    "status": dirty_status,
+                    "updated_at": text(dirty_row.get("updated_at")),
+                    "last_error": text(dirty_row.get("last_error")),
+                    "source_version": int_value(dirty_row.get("source_version"), 0),
+                }
+            ] if dirty_row is not None else [],
+        }
+
+
+    def list_bank_detail_transactions(
+        self,
+        *,
+        account_key: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        category_code: str | None = None,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
+        category_third_label: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 100,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        page_number = max(1, int_value(page, 1))
+        page_limit = min(max(1, int_value(page_size, 100)), 100)
+        with self._connection.transaction() as connection:
+            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
+            scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
+            if scope_summary["read_model_status"] == "missing":
+                return None
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
+            where_sql, params = _bank_detail_filter_sql(
+                tenant_id=tenant_id,
+                scope_keys=scope_keys,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
+                require_current_schema=require_current_schema,
+            )
+            total_row = connection.fetch_one(
+                f"select count(*)::bigint as total from read_model.bank_detail_rows where {where_sql}",
+                tuple(params),
+            )
+            total = int_value((total_row or {}).get("total"), 0)
+            category_counts = _bank_detail_empty_category_counts()
+            count_rows = connection.fetch_all(
+                f"""
+                select coalesce(effective_category_code, 'uncategorized') as category_code,
+                       count(*)::bigint as count
+                from read_model.bank_detail_rows
+                where {where_sql}
+                group by coalesce(effective_category_code, 'uncategorized')
+                """,
+                tuple(params),
+            )
+            for row in count_rows:
+                category_counts[text(row.get("category_code")) or "uncategorized"] = int_value(row.get("count"), 0)
+            rows = connection.fetch_all(
+                f"""
+                select payload, raw_payload, summary, purpose
+                from read_model.bank_detail_rows
+                where {where_sql}
+                order by trade_time_sort desc, transaction_id desc
+                limit %s offset %s
+                """,
+                tuple([*params, page_limit, (page_number - 1) * page_limit]),
+            )
+        return {
+            "account_key": account_key,
+            "date_from": date_from,
+            "date_to": date_to,
+            "rows": [_bank_detail_row_payload(row) for row in rows],
+            "category_counts": category_counts,
+            "pagination": {"page": page_number, "page_size": page_limit, "total": total},
+            **scope_summary,
+        }
+
+
+    def list_bank_detail_accounts(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        with self._connection.transaction() as connection:
+            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
+            scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
+            if scope_summary["read_model_status"] == "missing":
+                return None
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
+            where_sql, params = _bank_detail_filter_sql(
+                tenant_id=tenant_id,
+                scope_keys=scope_keys,
+                date_from=date_from,
+                date_to=date_to,
+                require_current_schema=require_current_schema,
+            )
+            all_rows_where = ["tenant_id = %s"]
+            all_rows_params: list[Any] = [tenant_id]
+            if require_current_schema:
+                all_rows_where.append("schema_version = %s")
+                all_rows_params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
+            rows = connection.fetch_all(
+                f"""
+                with all_rows as (
+                    select account_key, bank_name, account_last4, balance, trade_time, trade_date, trade_time_sort
+                    from read_model.bank_detail_rows
+                    where {" and ".join(all_rows_where)}
+                ),
+                filtered as (
+                    select account_key, bank_name, account_last4, balance, trade_time, trade_date, trade_time_sort
+                    from read_model.bank_detail_rows
+                    where {where_sql}
+                ),
+                accounts as (
+                    select account_key, bank_name, account_last4
+                    from all_rows
+                    group by account_key, bank_name, account_last4
+                ),
+                counts as (
+                    select account_key, bank_name, account_last4, count(*)::bigint as transaction_count
+                    from filtered
+                    group by account_key, bank_name, account_last4
+                ),
+                latest_balances as (
+                    select distinct on (account_key)
+                        account_key,
+                        balance as latest_balance,
+                        coalesce(trade_time::text, trade_date::text) as latest_balance_at
+                    from all_rows
+                    where balance is not null
+                    order by account_key, trade_time_sort desc
+                )
+                select accounts.account_key, accounts.bank_name, accounts.account_last4,
+                       coalesce(counts.transaction_count, 0)::bigint as transaction_count,
+                       latest_balances.latest_balance,
+                       latest_balances.latest_balance_at
+                from accounts
+                left join counts on counts.account_key = accounts.account_key
+                left join latest_balances on latest_balances.account_key = accounts.account_key
+                order by accounts.bank_name, accounts.account_last4
+                """,
+                tuple([*all_rows_params, *params]),
+            )
+        accounts = []
+        for row in rows:
+            latest_balance = row.get("latest_balance")
+            accounts.append(
+                {
+                    "account_key": text(row.get("account_key")) or "",
+                    "bank_name": text(row.get("bank_name")) or "未知银行",
+                    "account_last4": text(row.get("account_last4")) or "unknown",
+                    "display_name": f"{text(row.get('bank_name')) or '未知银行'} {text(row.get('account_last4')) or 'unknown'}",
+                    "latest_balance": decimal_text(latest_balance) if latest_balance is not None else None,
+                    "latest_balance_at": text(row.get("latest_balance_at")),
+                    "has_balance": latest_balance is not None,
+                    "transaction_count": int_value(row.get("transaction_count"), 0),
+                }
+            )
+        total_balance = sum(
+            (Decimal(str(account["latest_balance"])) for account in accounts if account.get("latest_balance") not in (None, "")),
+            Decimal("0.00"),
+        )
+        return {
+            "accounts": accounts,
+            "total_balance": decimal_text(total_balance) if any(account.get("has_balance") for account in accounts) else None,
+            "balance_account_count": sum(1 for account in accounts if account.get("has_balance")),
+            "missing_balance_account_count": sum(1 for account in accounts if not account.get("has_balance")),
+            **scope_summary,
+        }
+
+
+    def get_bank_detail_tagged_rows_by_transaction_ids(
+        self,
+        transaction_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_ids = _dedupe_preserve_order(
+            text(transaction_id)
+            for transaction_id in list(transaction_ids or [])
+            if text(transaction_id)
+        )
+        if not normalized_ids:
+            return {
+                "rows": [],
+                "missing_transaction_ids": [],
+                "source_versions": {},
+                "read_model_status": "fresh",
+                "read_model_scope_keys": [],
+                "read_model_scope_signatures": {},
+            }
+        with self._connection.transaction() as connection:
+            rows = connection.fetch_all(
+                """
+                select payload, raw_payload, summary, purpose, scope_key, source_versions
+                from read_model.bank_detail_rows
+                where tenant_id = %s
+                  and (
+                    transaction_id = any(%s)
+                    or payload->>'id' = any(%s)
+                    or payload->>'transaction_id' = any(%s)
+                  )
+                """,
+                (tenant_id, normalized_ids, normalized_ids, normalized_ids),
+            )
+            unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
+            payload_by_id: dict[str, dict[str, Any]] = {}
+            for row in unordered_payload_rows:
+                for row_identity in (row.get("transaction_id"), row.get("id")):
+                    if transaction_id := text(row_identity):
+                        payload_by_id.setdefault(transaction_id, row)
+            payload_rows = [
+                payload_by_id[transaction_id]
+                for transaction_id in normalized_ids
+                if transaction_id in payload_by_id
+            ]
+            row_ids = {text(row.get("transaction_id") or row.get("id")) for row in payload_rows}
+            missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in row_ids]
+            scope_keys = _dedupe_preserve_order(
+                text(row.get("scope_key")) or _bank_detail_month_text((row.get("trade_date") or row.get("trade_time")))
+                for row in payload_rows
+            )
+            if not scope_keys:
+                return {
+                    "rows": [],
+                    "missing_transaction_ids": missing_ids,
+                    "source_versions": {},
+                    "read_model_status": "missing",
+                    "read_model_scope_keys": [],
+                    "read_model_scope_signatures": {},
+                }
+            scope_summary = self.bank_detail_scope_summary(
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+        return {
+            "rows": payload_rows,
+            "missing_transaction_ids": missing_ids,
+            "source_versions": _source_versions_from_scope_summary(scope_summary),
+            **scope_summary,
+        }
+
+
+    def list_bank_detail_tagged_rows_by_month(
+        self,
+        month: str,
+        *,
+        direction: str | None = None,
+        category_codes: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month)
+        if not normalized_month or not MONTH_SCOPE_RE.match(normalized_month):
+            raise ValueError("bank detail tagged row month must be YYYY-MM.")
+        with self._connection.transaction() as connection:
+            scope_summary = self.bank_detail_scope_summary(
+                scope_keys=[normalized_month],
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+            if scope_summary["read_model_status"] == "missing":
+                return None
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
+            where = ["tenant_id = %s", "scope_month = %s::date"]
+            params: list[Any] = [tenant_id, month_start(normalized_month)]
+            if require_current_schema:
+                where.append("schema_version = %s")
+                params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
+            if normalized_direction := text(direction):
+                where.append("direction = %s")
+                params.append(normalized_direction)
+            normalized_category_codes = _dedupe_preserve_order(
+                text(category_code)
+                for category_code in list(category_codes or [])
+                if text(category_code)
+            )
+            if normalized_category_codes:
+                where.append("effective_category_code = any(%s)")
+                params.append(normalized_category_codes)
+            rows = connection.fetch_all(
+                f"""
+                select payload, raw_payload, summary, purpose, scope_key, source_versions
+                from read_model.bank_detail_rows
+                where {" and ".join(where)}
+                order by trade_time_sort desc, transaction_id desc
+                """,
+                tuple(params),
+            )
+        return {
+            "rows": [_bank_detail_row_payload(row) for row in rows],
+            "missing_transaction_ids": [],
+            "source_versions": _source_versions_from_scope_summary(scope_summary),
+            **scope_summary,
+        }
+
+
+    def list_bank_account_balances(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        with self._connection.transaction() as connection:
+            scope_summary = self.bank_account_balance_scope_summary(tenant_id=tenant_id, connection=connection)
+            balance_read_model_status = text(scope_summary.get("read_model_status")) or "missing"
+            if balance_read_model_status == "missing":
+                return None
+            rows = connection.fetch_all(
+                """
+                select account_identity, account_key, bank_name, account_last4, account_no, account_name,
+                       identity_confidence, latest_balance, latest_balance_at, latest_balance_transaction_id,
+                       latest_trade_time_sort, currency, transaction_total_count, schema_version,
+                       source_versions, generated_at
+                from read_model.bank_account_balances
+                where tenant_id = %s
+                  and schema_version = %s
+                order by bank_name, account_last4, account_identity
+                """,
+                (tenant_id, BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION),
+            )
+            count_clauses = ["tenant_id = %s"]
+            count_params: list[Any] = [tenant_id]
+            if date_text := text(date_from):
+                count_clauses.append("trade_date >= %s::date")
+                count_params.append(date_text[:10])
+            if date_text := text(date_to):
+                count_clauses.append("trade_date <= %s::date")
+                count_params.append(date_text[:10])
+            count_rows = connection.fetch_all(
+                f"""
+                select account_key, count(*)::bigint as transaction_count
+                from read_model.bank_detail_rows
+                where {" and ".join(count_clauses)}
+                group by account_key
+                """,
+                tuple(count_params),
+            )
+        transaction_counts = {
+            text(row.get("account_key")) or "": int_value(row.get("transaction_count"), 0)
+            for row in count_rows
+        }
+        accounts = []
+        totals_by_currency: dict[str, Decimal] = {}
+        for row in rows:
+            latest_balance = row.get("latest_balance")
+            currency = text(row.get("currency")) or "CNY"
+            has_balance = latest_balance is not None
+            if has_balance:
+                totals_by_currency[currency] = totals_by_currency.get(currency, Decimal("0.00")) + Decimal(str(latest_balance))
+            accounts.append(
+                {
+                    "account_identity": text(row.get("account_identity")) or "",
+                    "account_key": text(row.get("account_key")) or text(row.get("account_identity")) or "",
+                    "bank_name": text(row.get("bank_name")) or "未知银行",
+                    "account_last4": text(row.get("account_last4")) or "unknown",
+                    "display_name": f"{text(row.get('bank_name')) or '未知银行'} {text(row.get('account_last4')) or 'unknown'}",
+                    "account_no": text(row.get("account_no")),
+                    "account_name": text(row.get("account_name")),
+                    "identity_confidence": text(row.get("identity_confidence")) or "fallback",
+                    "latest_balance": decimal_text(latest_balance) if latest_balance is not None else None,
+                    "latest_balance_at": text(row.get("latest_balance_at")),
+                    "latest_balance_transaction_id": text(row.get("latest_balance_transaction_id")),
+                    "currency": currency,
+                    "has_balance": has_balance,
+                    "transaction_count": transaction_counts.get(text(row.get("account_key")) or "", 0),
+                    "transaction_total_count": int_value(row.get("transaction_total_count"), 0),
+                }
+            )
+        total_balance = totals_by_currency.get("CNY")
+        return {
+            "accounts": accounts,
+            "total_balance": decimal_text(total_balance) if total_balance is not None else None,
+            "total_balances_by_currency": {
+                currency: decimal_text(total)
+                for currency, total in sorted(totals_by_currency.items())
+            },
+            "balance_account_count": sum(1 for account in accounts if account.get("has_balance")),
+            "missing_balance_account_count": sum(1 for account in accounts if not account.get("has_balance")),
+            "balance_read_model_status": balance_read_model_status,
+            "read_model_status": balance_read_model_status,
+            **scope_summary,
+        }
+
+
+    def save_bank_account_balances(self, *, rows: list[dict[str, Any]], tenant_id: str = "default") -> None:
+        generated_at = text((rows[0] if rows else {}).get("generated_at")) if rows else None
+
+        def write(connection: Any) -> None:
+            connection.execute("delete from read_model.bank_account_balances where tenant_id = %s", (tenant_id,))
+            for row in list(rows or []):
+                connection.execute(
+                    """
+                    insert into read_model.bank_account_balances(
+                        tenant_id, account_identity, account_key, bank_name, account_last4,
+                        account_no, account_name, identity_confidence, latest_balance,
+                        latest_balance_at, latest_balance_transaction_id, latest_trade_time_sort,
+                        latest_bank_serial_no, source_batch_id, legacy_source_batch_id, currency,
+                        transaction_total_count, schema_version, source_versions, generated_at, raw_payload
+                    )
+                    values (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s::timestamptz, %s, %s::timestamptz,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, coalesce(%s::timestamptz, now()), %s
+                    )
+                    on conflict (tenant_id, account_identity) do update set
+                        account_key = excluded.account_key,
+                        bank_name = excluded.bank_name,
+                        account_last4 = excluded.account_last4,
+                        account_no = excluded.account_no,
+                        account_name = excluded.account_name,
+                        identity_confidence = excluded.identity_confidence,
+                        latest_balance = excluded.latest_balance,
+                        latest_balance_at = excluded.latest_balance_at,
+                        latest_balance_transaction_id = excluded.latest_balance_transaction_id,
+                        latest_trade_time_sort = excluded.latest_trade_time_sort,
+                        latest_bank_serial_no = excluded.latest_bank_serial_no,
+                        source_batch_id = excluded.source_batch_id,
+                        legacy_source_batch_id = excluded.legacy_source_batch_id,
+                        currency = excluded.currency,
+                        transaction_total_count = excluded.transaction_total_count,
+                        schema_version = excluded.schema_version,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        tenant_id,
+                        text(row.get("account_identity")),
+                        text(row.get("account_key") or row.get("account_identity")),
+                        text(row.get("bank_name")) or "未知银行",
+                        text(row.get("account_last4")) or "unknown",
+                        text(row.get("account_no")),
+                        text(row.get("account_name")),
+                        text(row.get("identity_confidence")) or "fallback",
+                        decimal_text(row.get("latest_balance")),
+                        text(row.get("latest_balance_at")),
+                        text(row.get("latest_balance_transaction_id")),
+                        text(row.get("latest_trade_time_sort")),
+                        text(row.get("latest_bank_serial_no")),
+                        text(row.get("source_batch_id")),
+                        text(row.get("legacy_source_batch_id")),
+                        text(row.get("currency")) or "CNY",
+                        int_value(row.get("transaction_total_count"), 0),
+                        BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
+                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+                        text(row.get("generated_at")),
+                        jsonb(row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}),
+                    ),
+                )
+            self._upsert_bank_detail_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_type="bank_account_balance",
+                scope_key="all",
+                scope_month=None,
+                row_count=len(list(rows or [])),
+                source_versions=(rows[0].get("source_versions") if rows and isinstance(rows[0].get("source_versions"), dict) else {}),
+                schema_version=BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
+                generated_at=generated_at,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def save_bank_detail_rows(self, *, scope_key: str, rows: list[dict[str, Any]], tenant_id: str = "default") -> None:
+        normalized_scope_key = text(scope_key)
+        if not normalized_scope_key or not MONTH_SCOPE_RE.match(normalized_scope_key):
+            raise ValueError("bank detail row scope_key must be YYYY-MM.")
+        scope_month = month_start(normalized_scope_key)
+        generated_at = text((rows[0] if rows else {}).get("generated_at")) if rows else None
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                "delete from read_model.bank_detail_rows where tenant_id = %s and scope_key = %s",
+                (tenant_id, normalized_scope_key),
+            )
+            for row in list(rows or []):
+                record = _bank_detail_row_record(row, scope_key=normalized_scope_key, scope_month=scope_month, tenant_id=tenant_id)
+                connection.execute(
+                    """
+                    insert into read_model.bank_detail_rows(
+                        tenant_id, transaction_id, scope_key, scope_month, source_batch_id,
+                        legacy_source_batch_id, account_key, bank_name, account_last4, account_no,
+                        account_name, trade_time, trade_date, trade_time_sort, direction,
+                        direction_label, amount, signed_amount, balance, currency,
+                        counterparty_name, summary, purpose, manual_category_code,
+                        manual_category_label, manual_category_path, manual_category_primary_label,
+                        manual_category_sub_label, manual_category_third_label, manual_category_label_path, manual_category_source,
+                        manual_category_version, manual_confirmed_category_code, auto_category_code, auto_category_label,
+                        auto_category_path, auto_category_primary_label, auto_category_sub_label, auto_category_third_label,
+                        auto_category_label_path, auto_category_source, auto_category_rule_code,
+                        auto_category_reason, auto_category_confidence, auto_category_rule_version,
+                        auto_candidate_category_codes, auto_candidate_categories,
+                        effective_category_code, effective_category_label, effective_category_path,
+                        effective_category_primary_label, effective_category_sub_label, effective_category_third_label,
+                        effective_category_label_path, effective_category_source,
+                        effective_turnover_role, effective_turnover_action_type, effective_turnover_family,
+                        category_version, category_source,
+                        category_resolution_status, category_rule_version,
+                        oa_relation_tag, invoice_relation_tag, relation_tags, relation_case_id,
+                        search_text, schema_version, source_versions, generated_at, payload, raw_payload
+                    )
+                    values (
+                        %s, %s, %s, %s::date, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s::timestamptz, %s::date, %s::timestamptz, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
+                    )
+                    on conflict (tenant_id, transaction_id) do update set
+                        scope_key = excluded.scope_key,
+                        scope_month = excluded.scope_month,
+                        source_batch_id = excluded.source_batch_id,
+                        legacy_source_batch_id = excluded.legacy_source_batch_id,
+                        account_key = excluded.account_key,
+                        bank_name = excluded.bank_name,
+                        account_last4 = excluded.account_last4,
+                        account_no = excluded.account_no,
+                        account_name = excluded.account_name,
+                        trade_time = excluded.trade_time,
+                        trade_date = excluded.trade_date,
+                        trade_time_sort = excluded.trade_time_sort,
+                        direction = excluded.direction,
+                        direction_label = excluded.direction_label,
+                        amount = excluded.amount,
+                        signed_amount = excluded.signed_amount,
+                        balance = excluded.balance,
+                        currency = excluded.currency,
+                        counterparty_name = excluded.counterparty_name,
+                        summary = excluded.summary,
+                        purpose = excluded.purpose,
+                        manual_category_code = excluded.manual_category_code,
+                        manual_category_label = excluded.manual_category_label,
+                        manual_category_path = excluded.manual_category_path,
+                        manual_category_primary_label = excluded.manual_category_primary_label,
+                        manual_category_sub_label = excluded.manual_category_sub_label,
+                        manual_category_third_label = excluded.manual_category_third_label,
+                        manual_category_label_path = excluded.manual_category_label_path,
+                        manual_category_source = excluded.manual_category_source,
+                        manual_category_version = excluded.manual_category_version,
+                        manual_confirmed_category_code = excluded.manual_confirmed_category_code,
+                        auto_category_code = excluded.auto_category_code,
+                        auto_category_label = excluded.auto_category_label,
+                        auto_category_path = excluded.auto_category_path,
+                        auto_category_primary_label = excluded.auto_category_primary_label,
+                        auto_category_sub_label = excluded.auto_category_sub_label,
+                        auto_category_third_label = excluded.auto_category_third_label,
+                        auto_category_label_path = excluded.auto_category_label_path,
+                        auto_category_source = excluded.auto_category_source,
+                        auto_category_rule_code = excluded.auto_category_rule_code,
+                        auto_category_reason = excluded.auto_category_reason,
+                        auto_category_confidence = excluded.auto_category_confidence,
+                        auto_category_rule_version = excluded.auto_category_rule_version,
+                        auto_candidate_category_codes = excluded.auto_candidate_category_codes,
+                        auto_candidate_categories = excluded.auto_candidate_categories,
+                        effective_category_code = excluded.effective_category_code,
+                        effective_category_label = excluded.effective_category_label,
+                        effective_category_path = excluded.effective_category_path,
+                        effective_category_primary_label = excluded.effective_category_primary_label,
+                        effective_category_sub_label = excluded.effective_category_sub_label,
+                        effective_category_third_label = excluded.effective_category_third_label,
+                        effective_category_label_path = excluded.effective_category_label_path,
+                        effective_category_source = excluded.effective_category_source,
+                        effective_turnover_role = excluded.effective_turnover_role,
+                        effective_turnover_action_type = excluded.effective_turnover_action_type,
+                        effective_turnover_family = excluded.effective_turnover_family,
+                        category_version = excluded.category_version,
+                        category_source = excluded.category_source,
+                        category_resolution_status = excluded.category_resolution_status,
+                        category_rule_version = excluded.category_rule_version,
+                        oa_relation_tag = excluded.oa_relation_tag,
+                        invoice_relation_tag = excluded.invoice_relation_tag,
+                        relation_tags = excluded.relation_tags,
+                        relation_case_id = excluded.relation_case_id,
+                        search_text = excluded.search_text,
+                        schema_version = excluded.schema_version,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    record,
+                )
+            self._upsert_bank_detail_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=scope_month,
+                row_count=len(list(rows or [])),
+                source_versions=(rows[0].get("source_versions") if rows and isinstance(rows[0].get("source_versions"), dict) else {}),
+                generated_at=generated_at,
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    def mark_bank_detail_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        tenant_id: str = "default",
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_scope_key = text(scope_key)
+        if not normalized_scope_key:
+            raise ValueError("bank detail scope_key is required.")
+
+        def write(connection: Any) -> None:
+            self._upsert_bank_detail_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=month_start(normalized_scope_key),
+                row_count=row_count,
+                source_versions=source_versions or {},
+            )
+
+        run_in_transaction(self._connection, write)
+
+
+    @staticmethod
+    def _upsert_bank_detail_scope(
+        connection: Any,
+        *,
+        tenant_id: str,
+        scope_type: str = "bank_detail",
+        scope_key: str,
+        scope_month: date | None,
+        row_count: int,
+        source_versions: dict[str, Any],
+        schema_version: int = BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+        generated_at: str | None = None,
+    ) -> None:
+        connection.execute(
+            """
+            insert into read_model.bank_detail_scopes(
+                tenant_id, scope_type, scope_key, scope_month, schema_version, status,
+                row_count, source_version, source_versions, generated_at, raw_payload
+            )
+            values (
+                %s, %s, %s, %s::date, %s, 'fresh',
+                %s, %s, %s, coalesce(%s::timestamptz, now()), %s
+            )
+            on conflict (tenant_id, scope_type, scope_key) do update set
+                scope_month = excluded.scope_month,
+                schema_version = excluded.schema_version,
+                status = 'fresh',
+                row_count = excluded.row_count,
+                source_version = excluded.source_version,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                last_error = null,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                tenant_id,
+                scope_type,
+                scope_key,
+                scope_month,
+                schema_version,
+                max(0, int_value(row_count, 0)),
+                _source_version_value(source_versions),
+                jsonb(source_versions),
+                generated_at,
+                jsonb({"source_versions": source_versions}),
+            ),
+        )
+
+
 class PostgresPendingInvoiceLifecycleReadModelRepository:
     def __init__(self, connection: Any, *, bank_detail_scope_summary: Any) -> None:
         self._connection = connection
@@ -1985,6 +2911,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
 class PostgresReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._bank_read_model_repository = PostgresBankReadModelRepository(connection)
         self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
         self._pending_invoice_lifecycle_repository = PostgresPendingInvoiceLifecycleReadModelRepository(
             connection,
@@ -2135,894 +3062,57 @@ class PostgresReadModelRepository:
 
         run_in_transaction(self._connection, write)
 
-    def bank_detail_scope_keys_for_range(self, *, date_from: str | None = None, date_to: str | None = None) -> list[str]:
-        return self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
 
-    def _bank_detail_scope_keys_for_range(
-        self,
-        *,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        connection: Any | None = None,
-    ) -> list[str]:
-        scope_keys = _bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
-        if scope_keys == ["all"]:
-            return self._bank_detail_available_month_scope_keys(connection=connection) or ["all"]
-        return scope_keys
 
-    def _bank_detail_available_month_scope_keys(self, *, tenant_id: str = "default", connection: Any | None = None) -> list[str]:
-        executor = connection or self._connection
-        rows = executor.fetch_all(
-            """
-            select scope_key
-            from read_model.bank_detail_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_detail'
-              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
-            order by scope_key
-            """,
-            (tenant_id,),
-        )
-        return _dedupe_preserve_order(
-            scope_key
-            for row in rows
-            if isinstance(row, dict)
-            for scope_key in [text(row.get("scope_key"))]
-            if scope_key and MONTH_SCOPE_RE.match(scope_key)
-        )
 
-    def bank_detail_scope_summary(
-        self,
-        *,
-        scope_keys: list[str],
-        tenant_id: str = "default",
-        connection: Any | None = None,
-    ) -> dict[str, Any]:
-        normalized_scope_keys = _dedupe_preserve_order(
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if str(scope_key).strip()
-        )
-        if not normalized_scope_keys:
-            return {
-                "read_model_status": "missing",
-                "read_model_scope_keys": [],
-                "read_model_generated_at": None,
-                "read_model_scope_signatures": {},
-            }
-        executor = connection or self._connection
-        rows = executor.fetch_all(
-            """
-            select scope_key, scope_type, schema_version, status, row_count, source_version,
-                   source_versions, generated_at, last_error
-            from read_model.bank_detail_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_detail'
-              and scope_key = any(%s)
-            """,
-            (tenant_id, normalized_scope_keys),
-        )
-        dirty_rows = executor.fetch_all(
-            """
-            select scope_key, status, updated_at::text as updated_at, last_error, source_version
-            from job.read_model_dirty_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_detail'
-              and scope_key = any(%s)
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            """,
-            (tenant_id, normalized_scope_keys),
-        )
-        by_scope = {text(row.get("scope_key")): row for row in rows if text(row.get("scope_key"))}
-        dirty_by_scope: dict[str, dict[str, Any]] = {}
-        for row in dirty_rows:
-            scope_key = text(row.get("scope_key"))
-            if scope_key and scope_key not in dirty_by_scope:
-                dirty_by_scope[scope_key] = row
-        dirty_statuses = {text(row.get("status")) for row in dirty_by_scope.values()}
-        if dirty_statuses.intersection({"pending", "processing"}):
-            status = "refreshing"
-        elif "failed" in dirty_statuses:
-            status = "stale"
-        elif any(scope_key not in by_scope for scope_key in normalized_scope_keys):
-            status = "missing"
-        elif any(int_value(by_scope[scope_key].get("schema_version"), 0) != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION for scope_key in normalized_scope_keys):
-            status = "schema_mismatch"
-        elif any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in normalized_scope_keys):
-            status = "stale"
-        else:
-            status = "fresh"
-        generated_values = [
-            text(by_scope[scope_key].get("generated_at"))
-            for scope_key in normalized_scope_keys
-            if scope_key in by_scope and text(by_scope[scope_key].get("generated_at"))
-        ]
-        signatures = {
-            scope_key: {
-                "schema_version": int_value(by_scope[scope_key].get("schema_version"), 0),
-                "status": text(by_scope[scope_key].get("status")) or "",
-                "row_count": int_value(by_scope[scope_key].get("row_count"), 0),
-                "source_version": int_value(by_scope[scope_key].get("source_version"), 0),
-                "source_versions": by_scope[scope_key].get("source_versions") if isinstance(by_scope[scope_key].get("source_versions"), dict) else {},
-                "generated_at": text(by_scope[scope_key].get("generated_at")),
-                "last_error": text(by_scope[scope_key].get("last_error")),
-                "dirty_status": text(dirty_by_scope.get(scope_key, {}).get("status")),
-                "dirty_source_version": int_value(dirty_by_scope.get(scope_key, {}).get("source_version"), 0),
-                "dirty_last_error": text(dirty_by_scope.get(scope_key, {}).get("last_error")),
-            }
-            for scope_key in normalized_scope_keys
-            if scope_key in by_scope
-        }
-        return {
-            "read_model_status": status,
-            "read_model_scope_keys": normalized_scope_keys,
-            "read_model_generated_at": max(generated_values) if generated_values else None,
-            "read_model_scope_signatures": signatures,
-            "dirty_scopes": [
-                {
-                    "scope_key": scope_key,
-                    "status": text(row.get("status")),
-                    "updated_at": text(row.get("updated_at")),
-                    "last_error": text(row.get("last_error")),
-                    "source_version": int_value(row.get("source_version"), 0),
-                }
-                for scope_key, row in dirty_by_scope.items()
-            ],
-        }
 
-    def bank_account_balance_scope_summary(
-        self,
-        *,
-        tenant_id: str = "default",
-        connection: Any | None = None,
-    ) -> dict[str, Any]:
-        executor = connection or self._connection
-        rows = executor.fetch_all(
-            """
-            select scope_key, scope_type, schema_version, status, row_count, source_version,
-                   source_versions, generated_at, last_error
-            from read_model.bank_detail_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_account_balance'
-              and scope_key = 'all'
-            """,
-            (tenant_id,),
-        )
-        dirty_rows = executor.fetch_all(
-            """
-            select scope_key, status, updated_at::text as updated_at, last_error, source_version
-            from job.read_model_dirty_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_account_balance'
-              and scope_key = 'all'
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            """,
-            (tenant_id,),
-        )
-        row = rows[0] if rows else None
-        dirty_row = dirty_rows[0] if dirty_rows else None
-        dirty_status = text((dirty_row or {}).get("status"))
-        if dirty_status in {"pending", "processing"}:
-            status = "refreshing"
-        elif dirty_status == "failed":
-            status = "stale"
-        elif row is None:
-            status = "missing"
-        elif int_value(row.get("schema_version"), 0) != BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION:
-            status = "schema_mismatch"
-        elif text(row.get("status")) != "fresh":
-            status = "stale"
-        else:
-            status = "fresh"
-        return {
-            "read_model_status": status,
-            "read_model_scope_keys": ["all"],
-            "read_model_generated_at": text((row or {}).get("generated_at")),
-            "read_model_scope_signatures": {
-                "all": {
-                    "schema_version": int_value((row or {}).get("schema_version"), 0),
-                    "status": text((row or {}).get("status")) or "",
-                    "row_count": int_value((row or {}).get("row_count"), 0),
-                    "source_version": int_value((row or {}).get("source_version"), 0),
-                    "source_versions": row.get("source_versions") if isinstance((row or {}).get("source_versions"), dict) else {},
-                    "generated_at": text((row or {}).get("generated_at")),
-                    "last_error": text((row or {}).get("last_error")),
-                    "dirty_status": dirty_status,
-                    "dirty_source_version": int_value((dirty_row or {}).get("source_version"), 0),
-                    "dirty_last_error": text((dirty_row or {}).get("last_error")),
-                }
-            } if row is not None else {},
-            "dirty_scopes": [
-                {
-                    "scope_key": text(dirty_row.get("scope_key")) or "all",
-                    "status": dirty_status,
-                    "updated_at": text(dirty_row.get("updated_at")),
-                    "last_error": text(dirty_row.get("last_error")),
-                    "source_version": int_value(dirty_row.get("source_version"), 0),
-                }
-            ] if dirty_row is not None else [],
-        }
 
-    def list_bank_detail_transactions(
-        self,
-        *,
-        account_key: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        category_code: str | None = None,
-        category_primary_label: str | None = None,
-        category_sub_label: str | None = None,
-        category_third_label: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 100,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        page_number = max(1, int_value(page, 1))
-        page_limit = min(max(1, int_value(page_size, 100)), 100)
-        with self._connection.transaction() as connection:
-            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
-            scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
-            if scope_summary["read_model_status"] == "missing":
-                return None
-            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
-            require_current_schema = read_model_status == "fresh"
-            where_sql, params = _bank_detail_filter_sql(
-                tenant_id=tenant_id,
-                scope_keys=scope_keys,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                keyword=keyword,
-                category_code=category_code,
-                category_primary_label=category_primary_label,
-                category_sub_label=category_sub_label,
-                category_third_label=category_third_label,
-                require_current_schema=require_current_schema,
-            )
-            total_row = connection.fetch_one(
-                f"select count(*)::bigint as total from read_model.bank_detail_rows where {where_sql}",
-                tuple(params),
-            )
-            total = int_value((total_row or {}).get("total"), 0)
-            category_counts = _bank_detail_empty_category_counts()
-            count_rows = connection.fetch_all(
-                f"""
-                select coalesce(effective_category_code, 'uncategorized') as category_code,
-                       count(*)::bigint as count
-                from read_model.bank_detail_rows
-                where {where_sql}
-                group by coalesce(effective_category_code, 'uncategorized')
-                """,
-                tuple(params),
-            )
-            for row in count_rows:
-                category_counts[text(row.get("category_code")) or "uncategorized"] = int_value(row.get("count"), 0)
-            rows = connection.fetch_all(
-                f"""
-                select payload, raw_payload, summary, purpose
-                from read_model.bank_detail_rows
-                where {where_sql}
-                order by trade_time_sort desc, transaction_id desc
-                limit %s offset %s
-                """,
-                tuple([*params, page_limit, (page_number - 1) * page_limit]),
-            )
-        return {
-            "account_key": account_key,
-            "date_from": date_from,
-            "date_to": date_to,
-            "rows": [_bank_detail_row_payload(row) for row in rows],
-            "category_counts": category_counts,
-            "pagination": {"page": page_number, "page_size": page_limit, "total": total},
-            **scope_summary,
-        }
 
-    def list_bank_detail_accounts(
-        self,
-        *,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        with self._connection.transaction() as connection:
-            scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to, connection=connection)
-            scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
-            if scope_summary["read_model_status"] == "missing":
-                return None
-            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
-            require_current_schema = read_model_status == "fresh"
-            where_sql, params = _bank_detail_filter_sql(
-                tenant_id=tenant_id,
-                scope_keys=scope_keys,
-                date_from=date_from,
-                date_to=date_to,
-                require_current_schema=require_current_schema,
-            )
-            all_rows_where = ["tenant_id = %s"]
-            all_rows_params: list[Any] = [tenant_id]
-            if require_current_schema:
-                all_rows_where.append("schema_version = %s")
-                all_rows_params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
-            rows = connection.fetch_all(
-                f"""
-                with all_rows as (
-                    select account_key, bank_name, account_last4, balance, trade_time, trade_date, trade_time_sort
-                    from read_model.bank_detail_rows
-                    where {" and ".join(all_rows_where)}
-                ),
-                filtered as (
-                    select account_key, bank_name, account_last4, balance, trade_time, trade_date, trade_time_sort
-                    from read_model.bank_detail_rows
-                    where {where_sql}
-                ),
-                accounts as (
-                    select account_key, bank_name, account_last4
-                    from all_rows
-                    group by account_key, bank_name, account_last4
-                ),
-                counts as (
-                    select account_key, bank_name, account_last4, count(*)::bigint as transaction_count
-                    from filtered
-                    group by account_key, bank_name, account_last4
-                ),
-                latest_balances as (
-                    select distinct on (account_key)
-                        account_key,
-                        balance as latest_balance,
-                        coalesce(trade_time::text, trade_date::text) as latest_balance_at
-                    from all_rows
-                    where balance is not null
-                    order by account_key, trade_time_sort desc
-                )
-                select accounts.account_key, accounts.bank_name, accounts.account_last4,
-                       coalesce(counts.transaction_count, 0)::bigint as transaction_count,
-                       latest_balances.latest_balance,
-                       latest_balances.latest_balance_at
-                from accounts
-                left join counts on counts.account_key = accounts.account_key
-                left join latest_balances on latest_balances.account_key = accounts.account_key
-                order by accounts.bank_name, accounts.account_last4
-                """,
-                tuple([*all_rows_params, *params]),
-            )
-        accounts = []
-        for row in rows:
-            latest_balance = row.get("latest_balance")
-            accounts.append(
-                {
-                    "account_key": text(row.get("account_key")) or "",
-                    "bank_name": text(row.get("bank_name")) or "未知银行",
-                    "account_last4": text(row.get("account_last4")) or "unknown",
-                    "display_name": f"{text(row.get('bank_name')) or '未知银行'} {text(row.get('account_last4')) or 'unknown'}",
-                    "latest_balance": decimal_text(latest_balance) if latest_balance is not None else None,
-                    "latest_balance_at": text(row.get("latest_balance_at")),
-                    "has_balance": latest_balance is not None,
-                    "transaction_count": int_value(row.get("transaction_count"), 0),
-                }
-            )
-        total_balance = sum(
-            (Decimal(str(account["latest_balance"])) for account in accounts if account.get("latest_balance") not in (None, "")),
-            Decimal("0.00"),
-        )
-        return {
-            "accounts": accounts,
-            "total_balance": decimal_text(total_balance) if any(account.get("has_balance") for account in accounts) else None,
-            "balance_account_count": sum(1 for account in accounts if account.get("has_balance")),
-            "missing_balance_account_count": sum(1 for account in accounts if not account.get("has_balance")),
-            **scope_summary,
-        }
 
-    def get_bank_detail_tagged_rows_by_transaction_ids(
-        self,
-        transaction_ids: list[str],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_ids = _dedupe_preserve_order(
-            text(transaction_id)
-            for transaction_id in list(transaction_ids or [])
-            if text(transaction_id)
-        )
-        if not normalized_ids:
-            return {
-                "rows": [],
-                "missing_transaction_ids": [],
-                "source_versions": {},
-                "read_model_status": "fresh",
-                "read_model_scope_keys": [],
-                "read_model_scope_signatures": {},
-            }
-        with self._connection.transaction() as connection:
-            rows = connection.fetch_all(
-                """
-                select payload, raw_payload, summary, purpose, scope_key, source_versions
-                from read_model.bank_detail_rows
-                where tenant_id = %s
-                  and (
-                    transaction_id = any(%s)
-                    or payload->>'id' = any(%s)
-                    or payload->>'transaction_id' = any(%s)
-                  )
-                """,
-                (tenant_id, normalized_ids, normalized_ids, normalized_ids),
-            )
-            unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
-            payload_by_id: dict[str, dict[str, Any]] = {}
-            for row in unordered_payload_rows:
-                for row_identity in (row.get("transaction_id"), row.get("id")):
-                    if transaction_id := text(row_identity):
-                        payload_by_id.setdefault(transaction_id, row)
-            payload_rows = [
-                payload_by_id[transaction_id]
-                for transaction_id in normalized_ids
-                if transaction_id in payload_by_id
-            ]
-            row_ids = {text(row.get("transaction_id") or row.get("id")) for row in payload_rows}
-            missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in row_ids]
-            scope_keys = _dedupe_preserve_order(
-                text(row.get("scope_key")) or _bank_detail_month_text((row.get("trade_date") or row.get("trade_time")))
-                for row in payload_rows
-            )
-            if not scope_keys:
-                return {
-                    "rows": [],
-                    "missing_transaction_ids": missing_ids,
-                    "source_versions": {},
-                    "read_model_status": "missing",
-                    "read_model_scope_keys": [],
-                    "read_model_scope_signatures": {},
-                }
-            scope_summary = self.bank_detail_scope_summary(
-                scope_keys=scope_keys,
-                tenant_id=tenant_id,
-                connection=connection,
-            )
-        return {
-            "rows": payload_rows,
-            "missing_transaction_ids": missing_ids,
-            "source_versions": _source_versions_from_scope_summary(scope_summary),
-            **scope_summary,
-        }
 
-    def list_bank_detail_tagged_rows_by_month(
-        self,
-        month: str,
-        *,
-        direction: str | None = None,
-        category_codes: list[str] | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_month = text(month)
-        if not normalized_month or not MONTH_SCOPE_RE.match(normalized_month):
-            raise ValueError("bank detail tagged row month must be YYYY-MM.")
-        with self._connection.transaction() as connection:
-            scope_summary = self.bank_detail_scope_summary(
-                scope_keys=[normalized_month],
-                tenant_id=tenant_id,
-                connection=connection,
-            )
-            if scope_summary["read_model_status"] == "missing":
-                return None
-            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
-            require_current_schema = read_model_status == "fresh"
-            where = ["tenant_id = %s", "scope_month = %s::date"]
-            params: list[Any] = [tenant_id, month_start(normalized_month)]
-            if require_current_schema:
-                where.append("schema_version = %s")
-                params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
-            if normalized_direction := text(direction):
-                where.append("direction = %s")
-                params.append(normalized_direction)
-            normalized_category_codes = _dedupe_preserve_order(
-                text(category_code)
-                for category_code in list(category_codes or [])
-                if text(category_code)
-            )
-            if normalized_category_codes:
-                where.append("effective_category_code = any(%s)")
-                params.append(normalized_category_codes)
-            rows = connection.fetch_all(
-                f"""
-                select payload, raw_payload, summary, purpose, scope_key, source_versions
-                from read_model.bank_detail_rows
-                where {" and ".join(where)}
-                order by trade_time_sort desc, transaction_id desc
-                """,
-                tuple(params),
-            )
-        return {
-            "rows": [_bank_detail_row_payload(row) for row in rows],
-            "missing_transaction_ids": [],
-            "source_versions": _source_versions_from_scope_summary(scope_summary),
-            **scope_summary,
-        }
 
-    def list_bank_account_balances(
-        self,
-        *,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        with self._connection.transaction() as connection:
-            scope_summary = self.bank_account_balance_scope_summary(tenant_id=tenant_id, connection=connection)
-            balance_read_model_status = text(scope_summary.get("read_model_status")) or "missing"
-            if balance_read_model_status == "missing":
-                return None
-            rows = connection.fetch_all(
-                """
-                select account_identity, account_key, bank_name, account_last4, account_no, account_name,
-                       identity_confidence, latest_balance, latest_balance_at, latest_balance_transaction_id,
-                       latest_trade_time_sort, currency, transaction_total_count, schema_version,
-                       source_versions, generated_at
-                from read_model.bank_account_balances
-                where tenant_id = %s
-                  and schema_version = %s
-                order by bank_name, account_last4, account_identity
-                """,
-                (tenant_id, BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION),
-            )
-            count_clauses = ["tenant_id = %s"]
-            count_params: list[Any] = [tenant_id]
-            if date_text := text(date_from):
-                count_clauses.append("trade_date >= %s::date")
-                count_params.append(date_text[:10])
-            if date_text := text(date_to):
-                count_clauses.append("trade_date <= %s::date")
-                count_params.append(date_text[:10])
-            count_rows = connection.fetch_all(
-                f"""
-                select account_key, count(*)::bigint as transaction_count
-                from read_model.bank_detail_rows
-                where {" and ".join(count_clauses)}
-                group by account_key
-                """,
-                tuple(count_params),
-            )
-        transaction_counts = {
-            text(row.get("account_key")) or "": int_value(row.get("transaction_count"), 0)
-            for row in count_rows
-        }
-        accounts = []
-        totals_by_currency: dict[str, Decimal] = {}
-        for row in rows:
-            latest_balance = row.get("latest_balance")
-            currency = text(row.get("currency")) or "CNY"
-            has_balance = latest_balance is not None
-            if has_balance:
-                totals_by_currency[currency] = totals_by_currency.get(currency, Decimal("0.00")) + Decimal(str(latest_balance))
-            accounts.append(
-                {
-                    "account_identity": text(row.get("account_identity")) or "",
-                    "account_key": text(row.get("account_key")) or text(row.get("account_identity")) or "",
-                    "bank_name": text(row.get("bank_name")) or "未知银行",
-                    "account_last4": text(row.get("account_last4")) or "unknown",
-                    "display_name": f"{text(row.get('bank_name')) or '未知银行'} {text(row.get('account_last4')) or 'unknown'}",
-                    "account_no": text(row.get("account_no")),
-                    "account_name": text(row.get("account_name")),
-                    "identity_confidence": text(row.get("identity_confidence")) or "fallback",
-                    "latest_balance": decimal_text(latest_balance) if latest_balance is not None else None,
-                    "latest_balance_at": text(row.get("latest_balance_at")),
-                    "latest_balance_transaction_id": text(row.get("latest_balance_transaction_id")),
-                    "currency": currency,
-                    "has_balance": has_balance,
-                    "transaction_count": transaction_counts.get(text(row.get("account_key")) or "", 0),
-                    "transaction_total_count": int_value(row.get("transaction_total_count"), 0),
-                }
-            )
-        total_balance = totals_by_currency.get("CNY")
-        return {
-            "accounts": accounts,
-            "total_balance": decimal_text(total_balance) if total_balance is not None else None,
-            "total_balances_by_currency": {
-                currency: decimal_text(total)
-                for currency, total in sorted(totals_by_currency.items())
-            },
-            "balance_account_count": sum(1 for account in accounts if account.get("has_balance")),
-            "missing_balance_account_count": sum(1 for account in accounts if not account.get("has_balance")),
-            "balance_read_model_status": balance_read_model_status,
-            "read_model_status": balance_read_model_status,
-            **scope_summary,
-        }
 
-    def save_bank_account_balances(self, *, rows: list[dict[str, Any]], tenant_id: str = "default") -> None:
-        generated_at = text((rows[0] if rows else {}).get("generated_at")) if rows else None
 
-        def write(connection: Any) -> None:
-            connection.execute("delete from read_model.bank_account_balances where tenant_id = %s", (tenant_id,))
-            for row in list(rows or []):
-                connection.execute(
-                    """
-                    insert into read_model.bank_account_balances(
-                        tenant_id, account_identity, account_key, bank_name, account_last4,
-                        account_no, account_name, identity_confidence, latest_balance,
-                        latest_balance_at, latest_balance_transaction_id, latest_trade_time_sort,
-                        latest_bank_serial_no, source_batch_id, legacy_source_batch_id, currency,
-                        transaction_total_count, schema_version, source_versions, generated_at, raw_payload
-                    )
-                    values (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s,
-                        %s::timestamptz, %s, %s::timestamptz,
-                        %s, %s, %s, %s,
-                        %s, %s, %s, coalesce(%s::timestamptz, now()), %s
-                    )
-                    on conflict (tenant_id, account_identity) do update set
-                        account_key = excluded.account_key,
-                        bank_name = excluded.bank_name,
-                        account_last4 = excluded.account_last4,
-                        account_no = excluded.account_no,
-                        account_name = excluded.account_name,
-                        identity_confidence = excluded.identity_confidence,
-                        latest_balance = excluded.latest_balance,
-                        latest_balance_at = excluded.latest_balance_at,
-                        latest_balance_transaction_id = excluded.latest_balance_transaction_id,
-                        latest_trade_time_sort = excluded.latest_trade_time_sort,
-                        latest_bank_serial_no = excluded.latest_bank_serial_no,
-                        source_batch_id = excluded.source_batch_id,
-                        legacy_source_batch_id = excluded.legacy_source_batch_id,
-                        currency = excluded.currency,
-                        transaction_total_count = excluded.transaction_total_count,
-                        schema_version = excluded.schema_version,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        tenant_id,
-                        text(row.get("account_identity")),
-                        text(row.get("account_key") or row.get("account_identity")),
-                        text(row.get("bank_name")) or "未知银行",
-                        text(row.get("account_last4")) or "unknown",
-                        text(row.get("account_no")),
-                        text(row.get("account_name")),
-                        text(row.get("identity_confidence")) or "fallback",
-                        decimal_text(row.get("latest_balance")),
-                        text(row.get("latest_balance_at")),
-                        text(row.get("latest_balance_transaction_id")),
-                        text(row.get("latest_trade_time_sort")),
-                        text(row.get("latest_bank_serial_no")),
-                        text(row.get("source_batch_id")),
-                        text(row.get("legacy_source_batch_id")),
-                        text(row.get("currency")) or "CNY",
-                        int_value(row.get("transaction_total_count"), 0),
-                        BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
-                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
-                        text(row.get("generated_at")),
-                        jsonb(row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}),
-                    ),
-                )
-            self._upsert_bank_detail_scope(
-                connection,
-                tenant_id=tenant_id,
-                scope_type="bank_account_balance",
-                scope_key="all",
-                scope_month=None,
-                row_count=len(list(rows or [])),
-                source_versions=(rows[0].get("source_versions") if rows and isinstance(rows[0].get("source_versions"), dict) else {}),
-                schema_version=BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
-                generated_at=generated_at,
-            )
 
-        run_in_transaction(self._connection, write)
 
-    def save_bank_detail_rows(self, *, scope_key: str, rows: list[dict[str, Any]], tenant_id: str = "default") -> None:
-        normalized_scope_key = text(scope_key)
-        if not normalized_scope_key or not MONTH_SCOPE_RE.match(normalized_scope_key):
-            raise ValueError("bank detail row scope_key must be YYYY-MM.")
-        scope_month = month_start(normalized_scope_key)
-        generated_at = text((rows[0] if rows else {}).get("generated_at")) if rows else None
+    def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
 
-        def write(connection: Any) -> None:
-            connection.execute(
-                "delete from read_model.bank_detail_rows where tenant_id = %s and scope_key = %s",
-                (tenant_id, normalized_scope_key),
-            )
-            for row in list(rows or []):
-                record = _bank_detail_row_record(row, scope_key=normalized_scope_key, scope_month=scope_month, tenant_id=tenant_id)
-                connection.execute(
-                    """
-                    insert into read_model.bank_detail_rows(
-                        tenant_id, transaction_id, scope_key, scope_month, source_batch_id,
-                        legacy_source_batch_id, account_key, bank_name, account_last4, account_no,
-                        account_name, trade_time, trade_date, trade_time_sort, direction,
-                        direction_label, amount, signed_amount, balance, currency,
-                        counterparty_name, summary, purpose, manual_category_code,
-                        manual_category_label, manual_category_path, manual_category_primary_label,
-                        manual_category_sub_label, manual_category_third_label, manual_category_label_path, manual_category_source,
-                        manual_category_version, manual_confirmed_category_code, auto_category_code, auto_category_label,
-                        auto_category_path, auto_category_primary_label, auto_category_sub_label, auto_category_third_label,
-                        auto_category_label_path, auto_category_source, auto_category_rule_code,
-                        auto_category_reason, auto_category_confidence, auto_category_rule_version,
-                        auto_candidate_category_codes, auto_candidate_categories,
-                        effective_category_code, effective_category_label, effective_category_path,
-                        effective_category_primary_label, effective_category_sub_label, effective_category_third_label,
-                        effective_category_label_path, effective_category_source,
-                        effective_turnover_role, effective_turnover_action_type, effective_turnover_family,
-                        category_version, category_source,
-                        category_resolution_status, category_rule_version,
-                        oa_relation_tag, invoice_relation_tag, relation_tags, relation_case_id,
-                        search_text, schema_version, source_versions, generated_at, payload, raw_payload
-                    )
-                    values (
-                        %s, %s, %s, %s::date, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s::timestamptz, %s::date, %s::timestamptz, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
-                    )
-                    on conflict (tenant_id, transaction_id) do update set
-                        scope_key = excluded.scope_key,
-                        scope_month = excluded.scope_month,
-                        source_batch_id = excluded.source_batch_id,
-                        legacy_source_batch_id = excluded.legacy_source_batch_id,
-                        account_key = excluded.account_key,
-                        bank_name = excluded.bank_name,
-                        account_last4 = excluded.account_last4,
-                        account_no = excluded.account_no,
-                        account_name = excluded.account_name,
-                        trade_time = excluded.trade_time,
-                        trade_date = excluded.trade_date,
-                        trade_time_sort = excluded.trade_time_sort,
-                        direction = excluded.direction,
-                        direction_label = excluded.direction_label,
-                        amount = excluded.amount,
-                        signed_amount = excluded.signed_amount,
-                        balance = excluded.balance,
-                        currency = excluded.currency,
-                        counterparty_name = excluded.counterparty_name,
-                        summary = excluded.summary,
-                        purpose = excluded.purpose,
-                        manual_category_code = excluded.manual_category_code,
-                        manual_category_label = excluded.manual_category_label,
-                        manual_category_path = excluded.manual_category_path,
-                        manual_category_primary_label = excluded.manual_category_primary_label,
-                        manual_category_sub_label = excluded.manual_category_sub_label,
-                        manual_category_third_label = excluded.manual_category_third_label,
-                        manual_category_label_path = excluded.manual_category_label_path,
-                        manual_category_source = excluded.manual_category_source,
-                        manual_category_version = excluded.manual_category_version,
-                        manual_confirmed_category_code = excluded.manual_confirmed_category_code,
-                        auto_category_code = excluded.auto_category_code,
-                        auto_category_label = excluded.auto_category_label,
-                        auto_category_path = excluded.auto_category_path,
-                        auto_category_primary_label = excluded.auto_category_primary_label,
-                        auto_category_sub_label = excluded.auto_category_sub_label,
-                        auto_category_third_label = excluded.auto_category_third_label,
-                        auto_category_label_path = excluded.auto_category_label_path,
-                        auto_category_source = excluded.auto_category_source,
-                        auto_category_rule_code = excluded.auto_category_rule_code,
-                        auto_category_reason = excluded.auto_category_reason,
-                        auto_category_confidence = excluded.auto_category_confidence,
-                        auto_category_rule_version = excluded.auto_category_rule_version,
-                        auto_candidate_category_codes = excluded.auto_candidate_category_codes,
-                        auto_candidate_categories = excluded.auto_candidate_categories,
-                        effective_category_code = excluded.effective_category_code,
-                        effective_category_label = excluded.effective_category_label,
-                        effective_category_path = excluded.effective_category_path,
-                        effective_category_primary_label = excluded.effective_category_primary_label,
-                        effective_category_sub_label = excluded.effective_category_sub_label,
-                        effective_category_third_label = excluded.effective_category_third_label,
-                        effective_category_label_path = excluded.effective_category_label_path,
-                        effective_category_source = excluded.effective_category_source,
-                        effective_turnover_role = excluded.effective_turnover_role,
-                        effective_turnover_action_type = excluded.effective_turnover_action_type,
-                        effective_turnover_family = excluded.effective_turnover_family,
-                        category_version = excluded.category_version,
-                        category_source = excluded.category_source,
-                        category_resolution_status = excluded.category_resolution_status,
-                        category_rule_version = excluded.category_rule_version,
-                        oa_relation_tag = excluded.oa_relation_tag,
-                        invoice_relation_tag = excluded.invoice_relation_tag,
-                        relation_tags = excluded.relation_tags,
-                        relation_case_id = excluded.relation_case_id,
-                        search_text = excluded.search_text,
-                        schema_version = excluded.schema_version,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    record,
-                )
-            self._upsert_bank_detail_scope(
-                connection,
-                tenant_id=tenant_id,
-                scope_key=normalized_scope_key,
-                scope_month=scope_month,
-                row_count=len(list(rows or [])),
-                source_versions=(rows[0].get("source_versions") if rows and isinstance(rows[0].get("source_versions"), dict) else {}),
-                generated_at=generated_at,
-            )
+    def _bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository._bank_detail_scope_keys_for_range(*args, **kwargs)
 
-        run_in_transaction(self._connection, write)
+    def _bank_detail_available_month_scope_keys(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository._bank_detail_available_month_scope_keys(*args, **kwargs)
 
-    def mark_bank_detail_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        tenant_id: str = "default",
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        normalized_scope_key = text(scope_key)
-        if not normalized_scope_key:
-            raise ValueError("bank detail scope_key is required.")
+    def bank_detail_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._bank_read_model_repository.bank_detail_scope_summary(*args, **kwargs)
 
-        def write(connection: Any) -> None:
-            self._upsert_bank_detail_scope(
-                connection,
-                tenant_id=tenant_id,
-                scope_key=normalized_scope_key,
-                scope_month=month_start(normalized_scope_key),
-                row_count=row_count,
-                source_versions=source_versions or {},
-            )
+    def bank_account_balance_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._bank_read_model_repository.bank_account_balance_scope_summary(*args, **kwargs)
 
-        run_in_transaction(self._connection, write)
+    def list_bank_detail_transactions(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_transactions(*args, **kwargs)
 
-    @staticmethod
-    def _upsert_bank_detail_scope(
-        connection: Any,
-        *,
-        tenant_id: str,
-        scope_type: str = "bank_detail",
-        scope_key: str,
-        scope_month: date | None,
-        row_count: int,
-        source_versions: dict[str, Any],
-        schema_version: int = BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
-        generated_at: str | None = None,
-    ) -> None:
-        connection.execute(
-            """
-            insert into read_model.bank_detail_scopes(
-                tenant_id, scope_type, scope_key, scope_month, schema_version, status,
-                row_count, source_version, source_versions, generated_at, raw_payload
-            )
-            values (
-                %s, %s, %s, %s::date, %s, 'fresh',
-                %s, %s, %s, coalesce(%s::timestamptz, now()), %s
-            )
-            on conflict (tenant_id, scope_type, scope_key) do update set
-                scope_month = excluded.scope_month,
-                schema_version = excluded.schema_version,
-                status = 'fresh',
-                row_count = excluded.row_count,
-                source_version = excluded.source_version,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                last_error = null,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                tenant_id,
-                scope_type,
-                scope_key,
-                scope_month,
-                schema_version,
-                max(0, int_value(row_count, 0)),
-                _source_version_value(source_versions),
-                jsonb(source_versions),
-                generated_at,
-                jsonb({"source_versions": source_versions}),
-            ),
-        )
+    def list_bank_detail_accounts(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_accounts(*args, **kwargs)
+
+    def get_bank_detail_tagged_rows_by_transaction_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.get_bank_detail_tagged_rows_by_transaction_ids(*args, **kwargs)
+
+    def list_bank_detail_tagged_rows_by_month(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_tagged_rows_by_month(*args, **kwargs)
+
+    def list_bank_account_balances(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_account_balances(*args, **kwargs)
+
+    def save_bank_account_balances(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.save_bank_account_balances(*args, **kwargs)
+
+    def save_bank_detail_rows(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.save_bank_detail_rows(*args, **kwargs)
+
+    def mark_bank_detail_scope(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.mark_bank_detail_scope(*args, **kwargs)
 
     def list_input_invoice_usage_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_input_invoice_usage_rows(**kwargs)

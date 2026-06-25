@@ -171,7 +171,7 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "filter options are derived only after rows gate returned fresh."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_bank_detail_tagged_rows_by_transaction_ids",
+        "PostgresBankReadModelRepository.get_bank_detail_tagged_rows_by_transaction_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current read-model query result to downstream freshness facade."),
     (
