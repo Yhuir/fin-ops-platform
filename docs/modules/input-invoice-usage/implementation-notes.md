@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Input usage export route owner audit
+
+- 目标：审计进项使用 export preview/download route ownership，选择下一步边界。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：`InputInvoiceUsageExportService` 已拥有 preview/workbook/read-model refreshing/row-limit 语义；`server.py` 仍拥有 auth、audit 和 XLSX response headers。下一步可将 export preview/download 收进 `InputInvoiceUsageApiRoutes`，但必须用显式 export/auth/audit/XLSX response 端口。payment-status-rules PUT 不在下一步范围。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需扩展 static Guard，并回归 export preview/download 和 refreshing API。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-export-route-owner-audit-2026-06-25.md`。
+- 未测风险：真实导出性能、生产 PostgreSQL/worker/App Status、browser/admin/write 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-export-route-callback-collapse`。
+
 ## 2026-06-25 - Input usage read route owner facade extraction
 
 - 目标：把非 OA reverse 的进项使用读路径 HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。

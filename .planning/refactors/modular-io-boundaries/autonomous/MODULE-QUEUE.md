@@ -361,7 +361,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 347 | `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit` | analysis-closed | implementation-gap-open | Audited OA reverse route-owner local support after all `/api/input-invoice-usage/oa-reverse*` mapping moved into `InputInvoiceUsageOaReverseApiRoutes`; selected core input usage route-owner audit next. |
 | 348 | `server-py:input-invoice-usage-core-route-owner-audit` | analysis-closed | implementation-gap-open | Audited remaining non-OA-reverse input usage routes; selected read route-owner facade extraction for rows/filter/detail/relation-detail/payment GET while deferring export and payment PUT. |
 | 349 | `server-py:input-invoice-usage-read-route-owner-facade-extraction` | local-implementation-closed | implementation-gap-open | Added `InputInvoiceUsageApiRoutes` for rows/filter-options/invoice detail/bank detail/OA detail/relation-details/payment-status-rules GET using explicit read/fresh-gate ports; left export and payment PUT in `Application`. |
-| 350 | `server-py:input-invoice-usage-export-route-owner-audit` | pending | implementation-gap-open | Audit input usage export preview/download route ownership, including XLSX bytes, content-disposition headers, refreshing payload mapping and export audit side effects. |
+| 350 | `server-py:input-invoice-usage-export-route-owner-audit` | analysis-closed | implementation-gap-open | Audited input usage export preview/download route ownership; selected route callback collapse with explicit export service, auth, audit and XLSX response ports. |
+| 351 | `server-py:input-invoice-usage-export-route-callback-collapse` | pending | implementation-gap-open | Move export preview/download HTTP mapping into `InputInvoiceUsageApiRoutes` using explicit export/auth/audit/XLSX response ports; keep payment-status-rules PUT in `Application`. |
 
 ## Status Values
 
