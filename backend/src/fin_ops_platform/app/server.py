@@ -67,6 +67,7 @@ from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadF
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchApiRoutes,
     WorkbenchGroupDetailApiRoutes,
+    WorkbenchReadApiRoutes,
     WorkbenchRowDetailApiRoutes,
 )
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
@@ -454,9 +455,6 @@ from fin_ops_platform.services.workbench_auto_pair_conflict_relation_read_port i
 from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_groups_page_cache import (
     build_workbench_groups_redis_cache_key_from_version,
-    normalize_workbench_group_detail_level,
-    normalize_workbench_group_search_mode,
-    stable_json_value,
     workbench_groups_redis_cache_version_from_key,
     workbench_groups_redis_ttl_seconds_from_env,
     workbench_groups_redis_version_key,
@@ -3624,8 +3622,8 @@ class Application:
             delattr(self, "_workbench_pair_relation_persist_service_instance")
 
     def _handle_api_workbench_summary(self, month: str | None) -> Response:
-        result = self._workbench_query_facade().summary(month)
-        return self._json_response(result.status_code, result.payload)
+        status_code, payload = self._workbench_read_routes().summary(month)
+        return self._json_response(status_code, payload)
 
     def _handle_api_workbench_groups(
         self,
@@ -3644,40 +3642,22 @@ class Application:
         column_filters: str | None = None,
         time_filters: str | None = None,
     ) -> Response:
-        current_month = month or "all"
-        normalized_zone = str(zone or "").strip()
-        if normalized_zone not in {"open", "paired"}:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
-            )
-        normalized_detail_level = self._normalize_workbench_group_detail_level(detail_level)
-        normalized_search_mode = self._normalize_workbench_group_search_mode(search_mode)
-        try:
-            normalized_column_filters = self._normalize_workbench_group_json_query_param(column_filters, "column_filters")
-            normalized_time_filters = self._normalize_workbench_group_json_query_param(time_filters, "time_filters")
-            normalized_search_by_pane = self._normalize_workbench_group_json_query_param(search_by_pane, "search_by_pane")
-        except ValueError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_groups_query", "message": str(error)},
-            )
-        result = self._workbench_query_facade().groups(
-            current_month,
-            zone=normalized_zone,
+        status_code, payload = self._workbench_read_routes().groups(
+            month,
+            zone=zone,
             page=page,
             page_size=page_size,
             status=status,
             source_kind=source_kind,
             search=search,
-            search_mode=normalized_search_mode,
-            search_by_pane=normalized_search_by_pane,
+            search_mode=search_mode,
+            search_by_pane=search_by_pane,
             sort=sort,
-            detail_level=normalized_detail_level,
-            column_filters=normalized_column_filters,
-            time_filters=normalized_time_filters,
+            detail_level=detail_level,
+            column_filters=column_filters,
+            time_filters=time_filters,
         )
-        return self._json_response(result.status_code, result.payload)
+        return self._json_response(status_code, payload)
 
     def _handle_api_workbench_group_detail(
         self,
@@ -3978,31 +3958,6 @@ class Application:
             column_filters=column_filters,
             time_filters=time_filters,
         )
-
-    @staticmethod
-    def _normalize_workbench_group_json_query_param(value: str | None, name: str) -> dict[str, object]:
-        raw_value = str(value or "").strip()
-        if not raw_value:
-            return {}
-        try:
-            parsed = json.loads(raw_value)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"{name} must be valid JSON object.") from error
-        if not isinstance(parsed, dict):
-            raise ValueError(f"{name} must be a JSON object.")
-        return stable_json_value(parsed)
-
-    @staticmethod
-    def _normalize_workbench_group_search_mode(value: str | None) -> str:
-        return normalize_workbench_group_search_mode(value)
-
-    @staticmethod
-    def _stable_json_value(value: object) -> object:
-        return stable_json_value(value)
-
-    @staticmethod
-    def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
-        return normalize_workbench_group_detail_level(detail_level)
 
     @staticmethod
     def _workbench_groups_redis_ttl_seconds() -> int:
@@ -8549,6 +8504,16 @@ class Application:
 
     def _get_api_workbench_row_detail_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
         return self._workbench_row_detail_routes().get_payload(row_id, month=month)
+
+    def _workbench_read_routes(self) -> WorkbenchReadApiRoutes:
+        routes = getattr(self, "_workbench_read_api_routes", None)
+        if routes is None:
+            routes = self._build_workbench_read_api_routes()
+            self._workbench_read_api_routes = routes
+        return routes
+
+    def _build_workbench_read_api_routes(self) -> WorkbenchReadApiRoutes:
+        return WorkbenchReadApiRoutes(query_facade_provider=self._workbench_query_facade)
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)

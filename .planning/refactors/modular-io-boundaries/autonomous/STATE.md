@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-groups-read-route-owner-extraction-selected`
+Current state: `workbench-read-route-owner-post-groups-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:post-no-oa-server-local-support-next-boundary-selection` as `analysis-closed` in `analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`. The next local implementation boundary is `server-py:workbench-groups-read-route-owner-extraction`: move Workbench summary/groups read HTTP validation and mapping into `routes_workbench.py` while preserving `Application` dispatch/response/metrics and leaving SSE events/refresh-status for later slices. Production browser/admin/write evidence remains deferred until local modularization gaps are closed.
+Completed `server-py:workbench-groups-read-route-owner-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md`. `WorkbenchReadApiRoutes` now owns Workbench summary/groups read HTTP validation and facade parameter mapping; `Application` keeps dispatch, response construction and metrics. The next local boundary is `server-py:workbench-read-route-owner-post-groups-audit` to audit refresh-status, SSE events and legacy `/api/workbench` payload surfaces before selecting another narrow local slice. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

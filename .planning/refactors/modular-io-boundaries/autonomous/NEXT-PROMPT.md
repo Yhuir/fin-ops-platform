@@ -1,51 +1,56 @@
 # Next Prompt
 
-Continue after `planning:post-no-oa-server-local-support-next-boundary-selection`.
+Continue after `server-py:workbench-groups-read-route-owner-extraction`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `planning:post-no-oa-server-local-support-next-boundary-selection`.
-- Row406 status: `analysis-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`.
-- Selected next local implementation boundary: `server-py:workbench-groups-read-route-owner-extraction`.
-- Workbench group detail is already route-owned, but summary/groups list validation and facade mapping still live in `Application`.
+- Last completed boundary: `server-py:workbench-groups-read-route-owner-extraction`.
+- Row407 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md`.
+- `WorkbenchReadApiRoutes` now owns summary/groups read validation and facade parameter mapping.
+- `Application` keeps Workbench dispatch, response construction and API metrics.
+- SSE events, refresh-status and legacy `/api/workbench` payload handling remain to be audited.
 - Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
 
 ## Previous Prompt Completion
 
-`planning:post-no-oa-server-local-support-next-boundary-selection` is complete:
+`server-py:workbench-groups-read-route-owner-extraction` is complete:
 
-- read current state/queue and Workbench module docs;
-- inspected `routes_workbench.py` and residual Workbench `server.py` read route handlers;
-- identified `GET /api/workbench/summary` and `GET /api/workbench/groups` as the next narrow local route-owner gap;
-- explicitly deferred `GET /api/workbench/events` and `GET /api/workbench/refresh-status` to later slices;
+- added `WorkbenchReadApiRoutes`;
+- moved `GET /api/workbench/summary` and `GET /api/workbench/groups` read validation/facade mapping out of `Application`;
+- removed migrated group-list normalizer helpers from `server.py`;
+- added `tests/test_workbench_routes.py` coverage for summary/groups route owner;
+- added `test_workbench_groups_read_route_owner_extraction_stays_local` static Guard;
+- confirmed the local API contract harness still covers `/api/workbench/summary` and `/api/workbench/groups`;
 - avoided production validation.
 
 ## Next Boundary
 
-`server-py:workbench-groups-read-route-owner-extraction`
+`server-py:workbench-read-route-owner-post-groups-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
    - `backend/src/fin_ops_platform/app/routes_workbench.py`
-   - `backend/src/fin_ops_platform/app/server.py` Workbench summary/groups handlers
+   - `backend/src/fin_ops_platform/app/server.py` remaining Workbench read handlers
    - `tests/test_workbench_routes.py`
    - relevant Workbench static guards in `tests/test_platform_runtime_boundary_guards.py`
-3. Write the implementation analysis for `server-py:workbench-groups-read-route-owner-extraction`.
-4. Move Workbench summary/groups read validation and facade mapping into `routes_workbench.py` behind explicit ports.
-5. Keep `Application` responsible for top-level route dispatch, JSON response construction and Workbench metrics.
-6. Add local route-owner tests and a static Guard preventing group-list validation from returning to `Application`.
-7. Update state/queue/journal/next prompt, run targeted tests/docs/diff checks, commit/push.
+3. Audit remaining Workbench read-route `Application` surfaces after summary/groups extraction:
+   - `/api/workbench/refresh-status`;
+   - `/api/workbench/events`;
+   - legacy `/api/workbench` payload and SQL read-model fallback helpers.
+4. Select the next narrow local implementation or guard boundary.
+5. If a safe implementation slice exists, write analysis first, implement, test, update guards/state and commit/push.
+6. If only audit is safe, write the audit, update state/queue/journal/next prompt, run docs/diff checks and commit/push.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not claim global closure from Workbench route-owner extraction.
+- Do not claim global closure from Workbench read route-owner extraction.
 - Do not choose Go implementation; Go admission remains blocked.
-- Do not move SSE events or controlled production browser/admin/write evidence in this slice.
+- Do not move SSE events unless the audit proves a narrow route-owner split can preserve stream lifecycle cleanup.

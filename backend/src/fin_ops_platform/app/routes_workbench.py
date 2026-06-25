@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+import json
 from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    normalize_workbench_group_detail_level,
+    normalize_workbench_group_search_mode,
+    stable_json_value,
+)
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 
 
@@ -123,6 +129,81 @@ class WorkbenchGroupDetailApiRoutes:
             group_id=normalized_group_id,
         )
         return result.status_code, result.payload
+
+
+class WorkbenchReadApiRoutes:
+    """Read-only owner for Workbench summary and grouped list request mapping."""
+
+    def __init__(self, *, query_facade_provider: Callable[[], Any]) -> None:
+        self._query_facade_provider = query_facade_provider
+
+    def summary(self, month: str | None) -> tuple[HTTPStatus, dict[str, object]]:
+        result = self._query_facade_provider().summary(month)
+        return result.status_code, result.payload
+
+    def groups(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        search_mode: str | None = None,
+        search_by_pane: str | None = None,
+        sort: str | None = None,
+        detail_level: str | None = None,
+        column_filters: str | None = None,
+        time_filters: str | None = None,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        current_month = month or "all"
+        normalized_zone = str(zone or "").strip()
+        if normalized_zone not in {"open", "paired"}:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+            )
+        try:
+            normalized_column_filters = self._normalize_json_query_param(column_filters, "column_filters")
+            normalized_time_filters = self._normalize_json_query_param(time_filters, "time_filters")
+            normalized_search_by_pane = self._normalize_json_query_param(search_by_pane, "search_by_pane")
+        except ValueError as error:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_groups_query", "message": str(error)},
+            )
+        result = self._query_facade_provider().groups(
+            current_month,
+            zone=normalized_zone,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+            search_mode=normalize_workbench_group_search_mode(search_mode),
+            search_by_pane=normalized_search_by_pane,
+            sort=sort,
+            detail_level=normalize_workbench_group_detail_level(detail_level),
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+        )
+        return result.status_code, result.payload
+
+    @staticmethod
+    def _normalize_json_query_param(value: str | None, name: str) -> dict[str, object]:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{name} must be valid JSON object.") from error
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{name} must be a JSON object.")
+        normalized = stable_json_value(parsed)
+        return normalized if isinstance(normalized, dict) else {}
 
 
 class WorkbenchApiRoutes:

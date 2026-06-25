@@ -4862,6 +4862,71 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_groups_read_route_owner_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        routes_path = APP_ROOT / "routes_workbench.py"
+        routes_source = routes_path.read_text(encoding="utf-8")
+        routes_tree = _parse(routes_path)
+        read_route_source = _class_source(routes_tree, routes_source, "WorkbenchReadApiRoutes")
+        groups_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_groups")
+        summary_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_summary")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for marker in (
+            "def summary(",
+            "def groups(",
+            "normalize_workbench_group_search_mode",
+            "normalize_workbench_group_detail_level",
+            "_normalize_json_query_param",
+            "invalid_workbench_groups_query",
+        ):
+            if marker not in read_route_source:
+                violations.append(f"WorkbenchReadApiRoutes missing marker: {marker}")
+        for forbidden in (
+            "_normalize_workbench_group_json_query_param",
+            "_normalize_workbench_group_search_mode",
+            "_normalize_workbench_group_detail_level",
+            "stable_json_value",
+            "normalize_workbench_group_search_mode",
+            "normalize_workbench_group_detail_level",
+            "_workbench_query_facade().groups",
+        ):
+            if forbidden in groups_handler_source:
+                violations.append(f"server.py groups handler still owns route mapping: {forbidden}")
+        if "_workbench_read_routes().groups(" not in groups_handler_source:
+            violations.append("server.py groups handler does not delegate to WorkbenchReadApiRoutes")
+        if "_workbench_read_routes().summary(" not in summary_handler_source:
+            violations.append("server.py summary handler does not delegate to WorkbenchReadApiRoutes")
+        for forbidden in (
+            "WorkbenchRelationCommandService",
+            "ReadModelRefreshGateway",
+            "dirty_scope",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+        ):
+            if forbidden in read_route_source:
+                violations.append(f"WorkbenchReadApiRoutes gained write/runtime side effect: {forbidden}")
+        for marker in (
+            "server-py:workbench-groups-read-route-owner-extraction",
+            "GET /api/workbench/summary",
+            "GET /api/workbench/groups",
+            "WorkbenchReadApiRoutes",
+            "SSE events",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench groups read extraction analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
