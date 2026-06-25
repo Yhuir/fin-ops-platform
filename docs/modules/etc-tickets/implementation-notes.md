@@ -710,3 +710,13 @@
 - 测试覆盖：新增 direct service tests 覆盖普通删除、submitted reset 和 missing/idempotent fallback；扩展 static Guard；重跑 business batch delete API 和底层 service 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_business_batch_delete_service.py backend/src/fin_ops_platform/app/server.py tests/test_etc_business_batch_delete_service.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_business_batch_delete_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_summary_relation_delete_uses_workbench_relation_command_boundary -v`；business batch delete targeted API regressions 4 条通过；ETC service delete regressions 3 条通过。
 - 未测风险：`Application._handle_api_etc_business_batch_delete(...)` 仍是薄 callback；下一步审计能否 collapse 到 `EtcBusinessBatchApiRoutes`。
+
+## 2026-06-25 - ETC business-batch delete route callback收敛审计
+
+- 目标：审计 service extraction 后的 business-batch DELETE 薄 callback 是否可以迁入 route owner。
+- 影响范围：`Application._handle_api_etc_business_batch_delete(...)`、`Application._route_api_etc_business_batch_v2(...)`、`Application._handle_legacy_etc_batch_business_delete(...)`、`EtcBusinessBatchApiRoutes`、`EtcBusinessBatchDeleteService`。
+- 关键决策：DELETE callback 已足够薄，可以移入 `EtcBusinessBatchApiRoutes`；route owner 需要显式 delete service、JSON loader、refresh/persist ports。legacy `/api/etc/batches/{id}` 兼容 resolver 可暂时保留，但不能拥有删除副作用。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only；下一实现 slice 需要 static Guard 和 targeted business-batch DELETE API regressions。
+- 验证命令：只读审计 `server.py`、business route owner、legacy route owner、delete service、Guard 和 CodeGraph；未运行新增测试。
+- 未测风险：DELETE HTTP mapping 仍在 `Application`，等待 callback collapse。
