@@ -457,7 +457,8 @@ Current local-first state:
 - Row362 is complete in `analysis/server-py-output-invoice-collection-post-fresh-gate-local-closure-audit-2026-06-25.md`: output collection local `server.py` support is accounted for; remaining output collection `Application` methods are explicit composition-root/platform/provider ports.
 - Row363 is complete in `analysis/server-py-oa-pending-payment-route-owner-audit-2026-06-25.md`: remaining `/api/oa-pending-payments*` app callbacks are thin wrappers around route/read-model/command services.
 - Row364 is complete in `analysis/server-py-oa-pending-payment-route-callback-collapse-2026-06-25.md`: `/api/oa-pending-payments*` HTTP mapping now lives in `OaPendingPaymentApiRoutes.route(...)` and app-owned callbacks were removed.
-- Row365 is the next local boundary: audit remaining OA pending payment `Application` provider/composition surfaces after route callback collapse.
+- Row365 is complete in `analysis/server-py-oa-pending-payment-route-owner-local-closure-audit-2026-06-25.md`: OA pending payment local `server.py` support is accounted for; remaining methods are explicit composition-root/provider/platform ports.
+- Row366 is the next local boundary: audit remaining `/api/pending-invoices*` app-owned route callbacks and select the next bounded implementation slice.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

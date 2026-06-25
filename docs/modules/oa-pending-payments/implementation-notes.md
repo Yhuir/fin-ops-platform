@@ -3,6 +3,15 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-25 - route-owner local server.py audit
+
+- 目标：在 `/api/oa-pending-payments*` route callback collapse 后，审计 OA 待付款剩余 `Application` 表面是否还有本地 implementation gap。
+- 结论：本地 `server.py` route-owner 支持已 accounted；剩余方法是 query/route/command/read-model service composition、pending relation repository provider、payment-admitted projection/source adapter provider、source-version provider、refresh gateway port、auth/session adapter 或 shared invoice-usage invalidation fan-out，不再承载 OA 待付款私有 HTTP callback、read-model payload 或 command 业务实现。
+- 文档影响：更新 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：沿用 OA pending payment API 回归和 `test_oa_pending_payment_routes_use_route_owner` Guard；本条为审计 slice，无运行时代码变更。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_oa_pending_payment_routes_use_route_owner -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/OA/worker/App Status/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-25 - route callback collapse
 
 - 目标：把 `/api/oa-pending-payments*` HTTP dispatch 从 `Application` 移入 `OaPendingPaymentApiRoutes.route(...)`。
