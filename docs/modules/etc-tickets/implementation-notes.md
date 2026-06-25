@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC legacy batch read payload facade audit
+
+- 目标：审计 legacy `/api/etc/batches` list/detail/count/filter payload ownership，为下一步 read facade extraction 定界。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：不把 read payload 直接搬进 route owner；该路径同时包含 business/submission/import unified view、reconciliation import 排除、counts、filter、detail supplement metadata 和 attachment serialization，下一步应抽 `EtcLegacyBatchReadFacade`。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步 read facade extraction 必须补 facade/service 测试、静态 guard 和 targeted list/detail/query API 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`。
+- 未测风险：legacy batch list/detail payload helper 仍在 `Application`；本地模块化闭环未完成。
+- 后续事项：执行 `server-py:etc-legacy-batch-read-facade-extraction`。
+
 ## 2026-06-25 - ETC legacy batch lifecycle side-effect service
 
 - 目标：把 legacy `/api/etc/batches*` 的 OA draft、confirm-submitted、mark-not-submitted 生命周期副作用从 `Application` 抽到显式 service。

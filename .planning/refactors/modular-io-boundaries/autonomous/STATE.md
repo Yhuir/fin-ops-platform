@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-legacy-batch-lifecycle-side-effects-service-owned`
+Current state: `etc-legacy-batch-read-facade-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-legacy-batch-draft-confirm-callback-audit` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`. T0 added `EtcLegacyBatchLifecycleService`, moved legacy batch OA draft/confirm/reopen lifecycle side effects out of `Application`, returned explicit refresh events, and kept HTTP body/header/detail/error mapping in `server.py`. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-read-payload-facade-audit`.
+Completed `server-py:etc-legacy-batch-read-payload-facade-audit` as `analysis-closed` in `analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`. T0 audited legacy batch list/detail/count/filter payload ownership, rejected direct route-owner migration as too broad, and selected `server-py:etc-legacy-batch-read-facade-extraction` as the next local implementation boundary. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
