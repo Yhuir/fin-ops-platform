@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-read-export-route-callback-collapse-selected`
+Current state: `turnover-ledger-write-route-callback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-route-owner-audit` as `analysis-closed` in `analysis/server-py-turnover-ledger-route-owner-audit-2026-06-25.md`. Turnover ledger read/export/GET callbacks are thin enough for a bounded route-owner collapse; mutation callbacks remain thicker session/body/idempotency/precondition wrappers for later audits. T0 selected turnover ledger read/export route callback collapse next.
+Completed `server-py:turnover-ledger-read-export-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-read-export-route-callback-collapse-2026-06-25.md`. Turnover ledger read/export/GET HTTP mapping now lives in `TurnoverLedgerApiRoutes.route(...)` with explicit JSON/export/tag-selection ports; app-owned GET callbacks were removed. Mutation callbacks remain in `Application` and T0 selected turnover ledger write route callback audit next.
 
 ## Closed Or Deferred Slices
 

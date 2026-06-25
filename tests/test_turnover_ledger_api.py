@@ -3656,15 +3656,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             TurnoverLedgerExportLimitError,
         )
 
-        class ExportLimitFacade:
-            def export_preview(self, **_kwargs: object) -> dict[str, object]:
+        class ExportLimitRoutes:
+            @staticmethod
+            def export_preview(**_kwargs: object) -> dict[str, object]:
                 raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
 
-            def export(self, **_kwargs: object) -> tuple[str, bytes]:
+            @staticmethod
+            def export(**_kwargs: object) -> tuple[str, bytes]:
                 raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
 
         app = build_application()
-        app._turnover_ledger_read_facade = ExportLimitFacade()
+        app._turnover_ledger_api_routes.export_preview = ExportLimitRoutes.export_preview  # type: ignore[method-assign]
+        app._turnover_ledger_api_routes.export = ExportLimitRoutes.export  # type: ignore[method-assign]
 
         preview_response = app.handle_request("GET", "/api/turnover-ledger/export-preview?family=all")
         export_response = app.handle_request("GET", "/api/turnover-ledger/export?family=all")

@@ -1660,6 +1660,64 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_turnover_ledger_read_export_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        route_path = APP_ROOT / "routes_turnover_ledger.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_source = route_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        violations: list[str] = []
+
+        if "def route(" not in route_source:
+            violations.append("TurnoverLedgerApiRoutes does not own read/export route dispatch")
+        for snippet in (
+            'route_path == "/api/turnover-ledger"',
+            'route_path == "/api/turnover-ledger/export-preview"',
+            'route_path == "/api/turnover-ledger/export"',
+            'route_path == "/api/turnover-ledger/tag-selection"',
+            'route_path.startswith("/api/turnover-ledger/relations/")',
+            "def handle_list_route(",
+            "def handle_export_preview_route(",
+            "def handle_export_route(",
+            "def handle_relation_route(",
+            "def handle_relation_extra_route(",
+            "def handle_tag_selection_route(",
+        ):
+            if snippet not in route_source:
+                violations.append(f"TurnoverLedgerApiRoutes is missing read/export route-owner behavior {snippet}")
+        for removed_handler in (
+            "_handle_api_turnover_ledger",
+            "_handle_api_turnover_ledger_export_preview",
+            "_handle_api_turnover_ledger_export",
+            "_handle_api_turnover_ledger_relation",
+            "_handle_api_turnover_ledger_relation_extra",
+            "_handle_api_turnover_ledger_tag_selection",
+        ):
+            if _function_source(server_tree, server_source, removed_handler):
+                violations.append(f"server.py still owns turnover ledger read/export route callback {removed_handler}")
+        for retained_handler in (
+            "_handle_api_turnover_ledger_tag_selection_update",
+            "_handle_api_turnover_ledger_bank_row_tags_batch",
+            "_handle_api_turnover_ledger_relation_extra_update",
+            "_handle_api_turnover_ledger_confirm",
+            "_handle_api_turnover_ledger_closure_confirm",
+            "_handle_api_turnover_ledger_closure_withdraw",
+            "_handle_api_turnover_ledger_withdraw",
+        ):
+            if not _function_source(server_tree, server_source, retained_handler):
+                violations.append(f"server.py no longer owns turnover ledger mutation callback {retained_handler}")
+        if "self._turnover_ledger_api_routes.route(method, route_path, query)" not in server_source:
+            violations.append("server.py does not delegate turnover ledger read/export routing to the route owner")
+        for snippet in (
+            "json_response=self._json_response",
+            "export_response=self._turnover_ledger_export_response",
+            "tag_selection_provider=self._app_settings_service.get_turnover_ledger_tag_selection_payload",
+        ):
+            if snippet not in server_source:
+                violations.append(f"server.py does not inject turnover ledger route port {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_tax_offset_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

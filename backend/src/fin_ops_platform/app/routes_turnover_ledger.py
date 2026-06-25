@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from http import HTTPStatus
+from typing import Any, Callable
+from urllib.parse import unquote
 
-from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
+from fin_ops_platform.services.turnover_ledger_export_service import (
+    TurnoverLedgerExportLimitError,
+    TurnoverLedgerExportService,
+)
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
@@ -141,12 +146,145 @@ class TurnoverLedgerApiRoutes:
         relation_service: TurnoverRelationService,
         extra_service: Any | None = None,
         query_service: TurnoverLedgerQueryService | None = None,
+        json_response: Callable[[HTTPStatus, dict[str, object]], Any] | None = None,
+        export_response: Callable[[str, bytes], Any] | None = None,
+        tag_selection_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._ledger_service = ledger_service
         self._relation_service = relation_service
         self._extra_service = extra_service or InMemoryTurnoverLedgerExtraService()
         self._query_service = query_service
         self._export_service = TurnoverLedgerExportService(self.list_grouped_ledger)
+        self._json_response = json_response
+        self._export_response = export_response
+        self._tag_selection_provider = tag_selection_provider
+
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+    ) -> Any | None:
+        if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
+            return self.handle_export_preview_route(query)
+        if method == "GET" and route_path == "/api/turnover-ledger/export":
+            return self.handle_export_route(query)
+        if method == "GET" and route_path == "/api/turnover-ledger/tag-selection":
+            return self.handle_tag_selection_route()
+        if method == "GET" and route_path == "/api/turnover-ledger":
+            return self.handle_list_route(query)
+        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self.handle_relation_extra_route(relation_id)
+        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/"):
+            relation_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self.handle_relation_route(relation_id)
+        return None
+
+    def handle_list_route(self, query: dict[str, list[str]]) -> Any:
+        view = self._query_value(query, "view", None)
+        family = self._query_value(query, "family", "all")
+        direction = self._query_value(query, "direction", "all")
+        status = self._query_value(query, "status", None)
+        page = self._query_int(query, "page", 1)
+        page_size = self._query_int(query, "page_size", 50)
+        try:
+            payload = self.list_ledger(
+                view=view,
+                family=family,
+                direction=direction,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+        except (TypeError, ValueError) as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_request", "message": str(exc)},
+            )
+        return self._respond(HTTPStatus.OK, payload)
+
+    def handle_tag_selection_route(self) -> Any:
+        if self._tag_selection_provider is None:
+            raise RuntimeError("turnover ledger tag selection provider is not configured")
+        return self._respond(HTTPStatus.OK, self._tag_selection_provider())
+
+    def handle_export_preview_route(self, query: dict[str, list[str]]) -> Any:
+        try:
+            payload = self.export_preview(
+                family=self._query_value(query, "family", "all") or "all",
+                limit=self._query_int(query, "limit", 20),
+            )
+        except TurnoverLedgerExportLimitError as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
+            )
+        except (TypeError, ValueError) as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
+            )
+        return self._respond(HTTPStatus.OK, payload)
+
+    def handle_export_route(self, query: dict[str, list[str]]) -> Any:
+        try:
+            filename, content = self.export(family=self._query_value(query, "family", "all") or "all")
+        except TurnoverLedgerExportLimitError as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
+            )
+        except (TypeError, ValueError) as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
+            )
+        if self._export_response is None:
+            raise RuntimeError("turnover ledger export response port is not configured")
+        return self._export_response(filename, content)
+
+    def handle_relation_route(self, relation_id: str) -> Any:
+        try:
+            payload = self.get_relation(relation_id)
+        except KeyError:
+            return self._unknown_relation_response()
+        return self._respond(HTTPStatus.OK, payload)
+
+    def handle_relation_extra_route(self, relation_id: str) -> Any:
+        try:
+            payload = self.get_relation_extra(relation_id)
+        except KeyError:
+            return self._unknown_relation_response()
+        return self._respond(HTTPStatus.OK, payload)
+
+    @staticmethod
+    def _query_value(
+        query: dict[str, list[str]],
+        key: str,
+        default: str | None,
+    ) -> str | None:
+        return query.get(key, [default])[0]
+
+    @classmethod
+    def _query_int(
+        cls,
+        query: dict[str, list[str]],
+        key: str,
+        default: int,
+    ) -> int:
+        return int(cls._query_value(query, key, str(default)) or default)
+
+    def _unknown_relation_response(self) -> Any:
+        return self._respond(
+            HTTPStatus.NOT_FOUND,
+            {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+        )
+
+    def _respond(self, status: HTTPStatus, payload: dict[str, object]) -> Any:
+        if self._json_response is None:
+            raise RuntimeError("turnover ledger JSON response port is not configured")
+        return self._json_response(status, payload)
 
     def list_ledger(
         self,

@@ -1,5 +1,16 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-25 - read/export GET route-owner collapse
+
+- 目标：执行 `server-py:turnover-ledger-read-export-route-callback-collapse`，把外部往来 read/export/GET HTTP mapping 从 `server.py` 收到 `TurnoverLedgerApiRoutes.route(...)`。
+- 影响范围：`GET /api/turnover-ledger`、`GET /api/turnover-ledger/export-preview`、`GET /api/turnover-ledger/export`、`GET /api/turnover-ledger/tag-selection`、`GET /api/turnover-ledger/relations/{relation_id}`、`GET /api/turnover-ledger/relations/{relation_id}/extra` 的 HTTP 参数解析、错误映射和 response adapter；不改变 grouped payload、read model freshness、导出字段、权限、闭环、撤回、tag-selection PUT、bank-row-tags、extra PUT 或 Workbench relation 写边界。
+- 关键决策：`TurnoverLedgerApiRoutes` 作为 route owner 接收 `json_response`、`export_response`、`tag_selection_provider` 三个显式端口；`Application` 只保留端口组装、XLSX response 平台 adapter 和未迁移的 mutation callbacks。
+- 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；外部往来业务状态机定义不变。
+- 测试覆盖：新增 `test_turnover_ledger_read_export_routes_use_route_owner` 静态 Guard，更新 export limit API 测试注入点到 route owner；复跑 read facade、turnover ledger API 和 route-owner inventory Guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；mutation callbacks 仍需后续审计，不能声明外部往来模块全局 closed。
+- 后续事项：执行 `server-py:turnover-ledger-write-route-callback-audit`。
+
 ## 2026-06-25 - turnover ledger route-owner audit
 
 - 目标：执行 `server-py:turnover-ledger-route-owner-audit`，审计 `/api/turnover-ledger*` 在 `server.py` 的剩余 route ownership。

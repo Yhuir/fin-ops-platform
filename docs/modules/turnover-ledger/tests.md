@@ -62,6 +62,29 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-25 - read/export GET route-owner collapse test note
+
+`server-py:turnover-ledger-read-export-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改外部往来金额、标签准入、闭环、撤回、extra 或分组业务规则。
+- Service-layer tests：适用；复跑 `tests/test_turnover_ledger_read_facade.py`，证明 read facade 仍代理到 route/service boundary。
+- API contract tests：适用；复跑 `tests/test_turnover_ledger_api.py` 140 个用例，覆盖列表/grouped、tag-selection、extra、export、权限/error、idempotency/stale 和写路径回归。更新 `test_export_limit_returns_structured_error`，把导出上限错误注入点改到新的 `TurnoverLedgerApiRoutes` route-owner boundary。
+- Read model/cache/background job tests：间接适用；本 slice 未改 worker、dirty/outbox 或 read model writer，但 API 回归继续覆盖 grouped metadata、stale refresh enqueue 和 read model freshness 诊断。
+- Frontend component and interaction tests：不适用；未改前端 API mapper、页面交互、operation overlay 或 Browser flow。
+- End-to-end business-flow integration tests：不适用；未改 confirm/withdraw/tag-selection 写业务流。
+- Existing feature regression tests：适用；新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_turnover_ledger_read_export_routes_use_route_owner`，防止 read/export GET callback 回到 `server.py`，并确认 mutation callbacks 仍保留给后续写路径审计。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；mutation callbacks 是下一轮边界。
+
 ## 2026-06-24 - repository port extraction test note
 
 `read-models:turnover-ledger-repository-port-extraction` 已完成。测试合同执行结果：

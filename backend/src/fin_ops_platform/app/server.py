@@ -372,7 +372,6 @@ from fin_ops_platform.services.turnover_ledger_read_model_refresh_producer impor
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
-    TurnoverLedgerExportLimitError,
 )
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
@@ -1286,6 +1285,9 @@ class Application:
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
             query_service=self._turnover_ledger_query_service,
+            json_response=self._json_response,
+            export_response=self._turnover_ledger_export_response,
+            tag_selection_provider=self._app_settings_service.get_turnover_ledger_tag_selection_payload,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
             routes=self._turnover_ledger_api_routes,
@@ -1953,27 +1955,17 @@ class Application:
         if method == "POST" and route_path.startswith("/api/no-oa-bank-batches/") and route_path.endswith("/withdraw"):
             batch_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_no_oa_bank_batch_withdraw(batch_id, body, headers)
-        if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
-            return self._handle_api_turnover_ledger_export_preview(query)
-        if method == "GET" and route_path == "/api/turnover-ledger/export":
-            return self._handle_api_turnover_ledger_export(query)
-        if method == "GET" and route_path == "/api/turnover-ledger/tag-selection":
-            return self._handle_api_turnover_ledger_tag_selection()
+        if route_path == "/api/turnover-ledger" or route_path.startswith("/api/turnover-ledger/"):
+            turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query)
+            if turnover_ledger_response is not None:
+                return turnover_ledger_response
         if method == "PUT" and route_path == "/api/turnover-ledger/tag-selection":
             return self._handle_api_turnover_ledger_tag_selection_update(body, headers)
-        if method == "GET" and route_path == "/api/turnover-ledger":
-            return self._handle_api_turnover_ledger(query)
         if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
             return self._handle_api_turnover_ledger_bank_row_tags_batch(body, headers)
-        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
-            relation_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_turnover_ledger_relation_extra(relation_id)
         if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_turnover_ledger_relation_extra_update(relation_id, body, headers)
-        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/"):
-            relation_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_turnover_ledger_relation(relation_id)
         if method == "POST" and route_path == "/api/turnover-ledger/relations/confirm":
             return self._handle_api_turnover_ledger_confirm(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
@@ -9900,23 +9892,6 @@ class Application:
         return int(value)
 
     @staticmethod
-    def _turnover_ledger_query_value(
-        query: dict[str, list[str]],
-        key: str,
-        default: str | None,
-    ) -> str | None:
-        return query.get(key, [default])[0]
-
-    @classmethod
-    def _turnover_ledger_query_int(
-        cls,
-        query: dict[str, list[str]],
-        key: str,
-        default: int,
-    ) -> int:
-        return int(cls._turnover_ledger_query_value(query, key, str(default)) or default)
-
-    @staticmethod
     def _turnover_ledger_export_response(filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
@@ -9928,35 +9903,6 @@ class Application:
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
-        )
-
-    def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
-        view = self._turnover_ledger_query_value(query, "view", None)
-        family = self._turnover_ledger_query_value(query, "family", "all")
-        direction = self._turnover_ledger_query_value(query, "direction", "all")
-        status = self._turnover_ledger_query_value(query, "status", None)
-        page = self._turnover_ledger_query_int(query, "page", 1)
-        page_size = self._turnover_ledger_query_int(query, "page_size", 50)
-        try:
-            payload = self._turnover_ledger_read_facade.list_ledger(
-                view=view,
-                family=family,
-                direction=direction,
-                status=status,
-                page=page,
-                page_size=page_size,
-            )
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_ledger_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_turnover_ledger_tag_selection(self) -> Response:
-        return self._json_response(
-            HTTPStatus.OK,
-            self._app_settings_service.get_turnover_ledger_tag_selection_payload(),
         )
 
     def _handle_api_turnover_ledger_tag_selection_update(
@@ -10105,61 +10051,6 @@ class Application:
                 f"Bank transaction is not tagged as turnover: {transaction_id}",
                 transaction_id=transaction_id,
             )
-
-    def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
-        try:
-            payload = self._turnover_ledger_read_facade.export_preview(
-                family=self._turnover_ledger_query_value(query, "family", "all"),
-                limit=self._turnover_ledger_query_int(query, "limit", 20),
-            )
-        except TurnoverLedgerExportLimitError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
-            )
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_turnover_ledger_export(self, query: dict[str, list[str]]) -> Response:
-        try:
-            filename, content = self._turnover_ledger_read_facade.export(
-                family=self._turnover_ledger_query_value(query, "family", "all"),
-            )
-        except TurnoverLedgerExportLimitError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
-            )
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
-            )
-        return self._turnover_ledger_export_response(filename, content)
-
-    def _handle_api_turnover_ledger_relation(self, relation_id: str) -> Response:
-        try:
-            payload = self._turnover_ledger_read_facade.get_relation(relation_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_turnover_ledger_relation_extra(self, relation_id: str) -> Response:
-        try:
-            payload = self._turnover_ledger_read_facade.get_relation_extra(relation_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_turnover_ledger_relation_extra_update(
         self,
