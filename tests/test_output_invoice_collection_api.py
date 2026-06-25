@@ -182,6 +182,41 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             20000,
         )
 
+    def test_export_and_filter_routes_preserve_refreshing_sql_read_model_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[self._invoice("out-refresh", "9201", "刷新客户")])
+
+            def refreshing_rows(_query: dict[str, list[str]]) -> dict[str, object]:
+                return {
+                    "rows": [],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 0},
+                    "summary": {},
+                    "read_model_status": "refreshing",
+                    "read_model_scope_key": "all",
+                }
+
+            app._get_output_invoice_collection_all_rows_from_sql_read_model = refreshing_rows
+            filter_response = app.handle_request("GET", "/api/output-invoice-collections/filter-options")
+            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
+            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
+
+        filter_payload = json.loads(filter_response.body)
+        preview_payload = json.loads(preview_response.body)
+        download_payload = json.loads(download_response.body)
+        self.assertEqual(filter_response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(filter_payload["read_model_status"], "refreshing")
+        self.assertEqual(filter_payload["readModelStatus"], "refreshing")
+        self.assertEqual(preview_response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(preview_payload["read_model_status"], "refreshing")
+        self.assertEqual(preview_payload["readModelStatus"], "refreshing")
+        self.assertEqual(download_response.status_code, int(HTTPStatus.CONFLICT))
+        self.assertEqual(
+            download_payload["error"]["code"],
+            "output_invoice_collection_read_model_refreshing",
+        )
+        self.assertEqual(download_payload["error"]["details"]["readModelStatus"], "refreshing")
+
     def test_detail_rules_preview_history_and_relation_routes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

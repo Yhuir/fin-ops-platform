@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Read model fresh gate service extraction
+
+- 目标：把销项发票收款情况 SQL read model fresh gate、schema stale 检查、source-version 检查、all-rows 聚合和 relation detail fail-closed 从 `Application` 抽到显式 service 边界。
+- 影响范围：新增 `OutputInvoiceCollectionReadModelFreshGateService`；`server.py` 的 output collection rows/all-rows/relation-detail helper 改为委托；删除旧 shared invoice relation helper 死代码；更新 read model architecture Guard 和 runtime boundary Guard。
+- 关键决策：service 接收 repository、query service、SQL runtime requirement、refresh enqueue 和 expected source-version provider 作为显式依赖；保留 output 特有的 `readModelStatus` 兼容字段；lifecycle overlay 继续由 route owner/query service 负责；dict-based refreshing all-rows payload 不会被导出为 empty workbook，filter options/export preview 返回 202，export download 返回 structured 409 refresh error。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：新增 `tests/test_output_invoice_collection_read_model_fresh_gate_service.py` 覆盖 schema stale 和 source-version stale；`tests/test_output_invoice_collection_api.py` 覆盖 refreshing all-rows payload 的 filter/export-preview/export contract；复跑完整 output collection API、read model architecture Guard 和 runtime boundary Guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_output_invoice_collections.py tests/test_output_invoice_collection_read_model_fresh_gate_service.py tests/test_output_invoice_collection_api.py tests/test_platform_runtime_boundary_guards.py tests/test_read_model_architecture_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_read_model_fresh_gate_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-25 - Mutation route callback collapse
 
 - 目标：把销项发票收款情况剩余 receipt preview/settings、收款状态、提醒、红蓝票和收据 create/void/reissue HTTP mapping 从 `Application` 移入 `OutputInvoiceCollectionApiRoutes`。

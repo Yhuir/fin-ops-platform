@@ -1547,6 +1547,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OutputInvoiceCollectionApiRoutes")
+        fresh_gate_source = (SERVICES_ROOT / "output_invoice_collection_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
         violations: list[str] = []
 
         for required in (
@@ -1581,6 +1582,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Application does not dispatch output collection read routes through route owner")
         if "def _output_invoice_collection_xlsx_response(" not in server_source:
             violations.append("Application is missing explicit output collection xlsx response port")
+        for required in (
+            "class OutputInvoiceCollectionReadModelFreshGateService",
+            "source_version_mismatch_reasons",
+            "require_expected_source_versions",
+            "payload_requires_schema_refresh",
+            "def all_rows(",
+            "def rows(",
+            "def relation_details(",
+        ):
+            if required not in fresh_gate_source:
+                violations.append(f"Output collection fresh-gate service is missing {required}")
         for removed_handler in (
             "_handle_api_output_invoice_collections_rows",
             "_handle_api_output_invoice_collections_filter_options",
@@ -1603,6 +1615,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_output_invoice_collections_receipt_settings",
             "_handle_api_output_invoice_collections_receipt_settings_update",
             "_output_invoice_collection_mutation",
+            "_get_invoice_relation_all_rows_from_sql_read_model",
+            "_output_invoice_collection_sql_payload_requires_schema_refresh",
+            "_invoice_relation_scope_key_from_query",
+            "_invoice_relation_refreshing_payload",
         ):
             if _function_source(server_tree, server_source, removed_handler):
                 violations.append(f"server.py still owns output collection route callback {removed_handler}")

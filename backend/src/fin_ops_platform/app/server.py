@@ -251,8 +251,8 @@ from fin_ops_platform.services.output_invoice_collection_lifecycle_service impor
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
 )
-from fin_ops_platform.services.output_invoice_collection_read_model_detail_service import (
-    OutputInvoiceCollectionReadModelDetailService,
+from fin_ops_platform.services.output_invoice_collection_read_model_fresh_gate_service import (
+    OutputInvoiceCollectionReadModelFreshGateService,
 )
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
@@ -7443,6 +7443,29 @@ class Application:
             load_json_body=self._load_json_body,
         )
 
+    def _output_invoice_collection_read_model_fresh_gate(self) -> OutputInvoiceCollectionReadModelFreshGateService:
+        service = getattr(self, "_output_invoice_collection_read_model_fresh_gate_instance", None)
+        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
+        query_service = self._output_invoice_collection_service()
+        if (
+            isinstance(service, OutputInvoiceCollectionReadModelFreshGateService)
+            and getattr(service, "_repository", None) is repository
+            and getattr(service, "_query_service", None) is query_service
+        ):
+            return service
+        service = OutputInvoiceCollectionReadModelFreshGateService(
+            repository=repository,
+            query_service=query_service,
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+            enqueue_refresh=lambda scope_key, reason: self._enqueue_output_invoice_collection_read_model_refresh(
+                scope_key,
+                reason=reason,
+            ),
+            expected_source_versions=self._output_invoice_collection_expected_source_versions,
+        )
+        self._output_invoice_collection_read_model_fresh_gate_instance = service
+        return service
+
     def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
@@ -7476,177 +7499,21 @@ class Application:
     def _get_output_invoice_collection_all_rows_from_sql_read_model(
         self,
         query: dict[str, list[str]],
-    ) -> dict[str, object] | Response | None:
-        return self._get_invoice_relation_all_rows_from_sql_read_model(
-            query,
-            row_getter=self._get_output_invoice_collection_rows_from_sql_read_model,
-        )
-
-    def _get_invoice_relation_all_rows_from_sql_read_model(
-        self,
-        query: dict[str, list[str]],
-        *,
-        row_getter: object,
-    ) -> dict[str, object] | Response | None:
-        if not callable(row_getter):
-            return None
-        page_size = 200
-        first_query = {key: list(values) for key, values in query.items()}
-        first_query["page"] = ["1"]
-        first_query["page_size"] = [str(page_size)]
-        first_payload = row_getter(first_query)
-        if first_payload is None:
-            return None
-        if first_payload.get("read_model_status") != "fresh":
-            return self._json_response(HTTPStatus.ACCEPTED, first_payload)
-        rows = list(first_payload.get("rows") or [])
-        pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
-        total = int(pagination.get("total") or len(rows))
-        page = 2
-        while len(rows) < total:
-            page_query = {key: list(values) for key, values in query.items()}
-            page_query["page"] = [str(page)]
-            page_query["page_size"] = [str(page_size)]
-            page_payload = row_getter(page_query)
-            if not isinstance(page_payload, dict):
-                return None
-            if page_payload.get("read_model_status") != "fresh":
-                return self._json_response(HTTPStatus.ACCEPTED, page_payload)
-            page_rows = list(page_payload.get("rows") or [])
-            if not page_rows:
-                break
-            rows.extend(page_rows)
-            page += 1
-        return {
-            "rows": rows,
-            "pagination": {"page": 1, "pageSize": page_size, "total": total},
-            "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
-            "read_model_status": "fresh",
-            "read_model_scope_key": first_payload.get("read_model_scope_key"),
-        }
+    ) -> dict[str, object] | None:
+        return self._output_invoice_collection_read_model_fresh_gate().all_rows(query)
 
     def _get_input_invoice_usage_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         return self._input_invoice_usage_read_model_fresh_gate().rows(query)
 
     def _get_output_invoice_collection_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
-        list_rows = getattr(repository, "list_output_invoice_collection_rows", None)
-        scope_key = self._invoice_relation_scope_key_from_query(query)
-        if not callable(list_rows):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_output_invoice_collection_read_model_refresh(
-                    scope_key,
-                    reason="api_sql_repository_unavailable",
-                )
-                return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
-            return None
-        try:
-            payload = list_rows(
-                month=query.get("month", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["invoice_date"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
-        except ValueError as exc:
-            raise OutputInvoiceCollectionError("invalid_output_invoice_collection_query", str(exc)) from exc
-        if not isinstance(payload, dict):
-            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_miss")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
-        if self._output_invoice_collection_sql_payload_requires_schema_refresh(payload):
-            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_schema_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if refresh_status != "fresh":
-            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
-        stale_reasons = source_version_mismatch_reasons(
-            expected=require_expected_source_versions(
-                self._output_invoice_collection_expected_source_versions(scope_key=scope_key),
-                context="output_invoice_collection_read_model",
-            ),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_source_versions_stale")
-            return self._invoice_relation_refreshing_payload(
-                scope_key=scope_key,
-                include_output_metadata=True,
-                stale_reasons=stale_reasons,
-            )
-        parsed_filters = self._output_invoice_collection_service()._parse_filters(query.get("filters", [None])[0])
-        sort_field, sort_direction = self._output_invoice_collection_service()._parse_sort(
-            query.get("sort_field", ["invoice_date"])[0],
-            query.get("sort_direction", ["desc"])[0],
-        )
-        result = dict(payload)
-        result["filterConfig"] = self._output_invoice_collection_service()._filter_config()
-        result["appliedFilters"] = {"filters": parsed_filters}
-        result["sort"] = {"field": sort_field, "direction": sort_direction}
-        result["read_model_status"] = "fresh"
-        result["readModelStatus"] = "fresh"
-        result["read_model_scope_key"] = scope_key
-        result.pop("refresh_status", None)
-        return result
+        return self._output_invoice_collection_read_model_fresh_gate().rows(query)
 
     def _get_output_invoice_collection_relation_details_from_sql_read_model(
         self,
         row_id: str,
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
-        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
-        if not callable(getattr(repository, "get_output_invoice_collection_row_by_row_id", None)):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_output_invoice_collection_read_model_refresh(
-                    "all",
-                    reason="api_detail_sql_repository_unavailable",
-                )
-                return OutputInvoiceCollectionReadModelDetailService.refreshing_payload(
-                    kind=query.get("kind", [""])[0],
-                    scope_key="all",
-                )
-            return None
-        service = OutputInvoiceCollectionReadModelDetailService(
-            repository=repository,
-            enqueue_refresh=lambda scope_key, reason: self._enqueue_output_invoice_collection_read_model_refresh(
-                scope_key,
-                reason=reason,
-            ),
-            source_versions_provider=self._output_invoice_collection_expected_source_versions,
-        )
-        return service.relation_details(row_id, kind=query.get("kind", [""])[0])
-
-    @staticmethod
-    def _output_invoice_collection_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
-        for row in list(payload.get("rows") or []):
-            if not isinstance(row, dict):
-                return True
-            if not isinstance(row.get("invoice"), dict):
-                return True
-            if not isinstance(row.get("collectionStatus"), dict):
-                return True
-            if not isinstance(row.get("oa"), dict):
-                return True
-            if not isinstance(row.get("bankTransactions"), dict):
-                return True
-            if not isinstance(row.get("invoiceRelations"), dict):
-                return True
-            if not isinstance(row.get("redInvoiceRelation"), dict):
-                return True
-            if not isinstance(row.get("receipt"), dict):
-                return True
-        return False
-
-    @staticmethod
-    def _invoice_relation_scope_key_from_query(query: dict[str, list[str]]) -> str:
-        month = str(query.get("month", [""])[0] or "").strip()
-        if len(month) >= 7 and month[4] == "-":
-            return month[:7]
-        return "all"
+        return self._output_invoice_collection_read_model_fresh_gate().relation_details(row_id, query)
 
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = input_invoice_usage_source_versions(
@@ -7688,27 +7555,6 @@ class Application:
         if not callable(source_versions_loader):
             return {}
         return dict(source_versions_loader(scope_key=scope_key or "all") or {})
-
-    @staticmethod
-    def _invoice_relation_refreshing_payload(
-        *,
-        scope_key: str,
-        include_output_metadata: bool = False,
-        stale_reasons: list[str] | None = None,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "rows": [],
-            "pagination": {"page": 1, "pageSize": 50, "total": 0},
-            "summary": {},
-            "filterConfig": [],
-            "read_model_status": "refreshing",
-            "read_model_scope_key": scope_key,
-        }
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = list(stale_reasons)
-        if include_output_metadata:
-            payload["readModelStatus"] = "refreshing"
-        return payload
 
     def _enqueue_input_invoice_usage_read_model_refresh(
         self,

@@ -35,8 +35,8 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "dict read_model_status=fresh",
     ): (1, "all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._get_invoice_relation_all_rows_from_sql_read_model",
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
+        "OutputInvoiceCollectionReadModelFreshGateService.all_rows",
         "dict read_model_status=fresh",
     ): (1, "shared output-collection all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
     (
@@ -45,13 +45,13 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "read_model_status=fresh",
     ): (1, "input usage service performs schema/status/source-version checks before marking the SQL payload fresh."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._get_output_invoice_collection_rows_from_sql_read_model",
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
+        "OutputInvoiceCollectionReadModelFreshGateService.rows",
         "read_model_status=fresh",
     ): (1, "legacy query path performs schema/status/source-version checks before marking the SQL payload fresh."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._get_output_invoice_collection_rows_from_sql_read_model",
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
+        "OutputInvoiceCollectionReadModelFreshGateService.rows",
         "readModelStatus=fresh",
     ): (1, "camelCase alias for the same fresh-gated output invoice collection payload."),
     (

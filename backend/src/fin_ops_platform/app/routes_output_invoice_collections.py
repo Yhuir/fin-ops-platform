@@ -222,6 +222,13 @@ class OutputInvoiceCollectionApiRoutes:
         if _is_response_like(sql_rows_payload):
             return HTTPStatus.ACCEPTED, _response_like_payload(sql_rows_payload)
         if isinstance(sql_rows_payload, dict):
+            if sql_rows_payload.get("read_model_status") == "refreshing":
+                sql_rows_payload["readModelStatus"] = (
+                    sql_rows_payload.get("readModelStatus")
+                    or sql_rows_payload.get("read_model_status")
+                    or "refreshing"
+                )
+                return HTTPStatus.ACCEPTED, sql_rows_payload
             payload = self._query_service.filter_options_for_rows(
                 rows=list(sql_rows_payload.get("rows") or []),
                 keyword=query.get("keyword", [None])[0],
@@ -252,6 +259,13 @@ class OutputInvoiceCollectionApiRoutes:
             payload["readModelStatus"] = payload.get("readModelStatus") or payload.get("read_model_status") or "refreshing"
             return HTTPStatus.ACCEPTED, payload
         if isinstance(sql_rows_payload, dict):
+            if sql_rows_payload.get("read_model_status") == "refreshing":
+                sql_rows_payload["readModelStatus"] = (
+                    sql_rows_payload.get("readModelStatus")
+                    or sql_rows_payload.get("read_model_status")
+                    or "refreshing"
+                )
+                return HTTPStatus.ACCEPTED, sql_rows_payload
             rows = self._query_service.apply_lifecycle_overlays_to_rows(
                 [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
                 tenant_id=tenant_id,
@@ -279,6 +293,18 @@ class OutputInvoiceCollectionApiRoutes:
                 details=_response_like_payload(sql_rows_payload),
             )
         if isinstance(sql_rows_payload, dict):
+            if sql_rows_payload.get("read_model_status") == "refreshing":
+                sql_rows_payload["readModelStatus"] = (
+                    sql_rows_payload.get("readModelStatus")
+                    or sql_rows_payload.get("read_model_status")
+                    or "refreshing"
+                )
+                raise OutputInvoiceCollectionError(
+                    "output_invoice_collection_read_model_refreshing",
+                    "销项发票收款情况数据正在刷新，请稍后重试导出。",
+                    status_code=HTTPStatus.CONFLICT,
+                    details=sql_rows_payload,
+                )
             rows = self._query_service.apply_lifecycle_overlays_to_rows(
                 [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
                 tenant_id=tenant_id,
