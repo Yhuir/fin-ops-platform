@@ -3595,9 +3595,754 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         )
 
 
+class PostgresSummaryReadModelRepository:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
+        executor = connection or self._connection
+        dirty_row = executor.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type, scope_key),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    def load_cost_statistics_read_models(self) -> dict[str, Any]:
+        return self._load_table_map(
+            "select scope_key as key, payload, raw_payload from read_model.cost_statistics_read_models order by scope_key",
+            "read_models",
+        )
+
+    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, payload, raw_payload
+            from read_model.cost_statistics_read_models
+            where scope_key = %s
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        if row is None:
+            return None
+        stored_payload = _read_model_payload(row)
+        if not isinstance(stored_payload, dict):
+            stored_payload = {}
+        row_items = self._connection.fetch_all(
+            """
+            select
+                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                payment_account_label, direction, remark, project_id, project_name, expense_type,
+                expense_content, amount::text as amount, oa_applicant, source_versions,
+                generated_at::text as generated_at, cache_status, payload, raw_payload
+            from read_model.cost_statistics_rows
+            where scope_key = %s
+            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
+            """,
+            (normalized_scope_key,),
+        )
+        if row_items:
+            payload = _cost_statistics_payload_from_rows(
+                scope_key=normalized_scope_key,
+                parent_payload=stored_payload,
+                parent_row=row,
+                rows=row_items,
+            )
+        else:
+            payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'cost_statistics'
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        refresh_status = "fresh"
+        if dirty_row is not None:
+            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        return {
+            "scope_key": normalized_scope_key,
+            "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
+            "payload": payload,
+            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
+            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
+            "source_versions": (
+                row.get("source_versions")
+                if isinstance(row.get("source_versions"), dict)
+                else stored_payload.get("source_versions")
+                if isinstance(stored_payload.get("source_versions"), dict)
+                else {}
+            ),
+            "entry_count": int_value(
+                row.get("entry_count")
+                or payload.get("entry_count")
+                or ((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get("row_count")),
+                0,
+            ),
+            "refresh_status": refresh_status,
+            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
+        }
+
+    def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
+        def write(connection: Any) -> None:
+            self._save_generic_read_model_snapshots(
+                connection,
+                snapshot,
+                table="read_model.cost_statistics_read_models",
+                changed_scope_keys=changed_scope_keys,
+                default_project_scope="all",
+            )
+            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+            if changed_scope_keys is not None:
+                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+            for scope_key, payload in iter_mapping(read_models):
+                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
+                    continue
+                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
+                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+                    continue
+                self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
+
+        run_in_transaction(self._connection, write)
+
+    def load_tax_offset_read_models(self) -> dict[str, Any]:
+        return self._load_table_map(
+            "select scope_key as key, payload, raw_payload from read_model.tax_offset_read_models order by scope_key",
+            "read_models",
+        )
+
+    def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
+        resolved_filters = filters if isinstance(filters, dict) else {}
+        where: list[str] = ["status <> 'superseded'"]
+        params: list[Any] = []
+        if value := text(resolved_filters.get("month")):
+            where.append("scope_month = %s::date")
+            params.append(month_start(value))
+        if value := text(resolved_filters.get("type")):
+            where.append("batch_type = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("status")):
+            where.append("status = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("bucket")):
+            where.append("status_bucket = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("account_key")):
+            where.append("account_key = %s")
+            params.append(value)
+        rows = self._connection.fetch_all(
+            f"""
+            select batch_id, source_versions, payload, raw_payload
+            from read_model.no_oa_bank_batch_rows
+            where {" and ".join(where)}
+            order by scope_month desc nulls last, generated_at desc, batch_id
+            """,
+            tuple(params),
+        )
+        if not rows:
+            return [] if self._no_oa_bank_batch_readiness_is_fresh(text(resolved_filters.get("month"))) else None
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if isinstance(payload, dict):
+                if isinstance(row.get("source_versions"), dict):
+                    payload = {**payload, "source_versions": row.get("source_versions")}
+                result.append(payload)
+            elif batch_id := text(row.get("batch_id")):
+                payload = {"batch_id": batch_id}
+                if isinstance(row.get("source_versions"), dict):
+                    payload["source_versions"] = row.get("source_versions")
+                result.append(payload)
+        return result
+
+    def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
+        normalized_scope_key = text(scope_key)
+        candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
+        if normalized_scope_key and self._refresh_status(scope_type="no_oa_bank_batch", scope_key=normalized_scope_key) != "fresh":
+            return False
+        for candidate_scope_key in candidate_scope_keys:
+            if not candidate_scope_key:
+                continue
+            if self._refresh_status(scope_type="no_oa_bank_batch", scope_key=candidate_scope_key) != "fresh":
+                continue
+            if self._no_oa_bank_batch_readiness_scope_is_fresh(candidate_scope_key):
+                return True
+        return False
+
+    def _no_oa_bank_batch_readiness_scope_is_fresh(self, scope_key: str) -> bool:
+        row = self._connection.fetch_one(
+            """
+            select status
+            from read_model.app_status_readiness
+            where tenant_id = 'default'
+              and read_model_key = 'no_oa_bank_batch'
+              and scope_type = 'no_oa_bank_batch'
+              and scope_key = %s
+            limit 1
+            """,
+            (scope_key,),
+        )
+        return isinstance(row, dict) and text(row.get("status")) == "fresh"
+
+    def list_turnover_ledger_view(
+        self,
+        *,
+        family: str = "all",
+        direction: str = "all",
+        status: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+        scope_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_family = (text(family) or "all").lower()
+        normalized_direction = (text(direction) or "all").lower()
+        normalized_status = text(status)
+        normalized_scope_key = text(scope_key) or "all"
+        normalized_page = max(int_value(page, 1), 1)
+        normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
+        clauses: list[str] = ["status <> 'withdrawn'"]
+        params: list[Any] = []
+        if normalized_scope_key != "all":
+            clauses.append("scope_month = %s::date")
+            params.append(month_start(normalized_scope_key))
+        if normalized_family != "all":
+            clauses.append("family = %s")
+            params.append(normalized_family)
+        if normalized_status:
+            clauses.append("status = %s")
+            params.append(normalized_status)
+        where_sql = " and ".join(clauses)
+        all_rows = self._connection.fetch_all(
+            f"""
+            select relation_id, family, status, amount::text as amount, source_versions, payload, raw_payload
+            from read_model.turnover_ledger_rows
+            where {where_sql}
+            order by scope_month desc nulls last, generated_at desc, relation_id
+            """,
+            tuple(params),
+        )
+        if not all_rows:
+            return None
+        source_versions = _shared_source_versions(all_rows)
+        ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
+        if normalized_direction == "borrow_in":
+            ledger_rows = [
+                row for row in ledger_rows
+                if row.get("business_type") == "borrow_in"
+                or _decimal_or_zero(row.get("pending_repayment_amount")) > Decimal("0")
+                or _decimal_or_zero(row.get("repaid_amount")) > Decimal("0")
+            ]
+        elif normalized_direction == "borrow_out":
+            ledger_rows = [
+                row for row in ledger_rows
+                if row.get("business_type") in {"borrow_out", "business_receivable"}
+                or _decimal_or_zero(row.get("pending_collection_amount")) > Decimal("0")
+                or _decimal_or_zero(row.get("collected_amount")) > Decimal("0")
+            ]
+        visible_rows = ledger_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
+        return {
+            "summary": _turnover_ledger_summary(ledger_rows),
+            "family_summaries": [
+                _turnover_ledger_family_summary(family_key, [row for row in ledger_rows if row.get("family") == family_key])
+                for family_key in ("personal", "company", "bank", "business")
+            ],
+            "rows": visible_rows,
+            "pagination": {
+                "page": normalized_page,
+                "page_size": normalized_page_size,
+                "total": len(ledger_rows),
+            },
+            "filters": {
+                "family": normalized_family,
+                "direction": normalized_direction,
+                "status": normalized_status,
+            },
+            "read_model_status": "fresh",
+            "source_versions": source_versions,
+        }
+
+    def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return
+        normalized_scope_key = text(scope_key) or text(payload.get("scope_key")) or "all"
+
+        def write(connection: Any) -> None:
+            if normalized_scope_key == "all":
+                connection.execute("delete from read_model.turnover_ledger_rows", ())
+            else:
+                connection.execute(
+                    "delete from read_model.turnover_ledger_rows where scope_month = %s::date",
+                    (month_start(normalized_scope_key),),
+                )
+            for index, item in enumerate(rows):
+                if not isinstance(item, dict):
+                    continue
+                row = serialize_value(item)
+                relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
+                bank_row_ids = text_list(row.get("bank_row_ids"))
+                connection.execute(
+                    """
+                    insert into read_model.turnover_ledger_rows(
+                        relation_id, scope_month, family, status, relation_type, source,
+                        counterparty_name, amount, bank_row_ids, source_versions,
+                        generated_at, cache_status, payload, raw_payload
+                    )
+                    values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'fresh', %s, %s)
+                    on conflict (relation_id) do update set
+                        scope_month = excluded.scope_month,
+                        family = excluded.family,
+                        status = excluded.status,
+                        relation_type = excluded.relation_type,
+                        source = excluded.source,
+                        counterparty_name = excluded.counterparty_name,
+                        amount = excluded.amount,
+                        bank_row_ids = excluded.bank_row_ids,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        relation_id,
+                        month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
+                        text(row.get("family")),
+                        text(row.get("status") or "suggested"),
+                        text(row.get("relation_type") or row.get("business_type")),
+                        text(row.get("source")),
+                        text(row.get("counterparty_name")),
+                        decimal_text(row.get("balance_amount") or row.get("principal_amount") or row.get("amount")),
+                        bank_row_ids,
+                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+                        jsonb(row),
+                        jsonb({"normalized_payload": row}),
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
+
+    def clear_turnover_ledger_rows(self) -> None:
+        self._connection.execute("delete from read_model.turnover_ledger_rows", ())
+
+    def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select scope_key, scope_month, generated_at, entry_count, source_versions, schema_version, cache_status, payload, raw_payload
+            from read_model.tax_offset_read_models
+            where scope_key = %s
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        if row is None:
+            return None
+        stored_payload = _read_model_payload(row)
+        if not isinstance(stored_payload, dict):
+            stored_payload = {}
+        payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
+        item_rows = self._connection.fetch_all(
+            """
+            select item_type, item_index, item_id, payload, raw_payload
+            from read_model.tax_offset_items
+            where scope_key = %s
+            order by item_type, item_index, item_id
+            """,
+            (normalized_scope_key,),
+        )
+        if item_rows:
+            payload = _tax_offset_payload_from_items(parent_payload=payload, rows=item_rows)
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'tax_offset'
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        refresh_status = "fresh"
+        if dirty_row is not None:
+            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        return {
+            "scope_key": normalized_scope_key,
+            "payload": payload,
+            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
+            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
+            "source_versions": (
+                row.get("source_versions")
+                if isinstance(row.get("source_versions"), dict)
+                else stored_payload.get("source_versions")
+                if isinstance(stored_payload.get("source_versions"), dict)
+                else {}
+            ),
+            "entry_count": int_value(row.get("entry_count") or stored_payload.get("entry_count") or _tax_offset_item_count(payload), 0),
+            "refresh_status": refresh_status,
+            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
+        }
+
+    def save_tax_offset_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
+        def write(connection: Any) -> None:
+            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+            if changed_scope_keys is not None:
+                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                    connection.execute("delete from read_model.tax_offset_read_models where scope_key = %s", (scope_key,))
+                    connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
+            for scope_key, payload in iter_mapping(read_models):
+                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
+                    continue
+                source_counts = payload.get("source_counts") if isinstance(payload.get("source_counts"), dict) else {}
+                source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+                row_count = self._read_model_row_count(payload)
+                scope_month = month_start(payload.get("scope_month") or payload.get("month") or scope_key)
+                connection.execute(
+                    """
+                    insert into read_model.tax_offset_read_models(
+                        scope_key, scope_month, generated_at, entry_count,
+                        source_counts, source_versions, schema_version, cache_status, payload, raw_payload
+                    )
+                    values (%s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (scope_key) do update set
+                        scope_month = excluded.scope_month,
+                        generated_at = excluded.generated_at,
+                        entry_count = excluded.entry_count,
+                        source_counts = excluded.source_counts,
+                        source_versions = excluded.source_versions,
+                        schema_version = excluded.schema_version,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        scope_key,
+                        scope_month,
+                        text(payload.get("generated_at")),
+                        row_count,
+                        jsonb(source_counts),
+                        jsonb(source_versions),
+                        text(payload.get("schema_version")),
+                        text(payload.get("cache_status") or "fresh"),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload}),
+                    ),
+                )
+                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                if isinstance(model_payload, dict) and any(key in model_payload for key in _TAX_OFFSET_ITEM_TYPES):
+                    self._replace_tax_offset_items(connection, scope_key=scope_key, payload=payload)
+
+        run_in_transaction(self._connection, write)
+
+    def _replace_cost_statistics_rows(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
+        connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        time_rows = model_payload.get("time_rows") if isinstance(model_payload, dict) else None
+        if not isinstance(time_rows, list):
+            return
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
+        if scope_month_text == "all":
+            raise ValueError("cost_statistics_rows only supports concrete month scopes.")
+        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
+        if scope_month is None:
+            raise ValueError("cost_statistics_rows requires a concrete scope_month.")
+        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
+        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        row_params: list[tuple[Any, ...]] = []
+        for index, item in enumerate(time_rows):
+            if not isinstance(item, dict):
+                continue
+            row = serialize_value(item)
+            transaction_id = text(row.get("transaction_id")) or f"row-{index}"
+            row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
+            row_params.append(
+                (
+                    scope_key,
+                    project_scope,
+                    scope_month,
+                    row_key,
+                    transaction_id,
+                    text(row.get("group_id")),
+                    text(row.get("trade_time")),
+                    _date_text(row.get("trade_date") or row.get("trade_time")),
+                    text(row.get("counterparty_name")),
+                    text(row.get("payment_account_label")),
+                    text(row.get("direction")),
+                    text(row.get("remark")),
+                    text(row.get("project_id")),
+                    text(row.get("project_name")) or "未归集项目",
+                    text(row.get("expense_type")) or "未分类",
+                    text(row.get("expense_content")),
+                    decimal_text(row.get("amount")) or "0",
+                    text(row.get("oa_applicant")),
+                    jsonb(source_versions),
+                    generated_at,
+                    cache_status,
+                    jsonb(row),
+                    jsonb({"normalized_payload": row}),
+                ),
+            )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.cost_statistics_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
+                trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
+                remark, project_id, project_name, expense_type, expense_content, amount,
+                oa_applicant, source_versions, generated_at, cache_status, payload, raw_payload
+            )
+            values (
+                %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+            )
+            on conflict (scope_key, row_key) do update set
+                project_scope = excluded.project_scope,
+                scope_month = excluded.scope_month,
+                transaction_id = excluded.transaction_id,
+                group_id = excluded.group_id,
+                trade_time_text = excluded.trade_time_text,
+                trade_date = excluded.trade_date,
+                counterparty_name = excluded.counterparty_name,
+                payment_account_label = excluded.payment_account_label,
+                direction = excluded.direction,
+                remark = excluded.remark,
+                project_id = excluded.project_id,
+                project_name = excluded.project_name,
+                expense_type = excluded.expense_type,
+                expense_content = excluded.expense_content,
+                amount = excluded.amount,
+                oa_applicant = excluded.oa_applicant,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            row_params,
+        )
+
+    def _replace_tax_offset_items(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
+        connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
+        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        if not isinstance(model_payload, dict):
+            return
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_key)
+        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
+        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        for payload_key, item_type in _TAX_OFFSET_ITEM_TYPES.items():
+            items = model_payload.get(payload_key)
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                row = serialize_value(item)
+                item_id = text(row.get("id") or row.get("unique_key") or row.get("invoice_id")) or f"{item_type}:{index}"
+                connection.execute(
+                    """
+                    insert into read_model.tax_offset_items(
+                        scope_key, scope_month, item_type, item_id, item_index, issue_date,
+                        invoice_no, invoice_code, digital_invoice_no, seller_name, seller_tax_no,
+                        buyer_name, buyer_tax_no, invoice_type, tax_rate, tax_amount, total_with_tax,
+                        source_kind, source_versions, generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        %s, %s::date, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                    )
+                    on conflict (scope_key, item_type, item_id) do update set
+                        scope_month = excluded.scope_month,
+                        item_index = excluded.item_index,
+                        issue_date = excluded.issue_date,
+                        invoice_no = excluded.invoice_no,
+                        invoice_code = excluded.invoice_code,
+                        digital_invoice_no = excluded.digital_invoice_no,
+                        seller_name = excluded.seller_name,
+                        seller_tax_no = excluded.seller_tax_no,
+                        buyer_name = excluded.buyer_name,
+                        buyer_tax_no = excluded.buyer_tax_no,
+                        invoice_type = excluded.invoice_type,
+                        tax_rate = excluded.tax_rate,
+                        tax_amount = excluded.tax_amount,
+                        total_with_tax = excluded.total_with_tax,
+                        source_kind = excluded.source_kind,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        scope_key,
+                        scope_month,
+                        item_type,
+                        item_id,
+                        index,
+                        _date_text(row.get("issue_date") or row.get("invoice_date")),
+                        text(row.get("invoice_no")),
+                        text(row.get("invoice_code")),
+                        text(row.get("digital_invoice_no")),
+                        text(row.get("seller_name")),
+                        text(row.get("seller_tax_no")),
+                        text(row.get("buyer_name")),
+                        text(row.get("buyer_tax_no")),
+                        text(row.get("invoice_type")),
+                        text(row.get("tax_rate")),
+                        decimal_text(row.get("tax_amount")),
+                        decimal_text(row.get("total_with_tax") or row.get("amount")),
+                        text(row.get("source_kind")),
+                        jsonb(source_versions),
+                        generated_at,
+                        cache_status,
+                        jsonb(row),
+                        jsonb({"normalized_payload": row}),
+                    ),
+                )
+
+    def _load_table_map(self, sql: str, payload_key: str) -> dict[str, Any]:
+        rows = self._connection.fetch_all(sql)
+        values = {str(row.get("key")): _read_model_payload(row) for row in rows}
+        return {payload_key: values} if values else {}
+
+    def _save_generic_read_model_snapshots(
+        self,
+        connection: Any,
+        snapshot: dict[str, Any],
+        *,
+        table: str,
+        changed_scope_keys: set[str] | None,
+        default_project_scope: str | None,
+    ) -> None:
+        read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+        if changed_scope_keys is not None:
+            present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+            for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                connection.execute(f"delete from {table} where scope_key = %s", (scope_key,))
+        for scope_key, payload in iter_mapping(read_models):
+            if changed_scope_keys is not None and scope_key not in changed_scope_keys:
+                continue
+            source_counts = payload.get("source_counts") if isinstance(payload.get("source_counts"), dict) else {}
+            source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+            row_count = self._read_model_row_count(payload)
+            scope_month = month_start(payload.get("scope_month") or payload.get("month") or scope_key)
+            if default_project_scope is not None:
+                connection.execute(
+                    f"""
+                    insert into {table}(
+                        scope_key, project_scope, scope_month, generated_at, entry_count,
+                        source_counts, source_versions, payload, raw_payload
+                    )
+                    values (%s, %s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
+                    on conflict (scope_key) do update set
+                        project_scope = excluded.project_scope,
+                        scope_month = excluded.scope_month,
+                        generated_at = excluded.generated_at,
+                        entry_count = excluded.entry_count,
+                        source_counts = excluded.source_counts,
+                        source_versions = excluded.source_versions,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        scope_key,
+                        text(payload.get("project_scope") or default_project_scope) or default_project_scope,
+                        scope_month,
+                        text(payload.get("generated_at")),
+                        row_count,
+                        jsonb(source_counts),
+                        jsonb(source_versions),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload}),
+                    ),
+                )
+            else:
+                connection.execute(
+                    f"""
+                    insert into {table}(
+                        scope_key, scope_month, generated_at, entry_count,
+                        source_counts, source_versions, payload, raw_payload
+                    )
+                    values (%s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
+                    on conflict (scope_key) do update set
+                        scope_month = excluded.scope_month,
+                        generated_at = excluded.generated_at,
+                        entry_count = excluded.entry_count,
+                        source_counts = excluded.source_counts,
+                        source_versions = excluded.source_versions,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        scope_key,
+                        scope_month,
+                        text(payload.get("generated_at")),
+                        row_count,
+                        jsonb(source_counts),
+                        jsonb(source_versions),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload}),
+                    ),
+                )
+
+    @staticmethod
+    def _read_model_row_count(payload: dict[str, Any]) -> int:
+        for key in ("entries", "rows", "items", "records"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return len(value)
+        tax_offset_count = 0
+        for key in ("output_items", "input_plan_items", "certified_items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                tax_offset_count += len(value)
+        if tax_offset_count:
+            return tax_offset_count
+        return int_value(payload.get("entry_count") or payload.get("row_count"), 0)
+
+
+
 class PostgresReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._summary_read_model_repository = PostgresSummaryReadModelRepository(connection)
         self._search_workbench_relation_repository = PostgresSearchWorkbenchRelationReadModelRepository(connection)
         self._bank_read_model_repository = PostgresBankReadModelRepository(connection)
         self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
@@ -3605,6 +4350,36 @@ class PostgresReadModelRepository:
             connection,
             bank_detail_scope_summary=self.bank_detail_scope_summary,
         )
+
+    def load_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._summary_read_model_repository.load_cost_statistics_read_models(*args, **kwargs)
+
+    def get_cost_statistics_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_view(*args, **kwargs)
+
+    def save_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> None:
+        self._summary_read_model_repository.save_cost_statistics_read_models(*args, **kwargs)
+
+    def load_tax_offset_read_models(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._summary_read_model_repository.load_tax_offset_read_models(*args, **kwargs)
+
+    def get_tax_offset_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_tax_offset_view(*args, **kwargs)
+
+    def save_tax_offset_read_models(self, *args: Any, **kwargs: Any) -> None:
+        self._summary_read_model_repository.save_tax_offset_read_models(*args, **kwargs)
+
+    def list_no_oa_bank_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
+        return self._summary_read_model_repository.list_no_oa_bank_batch_rows(*args, **kwargs)
+
+    def list_turnover_ledger_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.list_turnover_ledger_view(*args, **kwargs)
+
+    def save_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
+        self._summary_read_model_repository.save_turnover_ledger_rows(*args, **kwargs)
+
+    def clear_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
+        self._summary_read_model_repository.clear_turnover_ledger_rows(*args, **kwargs)
 
     def search_index(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.search_index(*args, **kwargs)
@@ -7877,725 +8652,6 @@ class PostgresReadModelRepository:
                 )
 
         run_in_transaction(self._connection, write)
-
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        return self._load_table_map(
-            "select scope_key as key, payload, raw_payload from read_model.cost_statistics_read_models order by scope_key",
-            "read_models",
-        )
-
-    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip()
-        if not normalized_scope_key:
-            return None
-        row = self._connection.fetch_one(
-            """
-            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, payload, raw_payload
-            from read_model.cost_statistics_read_models
-            where scope_key = %s
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        if row is None:
-            return None
-        stored_payload = _read_model_payload(row)
-        if not isinstance(stored_payload, dict):
-            stored_payload = {}
-        row_items = self._connection.fetch_all(
-            """
-            select
-                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                payment_account_label, direction, remark, project_id, project_name, expense_type,
-                expense_content, amount::text as amount, oa_applicant, source_versions,
-                generated_at::text as generated_at, cache_status, payload, raw_payload
-            from read_model.cost_statistics_rows
-            where scope_key = %s
-            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
-            """,
-            (normalized_scope_key,),
-        )
-        if row_items:
-            payload = _cost_statistics_payload_from_rows(
-                scope_key=normalized_scope_key,
-                parent_payload=stored_payload,
-                parent_row=row,
-                rows=row_items,
-            )
-        else:
-            payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'cost_statistics'
-              and scope_key = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        return {
-            "scope_key": normalized_scope_key,
-            "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
-            "payload": payload,
-            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
-            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
-            "source_versions": (
-                row.get("source_versions")
-                if isinstance(row.get("source_versions"), dict)
-                else stored_payload.get("source_versions")
-                if isinstance(stored_payload.get("source_versions"), dict)
-                else {}
-            ),
-            "entry_count": int_value(
-                row.get("entry_count")
-                or payload.get("entry_count")
-                or ((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get("row_count")),
-                0,
-            ),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-        }
-
-    def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        def write(connection: Any) -> None:
-            self._save_generic_read_model_snapshots(
-                connection,
-                snapshot,
-                table="read_model.cost_statistics_read_models",
-                changed_scope_keys=changed_scope_keys,
-                default_project_scope="all",
-            )
-            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
-            if changed_scope_keys is not None:
-                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
-                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-            for scope_key, payload in iter_mapping(read_models):
-                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
-                    continue
-                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-                if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
-                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-                    continue
-                self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
-
-        run_in_transaction(self._connection, write)
-
-    def load_tax_offset_read_models(self) -> dict[str, Any]:
-        return self._load_table_map(
-            "select scope_key as key, payload, raw_payload from read_model.tax_offset_read_models order by scope_key",
-            "read_models",
-        )
-
-    def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
-        resolved_filters = filters if isinstance(filters, dict) else {}
-        where: list[str] = ["status <> 'superseded'"]
-        params: list[Any] = []
-        if value := text(resolved_filters.get("month")):
-            where.append("scope_month = %s::date")
-            params.append(month_start(value))
-        if value := text(resolved_filters.get("type")):
-            where.append("batch_type = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("status")):
-            where.append("status = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("bucket")):
-            where.append("status_bucket = %s")
-            params.append(value)
-        if value := text(resolved_filters.get("account_key")):
-            where.append("account_key = %s")
-            params.append(value)
-        rows = self._connection.fetch_all(
-            f"""
-            select batch_id, source_versions, payload, raw_payload
-            from read_model.no_oa_bank_batch_rows
-            where {" and ".join(where)}
-            order by scope_month desc nulls last, generated_at desc, batch_id
-            """,
-            tuple(params),
-        )
-        if not rows:
-            return [] if self._no_oa_bank_batch_readiness_is_fresh(text(resolved_filters.get("month"))) else None
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            payload = _read_model_payload(row)
-            if isinstance(payload, dict):
-                if isinstance(row.get("source_versions"), dict):
-                    payload = {**payload, "source_versions": row.get("source_versions")}
-                result.append(payload)
-            elif batch_id := text(row.get("batch_id")):
-                payload = {"batch_id": batch_id}
-                if isinstance(row.get("source_versions"), dict):
-                    payload["source_versions"] = row.get("source_versions")
-                result.append(payload)
-        return result
-
-    def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
-        normalized_scope_key = text(scope_key)
-        candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
-        if normalized_scope_key and self._refresh_status(scope_type="no_oa_bank_batch", scope_key=normalized_scope_key) != "fresh":
-            return False
-        for candidate_scope_key in candidate_scope_keys:
-            if not candidate_scope_key:
-                continue
-            if self._refresh_status(scope_type="no_oa_bank_batch", scope_key=candidate_scope_key) != "fresh":
-                continue
-            if self._no_oa_bank_batch_readiness_scope_is_fresh(candidate_scope_key):
-                return True
-        return False
-
-    def _no_oa_bank_batch_readiness_scope_is_fresh(self, scope_key: str) -> bool:
-        row = self._connection.fetch_one(
-            """
-            select status
-            from read_model.app_status_readiness
-            where tenant_id = 'default'
-              and read_model_key = 'no_oa_bank_batch'
-              and scope_type = 'no_oa_bank_batch'
-              and scope_key = %s
-            limit 1
-            """,
-            (scope_key,),
-        )
-        return isinstance(row, dict) and text(row.get("status")) == "fresh"
-
-    def list_turnover_ledger_view(
-        self,
-        *,
-        family: str = "all",
-        direction: str = "all",
-        status: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-        scope_key: str | None = None,
-    ) -> dict[str, Any] | None:
-        normalized_family = (text(family) or "all").lower()
-        normalized_direction = (text(direction) or "all").lower()
-        normalized_status = text(status)
-        normalized_scope_key = text(scope_key) or "all"
-        normalized_page = max(int_value(page, 1), 1)
-        normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
-        clauses: list[str] = ["status <> 'withdrawn'"]
-        params: list[Any] = []
-        if normalized_scope_key != "all":
-            clauses.append("scope_month = %s::date")
-            params.append(month_start(normalized_scope_key))
-        if normalized_family != "all":
-            clauses.append("family = %s")
-            params.append(normalized_family)
-        if normalized_status:
-            clauses.append("status = %s")
-            params.append(normalized_status)
-        where_sql = " and ".join(clauses)
-        all_rows = self._connection.fetch_all(
-            f"""
-            select relation_id, family, status, amount::text as amount, source_versions, payload, raw_payload
-            from read_model.turnover_ledger_rows
-            where {where_sql}
-            order by scope_month desc nulls last, generated_at desc, relation_id
-            """,
-            tuple(params),
-        )
-        if not all_rows:
-            return None
-        source_versions = _shared_source_versions(all_rows)
-        ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
-        if normalized_direction == "borrow_in":
-            ledger_rows = [
-                row for row in ledger_rows
-                if row.get("business_type") == "borrow_in"
-                or _decimal_or_zero(row.get("pending_repayment_amount")) > Decimal("0")
-                or _decimal_or_zero(row.get("repaid_amount")) > Decimal("0")
-            ]
-        elif normalized_direction == "borrow_out":
-            ledger_rows = [
-                row for row in ledger_rows
-                if row.get("business_type") in {"borrow_out", "business_receivable"}
-                or _decimal_or_zero(row.get("pending_collection_amount")) > Decimal("0")
-                or _decimal_or_zero(row.get("collected_amount")) > Decimal("0")
-            ]
-        visible_rows = ledger_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
-        return {
-            "summary": _turnover_ledger_summary(ledger_rows),
-            "family_summaries": [
-                _turnover_ledger_family_summary(family_key, [row for row in ledger_rows if row.get("family") == family_key])
-                for family_key in ("personal", "company", "bank", "business")
-            ],
-            "rows": visible_rows,
-            "pagination": {
-                "page": normalized_page,
-                "page_size": normalized_page_size,
-                "total": len(ledger_rows),
-            },
-            "filters": {
-                "family": normalized_family,
-                "direction": normalized_direction,
-                "status": normalized_status,
-            },
-            "read_model_status": "fresh",
-            "source_versions": source_versions,
-        }
-
-    def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
-        rows = payload.get("rows") if isinstance(payload, dict) else None
-        if not isinstance(rows, list):
-            return
-        normalized_scope_key = text(scope_key) or text(payload.get("scope_key")) or "all"
-
-        def write(connection: Any) -> None:
-            if normalized_scope_key == "all":
-                connection.execute("delete from read_model.turnover_ledger_rows", ())
-            else:
-                connection.execute(
-                    "delete from read_model.turnover_ledger_rows where scope_month = %s::date",
-                    (month_start(normalized_scope_key),),
-                )
-            for index, item in enumerate(rows):
-                if not isinstance(item, dict):
-                    continue
-                row = serialize_value(item)
-                relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
-                bank_row_ids = text_list(row.get("bank_row_ids"))
-                connection.execute(
-                    """
-                    insert into read_model.turnover_ledger_rows(
-                        relation_id, scope_month, family, status, relation_type, source,
-                        counterparty_name, amount, bank_row_ids, source_versions,
-                        generated_at, cache_status, payload, raw_payload
-                    )
-                    values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'fresh', %s, %s)
-                    on conflict (relation_id) do update set
-                        scope_month = excluded.scope_month,
-                        family = excluded.family,
-                        status = excluded.status,
-                        relation_type = excluded.relation_type,
-                        source = excluded.source,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        bank_row_ids = excluded.bank_row_ids,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        relation_id,
-                        month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
-                        text(row.get("family")),
-                        text(row.get("status") or "suggested"),
-                        text(row.get("relation_type") or row.get("business_type")),
-                        text(row.get("source")),
-                        text(row.get("counterparty_name")),
-                        decimal_text(row.get("balance_amount") or row.get("principal_amount") or row.get("amount")),
-                        bank_row_ids,
-                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
-                        jsonb(row),
-                        jsonb({"normalized_payload": row}),
-                    ),
-                )
-
-        run_in_transaction(self._connection, write)
-
-    def clear_turnover_ledger_rows(self) -> None:
-        self._connection.execute("delete from read_model.turnover_ledger_rows", ())
-
-    def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip()
-        if not normalized_scope_key:
-            return None
-        row = self._connection.fetch_one(
-            """
-            select scope_key, scope_month, generated_at, entry_count, source_versions, schema_version, cache_status, payload, raw_payload
-            from read_model.tax_offset_read_models
-            where scope_key = %s
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        if row is None:
-            return None
-        stored_payload = _read_model_payload(row)
-        if not isinstance(stored_payload, dict):
-            stored_payload = {}
-        payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
-        item_rows = self._connection.fetch_all(
-            """
-            select item_type, item_index, item_id, payload, raw_payload
-            from read_model.tax_offset_items
-            where scope_key = %s
-            order by item_type, item_index, item_id
-            """,
-            (normalized_scope_key,),
-        )
-        if item_rows:
-            payload = _tax_offset_payload_from_items(parent_payload=payload, rows=item_rows)
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'tax_offset'
-              and scope_key = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        return {
-            "scope_key": normalized_scope_key,
-            "payload": payload,
-            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
-            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
-            "source_versions": (
-                row.get("source_versions")
-                if isinstance(row.get("source_versions"), dict)
-                else stored_payload.get("source_versions")
-                if isinstance(stored_payload.get("source_versions"), dict)
-                else {}
-            ),
-            "entry_count": int_value(row.get("entry_count") or stored_payload.get("entry_count") or _tax_offset_item_count(payload), 0),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-        }
-
-    def save_tax_offset_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        def write(connection: Any) -> None:
-            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
-            if changed_scope_keys is not None:
-                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
-                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                    connection.execute("delete from read_model.tax_offset_read_models where scope_key = %s", (scope_key,))
-                    connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
-            for scope_key, payload in iter_mapping(read_models):
-                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
-                    continue
-                source_counts = payload.get("source_counts") if isinstance(payload.get("source_counts"), dict) else {}
-                source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-                row_count = self._read_model_row_count(payload)
-                scope_month = month_start(payload.get("scope_month") or payload.get("month") or scope_key)
-                connection.execute(
-                    """
-                    insert into read_model.tax_offset_read_models(
-                        scope_key, scope_month, generated_at, entry_count,
-                        source_counts, source_versions, schema_version, cache_status, payload, raw_payload
-                    )
-                    values (%s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s, %s, %s)
-                    on conflict (scope_key) do update set
-                        scope_month = excluded.scope_month,
-                        generated_at = excluded.generated_at,
-                        entry_count = excluded.entry_count,
-                        source_counts = excluded.source_counts,
-                        source_versions = excluded.source_versions,
-                        schema_version = excluded.schema_version,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        scope_key,
-                        scope_month,
-                        text(payload.get("generated_at")),
-                        row_count,
-                        jsonb(source_counts),
-                        jsonb(source_versions),
-                        text(payload.get("schema_version")),
-                        text(payload.get("cache_status") or "fresh"),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-                if isinstance(model_payload, dict) and any(key in model_payload for key in _TAX_OFFSET_ITEM_TYPES):
-                    self._replace_tax_offset_items(connection, scope_key=scope_key, payload=payload)
-
-        run_in_transaction(self._connection, write)
-
-    def _replace_cost_statistics_rows(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
-        connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-        time_rows = model_payload.get("time_rows") if isinstance(model_payload, dict) else None
-        if not isinstance(time_rows, list):
-            return
-        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
-        if scope_month_text == "all":
-            raise ValueError("cost_statistics_rows only supports concrete month scopes.")
-        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
-        if scope_month is None:
-            raise ValueError("cost_statistics_rows requires a concrete scope_month.")
-        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
-        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
-        row_params: list[tuple[Any, ...]] = []
-        for index, item in enumerate(time_rows):
-            if not isinstance(item, dict):
-                continue
-            row = serialize_value(item)
-            transaction_id = text(row.get("transaction_id")) or f"row-{index}"
-            row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
-            row_params.append(
-                (
-                    scope_key,
-                    project_scope,
-                    scope_month,
-                    row_key,
-                    transaction_id,
-                    text(row.get("group_id")),
-                    text(row.get("trade_time")),
-                    _date_text(row.get("trade_date") or row.get("trade_time")),
-                    text(row.get("counterparty_name")),
-                    text(row.get("payment_account_label")),
-                    text(row.get("direction")),
-                    text(row.get("remark")),
-                    text(row.get("project_id")),
-                    text(row.get("project_name")) or "未归集项目",
-                    text(row.get("expense_type")) or "未分类",
-                    text(row.get("expense_content")),
-                    decimal_text(row.get("amount")) or "0",
-                    text(row.get("oa_applicant")),
-                    jsonb(source_versions),
-                    generated_at,
-                    cache_status,
-                    jsonb(row),
-                    jsonb({"normalized_payload": row}),
-                ),
-            )
-        _execute_many(
-            connection,
-            """
-            insert into read_model.cost_statistics_rows(
-                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
-                trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
-                remark, project_id, project_name, expense_type, expense_content, amount,
-                oa_applicant, source_versions, generated_at, cache_status, payload, raw_payload
-            )
-            values (
-                %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-            )
-            on conflict (scope_key, row_key) do update set
-                project_scope = excluded.project_scope,
-                scope_month = excluded.scope_month,
-                transaction_id = excluded.transaction_id,
-                group_id = excluded.group_id,
-                trade_time_text = excluded.trade_time_text,
-                trade_date = excluded.trade_date,
-                counterparty_name = excluded.counterparty_name,
-                payment_account_label = excluded.payment_account_label,
-                direction = excluded.direction,
-                remark = excluded.remark,
-                project_id = excluded.project_id,
-                project_name = excluded.project_name,
-                expense_type = excluded.expense_type,
-                expense_content = excluded.expense_content,
-                amount = excluded.amount,
-                oa_applicant = excluded.oa_applicant,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            row_params,
-        )
-
-    def _replace_tax_offset_items(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
-        connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
-        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-        if not isinstance(model_payload, dict):
-            return
-        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_key)
-        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
-        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
-        for payload_key, item_type in _TAX_OFFSET_ITEM_TYPES.items():
-            items = model_payload.get(payload_key)
-            if not isinstance(items, list):
-                continue
-            for index, item in enumerate(items):
-                if not isinstance(item, dict):
-                    continue
-                row = serialize_value(item)
-                item_id = text(row.get("id") or row.get("unique_key") or row.get("invoice_id")) or f"{item_type}:{index}"
-                connection.execute(
-                    """
-                    insert into read_model.tax_offset_items(
-                        scope_key, scope_month, item_type, item_id, item_index, issue_date,
-                        invoice_no, invoice_code, digital_invoice_no, seller_name, seller_tax_no,
-                        buyer_name, buyer_tax_no, invoice_type, tax_rate, tax_amount, total_with_tax,
-                        source_kind, source_versions, generated_at, cache_status, payload, raw_payload
-                    )
-                    values (
-                        %s, %s::date, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                    )
-                    on conflict (scope_key, item_type, item_id) do update set
-                        scope_month = excluded.scope_month,
-                        item_index = excluded.item_index,
-                        issue_date = excluded.issue_date,
-                        invoice_no = excluded.invoice_no,
-                        invoice_code = excluded.invoice_code,
-                        digital_invoice_no = excluded.digital_invoice_no,
-                        seller_name = excluded.seller_name,
-                        seller_tax_no = excluded.seller_tax_no,
-                        buyer_name = excluded.buyer_name,
-                        buyer_tax_no = excluded.buyer_tax_no,
-                        invoice_type = excluded.invoice_type,
-                        tax_rate = excluded.tax_rate,
-                        tax_amount = excluded.tax_amount,
-                        total_with_tax = excluded.total_with_tax,
-                        source_kind = excluded.source_kind,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        scope_key,
-                        scope_month,
-                        item_type,
-                        item_id,
-                        index,
-                        _date_text(row.get("issue_date") or row.get("invoice_date")),
-                        text(row.get("invoice_no")),
-                        text(row.get("invoice_code")),
-                        text(row.get("digital_invoice_no")),
-                        text(row.get("seller_name")),
-                        text(row.get("seller_tax_no")),
-                        text(row.get("buyer_name")),
-                        text(row.get("buyer_tax_no")),
-                        text(row.get("invoice_type")),
-                        text(row.get("tax_rate")),
-                        decimal_text(row.get("tax_amount")),
-                        decimal_text(row.get("total_with_tax") or row.get("amount")),
-                        text(row.get("source_kind")),
-                        jsonb(source_versions),
-                        generated_at,
-                        cache_status,
-                        jsonb(row),
-                        jsonb({"normalized_payload": row}),
-                    ),
-                )
-
-    def _load_table_map(self, sql: str, payload_key: str) -> dict[str, Any]:
-        rows = self._connection.fetch_all(sql)
-        values = {str(row.get("key")): _read_model_payload(row) for row in rows}
-        return {payload_key: values} if values else {}
-
-    def _save_generic_read_model_snapshots(
-        self,
-        connection: Any,
-        snapshot: dict[str, Any],
-        *,
-        table: str,
-        changed_scope_keys: set[str] | None,
-        default_project_scope: str | None,
-    ) -> None:
-        read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
-        if changed_scope_keys is not None:
-            present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
-            for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                connection.execute(f"delete from {table} where scope_key = %s", (scope_key,))
-        for scope_key, payload in iter_mapping(read_models):
-            if changed_scope_keys is not None and scope_key not in changed_scope_keys:
-                continue
-            source_counts = payload.get("source_counts") if isinstance(payload.get("source_counts"), dict) else {}
-            source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-            row_count = self._read_model_row_count(payload)
-            scope_month = month_start(payload.get("scope_month") or payload.get("month") or scope_key)
-            if default_project_scope is not None:
-                connection.execute(
-                    f"""
-                    insert into {table}(
-                        scope_key, project_scope, scope_month, generated_at, entry_count,
-                        source_counts, source_versions, payload, raw_payload
-                    )
-                    values (%s, %s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
-                    on conflict (scope_key) do update set
-                        project_scope = excluded.project_scope,
-                        scope_month = excluded.scope_month,
-                        generated_at = excluded.generated_at,
-                        entry_count = excluded.entry_count,
-                        source_counts = excluded.source_counts,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        scope_key,
-                        text(payload.get("project_scope") or default_project_scope) or default_project_scope,
-                        scope_month,
-                        text(payload.get("generated_at")),
-                        row_count,
-                        jsonb(source_counts),
-                        jsonb(source_versions),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-            else:
-                connection.execute(
-                    f"""
-                    insert into {table}(
-                        scope_key, scope_month, generated_at, entry_count,
-                        source_counts, source_versions, payload, raw_payload
-                    )
-                    values (%s, %s::date, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
-                    on conflict (scope_key) do update set
-                        scope_month = excluded.scope_month,
-                        generated_at = excluded.generated_at,
-                        entry_count = excluded.entry_count,
-                        source_counts = excluded.source_counts,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        scope_key,
-                        scope_month,
-                        text(payload.get("generated_at")),
-                        row_count,
-                        jsonb(source_counts),
-                        jsonb(source_versions),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-
-    @staticmethod
-    def _read_model_row_count(payload: dict[str, Any]) -> int:
-        for key in ("entries", "rows", "items", "records"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return len(value)
-        tax_offset_count = 0
-        for key in ("output_items", "input_plan_items", "certified_items"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                tax_offset_count += len(value)
-        if tax_offset_count:
-            return tax_offset_count
-        return int_value(payload.get("entry_count") or payload.get("row_count"), 0)
 
     @staticmethod
     def _iter_workbench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:

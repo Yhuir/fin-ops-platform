@@ -12,6 +12,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresPendingInvoiceLifecycleReadModelRepository,
     PostgresReadModelRepository,
     PostgresSearchWorkbenchRelationReadModelRepository,
+    PostgresSummaryReadModelRepository,
 )
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
@@ -314,6 +315,32 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.workbench_relation_rows", shared_source)
                 self.assertNotIn("read_model.workbench_relation_groups", shared_source)
                 self.assertNotIn("read_model.workbench_relation_scopes", shared_source)
+
+    def test_summary_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
+        owned_methods = {
+            "load_cost_statistics_read_models",
+            "get_cost_statistics_view",
+            "save_cost_statistics_read_models",
+            "load_tax_offset_read_models",
+            "get_tax_offset_view",
+            "save_tax_offset_read_models",
+            "list_no_oa_bank_batch_rows",
+            "list_turnover_ledger_view",
+            "save_turnover_ledger_rows",
+            "clear_turnover_ledger_rows",
+        }
+
+        for method_name in owned_methods:
+            with self.subTest(method_name=method_name):
+                self.assertTrue(callable(getattr(PostgresSummaryReadModelRepository, method_name, None)))
+                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
+                self.assertIn("_summary_read_model_repository", shared_source)
+                self.assertNotIn("read_model.cost_statistics_read_models", shared_source)
+                self.assertNotIn("read_model.cost_statistics_rows", shared_source)
+                self.assertNotIn("read_model.tax_offset_read_models", shared_source)
+                self.assertNotIn("read_model.tax_offset_items", shared_source)
+                self.assertNotIn("read_model.no_oa_bank_batch_rows", shared_source)
+                self.assertNotIn("read_model.turnover_ledger_rows", shared_source)
 
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]

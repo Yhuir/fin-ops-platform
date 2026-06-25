@@ -18,14 +18,25 @@ Wave 3 second subwave completed the search/workbench relation physical SQL owner
 - `search`
 - `workbench_relation`
 
+Wave 3 third subwave completed the summary/residual read model physical SQL owner split:
+
+- `cost_statistics`
+- `tax_offset`
+- `no_oa_bank_batch`
+- `turnover_ledger`
+
 The public narrow ports remain unchanged:
 
 - `BankDetailReadModelRepositoryPort`
 - `BankAccountBalanceReadModelRepositoryPort`
 - `SearchReadModelRepositoryPort`
 - `WorkbenchRelationReadModelRepositoryPort`
+- `CostStatisticsReadModelRepositoryPort`
+- `TaxOffsetReadModelRepositoryPort`
+- `NoOaBankBatchReadModelRepositoryPort`
+- `TurnoverLedgerReadModelRepositoryPort`
 
-`PostgresReadModelRepository` keeps compatibility methods for existing port contracts, but those methods delegate to family-specific owners. `PostgresBankReadModelRepository` contains bank detail scope summaries, account/transaction list reads, tagged row lookups, bank account balance reads, bank detail writes, bank account balance writes, and bank detail scope marking. `PostgresSearchWorkbenchRelationReadModelRepository` contains search index reads/writes and workbench relation distribution rows/groups/scopes reads, writes, freshness checks, source-version reads, and empty-scope marking.
+`PostgresReadModelRepository` keeps compatibility methods for existing port contracts, but those methods delegate to family-specific owners. `PostgresBankReadModelRepository` contains bank detail scope summaries, account/transaction list reads, tagged row lookups, bank account balance reads, bank detail writes, bank account balance writes, and bank detail scope marking. `PostgresSearchWorkbenchRelationReadModelRepository` contains search index reads/writes and workbench relation distribution rows/groups/scopes reads, writes, freshness checks, source-version reads, and empty-scope marking. `PostgresSummaryReadModelRepository` contains cost statistics, tax offset, no-OA bank batch, and turnover ledger read/write SQL plus their local row/item snapshot helpers.
 
 ## PSCIP Movement
 
@@ -37,6 +48,10 @@ After this subwave:
 - `bank_account_balance` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
 - `search` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
 - `workbench_relation` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
+- `cost_statistics` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
+- `tax_offset` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
+- `no_oa_bank_batch` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
+- `turnover_ledger` moves from `PSCIP-L3-local-contract` toward `PSCIP-L3-local-owner-split`.
 - No broad `all` fake-fresh path was introduced.
 - No Redis or RabbitMQ freshness source was introduced.
 - No dirty scope/outbox ownership changed.
@@ -73,6 +88,21 @@ That guard proves:
 
 - `PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_rows_by_ids`
 - `PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids`
+- `PostgresSummaryReadModelRepository.list_turnover_ledger_view`
+
+`tests/test_read_model_manifest.py` now also includes `test_summary_read_model_physical_sql_owner_is_split_from_shared_repository`.
+
+That guard proves:
+
+- Summary/residual methods exist on `PostgresSummaryReadModelRepository`.
+- `PostgresReadModelRepository` compatibility methods delegate through `_summary_read_model_repository`.
+- The shared compatibility methods do not directly reference:
+  - `read_model.cost_statistics_read_models`
+  - `read_model.cost_statistics_rows`
+  - `read_model.tax_offset_read_models`
+  - `read_model.tax_offset_items`
+  - `read_model.no_oa_bank_batch_rows`
+  - `read_model.turnover_ledger_rows`
 
 ## Verification
 
@@ -83,6 +113,7 @@ python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositorie
 PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
 PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py tests/test_bank_account_balance_read_model.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_workbench_relation_read_facade.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_tax_offset_sql_runtime.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_turnover_ledger_read_model_refresh.py tests/test_turnover_ledger_read_facade.py -q
 PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards -v
 ```
 
@@ -91,16 +122,12 @@ Results:
 - `tests.test_read_model_manifest tests.test_runtime_worker_registry`: passed.
 - `tests/test_bank_details_sql_runtime.py tests/test_bank_account_balance_read_model.py`: 61 passed.
 - `tests/test_search_pending_sql_runtime.py tests/test_workbench_relation_read_facade.py`: 74 passed.
+- `tests/test_cost_statistics_sql_runtime.py tests/test_tax_offset_sql_runtime.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_turnover_ledger_read_model_refresh.py tests/test_turnover_ledger_read_facade.py`: 57 passed.
 - `tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards`: passed.
 
 ## Remaining
 
-Remaining non-Workbench physical SQL owner split candidates:
-
-- `cost_statistics`
-- `tax_offset`
-- `no_oa_bank_batch`
-- `turnover_ledger`
+No known non-Workbench physical SQL owner split candidates remain in this wave.
 
 Workbench itself remains the active-generation exception and is not mechanically converted.
 

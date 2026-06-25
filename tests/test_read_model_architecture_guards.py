@@ -201,7 +201,7 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "repository shaper mirrors fresh workbench summary payload read from active generation metadata."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.list_turnover_ledger_view",
+        "PostgresSummaryReadModelRepository.list_turnover_ledger_view",
         "dict read_model_status=fresh",
     ): (1, "repository returns the turnover ledger view; query service applies source-version freshness gate."),
     (
