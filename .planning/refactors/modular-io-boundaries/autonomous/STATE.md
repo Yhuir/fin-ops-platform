@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-turnover-ledger-route-owner-next-boundary-selection-selected`
+Current state: `bank-details-read-export-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-turnover-ledger-route-owner-local-closure-audit-2026-06-25.md`. No `_handle_api_turnover_ledger*` callbacks remain in `server.py`; remaining turnover ledger app surfaces are composition-root/provider/platform/source-version/read-model/local-runtime/legacy fallback support candidates, not route callbacks. T0 selected post-turnover next-boundary selection next.
+Completed `planning:post-turnover-ledger-route-owner-next-boundary-selection` as `analysis-closed` in `analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`. T0 selected `server-py:bank-details-read-export-route-callback-collapse` as the next safe local implementation boundary: move bank details accounts, transactions, transactions export and auto-tag-rules GET HTTP mapping into `BankDetailsApiRoutes.route(...)` while leaving bank details write callbacks for later slices.
 
 ## Closed Or Deferred Slices
 

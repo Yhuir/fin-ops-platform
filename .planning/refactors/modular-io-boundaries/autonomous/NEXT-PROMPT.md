@@ -1,50 +1,51 @@
 # Next Prompt
 
-Continue after `server-py:turnover-ledger-route-owner-local-closure-audit`.
+Continue after `planning:post-turnover-ledger-route-owner-next-boundary-selection`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:turnover-ledger-route-owner-local-closure-audit`.
-- Row388 status: `analysis-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-route-owner-local-closure-audit-2026-06-25.md`.
-- `server.py` no longer defines any `_handle_api_turnover_ledger*` route callback.
-- All known `/api/turnover-ledger*` route path handling lives in `TurnoverLedgerApiRoutes.route(...)`.
-- Remaining turnover ledger `Application` surfaces are composition-root/provider/platform/source-version/read-model/local-runtime/legacy fallback support candidates.
-- Turnover ledger module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
+- Last completed boundary: `planning:post-turnover-ledger-route-owner-next-boundary-selection`.
+- Row389 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`.
+- Next selected implementation boundary: `server-py:bank-details-read-export-route-callback-collapse`.
+- Scope is local-first: no production validation, no Go hot-path, no global module closure claim.
 
 ## Previous Prompt Completion
 
-`server-py:turnover-ledger-route-owner-local-closure-audit` is complete as analysis-only:
+`planning:post-turnover-ledger-route-owner-next-boundary-selection` is complete as analysis-only:
 
-- proved no `_handle_api_turnover_ledger*` callback remains in `server.py`;
-- classified remaining turnover ledger app surfaces;
-- verified the platform Guard and docs/diff checks;
+- compared remaining `server.py` route/support surfaces after turnover ledger route-owner closure;
+- selected bank details read/export route callback collapse as the next bounded local implementation slice;
+- left bank details write callbacks for later slices;
 - avoided runtime code changes and avoided production validation.
 
 ## Next Boundary
 
-`planning:post-turnover-ledger-route-owner-next-boundary-selection`
+`server-py:bank-details-read-export-route-callback-collapse`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-route-owner-local-closure-audit-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
-   - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/post-turnover-ledger-route-owner-next-boundary-selection-2026-06-25.md`
+   - `docs/modules/bank-details/README.md`
+   - `docs/modules/bank-details/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/app/routes_bank_details.py`
+   - `tests/test_bank_details_routes.py`
+   - `tests/test_bank_auto_tag_rules_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Perform planning only unless a narrow safe implementation boundary is clearly selected:
-   - compare remaining `server.py` route/support surfaces by module and risk;
-   - avoid selecting production validation while local implementation gaps remain;
-   - choose the next highest-risk safe local boundary and insert/update a precise queue row;
-   - generate a bounded next prompt.
-4. Update analysis/state/queue/next prompt and commit/push if verification passes.
+3. Implement only the read/export slice:
+   - move `/api/bank-details/accounts`, `/api/bank-details/transactions`, `/api/bank-details/transactions/export` and `GET /api/bank-details/auto-tag-rules` HTTP mapping into `BankDetailsApiRoutes.route(...)`;
+   - inject explicit read-session/json/export ports as needed;
+   - remove corresponding app callbacks from `server.py`;
+   - keep auto-tag PUT/reapply/file-replacement and category confirmation/assignment callbacks in `server.py` for later write slices.
+4. Update tests/Guard/docs/state/queue/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
+- Do not move bank details write callbacks in this slice.
+- Do not change bank detail read model, refresh, dirty/outbox, cache, business rules or frontend behavior.
 - Do not run production validation or mutation.
-- Do not claim module/global closure from turnover route-owner support alone.
-- Do not start Go hot-path work.
-- Do not open a broad rewrite; select one bounded local implementation or audit slice.
+- Do not claim bank details module/global closure.
