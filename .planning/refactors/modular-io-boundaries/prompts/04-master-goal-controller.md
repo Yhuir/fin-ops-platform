@@ -119,7 +119,9 @@ Current state expected on start:
 - `deployment:production-browser-smoke-runner-bundle-implementation` is complete as `implementation-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-implementation-2026-06-25.md`: added local bundle packager, manifest/exclusion tests and docs; normal app release packaging remains unchanged and no production browser smoke/token broker/deploy occurred.
 - `deployment:production-browser-smoke-token-broker-runbook` is complete as `analysis-closed` in `analysis/deployment-production-browser-smoke-token-broker-runbook-2026-06-25.md`: designed future root-owned in-memory target OA token broker protocol with session scope checks, private token descriptor handoff, sanitized metadata and stop gates; no broker was implemented/installed and no token was output.
 - `deployment:production-browser-smoke-runner-runtime-availability-classification` is complete as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-runtime-availability-classification-2026-06-25.md`: local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296.
-- `planning:global-closure-hard-stop-report` is complete as `hard-stop-reported` in `analysis/global-closure-hard-stop-report-2026-06-25.md`; there is no next pending owned boundary until an external/operational gate is supplied.
+- `planning:global-closure-hard-stop-report` is complete as `hard-stop-reported` in `analysis/global-closure-hard-stop-report-2026-06-25.md`; that hard stop applies to final production browser/admin/write evidence, not to local modular implementation closure.
+- `planning:local-modular-code-closure-reconciliation` is complete as `local-closure-reconciled` in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`; it reopened local-first modular implementation work before production validation.
+- `server-py:etc-reconciliation-route-owner-residual-audit` is complete as `analysis-closed` in `analysis/server-py-etc-reconciliation-route-owner-residual-audit-2026-06-25.md`; it selected `server-py:etc-reconciliation-task-route-owner-facade-extraction` as the next bounded local implementation boundary.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -364,10 +366,12 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-reconciliation-route-owner-residual-audit`.
+Start with `server-py:etc-reconciliation-task-route-owner-facade-extraction`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
+- `server-py:etc-reconciliation-route-owner-residual-audit` is complete in `analysis/server-py-etc-reconciliation-route-owner-residual-audit-2026-06-25.md`.
+- Row311 is the first concrete local implementation boundary in this reopened phase: extract `/api/etc/reconciliation-tasks*` URL subrouting and HTTP parsing/response mapping into an explicit route owner while preserving behavior.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.
@@ -377,13 +381,12 @@ Commit-backed baseline:
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/production-read-model-authenticated-api-response-shape-smoke-runbook-2026-06-25.md`, `analysis/read-model-authenticated-api-browser-smoke-runbook-selection-2026-06-25.md`, `analysis/production-read-model-public-page-shell-smoke-runbook-2026-06-25.md`, `analysis/planning-post-public-page-shell-smoke-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-shadow-read-rehearsal-read-only-runbook-2026-06-25.md`, `analysis/planning-post-shadow-read-rehearsal-next-boundary-selection-2026-06-25.md`, `analysis/production-workbench-read-model-high-row-query-plan-read-only-runbook-2026-06-25.md`, `analysis/planning-post-workbench-high-row-query-plan-next-boundary-selection-2026-06-25.md`, `analysis/production-read-model-unauthenticated-api-status-shape-classification-runbook-2026-06-25.md`, `analysis/planning-post-unauthenticated-api-classification-next-boundary-selection-2026-06-25.md`, `analysis/planning-read-model-internal-api-contract-harness-design-2026-06-25.md`, `analysis/contract-read-model-internal-api-contract-harness-implementation-2026-06-25.md`, `analysis/planning-post-internal-api-contract-harness-next-boundary-selection-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
-- Produce the read-model browser data harness coverage map and recommend the next smallest executable evidence boundary.
-- Use CodeGraph before any implementation-oriented decision about `Application`, auth/session helpers, route-owner classes or existing tests.
-- Do not run API probes until a non-secret auth path is configured.
+- Read `analysis/server-py-etc-reconciliation-route-owner-residual-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Use CodeGraph before implementation-oriented changes to `Application`, route-owner classes, auth/session helpers, ETC reconciliation task services or existing tests.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
-- Do not run full e2e smoke until the coverage map identifies the target and verification value.
+- Implement only the Row311 route-owner facade slice unless the audit proves a narrower stop condition.
+- Keep `/api/etc/import/*` and legacy `/api/etc/batches*` behavior out of Row311.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.
 - Do not claim module/global closure from row245, row246, row248 or worker handoffs alone.

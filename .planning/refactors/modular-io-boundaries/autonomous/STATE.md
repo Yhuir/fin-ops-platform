@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `local-modular-code-closure-reconciled`
+Current state: `etc-reconciliation-route-owner-residual-audit-completed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `planning:local-modular-code-closure-reconciliation` as `local-closure-reconciled` in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`, after refreshing commit-backed accounting in `analysis/commit-backed-state-reconciliation-2026-06-25-local-first-refresh.md`. T0 verified the previous production hard stop does not prove local modular implementation closure: `server.py` still has `21217` lines and `205` `_handle_api_*` methods, and `postgres_repositories/read_models.py` still has `11415` lines with a broad `PostgresReadModelRepository`. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-reconciliation-route-owner-residual-audit`.
+Completed `server-py:etc-reconciliation-route-owner-residual-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-route-owner-residual-audit-2026-06-25.md`. T0 classified the residual ETC/import/reconciliation route groups still owned by `Application`, confirmed `/api/etc/business-batches*` is already route-owned through `EtcBusinessBatchApiRoutes`, rejected task-aware import and legacy `/api/etc/batches*` as the first slice, and selected `server-py:etc-reconciliation-task-route-owner-facade-extraction` as the next bounded local implementation boundary. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
