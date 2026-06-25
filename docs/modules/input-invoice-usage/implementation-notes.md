@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - OA reverse route owner facade extraction
+
+- 目标：把 `/api/input-invoice-usage/oa-reverse*` 中轻量 preview/history/staged/batch create/get HTTP 映射从 `server.py` 迁入独立 route owner。
+- 影响范围：`routes_input_invoice_usage_oa_reverse.py`、`server.py` OA reverse dispatch/factory、静态 Guard 和 OA reverse API 回归；rows/filter-options/export/read-model fresh gate 不变。
+- 关键决策：`InputInvoiceUsageOaReverseApiRoutes` 只接收显式端口，不接收 `Application`；本轮仅迁移 preview、submitted history、staged drafts、batch create、batch get。OA draft create/revoke/status refresh/manual status 留在 `Application`，进入下一轮审计。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 route-owner inventory/static ownership Guard，回归 OA reverse preview/batch/get/history/staged/one-step draft/revoke/status refresh/manual status 关键 API 路径。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-facade-extraction-2026-06-25.md`。
+- 未测风险：真实 OA 登录、目标申请人凭据、生产 browser/admin/write 和 worker drain 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-oa-reverse-draft-mutation-callback-audit`。
+
 ## 2026-06-25 - OA reverse route owner audit
 
 - 目标：审计 `/api/input-invoice-usage/oa-reverse*` handler group 的 `server.py` 所有权，选择下一步本地模块化边界。

@@ -188,6 +188,7 @@ from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
 )
+from fin_ops_platform.app.routes_input_invoice_usage_oa_reverse import InputInvoiceUsageOaReverseApiRoutes
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InMemoryInputInvoiceUsageOaReverseBatchRepository,
     InputInvoiceUsageOaReverseInvalidTransitionError,
@@ -1933,21 +1934,15 @@ class Application:
             return self._handle_api_input_invoice_usage_payment_status_rules()
         if method == "PUT" and route_path == "/api/input-invoice-usage/payment-status-rules":
             return self._handle_api_input_invoice_usage_payment_status_rules_update(body, headers)
-        if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/preview":
-            return self._handle_api_input_invoice_usage_oa_reverse_preview(body, headers)
-        if method == "GET" and route_path == "/api/input-invoice-usage/oa-reverse/staged-drafts":
-            return self._handle_api_input_invoice_usage_oa_reverse_staged_drafts(query, headers)
-        if method == "GET" and route_path == "/api/input-invoice-usage/oa-reverse/submitted-history":
-            return self._handle_api_input_invoice_usage_oa_reverse_submitted_history(query, headers)
+        if route_path.startswith("/api/input-invoice-usage/oa-reverse"):
+            oa_reverse_response = self._input_invoice_usage_oa_reverse_routes().route(method, route_path, query, body, headers)
+            if oa_reverse_response is not None:
+                return oa_reverse_response
         if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/oa-draft":
             return self._handle_api_input_invoice_usage_oa_reverse_one_step_draft_create(body, headers)
-        if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/batches":
-            return self._handle_api_input_invoice_usage_oa_reverse_batch_create(body, headers)
         if route_path.startswith("/api/input-invoice-usage/oa-reverse/batches/"):
             oa_reverse_suffix = route_path.removeprefix("/api/input-invoice-usage/oa-reverse/batches/").strip("/")
             oa_reverse_parts = [unquote(part) for part in oa_reverse_suffix.split("/") if part]
-            if len(oa_reverse_parts) == 1 and method == "GET":
-                return self._handle_api_input_invoice_usage_oa_reverse_batch_get(oa_reverse_parts[0], headers)
             if len(oa_reverse_parts) == 2 and method == "POST" and oa_reverse_parts[1] == "oa-draft":
                 return self._handle_api_input_invoice_usage_oa_reverse_draft_create(oa_reverse_parts[0], body, headers)
             if len(oa_reverse_parts) == 3 and method == "POST" and oa_reverse_parts[1:] == ["oa-draft", "revoke"]:
@@ -6951,6 +6946,23 @@ class Application:
         self._input_invoice_usage_oa_reverse_service_instance = service
         return service
 
+    def _input_invoice_usage_oa_reverse_routes(self) -> InputInvoiceUsageOaReverseApiRoutes:
+        routes = getattr(self, "_input_invoice_usage_oa_reverse_api_routes", None)
+        service = self._input_invoice_usage_oa_reverse_service()
+        if isinstance(routes, InputInvoiceUsageOaReverseApiRoutes) and getattr(routes, "_service", None) is service:
+            return routes
+        routes = InputInvoiceUsageOaReverseApiRoutes(
+            service=service,
+            resolve_read_session=self._resolve_fin_ops_read_session,
+            mutation_actor=self._input_invoice_usage_mutation_actor,
+            load_json_body=self._load_json_body,
+            json_response=self._json_response,
+            input_usage_error_response=self._input_invoice_usage_error_response,
+            oa_reverse_error_response=self._input_invoice_usage_oa_reverse_error_response,
+        )
+        self._input_invoice_usage_oa_reverse_api_routes = routes
+        return routes
+
     def _record_input_invoice_usage_oa_reverse_audit(self, event: dict[str, object]) -> None:
         record_action = getattr(getattr(self, "_audit_service", None), "record_action", None)
         if callable(record_action):
@@ -7230,101 +7242,6 @@ class Application:
         self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason)
         self._enqueue_generic_read_model_refreshes("invoice_lifecycle", [scope_key], reason=reason)
 
-    def _handle_api_input_invoice_usage_oa_reverse_preview(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票使用情况页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            result = self._input_invoice_usage_oa_reverse_service().preview(
-                payload,
-                can_create_draft=bool(session.can_mutate_data) if session is not None else True,
-            )
-        except InputInvoiceUsageError as exc:
-            return self._input_invoice_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_input_invoice_usage_oa_reverse_batch_create(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        actor_id, can_mutate, auth_error = self._input_invoice_usage_mutation_actor(
-            headers,
-            denied_message="当前账户没有创建进项发票反提 OA 批次权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            result = self._input_invoice_usage_oa_reverse_service().create_batch(
-                payload if isinstance(payload, dict) else {},
-                actor_id=actor_id,
-                can_mutate=can_mutate,
-            )
-        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
-            return self._input_invoice_usage_oa_reverse_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_input_invoice_usage_oa_reverse_submitted_history(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票反提 OA 已提交历史权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = self._input_invoice_usage_oa_reverse_service().submitted_history(
-                limit=int(query.get("limit", ["50"])[0] or 50),
-            )
-        except (ValueError, TypeError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_reverse_history_query", "message": "limit must be a positive integer."},
-            )
-        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
-            return self._input_invoice_usage_oa_reverse_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_input_invoice_usage_oa_reverse_staged_drafts(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票反提 OA 暂存批次权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = self._input_invoice_usage_oa_reverse_service().staged_drafts(
-                limit=int(query.get("limit", ["50"])[0] or 50),
-            )
-        except (ValueError, TypeError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_reverse_staged_query", "message": "limit must be a positive integer."},
-            )
-        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
-            return self._input_invoice_usage_oa_reverse_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
     def _handle_api_input_invoice_usage_oa_reverse_one_step_draft_create(
         self,
         body: str | bytes | None,
@@ -7346,23 +7263,6 @@ class Application:
                 can_mutate=can_mutate,
                 oa_client_provider=self._target_oa_applicant_token_provider(),
             )
-        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
-            return self._input_invoice_usage_oa_reverse_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_input_invoice_usage_oa_reverse_batch_get(
-        self,
-        batch_id: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票反提 OA 批次权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            result = self._input_invoice_usage_oa_reverse_service().get_batch(batch_id)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)

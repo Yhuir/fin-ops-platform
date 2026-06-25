@@ -1,58 +1,63 @@
 # Next Prompt
 
-Continue after `server-py:input-invoice-usage-oa-reverse-route-owner-audit`.
+Continue after `server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:input-invoice-usage-oa-reverse-route-owner-audit`.
-- Row343 status: `analysis-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`.
-- `InputInvoiceUsageOaReverseService` owns OA reverse business state, idempotency, version conflict, draft/revoke/status/manual status, relation command write, audit and read model invalidation.
-- `server.py` still owns route dispatch and HTTP/session/body/error mapping for `/api/input-invoice-usage/oa-reverse*`.
-- The next implementation slice should move only lightweight OA reverse route mapping first:
+- Last completed boundary: `server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`.
+- Row344 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-facade-extraction-2026-06-25.md`.
+- `InputInvoiceUsageOaReverseApiRoutes` now owns lightweight OA reverse HTTP mapping for:
   - preview;
   - submitted history;
   - staged drafts;
   - batch create;
   - batch get.
-- Keep OA draft create/revoke/status refresh/manual status callbacks in `server.py` for a follow-up slice.
-- Keep rows/filter-options/export/read-model routes out of this boundary.
+- `server.py` still owns the remaining OA reverse mutation callbacks:
+  - one-step draft create;
+  - batch draft create;
+  - batch draft revoke;
+  - status refresh;
+  - manual OA status.
+- Rows/filter-options/export/read-model routes remain out of this boundary.
 - Production browser/admin/write gates remain final validation gates, not the next local implementation step.
 
 ## Next Boundary
 
-`server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`
+`server-py:input-invoice-usage-oa-reverse-draft-mutation-callback-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
 2. Read:
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-facade-extraction-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`
    - `docs/modules/input-invoice-usage/README.md`
    - `docs/modules/input-invoice-usage/tests.md`
+   - `backend/src/fin_ops_platform/app/routes_input_invoice_usage_oa_reverse.py`
    - `backend/src/fin_ops_platform/app/server.py` around:
-     - OA reverse dispatch in `_handle_request_untracked(...)`;
-     - `_input_invoice_usage_oa_reverse_service(...)`;
+     - `_handle_api_input_invoice_usage_oa_reverse_one_step_draft_create(...)`;
+     - `_handle_api_input_invoice_usage_oa_reverse_draft_create(...)`;
+     - `_handle_api_input_invoice_usage_oa_reverse_draft_revoke(...)`;
+     - `_handle_api_input_invoice_usage_oa_reverse_status_refresh(...)`;
+     - `_handle_api_input_invoice_usage_oa_reverse_manual_status(...)`;
+     - `_input_invoice_usage_oa_draft_client_for_batch(...)`;
+     - `_target_oa_applicant_token_provider(...)`;
      - `_input_invoice_usage_mutation_actor(...)`;
-     - `_input_invoice_usage_oa_reverse_error_response(...)`;
-     - `_handle_api_input_invoice_usage_oa_reverse_preview(...)`;
-     - `_handle_api_input_invoice_usage_oa_reverse_batch_create(...)`;
-     - `_handle_api_input_invoice_usage_oa_reverse_submitted_history(...)`;
-     - `_handle_api_input_invoice_usage_oa_reverse_staged_drafts(...)`;
-     - `_handle_api_input_invoice_usage_oa_reverse_batch_get(...)`.
+     - `_input_invoice_usage_oa_reverse_error_response(...)`.
    - `backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py`
    - `tests/test_input_invoice_usage_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Use CodeGraph before editing.
-4. Implement the route-owner facade extraction:
-   - add `backend/src/fin_ops_platform/app/routes_input_invoice_usage_oa_reverse.py`;
-   - define `InputInvoiceUsageOaReverseApiRoutes` with explicit ports, not `Application`;
-   - route preview/history/staged/batch create/get through this owner;
-   - keep draft create/revoke/status refresh/manual status in `server.py` for a later slice;
-   - add or extend static Guard;
-   - run targeted API regressions for the moved paths.
-5. Update analysis/state/docs and commit/push if verification passes.
+3. Use CodeGraph before selecting or editing any implementation boundary.
+4. Produce an analysis file for the remaining draft mutation callbacks:
+   - identify which callback can be safely moved into `InputInvoiceUsageOaReverseApiRoutes` next;
+   - identify whether any service/application-service extraction is required before callback collapse;
+   - keep OA token/header parsing out of services;
+   - preserve idempotency, expected version, relation command conflict, audit and read model invalidation behavior;
+   - do not touch rows/filter-options/export/read-model fresh gates.
+5. If the audit proves a narrow safe implementation boundary, execute it locally with tests and static Guard evidence; otherwise update state with the selected next implementation prompt.
+6. Update analysis/state/docs and commit/push if verification passes.
 
 ## Stop Gates
 
