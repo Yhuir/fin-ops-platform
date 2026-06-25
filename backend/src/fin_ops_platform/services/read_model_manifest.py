@@ -216,6 +216,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "get_invoice_lifecycle_rows_by_subject_ids",
             "get_invoice_lifecycle_rows_by_identity_keys",
             "list_invoice_lifecycle_rows",
+            "invoice_lifecycle_scope_summary",
         ),
         query_owner="InvoiceLifecycleReadFacade",
         repository_owner="InvoiceLifecycleReadModelRepositoryPort",
@@ -373,6 +374,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(
             "list_no_oa_bank_batch_rows",
+            "no_oa_bank_batch_source_versions_summary",
         ),
         query_owner="NoOaBankBatchApplicationService",
         repository_owner="NoOaBankBatchReadModelRepositoryPort",

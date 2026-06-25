@@ -260,6 +260,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_invoice_lifecycle_rows_by_subject_ids",
             "get_invoice_lifecycle_rows_by_identity_keys",
             "list_invoice_lifecycle_rows",
+            "invoice_lifecycle_scope_summary",
         }
 
         for method_name in owned_methods:
@@ -325,6 +326,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_tax_offset_view",
             "save_tax_offset_read_models",
             "list_no_oa_bank_batch_rows",
+            "no_oa_bank_batch_source_versions_summary",
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
             "clear_turnover_ledger_rows",
@@ -561,6 +563,7 @@ class ReadModelManifestTests(unittest.TestCase):
         }
         required_no_oa_ports = {
             "list_no_oa_bank_batch_rows",
+            "no_oa_bank_batch_source_versions_summary",
         }
 
         for entry in (search, no_oa_bank_batch):

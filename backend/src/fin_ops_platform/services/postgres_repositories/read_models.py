@@ -4480,6 +4480,9 @@ class PostgresReadModelRepository:
     def list_no_oa_bank_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
         return self._summary_read_model_repository.list_no_oa_bank_batch_rows(*args, **kwargs)
 
+    def no_oa_bank_batch_source_versions_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.no_oa_bank_batch_source_versions_summary(*args, **kwargs)
+
     def list_turnover_ledger_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.list_turnover_ledger_view(*args, **kwargs)
 
@@ -4651,6 +4654,9 @@ class PostgresReadModelRepository:
 
     def list_invoice_lifecycle_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._pending_invoice_lifecycle_repository.list_invoice_lifecycle_rows(**kwargs)
+
+    def invoice_lifecycle_scope_summary(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.invoice_lifecycle_scope_summary(**kwargs)
 
 
 
