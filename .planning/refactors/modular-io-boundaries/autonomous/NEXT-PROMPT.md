@@ -1,52 +1,50 @@
 # Next Prompt
 
-Continue after `server-py:bank-details-transaction-categories-route-callback-collapse`.
+Continue after `server-py:bank-details-route-owner-local-closure-audit-retry`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:bank-details-transaction-categories-route-callback-collapse`.
-- Row395 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-transaction-categories-route-callback-collapse-2026-06-25.md`.
-- Disabled `PATCH /api/bank-details/transactions/categories` is now owned by `BankDetailsApiRoutes.route(...)`.
-- `_handle_api_bank_transaction_categories(...)` is removed from `server.py`.
-- The 410 `manual_bank_transaction_category_disabled` no-mutation behavior is covered by route-owner tests and static Guard.
-- Bank-details route-owner closure, module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
+- Last completed boundary: `server-py:bank-details-route-owner-local-closure-audit-retry`.
+- Row396 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-route-owner-local-closure-audit-retry-2026-06-25.md`.
+- Bank-details route-owner local support is accounted for: no app-owned bank-details route callback remains in `server.py`.
+- Bank-details module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
+- `server.py` still has app-owned route callbacks for other modules.
 
 ## Previous Prompt Completion
 
-`server-py:bank-details-transaction-categories-route-callback-collapse` is complete locally:
+`server-py:bank-details-route-owner-local-closure-audit-retry` is complete as analysis-only:
 
-- moved the disabled PATCH mapping into the bank-details route owner;
-- removed the app-owned handler and dispatch branch;
-- preserved disabled bulk category mutation semantics;
-- updated tests, Guard, docs and autonomous state.
+- proved bank-details route callbacks are owned by `BankDetailsApiRoutes.route(...)`;
+- classified remaining bank-related `Application` methods as composition-root, HTTP/platform adapter, read-model/source-version/refresh provider or shared downstream support;
+- avoided runtime code changes and avoided production validation;
+- selected no-OA bank batch route-owner audit next.
 
 ## Next Boundary
 
-`server-py:bank-details-route-owner-local-closure-audit-retry`
+`server-py:no-oa-bank-batch-route-owner-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-transaction-categories-route-callback-collapse-2026-06-25.md`
-   - `docs/modules/bank-details/README.md`
-   - `docs/modules/bank-details/implementation-notes.md`
-   - `docs/modules/bank-details/tests.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-route-owner-local-closure-audit-retry-2026-06-25.md`
+   - `docs/modules/README.md`
+   - any no-OA bank batch module docs under `docs/modules/`
    - `backend/src/fin_ops_platform/app/server.py`
-   - `backend/src/fin_ops_platform/app/routes_bank_details.py`
-   - `tests/test_platform_runtime_boundary_guards.py`
-3. Audit only bank-details route ownership:
-   - prove no `_handle_api_bank_details*`, `_handle_api_bank_detail_category*` or `_handle_api_bank_transaction_categories` callbacks remain in `server.py`;
-   - confirm `/api/bank-details/...` dispatch delegates to `BankDetailsApiRoutes.route(...)`;
-   - classify remaining `Application` surfaces as composition-root, provider, auth/session, HTTP adapter, read-model/source-version/refresh or platform ports;
-   - do not claim module/global closure unless all local implementation definitions are actually satisfied.
+   - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
+   - relevant `tests/test_no_oa*` and `tests/test_platform_runtime_boundary_guards.py`
+3. Audit only no-OA bank batch route ownership:
+   - inventory `_handle_api_no_oa_bank_batch*` callbacks in `server.py`;
+   - classify callbacks as thin HTTP wrappers, route-owner collapse candidates, or service/side-effect extraction candidates;
+   - identify the smallest next local implementation boundary.
 4. Update analysis/state/queue/journal/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not change bank detail business behavior, read model, refresh, dirty/outbox, cache, frontend behavior or production data.
+- Do not move broad persistence, refresh, relation repair or worker side effects into route code.
+- Do not change no-OA bank batch business behavior, read model, dirty/outbox, cache, frontend behavior or production data during the audit.
 - Do not claim global closure.
-- If a remaining bank-details app-owned callback or implementation helper is found, select the next narrow local implementation boundary instead of closing.

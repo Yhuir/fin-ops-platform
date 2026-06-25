@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `bank-details-route-owner-local-closure-audit-retry-selected`
+Current state: `no-oa-bank-batch-route-owner-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:bank-details-transaction-categories-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-bank-details-transaction-categories-route-callback-collapse-2026-06-25.md`. Disabled `PATCH /api/bank-details/transactions/categories` now lives in `BankDetailsApiRoutes.route(...)`, `_handle_api_bank_transaction_categories(...)` is removed from `server.py`, and the 410 no-mutation contract is covered by route-owner tests plus static Guard. T0 selected `server-py:bank-details-route-owner-local-closure-audit-retry` next and still does not claim bank-details module/global closure.
+Completed `server-py:bank-details-route-owner-local-closure-audit-retry` as `analysis-closed` in `analysis/server-py-bank-details-route-owner-local-closure-audit-retry-2026-06-25.md`. No app-owned bank-details route callback remains in `server.py`; remaining bank-related surfaces are composition-root, HTTP/platform adapter, read-model/source-version/refresh provider or shared downstream support. T0 selected `server-py:no-oa-bank-batch-route-owner-audit` next and still does not claim bank-details module/global closure.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:bank-details-transaction-categories-route-callback-collapse`
+`server-py:bank-details-route-owner-local-closure-audit-retry`
 
 ## Next Prompt
 
-`server-py:bank-details-route-owner-local-closure-audit-retry`
+`server-py:no-oa-bank-batch-route-owner-audit`

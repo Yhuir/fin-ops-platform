@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:bank-details-route-owner-local-closure-audit-retry-selected` after the disabled bank-details PATCH categories mapping moved into `BankDetailsApiRoutes`.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:no-oa-bank-batch-route-owner-audit-selected` after bank-details route-owner local support was accounted for without module/global closure.
 
 ```text
 $gsd-autonomous --auto

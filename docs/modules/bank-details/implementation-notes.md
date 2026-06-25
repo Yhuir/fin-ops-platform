@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - route-owner local closure audit retry
+
+- 目标：执行 `server-py:bank-details-route-owner-local-closure-audit-retry`，复审禁用 PATCH categories 迁移后银行明细 route owner 是否仍有 app-owned callback 残留。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
+- 关键决策：`server.py` 不再保留 bank-details route callback；剩余 bank-related `Application` surfaces 分类为 composition-root、HTTP/platform adapter、read-model/source-version/refresh provider 或 shared downstream support。只声明 bank-details route-owner local support accounted，不声明模块/global closure。
+- 文档影响：新增 modular IO route-owner retry audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录；长期事实源不变。
+- 测试覆盖：本轮 analysis-only，不新增运行时测试；沿用 Row395 route-owner/Guard 测试和本轮 literal/CodeGraph 审计。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；module/global closure 未声明。
+- 后续事项：执行 `server-py:no-oa-bank-batch-route-owner-audit`。
+
 ## 2026-06-25 - disabled transaction categories PATCH route-owner collapse
 
 - 目标：执行 `server-py:bank-details-transaction-categories-route-callback-collapse`，把已禁用的 `PATCH /api/bank-details/transactions/categories` HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。

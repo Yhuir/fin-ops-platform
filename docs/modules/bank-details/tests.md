@@ -2,6 +2,27 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - route-owner local closure audit retry test note
+
+`server-py:bank-details-route-owner-local-closure-audit-retry` 已完成为 analysis-only：
+
+- Business core unit tests：不适用；本轮不改业务规则。
+- Service-layer tests：不适用；本轮不改 services/facades/repositories。
+- API contract tests：不适用；本轮复审 Row395 后的 route-owner ownership，不改变 API contract。
+- Read model/cache/background job tests：不适用；本轮不改 read model/worker/cache。
+- Frontend component and interaction tests：不适用；本轮不改前端。
+- End-to-end business-flow integration tests：不适用；本轮不改业务流。
+- Existing feature regression tests：沿用 Row395 `tests/test_bank_details_routes.py` 和 `tests/test_platform_runtime_boundary_guards.py`，并用 literal/CodeGraph 审计确认没有 bank-details app-owned callback 残留。
+
+验证命令：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；module/global closure 未声明。
+
 ## 2026-06-25 - disabled transaction categories PATCH route-owner collapse test note
 
 `server-py:bank-details-transaction-categories-route-callback-collapse` 已完成：
