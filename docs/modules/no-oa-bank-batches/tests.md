@@ -18,6 +18,14 @@
 
 ## 现有测试入口
 
+## 2026-06-26 - Worker unchanged source_versions fast-path
+
+- 变更类型：narrow implementation slice。
+- 背景：生产 direct SLO 第二轮中 no-OA 月度 refresh 仍出现高延迟，原因是 worker 每次 current event 都重新 build/persist，即使现有 SQL read model rows 与 Bankdetail tag、Workbench relation、Workbench matching、tag selection 和 category snapshot 的稳定 source_versions 完全一致。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；Business core/API/frontend/E2E 不新增，因为不改变批次生命周期、HTTP response shape、前端交互或业务写入流程。
+- 验证结果：`python -m pytest tests/test_bank_details_sql_runtime.py tests/test_invoice_lifecycle_sql_projection.py tests/test_no_oa_bank_batch_read_model_refresh.py -q` 已通过；发布后仍需生产 direct/HTTP SLO 证明真实 PostgreSQL/worker 下第二轮进入 skip fast-path。
+
 ## 2026-06-26 - Bank detail stable source_versions dependency
 
 - 变更类型：narrow implementation slice。

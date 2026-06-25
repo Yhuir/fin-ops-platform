@@ -2,6 +2,26 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-26 - bank detail tag read repository port test note
+
+`read-model:bank-detail-tag-read-port-for-downstream` 已完成：
+
+- Business core unit tests：不适用；本轮不改分类规则、金额、状态机或业务判断。
+- Service-layer tests：适用；`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_bank_detail_read_model_port_excludes_unrelated_read_model_methods` 更新为允许 `BankTransactionTagReadFacade` 所需的 `get_bank_detail_tagged_rows_by_transaction_ids` 和 `list_bank_detail_tagged_rows_by_month`，同时继续拒绝余额、pending invoice 等无关 read model 方法。
+- API contract tests：不适用；HTTP shape、状态码和权限未变。
+- Read model/cache/background job tests：适用；生产 SQL runtime 下 no-OA/pending 等下游必须通过 Bankdetail fresh gate 读取 tag projection，不能回退 live provider 伪造 fresh。
+- Frontend component and interaction tests：不适用；前端页面、组件和交互未变。
+- End-to-end business-flow integration tests：生产 SLO 验证适用；需要发布后用真实 PostgreSQL/worker 验证 bank detail 和下游 no-OA read model freshness。
+- Existing feature regression tests：适用；端口白名单防止 bank detail read boundary 扩成宽 repository。
+
+验证命令：
+
+```bash
+python -m pytest tests/test_bank_details_sql_runtime.py -q
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实生产 mutating write-operation closure 需要在本次 rollout 继续完成；生产 SLO 结果以发布后 `/tmp/finops-*` probe 输出为准。
+
 ## 2026-06-26 - bank detail unchanged scope projection skip test note
 
 `read-model:bank-detail-unchanged-scope-fast-path` 已完成：

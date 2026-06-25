@@ -198,10 +198,12 @@ worker 流程：
 job.outbox_events / job.read_model_dirty_scopes
   -> no-oa-bank-batch worker consumes no_oa_bank_batch.read_model.refresh
   -> NoOaBankBatchReadModelRefreshService.handle_runtime_event
-  -> NoOaBankBatchApplicationService.refresh_batches(scope_key)
+  -> 读取目标 scope 银行流水、Bankdetail tag read model 和 Workbench relation read model
+  -> 如果现有 SQL read model rows 的 source_versions 与当前依赖 source_versions 完全一致，skip rebuild，只 complete dirty scope
+  -> 否则 NoOaBankBatchApplicationService.refresh_batches_from_prepared_rows(scope_key)
   -> all scope: 读取全量银行流水并生成完整 no-OA snapshot
   -> YYYY-MM scope: 只读取目标月银行流水，只替换目标月批次，保留其它月份批次
-  -> save_no_oa_bank_batches 以合并后的完整 snapshot 覆盖，并删除 snapshot 缺席批次行
+  -> scoped persistence 保存合并后的 public snapshot，并删除 snapshot 缺席批次行
   -> complete dirty scope and readiness
 ```
 
@@ -209,6 +211,7 @@ job.outbox_events / job.read_model_dirty_scopes
 
 - worker handler event type 或 scope type 错误必须拒绝。
 - stale source version event 必须 skip，不得 rebuild 或覆盖 read model。
+- unchanged source_versions event 必须 skip，不得 rebuild 或覆盖 read model；skip 前必须已经读取 Bankdetail 和 Workbench relation 依赖，使比较覆盖真实 freshness proof。
 - 读取 Bankdetail tag/read model 时遇到 `*_read_model_not_fresh` 必须保持 `refreshing`/defer，不得把 no-OA readiness 标记为 `failed`。
 - GET list/detail 不得为了 missing/stale 同步 rebuild 全量批次。
 - 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
@@ -225,3 +228,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-17 | read-only 写入口门禁接入权限矩阵 | `read_export_only` 用户可查看批次和标签范围，但不能提交、撤回、批量勾选或保存 tag selection；权限矩阵归 `permissions-and-audit` 统一覆盖 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx` |
 | 2026-06-17 | relation-backed stale 用户可见状态收敛 | SQL read model 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchPage.test.tsx` |
 | 2026-06-23 | read-side manifest 合同守卫 | 仅锁定 `no_oa_bank_batch` 的 self-managed freshness、`scoped_incremental`、fan-out `all`、`no-oa-bank-batch` worker、query/permission owner 和 repository port；不改变业务/UI/read model/worker 状态定义 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts` |
+| 2026-06-26 | unchanged source_versions worker fast-path | worker 从 state_store 注入 no-OA SQL read repository，先读取 Bankdetail tag 与 Workbench relation 依赖 source_versions，再比较现有 SQL rows；一致时只 complete dirty scope，不 rebuild、不保存 snapshot | `tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save` |

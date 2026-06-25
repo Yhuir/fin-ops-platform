@@ -53,3 +53,31 @@ class BankDetailReadModelRepositoryPort:
     def list_bank_detail_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object] | None:
         payload = self._repository.list_bank_detail_accounts(date_from=date_from, date_to=date_to)
         return dict(payload) if isinstance(payload, dict) else None
+
+    def get_bank_detail_tagged_rows_by_transaction_ids(
+        self,
+        transaction_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        payload = self._repository.get_bank_detail_tagged_rows_by_transaction_ids(
+            transaction_ids,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def list_bank_detail_tagged_rows_by_month(
+        self,
+        month: str,
+        *,
+        direction: str | None = None,
+        category_codes: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        payload = self._repository.list_bank_detail_tagged_rows_by_month(
+            month,
+            direction=direction,
+            category_codes=category_codes,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else None

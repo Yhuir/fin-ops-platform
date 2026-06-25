@@ -49,6 +49,7 @@ class NoOaBankBatchReadModelRefreshService:
     ) -> None:
         self._queue_repository = queue_repository
         self._read_model_persistence = read_model_persistence or NoOaBankBatchReadModelPersistencePort(state_store)
+        no_oa_bank_batch_read_model_repository = getattr(state_store, "no_oa_bank_batch_sql_read_repository", None)
         self._application_service = NoOaBankBatchApplicationService(
             import_service=import_service,
             effective_category_provider=effective_category_provider,
@@ -58,6 +59,7 @@ class NoOaBankBatchReadModelRefreshService:
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_relation_service),
             workbench_read_model_service=workbench_read_model_service,
             state_store=state_store,
+            no_oa_bank_batch_read_model_repository=no_oa_bank_batch_read_model_repository,
             workbench_matching_source_versions_provider=workbench_matching_source_versions_provider,
             queue_repository=queue_repository,
             relation_facade=relation_facade,
@@ -80,7 +82,28 @@ class NoOaBankBatchReadModelRefreshService:
                 "source_version": event.source_version or event.payload.get("source_version"),
             }
 
-        bank_rows, _categories = self._application_service.refresh_batches(
+        bank_rows = self._application_service.no_oa_bank_transaction_rows(
+            month=scope_key,
+            include_categories=False,
+        )
+        categories = self._application_service.effective_categories_for_rows(bank_rows)
+        active_relations = self._application_service.active_relations_for_bank_rows(bank_rows)
+        source_versions = self._application_service.no_oa_bank_batch_source_versions()
+        unchanged = self._application_service.unchanged_read_model_scope_result(
+            scope_key=scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            self._complete_dirty_scope(event, scope_key=scope_key)
+            return {
+                **unchanged,
+                "bank_row_count": len(bank_rows),
+            }
+
+        bank_rows, _categories = self._application_service.refresh_batches_from_prepared_rows(
+            bank_rows=bank_rows,
+            categories_by_transaction_id=categories,
+            active_relations=active_relations,
             apply_relation_repairs=False,
             scope_key=scope_key,
         )

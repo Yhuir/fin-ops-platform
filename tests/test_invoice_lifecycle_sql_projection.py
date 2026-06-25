@@ -63,6 +63,15 @@ class InvoiceLifecycleSkipConnection:
         raise AssertionError("unchanged invoice lifecycle scope must not rebuild rows")
 
 
+class InvoiceLifecycleSkipReadRepository:
+    def __init__(self) -> None:
+        self.relation_calls: list[str] = []
+
+    def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
+        self.relation_calls.append(scope_key)
+        return {"scope_key": scope_key, "source_version": 7, "source_signature": "relation-v1"}
+
+
 class FreshInvoiceLifecycleReadModelRepository:
     def __init__(self) -> None:
         self.source_versions: dict[str, object] = {}
@@ -127,15 +136,17 @@ def test_invoice_lifecycle_reuses_fresh_input_usage_read_model_rows() -> None:
 
 def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild() -> None:
     connection = InvoiceLifecycleSkipConnection()
+    read_repository = InvoiceLifecycleSkipReadRepository()
     invoice_repository = FreshInvoiceLifecycleReadModelRepository()
     builder = InvoiceLifecycleSqlProjectionBuilder(
         connection=connection,
-        read_model_repository=SimpleNamespace(),
+        read_model_repository=read_repository,
         workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
         invoice_lifecycle_read_model_repository=invoice_repository,
     )
     builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
     invoice_repository.source_versions = builder._source_versions()
+    read_repository.relation_calls = []
 
     result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
 
@@ -144,7 +155,13 @@ def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(
     assert result["skipped"] is True
     assert result["skip_reason"] == "source_versions_unchanged"
     assert invoice_repository.listed_months == ["2026-05"]
+    assert read_repository.relation_calls == ["2026-05"]
     assert not connection.fetch_all_calls
+    assert result["source_versions"]["workbench_relation_source_versions"] == {
+        "scope_key": "2026-05",
+        "source_version": 7,
+        "source_signature": "relation-v1",
+    }
     assert result["source_versions"]["pending_invoice_read_model_source_versions"] == {
         "expense:all:2026-05": {"pending_invoice": "expense-v1"},
         "income:all:2026-05": {"pending_invoice": "income-v1"},

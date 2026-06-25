@@ -30,6 +30,15 @@
 
 ## 场景覆盖清单
 
+## 2026-06-26 - Dependency source-version skip closure
+
+- 变更类型：narrow implementation slice；不改变 HTTP response shape、权限、业务状态机、worker event type 或 queue schema。
+- 覆盖证据：`invoice_lifecycle` skip precheck 纳入 top-level Workbench relation source_versions，避免 rebuild 保存的 lifecycle rows 与 precheck source_versions 不一致；`no_oa_bank_batch` worker 从 state_store 注入 SQL read repository，先读取 Bankdetail tag 与 Workbench relation 依赖 source_versions，再对现有 SQL rows 做 unchanged skip；`bank_detail` read repository port 暴露 tag facade 必需方法，避免生产 SQL runtime 回退 live provider。
+- 新增/更新测试：`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`、`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_bank_detail_read_model_port_excludes_unrelated_read_model_methods`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖，因为本 slice 修正 dependency source_versions 和 worker skip fast-path；API contract、frontend interaction、E2E 不新增，因为 payload shape、前端状态和用户流程不变；business core 不新增，因为不改金额、分类、生命周期状态或权限判断。
+- 验证命令：`python -m pytest tests/test_bank_details_sql_runtime.py tests/test_invoice_lifecycle_sql_projection.py tests/test_no_oa_bank_batch_read_model_refresh.py -q`。
+- 未测风险：本地测试不连接真实 PostgreSQL/RabbitMQ/Redis/systemd worker；生产发布后必须用 direct SLO、HTTP SLO 和受控写操作 discovery/确认后的 mutating smoke 验证真实数据 freshness closure。
+
 ## 2026-06-26 - Scoped incremental projection fast-paths
 
 - 变更类型：narrow implementation slice；不改变 HTTP response shape、权限、业务状态机、worker event type 或 queue schema。

@@ -378,6 +378,9 @@ class InvoiceLifecycleSqlProjectionBuilder:
         pending_invoice_versions = self._pending_invoice_source_versions_for_month(month)
         if pending_invoice_versions:
             result["pending_invoice_read_model_source_versions"] = pending_invoice_versions
+        relation_versions = self._workbench_relation_source_versions_for_scope(month)
+        if relation_versions:
+            result["workbench_relation_source_versions"] = relation_versions
         input_versions = self._invoice_relation_scope_source_versions(
             scope_table_name="read_model.input_invoice_usage_scopes",
             scope_type="input_invoice_usage",
@@ -408,6 +411,14 @@ class InvoiceLifecycleSqlProjectionBuilder:
             if source_versions:
                 source_versions_by_scope[scope_key] = source_versions
         return source_versions_by_scope
+
+    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+        source_versions_loader = getattr(self._read_repository, "workbench_relation_source_versions", None)
+        if callable(source_versions_loader):
+            source_versions = source_versions_loader(scope_key=scope_key)
+            if isinstance(source_versions, dict) and source_versions:
+                return dict(source_versions)
+        return dict(self._workbench_relation_read_facade.last_source_versions)
 
     def _pending_invoice_scope_source_versions(self, scope_key: str) -> dict[str, object]:
         if self._dirty_scope_is_active(scope_type="pending_invoice", scope_key=scope_key):

@@ -408,6 +408,181 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         self.assertEqual(provider.calls, [["txn-once"]])
 
+    def test_unchanged_scope_skips_rebuild_and_snapshot_save(self) -> None:
+        class ImportService:
+            def list_transactions(self, *, month: str = "all"):
+                return [
+                    {
+                        "id": "txn-skip",
+                        "txn_date": "2026-04-23",
+                        "txn_direction": "outflow",
+                        "amount": "12.00",
+                        "bank_name": "CCB",
+                        "account_no": "6222000000008106",
+                        "counterparty_name": "测试供应商",
+                    }
+                ]
+
+        class EffectiveCategoryProvider:
+            def __init__(self) -> None:
+                self.last_source_versions: dict[str, object] = {}
+                self.calls: list[list[str]] = []
+
+            def bulk_get_for_rows(self, rows):
+                self.calls.append([str(row.get("id") or "") for row in rows])
+                self.last_source_versions = {
+                    "bank_detail": {
+                        "scope_key": "2026-04",
+                        "source_version": 11,
+                        "bank_detail_source_signature": "bank-detail-v1",
+                    }
+                }
+                return {
+                    "txn-skip": {
+                        "transaction_id": "txn-skip",
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "auto",
+                    }
+                }
+
+        class RelationFacade:
+            def __init__(self) -> None:
+                self.last_source_versions: dict[str, object] = {}
+                self.calls: list[str] = []
+
+            def list_by_month(self, month: str, *_args, **_kwargs) -> dict[str, object]:
+                self.calls.append(month)
+                self.last_source_versions = {
+                    "scope_key": month,
+                    "source_version": 19,
+                    "source_signature": "relation-v1",
+                }
+                return {
+                    "status": "fresh",
+                    "rows": [],
+                    "groups": [],
+                    "source_versions": dict(self.last_source_versions),
+                }
+
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.rows: list[dict[str, object]] = []
+                self.calls: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object] | None = None) -> list[dict[str, object]]:
+                self.calls.append(dict(filters or {}))
+                return [dict(row) for row in self.rows]
+
+        class StateStore:
+            def __init__(self, repository: ReadRepository) -> None:
+                self.no_oa_bank_batch_sql_read_repository = repository
+
+            def save_no_oa_bank_batches(self, *_args, **_kwargs) -> None:
+                raise AssertionError("unchanged no-OA scope must not save full snapshot")
+
+            def save_no_oa_bank_batches_scope(self, *_args, **_kwargs) -> None:
+                raise AssertionError("unchanged no-OA scope must not save scoped snapshot")
+
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.completions: list[dict[str, object]] = []
+
+            def read_model_refresh_is_current(self, **_kwargs) -> bool:
+                return True
+
+            def complete_read_model_refresh(self, **kwargs) -> None:
+                self.completions.append(dict(kwargs))
+
+        class NoOaService:
+            def build_batches(self, *_args, **_kwargs) -> None:
+                raise AssertionError("unchanged no-OA scope must not rebuild batches")
+
+            def public_snapshot(self) -> dict[str, object]:
+                raise AssertionError("unchanged no-OA scope must not publish a snapshot")
+
+        repository = ReadRepository()
+        state_store = StateStore(repository)
+        provider = EffectiveCategoryProvider()
+        relation_facade = RelationFacade()
+        queue_repository = QueueRepository()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=ImportService(),
+            effective_category_provider=provider,
+            no_oa_bank_batch_service=NoOaService(),
+            app_settings_service=type(
+                "Settings",
+                (),
+                {
+                    "get_no_oa_bank_batch_tag_selection_payload": lambda _self: {
+                        "version": 1,
+                        "selected_tag_codes": ["fee"],
+                    }
+                },
+            )(),
+            bank_transaction_category_service=type("CategoryService", (), {"snapshot": lambda _self: {}})(),
+            pair_relation_service=type("PairRelationService", (), {"snapshot": lambda _self: {}})(),
+            workbench_read_model_service=type("WorkbenchReadModel", (), {"snapshot": lambda _self: {}})(),
+            state_store=state_store,
+            queue_repository=queue_repository,
+            workbench_matching_source_versions_provider=lambda: {"workbench_read_model_schema_version": 77},
+            relation_facade=relation_facade,
+        )
+        bank_rows = service._application_service.no_oa_bank_transaction_rows(
+            month="2026-04",
+            include_categories=False,
+        )
+        service._application_service.effective_categories_for_rows(bank_rows)
+        service._application_service.active_relations_for_bank_rows(bank_rows)
+        repository.rows = [
+            {
+                "batch_id": "existing-batch",
+                "scope_month": "2026-04",
+                "source_versions": service._application_service.no_oa_bank_batch_source_versions(),
+            }
+        ]
+        provider.calls = []
+        relation_facade.calls = []
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-unchanged",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="2026-04",
+                scope_type="no_oa_bank_batch",
+                scope_key="2026-04",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:2026-04",
+                payload={"scope_type": "no_oa_bank_batch", "scope_key": "2026-04", "source_version": 9},
+                attempts=1,
+                status="processing",
+                source_version=9,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "2026-04")
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertEqual(result["bank_row_count"], 1)
+        self.assertEqual(result["batch_count"], 1)
+        self.assertEqual(provider.calls, [["txn-skip"]])
+        self.assertEqual(relation_facade.calls, ["2026-04"])
+        self.assertEqual(repository.calls, [{"month": "2026-04"}])
+        self.assertEqual(
+            queue_repository.completions,
+            [
+                {
+                    "tenant_id": "default",
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "2026-04",
+                    "source_version": 9,
+                }
+            ],
+        )
+        self.assertIn("bank_detail_source_versions", result["source_versions"])
+        self.assertIn("workbench_relation_source_versions", result["source_versions"])
+
     def test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches(self) -> None:
         class ImportService:
             def __init__(self) -> None:

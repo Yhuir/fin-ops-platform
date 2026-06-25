@@ -537,11 +537,62 @@ class NoOaBankBatchApplicationService:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
         bank_rows = self.no_oa_bank_transaction_rows(month=refresh_scope_key, include_categories=False)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
+        return self.refresh_batches_from_prepared_rows(
+            bank_rows=bank_rows,
+            categories_by_transaction_id=categories_by_transaction_id,
+            apply_relation_repairs=apply_relation_repairs,
+            scope_key=refresh_scope_key,
+        )
+
+    def unchanged_read_model_scope_result(
+        self,
+        *,
+        scope_key: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, object] | None:
+        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
+        if not callable(list_read_model_batches):
+            return None
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
+        read_model_rows = list_read_model_batches(filters)
+        if not read_model_rows:
+            return None
+        existing_versions = [
+            row.get("source_versions")
+            for row in list(read_model_rows)
+            if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
+        ]
+        if not existing_versions or any(dict(value) != source_versions for value in existing_versions):
+            return None
+        return {
+            "scope_key": normalized_scope_key,
+            "batch_count": len(read_model_rows),
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
+
+    def active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        return self._workbench_relation_active_relations_for_bank_rows(bank_rows)
+
+    def refresh_batches_from_prepared_rows(
+        self,
+        *,
+        bank_rows: list[dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+        active_relations: list[dict[str, object]] | None = None,
+        apply_relation_repairs: bool,
+        scope_key: str,
+    ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+        refresh_scope_key = str(scope_key or "all").strip() or "all"
         self._apply_categories_to_rows(bank_rows, categories_by_transaction_id)
         self._no_oa_bank_batch_service.build_batches(
             bank_rows,
             categories_by_transaction_id,
-            self._workbench_relation_active_relations_for_bank_rows(bank_rows),
+            active_relations
+            if active_relations is not None
+            else self._workbench_relation_active_relations_for_bank_rows(bank_rows),
             self.no_oa_bank_batch_source_versions(),
             eligible_batch_types=self.selected_tag_codes(),
             apply_relation_repairs=apply_relation_repairs,
