@@ -4893,6 +4893,14 @@ class Application:
             load_json_body=self._load_json_body,
             task_payload=self._etc_reconciliation_task_payload,
             unavailable_task_payload=self._etc_reconciliation_unavailable_task_payload,
+            cleanup_service=self._etc_reconciliation_import_cleanup_service(),
+            expected_version_from_payload=self._expected_version_from_payload,
+            reconciliation_error_response=self._reconciliation_error_response,
+            refresh_after_etc_invoice_link=lambda changed_months, reason: self._refresh_after_etc_invoice_link(
+                changed_months,
+                reason=reason,
+            ),
+            persist_state=self._persist_state,
             upload_source=self._handle_api_etc_reconciliation_upload,
             upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload,
             submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts,
@@ -4901,8 +4909,6 @@ class Application:
             confirm_task=self._handle_api_etc_reconciliation_confirm,
             reopen_task=self._handle_api_etc_reconciliation_reopen,
             refresh_matches=self._handle_api_etc_reconciliation_refresh_matches,
-            delete_imported_invoices=self._handle_api_etc_reconciliation_imported_invoices_delete,
-            delete_task=self._handle_api_etc_reconciliation_task_delete,
         )
         self._etc_reconciliation_task_api_routes = routes
         return routes
@@ -5191,81 +5197,6 @@ class Application:
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_imported_invoices_delete(self, task_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            task = self._etc_reconciliation_task_service.get_task(task_id)
-            cleanup_result = self._etc_reconciliation_import_cleanup_service().remove_imported_invoices(
-                task=task,
-                expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except EtcBatchNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        except EtcBatchDeleteError as error:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "etc_batch_delete_conflict", "message": str(error)},
-            )
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        self._refresh_after_etc_invoice_link(cleanup_result.changed_months, reason="etc_reconciliation_imported_invoices_removed")
-        self._persist_state()
-        response_payload = self._etc_reconciliation_task_payload(cleanup_result.updated_task)
-        response_payload["removedImportBatch"] = cleanup_result.delete_result
-        response_payload["removedCanonicalInvoiceCount"] = cleanup_result.canonical_deleted
-        return self._json_response(HTTPStatus.OK, response_payload)
-
-    def _handle_api_etc_reconciliation_task_delete(self, task_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        cleanup_result = None
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            actor = str(payload.get("actor") or "web_finance_user")
-            task = self._etc_reconciliation_task_service.get_task(task_id)
-            if int(getattr(task, "version", 0) or 0) != expected_version:
-                raise ValueError("task_version_conflict")
-            if str(getattr(task, "import_batch_id", "") or "").strip():
-                cleanup_result = self._etc_reconciliation_import_cleanup_service().cleanup_task_import_sources(
-                    task=task,
-                    actor=actor,
-                )
-                task = cleanup_result.task
-            result = self._etc_reconciliation_task_service.delete_task(
-                task_id=task_id,
-                expected_version=int(getattr(task, "version", expected_version) or expected_version),
-                actor=actor,
-                import_cleanup_confirmed=(
-                    cleanup_result is not None
-                    and (
-                        cleanup_result.removed_import_batch is not None
-                        or cleanup_result.removed_submission_batch is not None
-                    )
-                ),
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except EtcBatchNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        except EtcBatchDeleteError as error:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "etc_batch_delete_conflict", "message": str(error)},
-            )
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        if cleanup_result is not None and cleanup_result.removed_import_batch is not None:
-            self._refresh_after_etc_invoice_link(cleanup_result.changed_months, reason="etc_reconciliation_task_deleted")
-            self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
 
     def _etc_reconciliation_import_cleanup_service(self) -> EtcReconciliationImportCleanupService:
         service = getattr(self, "_etc_reconciliation_import_cleanup", None)

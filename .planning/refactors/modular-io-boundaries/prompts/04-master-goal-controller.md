@@ -125,6 +125,7 @@ Current state expected on start:
 - `server-py:etc-reconciliation-task-route-owner-facade-extraction` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-task-route-owner-facade-extraction-2026-06-25.md`; it added `EtcReconciliationTaskApiRoutes` and left task delete/imported-invoice delete side effects as the next audit target.
 - `server-py:etc-reconciliation-task-delete-side-effect-service-audit` is complete as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-delete-side-effect-service-audit-2026-06-25.md`; it selected `server-py:etc-reconciliation-import-cleanup-service-extraction`.
 - `server-py:etc-reconciliation-import-cleanup-service-extraction` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-import-cleanup-service-extraction-2026-06-25.md`; cleanup behavior is service-owned while HTTP callbacks remain in `Application`.
+- `server-py:etc-reconciliation-delete-route-callback-audit` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-delete-route-callback-audit-2026-06-25.md`; task delete and imported-invoice delete HTTP ownership moved into `EtcReconciliationTaskApiRoutes`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -369,7 +370,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-reconciliation-delete-route-callback-audit`.
+Start with `server-py:etc-import-route-owner-audit`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -377,7 +378,8 @@ Current local-first state:
 - `server-py:etc-reconciliation-task-route-owner-facade-extraction` is complete in `analysis/server-py-etc-reconciliation-task-route-owner-facade-extraction-2026-06-25.md`.
 - `server-py:etc-reconciliation-task-delete-side-effect-service-audit` is complete in `analysis/server-py-etc-reconciliation-task-delete-side-effect-service-audit-2026-06-25.md`.
 - `server-py:etc-reconciliation-import-cleanup-service-extraction` is complete in `analysis/server-py-etc-reconciliation-import-cleanup-service-extraction-2026-06-25.md`.
-- Row314 is the next local boundary: audit whether delete/imported-invoice HTTP callbacks can move into `EtcReconciliationTaskApiRoutes`, or whether refresh/persist operation-result boundaries must be extracted first.
+- `server-py:etc-reconciliation-delete-route-callback-audit` is complete in `analysis/server-py-etc-reconciliation-delete-route-callback-audit-2026-06-25.md`.
+- Row315 is the next local boundary: audit `/api/etc/import/*` preview/confirm/direct import route ownership and decide whether a route owner can be extracted with existing import session/job services, or whether job enqueue/readiness/result ports must be extracted first.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.
@@ -387,12 +389,12 @@ Commit-backed baseline:
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/server-py-etc-reconciliation-import-cleanup-service-extraction-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Read `analysis/server-py-etc-reconciliation-delete-route-callback-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
 - Use CodeGraph before implementation-oriented changes to `Application`, route-owner classes, auth/session helpers, ETC reconciliation task services, relation side-effect helpers or existing tests.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
-- Implement only the Row314 audit/selection slice unless the audit proves a narrower safe implementation can be completed and verified immediately.
-- Keep `/api/etc/import/*` and legacy `/api/etc/batches*` behavior out of Row311.
+- Implement only the Row315 audit/selection slice unless the audit proves a narrower safe implementation can be completed and verified immediately.
+- Keep legacy `/api/etc/batches*` behavior out of Row315.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.
 - Do not claim module/global closure from row245, row246, row248 or worker handoffs alone.

@@ -1746,6 +1746,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ]
         route_owner_init = _function_source(route_tree, route_source, "__init__")
         route_owner_route = _function_source(route_tree, route_source, "route")
+        route_owner_delete_task = _function_source(route_tree, route_source, "delete_task")
+        route_owner_delete_imported_invoices = _function_source(route_tree, route_source, "delete_imported_invoices")
 
         violations: list[str] = []
         if "EtcReconciliationTaskApiRoutes" not in server_source:
@@ -1756,12 +1758,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_etc_reconciliation_routes does not construct the route owner")
         if "task_service=self._etc_reconciliation_task_service" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit task service injection")
-        if "delete_task=self._handle_api_etc_reconciliation_task_delete" not in route_factory:
-            violations.append("ETC reconciliation route owner lacks explicit task delete callback")
+        if "cleanup_service=self._etc_reconciliation_import_cleanup_service()" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit cleanup service injection")
+        if "expected_version_from_payload=self._expected_version_from_payload" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit expected-version parser")
+        if "persist_state=self._persist_state" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit persist callback")
+        if "_handle_api_etc_reconciliation_task_delete" in server_source:
+            violations.append("server.py reintroduced ETC reconciliation task delete HTTP callback")
+        if "_handle_api_etc_reconciliation_imported_invoices_delete" in server_source:
+            violations.append("server.py reintroduced ETC reconciliation imported-invoices delete HTTP callback")
         if "Application" in route_owner_init:
             violations.append("ETC reconciliation route owner accepts the whole Application")
         if "EtcReconciliationTaskApiRoutes" not in route_owner_names:
             violations.append("routes_etc_reconciliation.py does not define EtcReconciliationTaskApiRoutes")
+        if "cleanup_task_import_sources" not in route_owner_delete_task:
+            violations.append("ETC reconciliation route owner task delete does not use cleanup service")
+        if "remove_imported_invoices" not in route_owner_delete_imported_invoices:
+            violations.append("ETC reconciliation route owner imported-invoices delete does not use cleanup service")
+        if "etc_reconciliation_task_deleted" not in route_owner_delete_task:
+            violations.append("ETC reconciliation route owner task delete lacks refresh reason")
+        if "etc_reconciliation_imported_invoices_removed" not in route_owner_delete_imported_invoices:
+            violations.append("ETC reconciliation route owner imported-invoices delete lacks refresh reason")
         for required_route in (
             'route_path == "/api/etc/reconciliation-tasks"',
             'route_path == "/api/etc/reconciliation-tasks/ready-for-import"',

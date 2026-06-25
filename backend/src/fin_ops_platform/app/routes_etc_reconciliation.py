@@ -4,6 +4,8 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
+from fin_ops_platform.services.etc_service import EtcBatchDeleteError, EtcBatchNotFoundError
+from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 
 
@@ -16,6 +18,11 @@ class EtcReconciliationTaskApiRoutes:
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
         task_payload: Callable[[Any], dict[str, Any]],
         unavailable_task_payload: Callable[[Any], dict[str, Any]],
+        cleanup_service: EtcReconciliationImportCleanupService,
+        expected_version_from_payload: Callable[[dict[str, object]], int],
+        reconciliation_error_response: Callable[[ValueError], Any],
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None],
+        persist_state: Callable[[], None],
         upload_source: Callable[..., Any],
         upload_supplement_for_card: Callable[..., Any],
         submit_ticket_root_texts: Callable[[str, str | bytes | None], Any],
@@ -24,14 +31,17 @@ class EtcReconciliationTaskApiRoutes:
         confirm_task: Callable[[str, str | bytes | None], Any],
         reopen_task: Callable[[str, str | bytes | None], Any],
         refresh_matches: Callable[[str], Any],
-        delete_imported_invoices: Callable[[str, str | bytes | None], Any],
-        delete_task: Callable[[str, str | bytes | None], Any],
     ) -> None:
         self._task_service = task_service
         self._json_response = json_response
         self._load_json_body = load_json_body
         self._task_payload = task_payload
         self._unavailable_task_payload = unavailable_task_payload
+        self._cleanup_service = cleanup_service
+        self._expected_version_from_payload = expected_version_from_payload
+        self._reconciliation_error_response = reconciliation_error_response
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
+        self._persist_state = persist_state
         self._upload_source = upload_source
         self._upload_supplement_for_card = upload_supplement_for_card
         self._submit_ticket_root_texts = submit_ticket_root_texts
@@ -40,8 +50,6 @@ class EtcReconciliationTaskApiRoutes:
         self._confirm_task = confirm_task
         self._reopen_task = reopen_task
         self._refresh_matches = refresh_matches
-        self._delete_imported_invoices = delete_imported_invoices
-        self._delete_task = delete_task
 
     def route(
         self,
@@ -106,7 +114,7 @@ class EtcReconciliationTaskApiRoutes:
         if method == "GET" and len(parts) == 1:
             return self.detail(task_id)
         if method == "DELETE" and len(parts) == 1:
-            return self._delete_task(task_id, body)
+            return self.delete_task(task_id, body)
         if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
             return self._delete_source_file(task_id, parts[2], body)
         if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
@@ -148,7 +156,7 @@ class EtcReconciliationTaskApiRoutes:
         if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
             return self._refresh_matches(task_id)
         if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
-            return self._delete_imported_invoices(task_id, body)
+            return self.delete_imported_invoices(task_id, body)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
 
     def detail(self, task_id: str) -> Any:
@@ -157,3 +165,81 @@ class EtcReconciliationTaskApiRoutes:
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def delete_imported_invoices(self, task_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._task_service.get_task(task_id)
+            cleanup_result = self._cleanup_service.remove_imported_invoices(
+                task=task,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcBatchDeleteError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_batch_delete_conflict", "message": str(error)},
+            )
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        self._refresh_after_etc_invoice_link(
+            cleanup_result.changed_months,
+            "etc_reconciliation_imported_invoices_removed",
+        )
+        self._persist_state()
+        response_payload = self._task_payload(cleanup_result.updated_task)
+        response_payload["removedImportBatch"] = cleanup_result.delete_result
+        response_payload["removedCanonicalInvoiceCount"] = cleanup_result.canonical_deleted
+        return self._json_response(HTTPStatus.OK, response_payload)
+
+    def delete_task(self, task_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        cleanup_result = None
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            actor = str(payload.get("actor") or "web_finance_user")
+            task = self._task_service.get_task(task_id)
+            if int(getattr(task, "version", 0) or 0) != expected_version:
+                raise ValueError("task_version_conflict")
+            if str(getattr(task, "import_batch_id", "") or "").strip():
+                cleanup_result = self._cleanup_service.cleanup_task_import_sources(
+                    task=task,
+                    actor=actor,
+                )
+                task = cleanup_result.task
+            result = self._task_service.delete_task(
+                task_id=task_id,
+                expected_version=int(getattr(task, "version", expected_version) or expected_version),
+                actor=actor,
+                import_cleanup_confirmed=(
+                    cleanup_result is not None
+                    and (
+                        cleanup_result.removed_import_batch is not None
+                        or cleanup_result.removed_submission_batch is not None
+                    )
+                ),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcBatchDeleteError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_batch_delete_conflict", "message": str(error)},
+            )
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        if cleanup_result is not None and cleanup_result.removed_import_batch is not None:
+            self._refresh_after_etc_invoice_link(cleanup_result.changed_months, "etc_reconciliation_task_deleted")
+            self._persist_state()
+        return self._json_response(HTTPStatus.OK, result)
