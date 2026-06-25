@@ -13656,16 +13656,7 @@ class Application:
 
     @staticmethod
     def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:
-        row_ids: set[str] = set()
-        for section in ("paired", "open"):
-            section_payload = payload.get(section, {})
-            if not isinstance(section_payload, dict):
-                continue
-            for pane in ("oa", "bank", "invoice"):
-                for row in list(section_payload.get(pane, [])):
-                    if isinstance(row, dict) and str(row.get("id", "")).strip():
-                        row_ids.add(str(row.get("id", "")).strip())
-        return row_ids
+        return Application._workbench_oa_attachment_context_row_index().raw_payload_row_ids(payload)
 
     def _oa_invoice_offset_desired_relations(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         return self._workbench_oa_invoice_offset_desired_relation_builder().build(payload)

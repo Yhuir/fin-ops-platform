@@ -473,7 +473,9 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 459 | `server-py:workbench-oa-attachment-repair-context-executor-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaAttachmentRepairContextExecutor`, moved missing attachment context repair confirm/persist/lifecycle orchestration out of `Application._repair_active_relations_with_oa_attachment_context(...)`. |
 | 460 | `server-py:workbench-oa-attachment-context-row-index-audit` | analysis-closed | implementation-gap-open | Audited OA attachment context row indexing and source matching; selected row index extraction while deferring generic raw row-id set extraction. |
 | 461 | `server-py:workbench-oa-attachment-context-row-index-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaAttachmentContextRowIndex`, moved raw payload row indexing, attachment context detection and OA id fallback matching out of `Application`. |
-| 462 | `server-py:workbench-raw-payload-row-id-set-helper-audit` | pending | implementation-gap-open | Audit `_raw_workbench_payload_row_ids(...)` and generic paired/open pane row-id set extraction; select the next narrow local implementation or guard boundary. |
+| 462 | `server-py:workbench-raw-payload-row-id-set-helper-audit` | analysis-closed | implementation-gap-open | Audited generic raw payload row-id set extraction; selected extraction into existing row-index owner. |
+| 463 | `server-py:workbench-raw-payload-row-id-set-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaAttachmentContextRowIndex.raw_payload_row_ids(...)`, moved `_raw_workbench_payload_row_ids(...)` logic out of `Application`. |
+| 464 | `server-py:workbench-pair-relation-display-payload-audit` | pending | implementation-gap-open | Audit `_apply_pair_relation_to_row(...)`, `_pair_relation_display_payload(...)`, relation metadata decorators and mode-specific pair metadata calls; select the next narrow local implementation or guard boundary. |
 
 ## Status Values
 

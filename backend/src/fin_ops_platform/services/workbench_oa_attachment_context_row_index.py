@@ -32,6 +32,15 @@ class WorkbenchOaAttachmentContextRowIndex:
                         rows_by_id[row_id] = row
         return rows_by_id
 
+    def raw_payload_row_ids(self, payload: dict[str, object]) -> set[str]:
+        row_ids: set[str] = set()
+        for section_payload in self._raw_payload_sections(payload):
+            for pane in ("oa", "bank", "invoice"):
+                for row in list(section_payload.get(pane, [])):
+                    if isinstance(row, dict) and str(row.get("id", "")).strip():
+                        row_ids.add(str(row.get("id", "")).strip())
+        return row_ids
+
     def attachment_row_ids_by_oa_id(
         self,
         rows_by_id: dict[str, dict[str, object]],
@@ -74,3 +83,12 @@ class WorkbenchOaAttachmentContextRowIndex:
             if self._attachment_row_id_matches_oa(invoice_id, oa_row_id):
                 return oa_row_id
         return None
+
+    @staticmethod
+    def _raw_payload_sections(payload: dict[str, object]) -> list[dict[str, object]]:
+        sections: list[dict[str, object]] = []
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if isinstance(section_payload, dict):
+                sections.append(section_payload)
+        return sections

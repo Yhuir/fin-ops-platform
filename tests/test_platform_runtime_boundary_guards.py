@@ -3580,6 +3580,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             method_name: _function_source(server_tree, server_source, method_name)
             for method_name in (
                 "_raw_workbench_payload_rows_by_id",
+                "_raw_workbench_payload_row_ids",
                 "_oa_attachment_context_row_ids_by_oa_id",
                 "_invoice_row_is_oa_attachment_context",
                 "_oa_id_from_attachment_invoice_id",
@@ -3611,6 +3612,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "class WorkbenchOaAttachmentContextRowIndex",
             "def raw_payload_rows_by_id(",
+            "def raw_payload_row_ids(",
             "def attachment_row_ids_by_oa_id(",
             "def invoice_row_is_attachment_context(",
             "def oa_id_from_attachment_invoice_id(",

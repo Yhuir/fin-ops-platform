@@ -32,6 +32,20 @@ class WorkbenchOaAttachmentContextRowIndexTests(unittest.TestCase):
         self.assertEqual(set(rows_by_id), {"oa-1", "bk-1", "inv-1"})
         self.assertEqual(rows_by_id["oa-1"]["type"], "oa")
 
+    def test_raw_payload_row_ids_returns_normalized_ids_from_all_panes(self) -> None:
+        payload = {
+            "paired": {
+                "oa": [{"id": " oa-1 "}],
+                "bank": [{"id": "bk-1"}],
+                "invoice": [{"id": ""}, "bad"],
+            },
+            "open": {
+                "invoice": [{"id": "inv-1"}],
+            },
+        }
+
+        self.assertEqual(self._index().raw_payload_row_ids(payload), {"oa-1", "bk-1", "inv-1"})
+
     def test_attachment_row_ids_by_oa_id_matches_derived_parent_matcher_and_invoice_id_fallback(self) -> None:
         rows_by_id = {
             "oa-1": {"id": "oa-1", "type": "oa"},
