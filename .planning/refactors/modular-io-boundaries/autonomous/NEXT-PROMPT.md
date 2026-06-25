@@ -1,51 +1,53 @@
 # Next Prompt
 
-Continue after `server-py:no-oa-bank-batch-route-callback-collapse`.
+Continue after `server-py:no-oa-bank-batch-route-owner-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:no-oa-bank-batch-route-callback-collapse`.
-- Row398 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-route-callback-collapse-2026-06-25.md`.
-- `NoOaBankBatchApiRoutes.route(...)` owns `/api/no-oa-bank-batches*` HTTP mapping.
-- Eight app-owned no-OA route callbacks are removed from `server.py`.
-- No no-OA route-owner closure audit, module/global closure or production PostgreSQL/worker/App Status/browser/admin/write evidence is claimed.
+- Last completed boundary: `server-py:no-oa-bank-batch-route-owner-local-closure-audit`.
+- Row399 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-route-owner-local-closure-audit-2026-06-25.md`.
+- No `_handle_api_no_oa_bank_batch*` callbacks remain in `server.py`.
+- No-OA module/global closure is not claimed because `_enqueue_no_oa_bank_batch_read_model_refreshes(...)` still owns scope normalization and direct gateway enqueue logic in `Application`.
 
 ## Previous Prompt Completion
 
-`server-py:no-oa-bank-batch-route-callback-collapse` is complete locally:
+`server-py:no-oa-bank-batch-route-owner-local-closure-audit` is complete as analysis-only:
 
-- added route-owner dispatch and explicit platform ports;
-- removed no-OA route callbacks from `server.py`;
-- preserved API behavior with route tests and public API regression tests;
-- added static Guard coverage.
+- proved no no-OA route callbacks remain in `server.py`;
+- classified remaining no-OA `Application` surfaces;
+- selected no-OA refresh producer extraction as the next local implementation boundary;
+- avoided runtime code changes and avoided production validation.
 
 ## Next Boundary
 
-`server-py:no-oa-bank-batch-route-owner-local-closure-audit`
+`server-py:no-oa-bank-batch-refresh-producer-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-route-callback-collapse-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-route-owner-local-closure-audit-2026-06-25.md`
    - `docs/modules/no-oa-bank-batches/README.md`
    - `docs/modules/no-oa-bank-batches/implementation-notes.md`
    - `docs/modules/no-oa-bank-batches/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
-   - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
-   - `tests/test_platform_runtime_boundary_guards.py`
-3. Audit only no-OA bank batch route ownership:
-   - prove no `_handle_api_no_oa_bank_batch*` callbacks remain in `server.py`;
-   - confirm `/api/no-oa-bank-batches*` dispatch delegates to `NoOaBankBatchApiRoutes.route(...)`;
-   - classify remaining `Application` surfaces as composition-root, provider, auth/session, HTTP adapter, read-model/source-version/refresh or platform ports;
-   - do not claim module/global closure unless all local implementation definitions are actually satisfied.
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_derived_lifecycle_executor.py`
+   - relevant no-OA read model refresh tests and platform Guards
+3. Implement only no-OA refresh producer extraction:
+   - introduce a no-OA-specific refresh producer/service in `services/`;
+   - move scope normalization and `ReadModelRefreshGateway.enqueue_many("no_oa_bank_batch", ...)` out of `Application`;
+   - preserve accepted scopes (`all` and `YYYY-MM`), reason forwarding and false return when gateway cannot enqueue;
+   - wire `NoOaBankBatchApplicationService` and derived lifecycle through the producer;
+   - remove `_enqueue_no_oa_bank_batch_read_model_refreshes(...)` from `Application`;
+   - add service/static Guard tests.
 4. Update analysis/state/queue/journal/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not change no-OA bank batch business behavior, read model, refresh, dirty/outbox, cache, frontend behavior or production data.
-- Do not claim global closure.
-- If a remaining no-OA app-owned callback or implementation helper is found, select the next narrow local implementation boundary instead of closing.
+- Do not change no-OA business behavior, API response shape, read model schema, dirty/outbox semantics, frontend behavior or production data.
+- Do not move unrelated Workbench payload decoration helpers in this slice.
+- Do not claim no-OA module/global closure.
