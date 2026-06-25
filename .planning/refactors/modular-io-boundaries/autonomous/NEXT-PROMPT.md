@@ -1,56 +1,51 @@
 # Next Prompt
 
-Continue after `server-py:workbench-groups-read-route-owner-extraction`.
+Continue after `server-py:workbench-read-route-owner-post-groups-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:workbench-groups-read-route-owner-extraction`.
-- Row407 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md`.
-- `WorkbenchReadApiRoutes` now owns summary/groups read validation and facade parameter mapping.
-- `Application` keeps Workbench dispatch, response construction and API metrics.
-- SSE events, refresh-status and legacy `/api/workbench` payload handling remain to be audited.
+- Last completed boundary: `server-py:workbench-read-route-owner-post-groups-audit`.
+- Row408 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-read-route-owner-post-groups-audit-2026-06-25.md`.
+- Selected next local implementation boundary: `server-py:workbench-refresh-status-route-owner-extraction`.
+- SSE events and legacy `/api/workbench` SQL fallback/payload handling remain deferred to dedicated slices.
 - Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
 
 ## Previous Prompt Completion
 
-`server-py:workbench-groups-read-route-owner-extraction` is complete:
+`server-py:workbench-read-route-owner-post-groups-audit` is complete:
 
-- added `WorkbenchReadApiRoutes`;
-- moved `GET /api/workbench/summary` and `GET /api/workbench/groups` read validation/facade mapping out of `Application`;
-- removed migrated group-list normalizer helpers from `server.py`;
-- added `tests/test_workbench_routes.py` coverage for summary/groups route owner;
-- added `test_workbench_groups_read_route_owner_extraction_stays_local` static Guard;
-- confirmed the local API contract harness still covers `/api/workbench/summary` and `/api/workbench/groups`;
+- audited remaining Workbench read-route `Application` surfaces;
+- classified `/api/workbench/refresh-status` as a thin facade delegate suitable for route-owner extraction;
+- deferred `/api/workbench/events` because it owns SSE stream lifecycle;
+- deferred legacy `/api/workbench` because it owns SQL fallback, refresh enqueue and payload behavior;
 - avoided production validation.
 
 ## Next Boundary
 
-`server-py:workbench-read-route-owner-post-groups-audit`
+`server-py:workbench-refresh-status-route-owner-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-read-route-owner-post-groups-audit-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
    - `backend/src/fin_ops_platform/app/routes_workbench.py`
-   - `backend/src/fin_ops_platform/app/server.py` remaining Workbench read handlers
+   - `backend/src/fin_ops_platform/app/server.py` refresh-status handler
    - `tests/test_workbench_routes.py`
    - relevant Workbench static guards in `tests/test_platform_runtime_boundary_guards.py`
-3. Audit remaining Workbench read-route `Application` surfaces after summary/groups extraction:
-   - `/api/workbench/refresh-status`;
-   - `/api/workbench/events`;
-   - legacy `/api/workbench` payload and SQL read-model fallback helpers.
-4. Select the next narrow local implementation or guard boundary.
-5. If a safe implementation slice exists, write analysis first, implement, test, update guards/state and commit/push.
-6. If only audit is safe, write the audit, update state/queue/journal/next prompt, run docs/diff checks and commit/push.
+3. Add refresh-status delegation to `WorkbenchReadApiRoutes`.
+4. Update `_handle_api_workbench_refresh_status(...)` to delegate to `self._workbench_read_routes().refresh_status(...)`.
+5. Add route-owner test and static Guard coverage.
+6. Do not move SSE events or `_workbench_refresh_status_payload_for_scope(...)`.
+7. Update state/queue/journal/next prompt, run targeted tests/docs/diff checks and commit/push.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
 - Do not claim global closure from Workbench read route-owner extraction.
 - Do not choose Go implementation; Go admission remains blocked.
-- Do not move SSE events unless the audit proves a narrow route-owner split can preserve stream lifecycle cleanup.
+- Do not move SSE events, refresh-status payload helpers or legacy `/api/workbench` SQL fallback in this slice.
