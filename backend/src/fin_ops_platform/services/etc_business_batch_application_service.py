@@ -211,6 +211,23 @@ class EtcBusinessBatchApplicationService:
         self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_created")
         return {"businessBatch": self.business_batch_payload(batch)}
 
+    def revoke_oa_draft_payload(
+        self,
+        business_batch_id: str,
+        *,
+        reason: str,
+        expected_version: int | None,
+        actor: EtcBusinessBatchActor,
+    ) -> dict[str, object]:
+        self._scoped_batch(business_batch_id, actor)
+        batch = self._etc_service.revoke_business_batch_oa_draft(
+            business_batch_id,
+            reason=reason,
+            expected_version=expected_version,
+        )
+        self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_revoked")
+        return {"businessBatch": self.business_batch_payload(batch)}
+
     def manual_oa_status_payload(
         self,
         business_batch_id: str,

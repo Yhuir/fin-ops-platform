@@ -158,6 +158,24 @@ class EtcBusinessBatchApiRoutes:
             return self._error_response(exc)
         return self._success(HTTPStatus.OK, result)
 
+    def revoke_oa_draft(
+        self,
+        business_batch_id: str,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.revoke_oa_draft_payload(
+                business_batch_id,
+                reason=str(payload.get("reason") or "").strip(),
+                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                actor=self._actor(session),
+            )
+        except Exception as exc:
+            return self._error_response(exc)
+        return self._success(HTTPStatus.OK, result)
+
     def manual_oa_status(
         self,
         business_batch_id: str,

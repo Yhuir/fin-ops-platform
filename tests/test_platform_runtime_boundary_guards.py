@@ -1741,6 +1741,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_etc_business_oa_draft",
             "_handle_api_etc_business_manual_oa_status",
             "_handle_api_etc_business_batch_delete",
+            "_handle_api_etc_business_oa_draft_revoke",
         }
         present = [
             node.name
@@ -1759,6 +1760,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "routes.preview_import(",
             "routes.confirm_import(",
             "routes.create_oa_draft(",
+            "routes.revoke_oa_draft(",
             "routes.manual_oa_status(",
             "self._etc_business_routes().delete_batch(",
         ):

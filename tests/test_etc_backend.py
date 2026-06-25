@@ -2746,6 +2746,60 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(deleted_list_response.body)["data"]["items"], [])
         self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
 
+    def test_etc_business_batch_oa_draft_revoke_route_resets_batch_and_invoices(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-REVOKE", "ownerUserId": "alice", "ownerOrgId": "finance"}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            preview_body, preview_headers = multipart(
+                {"invoices.zip": etc_zip(["ETC001"])},
+                {"expectedVersion": str(created["version"])},
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                preview_body,
+                preview_headers,
+            )
+            preview = json.loads(preview_response.body)["data"]
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                json.dumps({
+                    "sessionId": preview["sessionId"],
+                    "expectedVersion": preview["businessBatch"]["version"],
+                }),
+            )
+            confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": confirmed["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            revoke_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft/revoke",
+                json.dumps({"expectedVersion": drafted["version"], "reason": "补充漏导发票"}),
+            )
+            revoked_payload = json.loads(revoke_response.body)
+            invoice = app._etc_service.list_invoices_by_ids(["etc_invoice_0001"])[0]
+
+        self.assertEqual(revoke_response.status_code, 200)
+        self.assertTrue(revoked_payload["ok"])
+        revoked = revoked_payload["data"]["businessBatch"]
+        self.assertEqual(revoked["status"], "not_submitted")
+        self.assertIsNone(revoked["submissionBatchId"])
+        self.assertIsNone(revoked["oaDraftId"])
+        self.assertIsNone(invoice.current_batch_id)
+        self.assertEqual(invoice.status, EtcInvoiceStatus.UNSUBMITTED)
+
     def test_etc_business_batch_detail_returns_invoice_items_without_detection_fields(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

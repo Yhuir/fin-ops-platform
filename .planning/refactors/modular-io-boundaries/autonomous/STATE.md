@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-business-oa-draft-revoke-route-callback-collapse-selected`
+Current state: `etc-business-route-owner-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-business-oa-draft-revoke-callback-audit` as `analysis-closed` in `analysis/server-py-etc-business-oa-draft-revoke-callback-audit-2026-06-25.md`. T0 confirmed the remaining OA draft revoke callback mixes HTTP mapping with direct service/link/refresh sequencing and selected application-service payload ownership plus route-owner callback collapse next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-business-oa-draft-revoke-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-etc-business-oa-draft-revoke-route-callback-collapse-2026-06-25.md`. T0 moved OA draft revoke payload ownership into `EtcBusinessBatchApplicationService`, delegated route mapping to `EtcBusinessBatchApiRoutes`, removed `_handle_api_etc_business_oa_draft_revoke(...)` from `server.py`, and added Guard/API regressions. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-business-oa-draft-revoke-callback-audit`
+`server-py:etc-business-oa-draft-revoke-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:etc-business-oa-draft-revoke-route-callback-collapse`
+`server-py:etc-business-route-owner-local-closure-audit`

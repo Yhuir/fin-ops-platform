@@ -5760,27 +5760,12 @@ class Application:
             status_code, result = routes.manual_oa_status(business_batch_id, payload, session=session)
             return self._json_response(status_code, result)
         if method == "POST" and action == "oa-draft/revoke":
-            return self._handle_api_etc_business_oa_draft_revoke(business_batch_id, body)
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.revoke_oa_draft(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-
-    def _handle_api_etc_business_oa_draft_revoke(self, business_batch_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
-        try:
-            batch = self._etc_service.revoke_business_batch_oa_draft(
-                business_batch_id,
-                reason=str(payload.get("reason") or "").strip(),
-                expected_version=expected_version,
-            )
-        except Exception as error:
-            return self._etc_business_error_response(error)
-        changed_months = self._link_etc_invoices_to_existing_invoices(
-            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
-        )
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_oa_draft_revoked")
-        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
 
     def _etc_business_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
         session = resolve_oa_request_session(
