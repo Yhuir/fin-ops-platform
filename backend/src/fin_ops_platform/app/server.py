@@ -463,6 +463,7 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
 from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
     WorkbenchConfirmLinkContextRelationReadPort,
 )
+from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
@@ -667,8 +668,7 @@ class Application:
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
         self._workbench_matching_running_scope_months: set[str] = set()
-        self._workbench_events_active_streams_lock = Lock()
-        self._workbench_events_active_streams: dict[str, int] = {}
+        self._workbench_events_active_stream_registry = WorkbenchEventsActiveStreamRegistry()
         self._seed_payload = build_demo_seed()
         if self._bootstrap_mode == "lightweight":
             return
@@ -3687,28 +3687,12 @@ class Application:
             headers=headers,
         )
 
-    def _mark_workbench_events_stream_started(self, scope_key: str) -> None:
-        lock = getattr(self, "_workbench_events_active_streams_lock", None)
-        with (lock if lock is not None else nullcontext()):
-            active_streams = self._workbench_events_active_streams_registry()
-            active_streams[scope_key] = int(active_streams.get(scope_key, 0)) + 1
-
-    def _mark_workbench_events_stream_closed(self, scope_key: str) -> None:
-        lock = getattr(self, "_workbench_events_active_streams_lock", None)
-        with (lock if lock is not None else nullcontext()):
-            active_streams = self._workbench_events_active_streams_registry()
-            current_count = int(active_streams.get(scope_key, 0))
-            if current_count <= 1:
-                active_streams.pop(scope_key, None)
-            else:
-                active_streams[scope_key] = current_count - 1
-
-    def _workbench_events_active_streams_registry(self) -> dict[str, int]:
-        active_streams = getattr(self, "_workbench_events_active_streams", None)
-        if not isinstance(active_streams, dict):
-            active_streams = {}
-            self._workbench_events_active_streams = active_streams
-        return active_streams
+    def _workbench_events_stream_registry(self) -> WorkbenchEventsActiveStreamRegistry:
+        registry = getattr(self, "_workbench_events_active_stream_registry", None)
+        if registry is None:
+            registry = WorkbenchEventsActiveStreamRegistry()
+            self._workbench_events_active_stream_registry = registry
+        return registry
 
     def _workbench_refresh_status_payload_for_scope(self, scope_key: str) -> dict[str, object]:
         repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -8495,13 +8479,14 @@ class Application:
         return routes
 
     def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
+        stream_registry = self._workbench_events_stream_registry()
         return WorkbenchEventsApiRoutes(
             scope_key_for_month=self._workbench_read_model_scope_key,
             status_payload_for_scope=self._workbench_refresh_status_payload_for_scope,
             event_name_for_payload=self._workbench_refresh_status_event_name,
             serialize_sse_event=self._app_health_service.serialize_sse_event,
-            mark_stream_started=self._mark_workbench_events_stream_started,
-            mark_stream_closed=self._mark_workbench_events_stream_closed,
+            mark_stream_started=stream_registry.mark_started,
+            mark_stream_closed=stream_registry.mark_closed,
             sleep_seconds=sleep,
         )
 

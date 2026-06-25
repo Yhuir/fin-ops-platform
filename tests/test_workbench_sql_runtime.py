@@ -5385,8 +5385,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_workbench_events_stream_close_releases_active_stream_slot(self) -> None:
         app = object.__new__(Application)
         app._app_health_service = AppHealthService()
-        app._workbench_events_active_streams = {}
-        app._workbench_events_active_streams_lock = None
         app._workbench_sql_read_repository = type(
             "SqlWorkbench",
             (),
@@ -5407,11 +5405,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         first_event = next(stream)
         self.assertIn("event: workbench.read_model.completed", first_event)
-        self.assertEqual(app._workbench_events_active_streams, {"all": 1})
+        self.assertEqual(app._workbench_events_stream_registry().snapshot(), {"all": 1})
 
         stream.close()
 
-        self.assertEqual(app._workbench_events_active_streams, {})
+        self.assertEqual(app._workbench_events_stream_registry().snapshot(), {})
 
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)

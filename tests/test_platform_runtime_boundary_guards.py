@@ -4983,8 +4983,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
             "event_name_for_payload=self._workbench_refresh_status_event_name",
             "serialize_sse_event=self._app_health_service.serialize_sse_event",
-            "mark_stream_started=self._mark_workbench_events_stream_started",
-            "mark_stream_closed=self._mark_workbench_events_stream_closed",
+            "mark_stream_started=stream_registry.mark_started",
+            "mark_stream_closed=stream_registry.mark_closed",
         ):
             if marker not in builder_source:
                 violations.append(f"Workbench events route builder missing explicit port: {marker}")
@@ -5009,6 +5009,67 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench events extraction analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_events_active_stream_registry_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_source = (SERVICES_ROOT / "workbench_events_active_stream_registry.py").read_text(encoding="utf-8")
+        builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-active-stream-registry-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "def _mark_workbench_events_stream_started",
+            "def _mark_workbench_events_stream_closed",
+            "def _workbench_events_active_streams_registry",
+            "_workbench_events_active_streams_lock",
+            "_workbench_events_active_streams:",
+        ):
+            if forbidden in server_source:
+                violations.append(f"Application still owns Workbench active stream registry surface: {forbidden}")
+        for marker in (
+            "class WorkbenchEventsActiveStreamRegistry",
+            "def mark_started(",
+            "def mark_closed(",
+            "def snapshot(",
+            "Lock()",
+        ):
+            if marker not in service_source:
+                violations.append(f"WorkbenchEventsActiveStreamRegistry missing marker: {marker}")
+        for marker in (
+            "stream_registry = self._workbench_events_stream_registry()",
+            "mark_stream_started=stream_registry.mark_started",
+            "mark_stream_closed=stream_registry.mark_closed",
+        ):
+            if marker not in builder_source:
+                violations.append(f"Workbench events route builder is not wired through registry owner: {marker}")
+        for forbidden in (
+            "ReadModelRefreshGateway",
+            "dirty_scope",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "Response",
+            "HTTPStatus",
+        ):
+            if forbidden in service_source:
+                violations.append(f"WorkbenchEventsActiveStreamRegistry gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-events-active-stream-registry-extraction",
+            "WorkbenchEventsActiveStreamRegistry",
+            "stream close cleanup",
+            "refresh-status payload normalization",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench events registry extraction analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 

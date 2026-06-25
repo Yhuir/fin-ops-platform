@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `workbench-events-active-stream-registry-extraction-selected` after Workbench post-events audit selected active stream registry extraction as the next local slice.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `workbench-read-route-owner-post-stream-registry-audit-selected` after Workbench active stream registry extraction was locally implemented.
 
 ```text
 $gsd-autonomous --auto
