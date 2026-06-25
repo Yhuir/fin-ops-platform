@@ -240,7 +240,14 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
     def test_source_versions_include_bank_detail_source_versions_from_tag_facade(self) -> None:
         class EffectiveCategoryProvider:
-            last_source_versions = {"bank_detail": {"scope_key": "2026-04", "source_version": 11}}
+            last_source_versions = {
+                "bank_detail": {
+                    "scope_key": "2026-04",
+                    "source_version": 11,
+                    "bank_detail_source_signature": "signature-v1",
+                    "nested": {"source_version": 12, "stable": "kept"},
+                }
+            }
 
             def bulk_get_for_rows(self, _rows):
                 return {}
@@ -262,7 +269,13 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["bank_detail_source_versions"],
-            {"bank_detail": {"scope_key": "2026-04", "source_version": 11}},
+            {
+                "bank_detail": {
+                    "scope_key": "2026-04",
+                    "bank_detail_source_signature": "signature-v1",
+                    "nested": {"stable": "kept"},
+                }
+            },
         )
 
     def test_facade_non_fresh_error_does_not_save_no_oa_snapshot(self) -> None:

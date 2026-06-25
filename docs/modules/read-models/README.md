@@ -112,6 +112,8 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 
 目标态是 partitioned scoped read model + scoped incremental projection。`workbench` 例外保留 active generation 原子发布；`bank_account_balance` 当前是 all-only projection；`pending_invoice` 拒绝裸 `all`，用 page-first-screen explicit scopes；`cost_statistics` 有 active/all shard 与 parent aggregate scope。所有其它 fan-out `all` scope 都必须展开到真实 month shard 或明确 parent aggregate 后才能证明页面查询 fresh。
 
+Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_versions` 与本次计算出的 source contract 完全一致时返回 `skipped/source_versions_unchanged`，但这只是 worker 性能优化，不是 freshness 证明替代品。缺少 fresh SQL view、dirty/outbox 仍 active、source_versions 缺失或不一致时，必须重建或返回 refreshing/stale；不能把 volatile queue event `source_version` 当成业务内容变化，也不能过滤掉真正代表内容变化的 schema/rule/signature 字段。
+
 ## Read model 合同清单
 
 下表是当前 14 个 App Status read model 的共享合同索引，内容与 `READ_MODEL_MANIFEST` 保持一致，并由 `tests/test_read_model_manifest.py` 防漂移。页面模块可以继续维护自己的业务状态和 UI 细节，但新增或修改 read model 时必须先在这里和 manifest 中记录 `read_model_key`、`scope_type`、分区 key、scoped incremental target、full rebuild fallback、freshness proof、force refresh 合同与 operation barrier 合同。

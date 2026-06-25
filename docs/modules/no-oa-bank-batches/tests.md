@@ -18,6 +18,14 @@
 
 ## 现有测试入口
 
+## 2026-06-26 - Bank detail stable source_versions dependency
+
+- 变更类型：narrow implementation slice。
+- 背景：`bank_detail` unchanged refresh 会推进 durable queue/event `source_version`，但有效标签内容和 `bank_detail_source_signature` 不变。no-OA 依赖 bank_detail 分类结果时，只应把内容签名、scope、schema/rule 等稳定字段作为 stale 判断依据，不能让 volatile event source_version 反复污染 `no_oa_bank_batch` fresh 判断。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_source_versions_include_bank_detail_source_versions_from_tag_facade`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；Business core/API/frontend/E2E 不新增，因为不改变 no-OA 批次生命周期、HTTP shape、前端操作或用户流程。
+- 验证结果：`python -m pytest tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py tests/test_read_model_manifest.py -q` 已作为扩展集合的一部分通过；真实 worker drain 和生产 HTTP SLO 仍需发布后验证。
+
 ## 2026-06-25 - route-owner local closure audit test note
 
 `server-py:no-oa-bank-batch-route-owner-local-closure-audit` 已完成为 analysis-only：

@@ -30,6 +30,15 @@
 
 ## 场景覆盖清单
 
+## 2026-06-26 - Scoped incremental projection fast-paths
+
+- 变更类型：narrow implementation slice；不改变 HTTP response shape、权限、业务状态机、worker event type 或 queue schema。
+- 覆盖证据：`cost_statistics` 月度 projection 在 fresh SQL view 的 `source_versions` 与当前 workbench active generation source versions 完全一致时返回 `skipped/source_versions_unchanged`，不扫描 `read_model.workbench_groups`、不重写 payload；`invoice_lifecycle` 月度 projection 在 pending invoice、input usage、output collection、OA pending payment scope source versions 与当前 lifecycle source versions 完全一致时跳过 row rebuild；`no_oa_bank_batch` source versions 对 bank_detail 依赖过滤 volatile `source_version`，只保留内容签名和稳定版本字段。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan`、`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_source_versions_include_bank_detail_source_versions_from_tag_facade`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖，因为本 slice 只改变 projection skip path 和 source_versions contract；API contract、frontend interaction、E2E 不新增，因为 payload shape、前端状态和用户流程不变；business core 不新增，因为不改金额、分类、生命周期状态或权限判断。
+- 验证命令：`python -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_invoice_lifecycle_sql_projection.py tests/test_no_oa_bank_batch_read_model_refresh.py -q`；`python -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_cost_statistics_runtime_service.py tests/test_invoice_lifecycle_sql_projection.py tests/test_invoice_lifecycle_read_facade.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py tests/test_read_model_manifest.py -q`。
+- 未测风险：本地测试不连接真实 PostgreSQL/RabbitMQ/Redis/systemd worker；生产首次发布后会因为新增/修正 source_versions keys 触发一次重建，第二轮及以后才应进入稳定 skip fast-path，需用 direct SLO 和 HTTP SLO 验证。
+
 ## 2026-06-24 - T8 module IO contract reconciliation
 
 - 变更类型：documentation/accounting only；不改变 runtime、API shape、worker event、queue schema、权限、审计或前端行为。

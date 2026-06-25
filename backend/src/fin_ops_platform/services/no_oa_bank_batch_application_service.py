@@ -84,6 +84,23 @@ class NoOaPairRelationSnapshotPort:
             self._pair_relation_service._pair_relation_history = deepcopy(restored_relation_service._pair_relation_history)
 
 
+def _stable_dependency_source_versions(source_versions: dict[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in dict(source_versions).items():
+        if key == "source_version":
+            continue
+        if isinstance(value, dict):
+            result[key] = _stable_dependency_source_versions(value)
+        elif isinstance(value, list):
+            result[key] = [
+                _stable_dependency_source_versions(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
 class NoOaBankBatchApplicationService:
     def __init__(
         self,
@@ -839,7 +856,7 @@ class NoOaBankBatchApplicationService:
         }
         bank_detail_source_versions = getattr(self._effective_category_provider, "last_source_versions", None)
         if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
-            source_versions["bank_detail_source_versions"] = dict(bank_detail_source_versions)
+            source_versions["bank_detail_source_versions"] = _stable_dependency_source_versions(bank_detail_source_versions)
         workbench_relation_source_versions = self._workbench_relation_source_versions()
         if workbench_relation_source_versions:
             source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions

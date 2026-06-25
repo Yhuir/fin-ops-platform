@@ -78,6 +78,14 @@ class InvoiceLifecycleSqlProjectionBuilder:
 
     def rebuild_invoice_lifecycle_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        self._read_model_dependency_source_versions = self._dependency_source_versions_for_scope(normalized_scope_key)
+        source_versions = self._source_versions()
+        unchanged = self._unchanged_scope_result(
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         self._read_model_dependency_source_versions = {}
         rows = []
         rows.extend(self._pending_invoice_lifecycle_rows(normalized_scope_key))
@@ -106,6 +114,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
             workbench_relation_read_facade=self._workbench_relation_read_facade,
         )
         rows: list[dict[str, Any]] = []
+        fallback_source_versions: dict[str, object] = {}
         for direction in ("expense", "income"):
             for row in builder._pending_invoice_rows(direction=direction, filter_name="all", month=month):
                 bank = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
@@ -126,6 +135,11 @@ class InvoiceLifecycleSqlProjectionBuilder:
                         "certification_status": {},
                     }
                 )
+            fallback_source_versions[f"{direction}:all:{month}"] = dict(builder._pending_invoice_source_versions())  # noqa: SLF001
+        self._read_model_dependency_source_versions["pending_invoice_read_model_source_versions"] = (
+            self._pending_invoice_source_versions_for_month(month)
+            or fallback_source_versions
+        )
         return rows
 
     def _input_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
@@ -358,6 +372,137 @@ class InvoiceLifecycleSqlProjectionBuilder:
             source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
         source_versions.update(self._read_model_dependency_source_versions)
         return source_versions
+
+    def _dependency_source_versions_for_scope(self, month: str) -> dict[str, object]:
+        result: dict[str, object] = {}
+        pending_invoice_versions = self._pending_invoice_source_versions_for_month(month)
+        if pending_invoice_versions:
+            result["pending_invoice_read_model_source_versions"] = pending_invoice_versions
+        input_versions = self._invoice_relation_scope_source_versions(
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            scope_key=month,
+        )
+        if input_versions:
+            result["input_invoice_usage_read_model_source_versions"] = input_versions
+        output_versions = self._invoice_relation_scope_source_versions(
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            scope_key=month,
+        )
+        if output_versions:
+            result["output_invoice_collection_read_model_source_versions"] = output_versions
+        oa_versions = self._invoice_relation_scope_source_versions(
+            scope_table_name="read_model.oa_pending_payment_scopes",
+            scope_type="oa_pending_payment",
+            scope_key=month,
+        )
+        if oa_versions:
+            result["oa_pending_payment_read_model_source_versions"] = oa_versions
+        return result
+
+    def _pending_invoice_source_versions_for_month(self, month: str) -> dict[str, object]:
+        source_versions_by_scope: dict[str, object] = {}
+        for scope_key in (f"expense:all:{month}", f"income:all:{month}"):
+            source_versions = self._pending_invoice_scope_source_versions(scope_key)
+            if source_versions:
+                source_versions_by_scope[scope_key] = source_versions
+        return source_versions_by_scope
+
+    def _pending_invoice_scope_source_versions(self, scope_key: str) -> dict[str, object]:
+        if self._dirty_scope_is_active(scope_type="pending_invoice", scope_key=scope_key):
+            return {}
+        try:
+            row = self._connection.fetch_one(
+                """
+                select source_versions, cache_status
+                from read_model.pending_invoice_scopes
+                where scope_key = %s
+                limit 1
+                """,
+                (scope_key,),
+            )
+        except Exception:
+            return {}
+        if not isinstance(row, dict):
+            return {}
+        cache_status = str(row.get("cache_status") or "fresh").strip().lower()
+        if cache_status not in {"", "fresh"}:
+            return {}
+        source_versions = row.get("source_versions")
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def _invoice_relation_scope_source_versions(
+        self,
+        *,
+        scope_table_name: str,
+        scope_type: str,
+        scope_key: str,
+    ) -> dict[str, object]:
+        if self._dirty_scope_is_active(scope_type=scope_type, scope_key=scope_key):
+            return {}
+        try:
+            row = self._connection.fetch_one(
+                f"""
+                select source_versions, cache_status
+                from {scope_table_name}
+                where scope_key = %s
+                limit 1
+                """,
+                (scope_key,),
+            )
+        except Exception:
+            return {}
+        if not isinstance(row, dict):
+            return {}
+        cache_status = str(row.get("cache_status") or "fresh").strip().lower()
+        if cache_status not in {"", "fresh"}:
+            return {}
+        source_versions = row.get("source_versions")
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def _dirty_scope_is_active(self, *, scope_type: str, scope_key: str) -> bool:
+        try:
+            row = self._connection.fetch_one(
+                """
+                select status
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = %s
+                  and scope_key = %s
+                  and status in ('pending', 'processing', 'failed')
+                order by updated_at desc
+                limit 1
+                """,
+                (scope_type, scope_key),
+            )
+        except Exception:
+            return True
+        return isinstance(row, dict)
+
+    def _unchanged_scope_result(
+        self,
+        *,
+        scope_key: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, object] | None:
+        list_rows = getattr(self._invoice_lifecycle_read_model_repository, "list_invoice_lifecycle_rows", None)
+        if not callable(list_rows):
+            return None
+        payload = list_rows(month=scope_key)
+        if not isinstance(payload, dict) or str(payload.get("read_model_status") or "") != "fresh":
+            return None
+        existing_source_versions = payload.get("source_versions")
+        if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        rows = [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
+        return {
+            "scope_key": scope_key,
+            "row_count": len(rows),
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
 
     def _import_service(self) -> ImportNormalizationService:
         return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)

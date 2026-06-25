@@ -307,6 +307,26 @@ class CostStatisticsSaveRecorder:
         self.saved.append((snapshot, changed_scope_keys))
 
 
+class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.source_versions: dict[str, object] = {}
+        self.views: list[str] = []
+
+    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
+        self.views.append(scope_key)
+        return {
+            "scope_key": scope_key,
+            "refresh_status": "fresh",
+            "entry_count": 1,
+            "payload": {"time_rows": [{"transaction_id": "bank-1"}]},
+            "source_versions": dict(self.source_versions),
+        }
+
+    def save_cost_statistics_read_models(self, snapshot: dict, *, changed_scope_keys: set[str] | None = None) -> None:
+        raise AssertionError("unchanged cost statistics scope must not be rewritten")
+
+
 class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
     def test_port_excludes_unrelated_read_model_methods(self) -> None:
         class Repository:
@@ -847,6 +867,38 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
+
+    def test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_generations" in normalized:
+                    return {"source_versions": {"workbench_generation": "stable-v1", "source_version": 42}}
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.workbench_groups" in normalized:
+                    raise AssertionError("unchanged cost statistics scope must not scan workbench groups")
+                return super().fetch_all(sql, params)
+
+        repository = UnchangedCostStatisticsSaveRecorder()
+        connection = Connection()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+        repository.source_versions = builder._source_versions("2026-05")
+
+        result = builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
+
+        self.assertEqual(repository.views, ["active:2026-05"])
+        self.assertEqual(result["scope_key"], "active:2026-05")
+        self.assertEqual(result["row_count"], 1)
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["source_versions"]["workbench_source_versions"]["workbench_generation"], "stable-v1")
 
     def test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows(self) -> None:
         repository = CostStatisticsSaveRecorder()

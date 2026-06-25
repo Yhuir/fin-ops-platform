@@ -78,8 +78,17 @@ class CostStatisticsSqlProjectionBuilder:
         project_scope, month = _parse_cost_scope_key(scope_key)
         if month == "all":
             raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
-        payload = self._build_explorer_payload(month, project_scope=project_scope)
         source_versions = self._source_versions(month)
+        unchanged = self._unchanged_cost_statistics_scope_result(
+            scope_key=f"{project_scope}:{month}",
+            month=month,
+            project_scope=project_scope,
+            source_versions=source_versions,
+            refresh_kind="month",
+        )
+        if unchanged is not None:
+            return unchanged
+        payload = self._build_explorer_payload(month, project_scope=project_scope)
         return self._publish_cost_statistics_scope(
             month=month,
             project_scope=project_scope,
@@ -100,6 +109,15 @@ class CostStatisticsSqlProjectionBuilder:
             "source_shard_count": len(shard_versions),
             "source_shards": shard_versions,
         }
+        unchanged = self._unchanged_cost_statistics_scope_result(
+            scope_key=f"{project_scope}:all",
+            month="all",
+            project_scope=project_scope,
+            source_versions=source_versions,
+            refresh_kind="parent",
+        )
+        if unchanged is not None:
+            return unchanged
         return self._publish_cost_statistics_scope(
             month="all",
             project_scope=project_scope,
@@ -182,13 +200,71 @@ class CostStatisticsSqlProjectionBuilder:
         }
 
     def _source_versions(self, month: str) -> dict[str, Any]:
-        return {
+        source_versions = {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "workbench_scope_key": month,
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
             "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+        }
+        if month != "all":
+            workbench_source_versions = self._workbench_source_versions(month)
+            if workbench_source_versions:
+                source_versions["workbench_source_versions"] = workbench_source_versions
+        return source_versions
+
+    def _workbench_source_versions(self, scope_key: str) -> dict[str, Any]:
+        try:
+            row = self._connection.fetch_one(
+                """
+                select source_versions
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = %s
+                  and status = 'active'
+                order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
+                limit 1
+                """,
+                (scope_key,),
+            )
+        except Exception:
+            return {}
+        source_versions = row.get("source_versions") if isinstance(row, dict) else {}
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def _unchanged_cost_statistics_scope_result(
+        self,
+        *,
+        scope_key: str,
+        month: str,
+        project_scope: str,
+        source_versions: dict[str, Any],
+        refresh_kind: str,
+    ) -> dict[str, object] | None:
+        get_view = getattr(self._read_model_repository, "get_cost_statistics_view", None)
+        if not callable(get_view):
+            return None
+        try:
+            view = get_view(scope_key=scope_key)
+        except AttributeError:
+            return None
+        if not isinstance(view, dict) or str(view.get("refresh_status") or "") != "fresh":
+            return None
+        existing_source_versions = view.get("source_versions")
+        if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        entry_count = int(view.get("entry_count") or 0)
+        return {
+            "scope_key": scope_key,
+            "month": month,
+            "project_scope": project_scope,
+            "entry_count": entry_count,
+            "row_count": entry_count,
+            "source_versions": source_versions,
+            "refresh_kind": refresh_kind,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
         }
 
     def _build_explorer_payload(self, month: str, *, project_scope: str) -> dict[str, Any]:

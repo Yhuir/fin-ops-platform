@@ -21,6 +21,14 @@
 
 ## 场景覆盖清单
 
+## 2026-06-26 - Month-scope unchanged source_versions skip
+
+- 变更类型：narrow implementation slice。
+- 背景：生产 direct read model SLO 显示 `cost_statistics` 月度 scope 在输入未变化时仍重扫 `read_model.workbench_groups` 并重写 payload，影响 p95。月度 projection 现在把 workbench active generation `source_versions` 纳入自身 source_versions，只有 SQL view 已 fresh 且版本完全一致时才返回 `skipped/source_versions_unchanged`。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；API contract/frontend/E2E/business core 不新增，因为 response shape、页面行为、成本归因和导出语义不变。
+- 验证结果：`python -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_cost_statistics_runtime_service.py tests/test_read_model_manifest.py -q` 已作为扩展集合的一部分通过；完整 backend verify 仍需本轮最终执行。
+
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | 成本统计核心归因 | P0 | `tests/test_cost_statistics_service.py`、`tests/test_project_costing_service.py` | covered | 支出行、OA cost 字段、relation distribution、现金/票据/往来特殊场景、项目范围；Workbench open/proposed candidate 不计入成本。 |
