@@ -8,6 +8,17 @@ from fin_ops_platform.services.workbench_relation_sql_projection import Workbenc
 class CaptureWorkbenchRelationRepository:
     def __init__(self) -> None:
         self.saved: list[dict[str, object]] = []
+        self.existing_scope_summary: dict[str, object] | None = None
+        self.scope_summary_calls: list[dict[str, object]] = []
+
+    def workbench_relation_scope_summary(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.scope_summary_calls.append({"scope_key": scope_key, "tenant_id": tenant_id})
+        return self.existing_scope_summary
 
     def save_workbench_relation_distribution(
         self,
@@ -138,6 +149,11 @@ class WorkbenchRelationProjectionConnection:
             "invoices_updated_at": "2026-06-03T00:00:00+08:00",
             "oa_projection_updated_at": "2026-06-03T00:00:00+08:00",
         }
+
+
+class FailIfFetchAllRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        raise AssertionError("source-version unchanged projection should not scan source rows")
 
 
 class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProjectionConnection):
@@ -349,6 +365,38 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
         self.assertNotIn("txn-tian-196", rows_by_id)
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
+
+    def test_rebuild_skips_unchanged_scope_without_scanning_or_resaving_distribution(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = FailIfFetchAllRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+        source_versions = builder._source_versions()
+        repository.existing_scope_summary = {
+            "scope_key": "2026-01",
+            "row_count": 399,
+            "group_count": 21,
+            "source_versions": source_versions,
+            "cache_status": "fresh",
+        }
+
+        result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        self.assertEqual(
+            result,
+            {
+                "scope_key": "2026-01",
+                "row_count": 399,
+                "group_count": 21,
+                "source_versions": source_versions,
+                "skipped": True,
+                "skip_reason": "source_versions_unchanged",
+            },
+        )
+        self.assertEqual(repository.saved, [])
+        self.assertEqual(repository.scope_summary_calls, [{"scope_key": "2026-01", "tenant_id": "default"}])
 
 
 if __name__ == "__main__":

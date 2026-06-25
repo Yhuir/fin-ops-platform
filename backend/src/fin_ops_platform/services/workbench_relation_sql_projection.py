@@ -6,7 +6,7 @@ from typing import Any
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
-from fin_ops_platform.services.postgres_repositories.common import month_start, text, text_list
+from fin_ops_platform.services.postgres_repositories.common import int_value, month_start, text, text_list
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL, OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
@@ -56,6 +56,13 @@ class WorkbenchRelationSqlProjectionBuilder:
         normalized_scope = text(scope_key) or ""
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench relation SQL projection scope_key must be a month shard YYYY-MM.")
+        source_versions = self._source_versions()
+        unchanged = self._unchanged_scope_result(
+            scope_key=normalized_scope,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
         monthly_objects = self._source_objects_for_month(
             normalized_scope,
@@ -96,7 +103,6 @@ class WorkbenchRelationSqlProjectionBuilder:
             for row_id in sorted(monthly_objects)
             if row_id in objects
         ]
-        source_versions = self._source_versions()
         self._read_model_repository.save_workbench_relation_distribution(
             scope_key=normalized_scope,
             rows=rows,
@@ -109,6 +115,25 @@ class WorkbenchRelationSqlProjectionBuilder:
             "row_count": len(rows),
             "group_count": len(groups),
             "source_versions": source_versions,
+        }
+
+    def _unchanged_scope_result(self, *, scope_key: str, source_versions: dict[str, Any]) -> dict[str, Any] | None:
+        scope_summary_loader = getattr(self._read_model_repository, "workbench_relation_scope_summary", None)
+        if not callable(scope_summary_loader):
+            return None
+        payload = scope_summary_loader(scope_key=scope_key, tenant_id=self._tenant_id)
+        if not isinstance(payload, dict):
+            return None
+        existing_source_versions = payload.get("source_versions")
+        if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        return {
+            "scope_key": scope_key,
+            "row_count": int_value(payload.get("row_count"), 0),
+            "group_count": int_value(payload.get("group_count"), 0),
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
         }
 
     def mark_workbench_relation_scope_empty(self, scope_key: str) -> dict[str, Any]:

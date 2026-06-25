@@ -128,6 +128,15 @@ class UnderlyingWorkbenchRelationRepository:
         self.calls.append(("workbench_relation_source_versions", {"scope_key": scope_key, "tenant_id": tenant_id}))
         return {"workbench_relation_schema_version": "test"}
 
+    def workbench_relation_scope_summary(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
+        self.calls.append(("workbench_relation_scope_summary", {"scope_key": scope_key, "tenant_id": tenant_id}))
+        return {
+            "scope_key": scope_key,
+            "row_count": 1,
+            "group_count": 1,
+            "source_versions": {"workbench_relation_schema_version": "test"},
+        }
+
     def save_workbench_relation_distribution(
         self,
         *,
@@ -315,6 +324,10 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             ],
             "test",
         )
+        self.assertEqual(
+            port.workbench_relation_scope_summary(scope_key="2026-01", tenant_id="tenant")["row_count"],
+            1,
+        )
         port.save_workbench_relation_distribution(
             scope_key="2026-01",
             rows=[{"row_id": "txn-1"}],
@@ -336,6 +349,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "list_workbench_relation_rows",
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
+                "workbench_relation_scope_summary",
                 "save_workbench_relation_distribution",
                 "mark_workbench_relation_scope_empty",
             ],

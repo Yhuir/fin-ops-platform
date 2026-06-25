@@ -3519,6 +3519,18 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         source_versions = scope_row.get("source_versions") if isinstance(scope_row, dict) else None
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
+    def workbench_relation_scope_summary(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        scope_row = self._workbench_relation_scope_row(
+            scope_key=text(scope_key) or "all",
+            tenant_id=tenant_id,
+        )
+        return dict(scope_row) if isinstance(scope_row, dict) else None
+
 
     def _workbench_relation_groups_for_scope_group_ids(
         self,
@@ -4434,6 +4446,9 @@ class PostgresReadModelRepository:
 
     def workbench_relation_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._search_workbench_relation_repository.workbench_relation_source_versions(*args, **kwargs)
+
+    def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
 
     def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
         return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
