@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-legacy-batch-route-callbacks-owned`
+Current state: `etc-invoice-routes-owned`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-legacy-batch-route-callback-collapse-audit` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-route-callback-collapse-audit-2026-06-25.md`. T0 collapsed remaining legacy batch list/detail/delete/draft/confirm/reopen HTTP callbacks into `EtcLegacyBatchApiRoutes`, removed the old app-owned callbacks, and preserved read/delete/lifecycle service ownership plus the narrow business-batch legacy delete fallback port. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-invoice-route-owner-audit`.
+Completed `server-py:etc-invoice-route-owner-audit` as `local-implementation-closed` in `analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`. T0 added `EtcInvoiceApiRoutes`, moved `/api/etc/invoices` list and `/api/etc/invoices/revoke-submitted` HTTP mapping out of `Application`, preserved ETC service mutation plus link/refresh ports, and guarded the expanded route-owner inventory. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-reconciliation-task-mutation-callback-audit`.
 
 ## Closed Or Deferred Slices
 

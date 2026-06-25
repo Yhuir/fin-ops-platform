@@ -1,37 +1,38 @@
 # Next Prompt
 
-Continue after `server-py:etc-legacy-batch-route-callback-collapse-audit`.
+Continue after `server-py:etc-invoice-route-owner-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:etc-legacy-batch-route-callback-collapse-audit`.
-- Row321 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-route-callback-collapse-audit-2026-06-25.md`.
-- Row321 collapsed legacy batch list/detail/delete/draft/confirm/reopen HTTP callbacks into `EtcLegacyBatchApiRoutes`.
-- `server.py` now assembles the legacy batch read facade, delete service, lifecycle service, OA client builder, error/refresh/persist ports and narrow business-batch legacy delete fallback.
+- Last completed boundary: `server-py:etc-invoice-route-owner-audit`.
+- Row322 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`.
+- Row322 added `EtcInvoiceApiRoutes` and moved ETC invoice list/revoke-submitted HTTP mapping out of `Application`.
+- `server.py` now assembles the ETC invoice route owner with explicit JSON/body/serializer/link/refresh ports.
 - Local modular implementation closure is not proven.
 - Production browser/admin/write gates remain final validation gates, not the next local implementation step.
 
 ## Next Boundary
 
-`server-py:etc-invoice-route-owner-audit`
+`server-py:etc-reconciliation-task-mutation-callback-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-route-callback-collapse-audit-2026-06-25.md`
-   - `backend/src/fin_ops_platform/app/server.py` residual `/api/etc/invoices` and revoke-submitted handlers
-   - existing ETC route owners under `backend/src/fin_ops_platform/app/routes_etc*.py`
-   - ETC service methods used by `_handle_api_etc_invoices(...)` and `_handle_api_etc_revoke_submitted(...)`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`
+   - `backend/src/fin_ops_platform/app/routes_etc_reconciliation.py`
+   - `backend/src/fin_ops_platform/app/server.py` `_etc_reconciliation_routes(...)` factory and remaining `_handle_api_etc_reconciliation_*` callbacks
+   - `backend/src/fin_ops_platform/services/etc_reconciliation_service.py`
+   - `backend/src/fin_ops_platform/services/etc_reconciliation_import_cleanup_service.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-   - targeted ETC invoice/revoke tests in `tests/test_etc_backend.py`
-3. Use CodeGraph to inspect callers/callees for `_handle_api_etc_invoices`, `_handle_api_etc_revoke_submitted`, `revoke_submitted`, and invoice listing payload ownership.
+   - targeted ETC reconciliation task tests in `tests/test_etc_backend.py`
+3. Use CodeGraph to inspect callers/callees for `EtcReconciliationTaskApiRoutes`, `_etc_reconciliation_routes`, `_handle_api_etc_reconciliation_upload`, `_handle_api_etc_reconciliation_confirm`, `_handle_api_etc_reconciliation_reopen`, `_handle_api_etc_reconciliation_item_patch`, `_handle_api_etc_reconciliation_refresh_matches`, ticket-root text/file handlers and supplement upload.
 4. Decide whether the next safe implementation is:
-   - extracting a narrow `EtcInvoiceApiRoutes` owner for GET invoice list and revoke-submitted HTTP mapping;
-   - extracting revoke-submitted side effects before route ownership;
-   - or closing a smaller analysis-only slice if the current ownership is too coupled.
+   - moving remaining reconciliation task mutation HTTP handlers into `EtcReconciliationTaskApiRoutes` with explicit ports;
+   - extracting a narrower upload/source-file/service boundary first;
+   - or closing an analysis-only slice if callback coupling is too broad.
 5. Update analysis/state and add or update tests for any accepted implementation.
 
 ## Stop Gates
@@ -40,5 +41,5 @@ Continue after `server-py:etc-legacy-batch-route-callback-collapse-audit`.
 - Do not perform production mutation.
 - Do not pass `Application` into route owners or services.
 - Do not change business-batch v2 behavior.
-- Do not move SQL/table knowledge into route owners.
+- Keep cleanup behavior in `EtcReconciliationImportCleanupService` unless the selected boundary explicitly proves a narrower service move.
 - Keep read model refresh through existing explicit freshness/enqueue boundaries.

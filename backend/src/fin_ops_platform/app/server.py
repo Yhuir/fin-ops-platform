@@ -50,6 +50,7 @@ from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoute
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_etc_import import EtcImportApiRoutes
+from fin_ops_platform.app.routes_etc_invoices import EtcInvoiceApiRoutes
 from fin_ops_platform.app.routes_etc_legacy_batches import EtcLegacyBatchApiRoutes
 from fin_ops_platform.app.routes_etc_reconciliation import EtcReconciliationTaskApiRoutes
 from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
@@ -2152,17 +2153,8 @@ class Application:
             return self._handle_api_etc_business_batches_route(method, query, body, headers)
         if route_path.startswith("/api/etc/business-batches/"):
             return self._route_api_etc_business_batch_v2(method, route_path, body, headers)
-        if method == "GET" and route_path == "/api/etc/invoices":
-            return self._handle_api_etc_invoices(
-                status=query.get("status", [None])[0],
-                month=query.get("month", [None])[0],
-                plate=query.get("plate", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                page=query.get("page", [None])[0],
-                page_size=query.get("page_size", [None])[0],
-            )
-        if method == "POST" and route_path == "/api/etc/invoices/revoke-submitted":
-            return self._handle_api_etc_revoke_submitted(body)
+        if route_path == "/api/etc/invoices" or route_path == "/api/etc/invoices/revoke-submitted":
+            return self._etc_invoice_routes().route(method, route_path, query, body)
         if route_path == "/api/etc/batches" or route_path.startswith("/api/etc/batches/"):
             return self._etc_legacy_batch_routes().route(method, route_path, query, body, headers)
         if method == "GET" and route_path == "/api/session/me":
@@ -4866,6 +4858,21 @@ class Application:
         self._etc_legacy_batch_api_routes = routes
         return routes
 
+    def _etc_invoice_routes(self) -> EtcInvoiceApiRoutes:
+        routes = getattr(self, "_etc_invoice_api_routes", None)
+        if isinstance(routes, EtcInvoiceApiRoutes):
+            return routes
+        routes = EtcInvoiceApiRoutes(
+            etc_service=self._etc_service,
+            json_response=self._json_response,
+            load_json_body=self._load_json_body,
+            serialize_invoice=self._serialize_etc_invoice,
+            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+        )
+        self._etc_invoice_api_routes = routes
+        return routes
+
     def _etc_import_routes(self) -> EtcImportApiRoutes:
         routes = getattr(self, "_etc_import_api_routes", None)
         if isinstance(routes, EtcImportApiRoutes):
@@ -6201,43 +6208,6 @@ class Application:
             return self._etc_business_response(HTTPStatus.BAD_REQUEST, None, code="invalid_etc_business_batch_request", message=str(error))
         raise error
 
-    def _handle_api_etc_invoices(
-        self,
-        *,
-        status: str | None,
-        month: str | None,
-        plate: str | None,
-        keyword: str | None,
-        page: str | None,
-        page_size: str | None,
-    ) -> Response:
-        try:
-            resolved_page = int(page) if page not in (None, "") else 1
-            resolved_page_size = int(page_size) if page_size not in (None, "") else 50
-            invoices, total, counts = self._etc_service.list_invoices(
-                status=status or None,
-                month=month or None,
-                plate=plate or None,
-                keyword=keyword or None,
-                page=resolved_page,
-                page_size=resolved_page_size,
-            )
-        except (ValueError, EtcInvoiceRequestError) as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_invoice_request", "message": str(error)},
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "items": [self._serialize_etc_invoice(invoice) for invoice in invoices],
-                "counts": counts,
-                "page": max(resolved_page, 1),
-                "pageSize": min(max(resolved_page_size, 1), 500),
-                "total": total,
-            },
-        )
-
     def _serialize_etc_invoice(self, invoice: object) -> dict[str, object]:
         payload = Application._serialize_value(invoice)
         if not isinstance(payload, dict):
@@ -6269,31 +6239,6 @@ class Application:
                 json.dumps({"reason": "legacy_etc_batch_delete"}),
             )
         return None
-
-    def _handle_api_etc_revoke_submitted(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        invoice_ids = payload.get("invoiceIds")
-        if not isinstance(invoice_ids, list) or not all(isinstance(item, str) for item in invoice_ids):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_invoice_request", "message": "invoiceIds must be a string array."},
-            )
-        try:
-            result = self._etc_service.revoke_submitted(invoice_ids)
-        except EtcInvoiceNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
-        except EtcInvoiceRequestError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_invoice_request", "message": str(error)},
-            )
-        changed_months = self._link_etc_invoices_to_existing_invoices(
-            self._etc_service.list_invoices_by_ids(invoice_ids),
-        )
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_revoke_submitted")
-        return self._json_response(HTTPStatus.OK, result)
 
     def _build_etc_oa_client(self, headers: dict[str, str] | None) -> HttpEtcOAClient | None:
         if not isinstance(self._etc_service.oa_client, NotConfiguredEtcOAClient):

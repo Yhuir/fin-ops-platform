@@ -380,6 +380,26 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "EtcBusinessBatchApiRoutes",
                 "server_markers": ("def _etc_business_routes", "_etc_business_routes()."),
             },
+            "routes_etc_import.py": {
+                "module": "fin_ops_platform.app.routes_etc_import",
+                "class": "EtcImportApiRoutes",
+                "server_markers": ("def _etc_import_routes", "_etc_import_routes()."),
+            },
+            "routes_etc_invoices.py": {
+                "module": "fin_ops_platform.app.routes_etc_invoices",
+                "class": "EtcInvoiceApiRoutes",
+                "server_markers": ("def _etc_invoice_routes", "_etc_invoice_routes()."),
+            },
+            "routes_etc_legacy_batches.py": {
+                "module": "fin_ops_platform.app.routes_etc_legacy_batches",
+                "class": "EtcLegacyBatchApiRoutes",
+                "server_markers": ("def _etc_legacy_batch_routes", "_etc_legacy_batch_routes()."),
+            },
+            "routes_etc_reconciliation.py": {
+                "module": "fin_ops_platform.app.routes_etc_reconciliation",
+                "class": "EtcReconciliationTaskApiRoutes",
+                "server_markers": ("def _etc_reconciliation_routes", "_etc_reconciliation_routes()."),
+            },
             "routes_legacy_workbench_actions.py": {
                 "module": "fin_ops_platform.app.routes_legacy_workbench_actions",
                 "class": "LegacyWorkbenchActionRoutes",
@@ -2096,6 +2116,70 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append(f"legacy batch read facade imports forbidden modules: {leaked_imports}")
         if "Response" in facade_source or "_json_response" in facade_source:
             violations.append("legacy batch read facade constructs HTTP response details")
+
+        self.assertEqual(violations, [])
+
+    def test_etc_invoice_routes_delegate_to_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_etc_invoices.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+
+        handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
+        route_factory = _function_source(server_tree, server_source, "_etc_invoice_routes")
+        route_owner_init = _function_source(route_tree, route_source, "__init__")
+        route_owner_route = _function_source(route_tree, route_source, "route")
+        route_owner_list = _function_source(route_tree, route_source, "list_invoices")
+        route_owner_revoke = _function_source(route_tree, route_source, "revoke_submitted")
+
+        violations: list[str] = []
+        if "EtcInvoiceApiRoutes" not in server_source:
+            violations.append("server.py does not import/use EtcInvoiceApiRoutes")
+        if "_etc_invoice_routes().route(" not in handle_request:
+            violations.append("handle_request no longer delegates ETC invoice routes to route owner")
+        if "EtcInvoiceApiRoutes(" not in route_factory:
+            violations.append("_etc_invoice_routes does not construct the route owner")
+        for required_port in (
+            "etc_service=self._etc_service",
+            "json_response=self._json_response",
+            "load_json_body=self._load_json_body",
+            "serialize_invoice=self._serialize_etc_invoice",
+            "link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices",
+            "refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link",
+        ):
+            if required_port not in route_factory:
+                violations.append(f"ETC invoice route owner lacks explicit port {required_port}")
+        if "Application" in route_owner_init:
+            violations.append("ETC invoice route owner accepts the whole Application")
+        for required_route in (
+            'route_path == "/api/etc/invoices"',
+            'route_path == "/api/etc/invoices/revoke-submitted"',
+        ):
+            if required_route not in route_owner_route:
+                violations.append(f"ETC invoice route owner missing dispatch branch {required_route}")
+        if "list_invoices(" not in route_owner_list:
+            violations.append("ETC invoice list route does not delegate to ETC service")
+        if "revoke_submitted(invoice_ids)" not in route_owner_revoke:
+            violations.append("ETC invoice revoke route does not delegate status mutation to ETC service")
+        if "list_invoices_by_ids(invoice_ids)" not in route_owner_revoke:
+            violations.append("ETC invoice revoke route does not reload changed invoices for link refresh")
+        for removed_handler in (
+            "_handle_api_etc_invoices(",
+            "_handle_api_etc_revoke_submitted(",
+        ):
+            if removed_handler in server_source:
+                violations.append(f"server.py reintroduced ETC invoice callback {removed_handler}")
+        forbidden_imports = {
+            "fin_ops_platform.app.server",
+            "fin_ops_platform.app.auth",
+            "http.cookies",
+        }
+        route_imports = _imported_modules(route_tree)
+        leaked_imports = sorted(forbidden_imports.intersection(route_imports))
+        if leaked_imports:
+            violations.append(f"ETC invoice route owner imports forbidden modules: {leaked_imports}")
 
         self.assertEqual(violations, [])
 
