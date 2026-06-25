@@ -17,6 +17,9 @@ READ_MODEL_WRITE_TARGET_INVENTORY = (
     / "analysis"
     / "read-model-main-write-target-inventory-2026-06-26.md"
 )
+READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
+    REPO_ROOT / "docs" / "operations" / "read-model-production-evidence-runbook.md"
+)
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
@@ -535,6 +538,27 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotRegex(text, r"\b(?:TODO|TBD)\b")
         self.assertIn("business inverse", text)
         self.assertIn("bounded DB restore", text)
+
+    def test_read_model_production_evidence_runbook_keeps_restore_and_secret_gates(self) -> None:
+        text = READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK.read_text(encoding="utf-8")
+        required_markers = [
+            "Admin Token",
+            "不得从普通聊天粘贴到 transcript",
+            "业务 inverse",
+            "Bounded DB Restore Protocol",
+            "operation-before snapshot",
+            "exact predicate",
+            "单事务",
+            "post-restore verification",
+            "operation barrier",
+            "PSCIP-L4",
+            "./scripts/deploy-oa.sh",
+        ]
+        missing = [marker for marker in required_markers if marker not in text]
+        self.assertEqual(missing, [])
+
+        index_text = (REPO_ROOT / "docs" / "operations" / "index.md").read_text(encoding="utf-8")
+        self.assertIn("read-model-production-evidence-runbook.md", index_text)
 
     def _iter_source_trees(self) -> list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]]:
         entries: list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]] = []

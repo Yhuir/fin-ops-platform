@@ -61,6 +61,7 @@
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py` |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
 | Scripts | `scripts/check-read-model-scope-contracts.py` |
+| Production evidence | `docs/operations/read-model-production-evidence-runbook.md` |
 | Tests | `tests/test_read_model_*.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` |
 
 ## 依赖方向
