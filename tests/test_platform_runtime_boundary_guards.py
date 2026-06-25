@@ -3464,26 +3464,29 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
-        checked_sources = {
-            method_name: _function_source(tree, source, method_name)
-            for method_name in (
-                "_repair_active_relations_with_oa_attachment_context",
-            )
-        }
         sync_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
+        repair_source = _function_source(tree, source, "_repair_active_relations_with_oa_attachment_context")
         sync_executor_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_sync_executor.py").read_text(
+            encoding="utf-8"
+        )
+        repair_executor_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_context_executor.py").read_text(
             encoding="utf-8"
         )
 
         violations: list[str] = []
         if "_workbench_oa_invoice_offset_sync_executor().sync(" not in sync_source:
             violations.append("_sync_oa_invoice_offset_auto_pair_relations does not delegate to sync executor")
+        if "_workbench_oa_attachment_repair_context_executor().repair(" not in repair_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context does not delegate to repair context executor")
         for marker in ("confirm_relation(", "cancel_relation("):
             if marker not in sync_executor_source:
                 violations.append(f"WorkbenchOaInvoiceOffsetSyncExecutor does not delegate through command service {marker}")
-        for method_name, method_source in checked_sources.items():
-            if "confirm_relation" not in method_source:
-                violations.append(f"{method_name} does not delegate relation creation/repair to command service")
+        if "confirm_relation(**repair.confirm_kwargs)" not in repair_executor_source:
+            violations.append("WorkbenchOaAttachmentRepairContextExecutor does not delegate through command service confirm_relation")
+        for method_name, method_source in (
+            ("_repair_active_relations_with_oa_attachment_context", repair_source),
+            ("_sync_oa_invoice_offset_auto_pair_relations", sync_source),
+        ):
             for forbidden in (
                 "_workbench_pair_relation_service.create_active_relation",
                 "_workbench_pair_relation_service.cancel_relation",
@@ -3526,6 +3529,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         method_source = _function_source(tree, source, "_repair_active_relations_with_oa_attachment_context")
+        factory_source = _function_source(tree, source, "_workbench_oa_attachment_repair_context_executor")
+        executor_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_context_executor.py").read_text(
+            encoding="utf-8"
+        )
         port_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_relation_read_port.py").read_text(encoding="utf-8")
 
         violations: list[str] = []
@@ -3535,12 +3542,32 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("WorkbenchOaAttachmentRepairRelationReadPort does not expose list_active_relations")
         if "_workbench_pair_relation_service.list_active_relations" in method_source:
             violations.append("_repair_active_relations_with_oa_attachment_context still reads broad pair service directly")
-        if "_workbench_oa_attachment_repair_relation_read_port()" not in method_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context does not use OA attachment repair relation read port")
-        if "replace_existing=True" not in method_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context no longer preserves replace-existing repair")
-        if "before_relations=[before_relation]" not in method_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context no longer preserves before relation payload")
+        if "_workbench_oa_attachment_repair_context_executor().repair(" not in method_source:
+            violations.append("_repair_active_relations_with_oa_attachment_context does not delegate to repair context executor")
+        if "_workbench_oa_attachment_repair_relation_read_port().list_active_relations" not in factory_source:
+            violations.append("OA attachment repair context executor factory does not use relation read port")
+        for marker in (
+            "confirm_relation(**repair.confirm_kwargs)",
+            "replace_existing",
+            "before_relations",
+            "repair_missing_oa_attachment_context",
+            "repair_active_relations_with_oa_attachment_context",
+            "persist_pair_relations",
+            "execute_lifecycle_event",
+        ):
+            if marker not in executor_source:
+                violations.append(f"WorkbenchOaAttachmentRepairContextExecutor missing repair marker {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in executor_source:
+                violations.append(f"WorkbenchOaAttachmentRepairContextExecutor gained forbidden dependency: {forbidden}")
 
         self.assertEqual(violations, [])
 

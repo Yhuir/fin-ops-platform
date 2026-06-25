@@ -517,6 +517,9 @@ from fin_ops_platform.services.workbench_oa_invoice_offset_desired_relation_buil
 from fin_ops_platform.services.workbench_oa_invoice_offset_sync_executor import (
     WorkbenchOaInvoiceOffsetSyncExecutor,
 )
+from fin_ops_platform.services.workbench_oa_attachment_repair_context_executor import (
+    WorkbenchOaAttachmentRepairContextExecutor,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13596,106 +13599,28 @@ class Application:
         return executor
 
     def _repair_active_relations_with_oa_attachment_context(self, payload: dict[str, object]) -> None:
-        rows_by_id = self._raw_workbench_payload_rows_by_id(payload)
-        if not rows_by_id:
-            return
-        attachment_row_ids_by_oa_id = self._oa_attachment_context_row_ids_by_oa_id(rows_by_id)
-        if not attachment_row_ids_by_oa_id:
-            return
+        self._workbench_oa_attachment_repair_context_executor().repair(payload)
 
-        changed_case_ids: list[str] = []
-        changed_scope_keys: set[str] = {"all"}
-        timestamp = datetime.now(UTC).isoformat()
-        command_service = self._workbench_relation_command_service(require_fresh_relations=False)
-        relation_read_port = self._workbench_oa_attachment_repair_relation_read_port()
-        for relation in relation_read_port.list_active_relations():
-            if self._relation_requires_dedicated_withdraw_action(relation):
-                continue
-            row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
-            if not row_ids:
-                continue
-            row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
-            relation_row_ids = set(row_ids)
-            relation_has_bank = any(
-                (row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)) == "bank"
-                for index, row_id in enumerate(row_ids)
-            )
-            if not relation_has_bank:
-                continue
-            oa_row_ids = [
-                row_id
-                for index, row_id in enumerate(row_ids)
-                if (row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)) == "oa"
-            ]
-            missing_attachment_row_ids: list[str] = []
-            for oa_row_id in oa_row_ids:
-                for attachment_row_id in attachment_row_ids_by_oa_id.get(oa_row_id, []):
-                    if attachment_row_id not in relation_row_ids and attachment_row_id in rows_by_id:
-                        missing_attachment_row_ids.append(attachment_row_id)
-            if not missing_attachment_row_ids:
-                continue
-
-            repaired_row_ids = [*row_ids, *missing_attachment_row_ids]
-            repaired_row_types = [
-                *[
-                    row_types[index] if index < len(row_types) and row_types[index] else self._row_type_for_row_id(row_id)
-                    for index, row_id in enumerate(row_ids)
-                ],
-                *(["invoice"] * len(missing_attachment_row_ids)),
-            ]
-            repaired_rows = [rows_by_id[row_id] for row_id in repaired_row_ids if row_id in rows_by_id]
-            before_relation = self._serialize_value(relation)
-            amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(repaired_rows))
-            command_result = command_service.confirm_relation(
-                case_id=str(relation.get("case_id") or ""),
-                row_ids=repaired_row_ids,
-                row_types=repaired_row_types,
-                relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
-                actor_id="system_repair",
-                relation_created_by=str(relation.get("created_by") or "system_repair"),
-                month_scope=str(relation.get("month_scope") or "all"),
-                note=str(relation.get("note") or ""),
-                amount_check=amount_check,
-                special_metadata=relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else None,
-                exception_case_id=str(relation.get("exception_case_id") or ""),
-                rule_version=str(relation.get("rule_version") or ""),
-                evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
-                oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
-                display_tags=[
-                    str(tag).strip()
-                    for tag in list(relation.get("display_tags") or [])
-                    if str(tag).strip()
-                ],
-                occurred_at=timestamp,
-                before_relations=[before_relation],
-                replace_existing=True,
-                history_operation_type="repair_missing_oa_attachment_context",
+    def _workbench_oa_attachment_repair_context_executor(self) -> WorkbenchOaAttachmentRepairContextExecutor:
+        executor = getattr(self, "_workbench_oa_attachment_repair_context_executor_instance", None)
+        if executor is None:
+            executor = WorkbenchOaAttachmentRepairContextExecutor(
+                raw_payload_rows_by_id=self._raw_workbench_payload_rows_by_id,
+                attachment_row_ids_by_oa_id=self._oa_attachment_context_row_ids_by_oa_id,
+                active_relations=self._workbench_oa_attachment_repair_relation_read_port().list_active_relations,
+                relation_requires_dedicated_withdraw_action=self._relation_requires_dedicated_withdraw_action,
+                row_type_for_row_id=self._row_type_for_row_id,
+                serialize_value=self._serialize_value,
+                rows_by_type=self._rows_by_type,
+                amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
+                scope_keys_for_row_ids=self._scope_keys_for_row_ids,
+                command_service_provider=lambda: self._workbench_relation_command_service(require_fresh_relations=False),
+                persist_pair_relations=self._persist_workbench_pair_relations,
+                execute_lifecycle_event=self._execute_derived_data_lifecycle_event,
                 history_note="修复已有关联缺失的 OA 附件证据行。",
             )
-            repaired_relation = dict(command_result.get("relation") or {})
-            case_id = str(repaired_relation.get("case_id") or "").strip()
-            if case_id:
-                changed_case_ids.extend(
-                    str(changed_case_id)
-                    for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
-                    if str(changed_case_id).strip()
-                )
-            changed_scope_keys.update(
-                self._scope_keys_for_row_ids(
-                    month=str(payload.get("month") or "all"),
-                    row_ids=repaired_row_ids,
-                    month_scope=str(repaired_relation.get("month_scope") or ""),
-                )
-            )
-
-        if not changed_case_ids:
-            return
-        self._persist_workbench_pair_relations(changed_case_ids=sorted(set(changed_case_ids)))
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=list(changed_scope_keys),
-            metadata={"source": "repair_active_relations_with_oa_attachment_context"},
-        )
+            self._workbench_oa_attachment_repair_context_executor_instance = executor
+        return executor
 
     @staticmethod
     def _raw_workbench_payload_rows_by_id(payload: dict[str, object]) -> dict[str, dict[str, object]]:
