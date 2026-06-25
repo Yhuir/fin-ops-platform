@@ -82,92 +82,175 @@ class PostgresWorkbenchRepository:
                 connection.execute("delete from read_model.no_oa_bank_batch_rows")
                 connection.execute("delete from app.no_oa_bank_batch_events")
                 connection.execute("delete from app.no_oa_bank_batches")
-            for batch_id, payload in batch_items:
-                connection.execute(
-                    """
-                    insert into app.no_oa_bank_batches(
-                        batch_id, status, status_bucket, version, scope_month, account_key,
-                        total_amount, bank_transaction_ids, source_versions, raw_payload
-                    )
-                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
-                    on conflict (batch_id) do update set
-                        status = excluded.status,
-                        status_bucket = excluded.status_bucket,
-                        version = excluded.version,
-                        scope_month = excluded.scope_month,
-                        account_key = excluded.account_key,
-                        total_amount = excluded.total_amount,
-                        bank_transaction_ids = excluded.bank_transaction_ids,
-                        source_versions = excluded.source_versions,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        batch_id,
-                        text(payload.get("status") or "draft"),
-                        text(payload.get("status_bucket")),
-                        int_value(payload.get("version"), 1),
-                        month_start(payload.get("scope_month") or payload.get("month")),
-                        text(payload.get("account_key")),
-                        decimal_text(payload.get("total_amount") or payload.get("amount") or 0),
-                        text_list(payload.get("bank_transaction_ids") or payload.get("row_ids")),
-                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-                row_ids = text_list(payload.get("bank_transaction_ids") or payload.get("row_ids"))
-                connection.execute(
-                    """
-                    insert into read_model.no_oa_bank_batch_rows(
-                        batch_id, scope_month, batch_type, status, status_bucket, account_key,
-                        total_amount, row_count, submitted_at, withdrawn_at, source_versions,
-                        generated_at, cache_status, payload, raw_payload
-                    )
-                    values (
-                        %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
-                        %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                    )
-                    on conflict (batch_id) do update set
-                        scope_month = excluded.scope_month,
-                        batch_type = excluded.batch_type,
-                        status = excluded.status,
-                        status_bucket = excluded.status_bucket,
-                        account_key = excluded.account_key,
-                        total_amount = excluded.total_amount,
-                        row_count = excluded.row_count,
-                        submitted_at = excluded.submitted_at,
-                        withdrawn_at = excluded.withdrawn_at,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        batch_id,
-                        month_start(payload.get("scope_month") or payload.get("month")),
-                        text(payload.get("batch_type") or payload.get("type")),
-                        text(payload.get("status") or "draft") or "draft",
-                        text(payload.get("status_bucket")),
-                        text(payload.get("account_key")),
-                        decimal_text(payload.get("total_amount") or payload.get("amount") or 0) or "0",
-                        int_value(payload.get("row_count"), len(row_ids)),
-                        text(payload.get("submitted_at")),
-                        text(payload.get("withdrawn_at")),
-                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                        text(payload.get("updated_at") or payload.get("generated_at")),
-                        text(payload.get("cache_status") or "fresh") or "fresh",
-                        jsonb(serialize_value(payload)),
-                        jsonb({"normalized_payload": serialize_value(payload)}),
-                    ),
-                )
+            self._upsert_no_oa_bank_batch_items(connection, batch_items)
             self._replace_no_oa_bank_batch_events(
                 connection,
                 snapshot.get("audit_log") if isinstance(snapshot, dict) else None,
             )
 
         run_in_transaction(self._connection, write)
+
+    def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
+        normalized_scope_key = text(scope_key)
+        if not normalized_scope_key or normalized_scope_key == "all":
+            self.save_no_oa_bank_batches(snapshot)
+            return
+        scope_month = month_start(normalized_scope_key)
+        if not scope_month:
+            raise ValueError(f"no-OA bank batch scope must be 'all' or a YYYY-MM shard: {scope_key}")
+
+        batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
+        batch_items = [
+            (batch_id, payload)
+            for batch_id, payload in list(iter_mapping(batches))
+            if month_start(payload.get("scope_month") or payload.get("month")) == scope_month
+        ]
+        batch_ids = [
+            str(batch_id).strip()
+            for batch_id, _payload in batch_items
+            if str(batch_id).strip()
+        ]
+
+        def write(connection: Any) -> None:
+            if batch_ids:
+                connection.execute(
+                    """
+                    delete from read_model.no_oa_bank_batch_rows
+                    where scope_month = %s::date
+                      and not (batch_id = any(%s))
+                    """,
+                    (scope_month, batch_ids),
+                )
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batch_events
+                    where no_oa_bank_batch_id in (
+                        select id
+                        from app.no_oa_bank_batches
+                        where scope_month = %s::date
+                          and not (batch_id = any(%s))
+                    )
+                    """,
+                    (scope_month, batch_ids),
+                )
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batches
+                    where scope_month = %s::date
+                      and not (batch_id = any(%s))
+                    """,
+                    (scope_month, batch_ids),
+                )
+            else:
+                connection.execute("delete from read_model.no_oa_bank_batch_rows where scope_month = %s::date", (scope_month,))
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batch_events
+                    where no_oa_bank_batch_id in (
+                        select id from app.no_oa_bank_batches where scope_month = %s::date
+                    )
+                    """,
+                    (scope_month,),
+                )
+                connection.execute("delete from app.no_oa_bank_batches where scope_month = %s::date", (scope_month,))
+            self._upsert_no_oa_bank_batch_items(connection, batch_items)
+            scoped_batch_ids = set(batch_ids)
+            audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else []
+            audit_items = audit_log if isinstance(audit_log, list) else []
+            scoped_audit_log = [
+                item
+                for item in audit_items
+                if isinstance(item, dict) and text(item.get("batch_id")) in scoped_batch_ids
+            ]
+            self._replace_no_oa_bank_batch_events(connection, scoped_audit_log)
+
+        run_in_transaction(self._connection, write)
+
+    def _upsert_no_oa_bank_batch_items(
+        self,
+        connection: Any,
+        batch_items: list[tuple[str, dict[str, Any]]],
+    ) -> None:
+        for batch_id, payload in batch_items:
+            connection.execute(
+                """
+                insert into app.no_oa_bank_batches(
+                    batch_id, status, status_bucket, version, scope_month, account_key,
+                    total_amount, bank_transaction_ids, source_versions, raw_payload
+                )
+                values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
+                on conflict (batch_id) do update set
+                    status = excluded.status,
+                    status_bucket = excluded.status_bucket,
+                    version = excluded.version,
+                    scope_month = excluded.scope_month,
+                    account_key = excluded.account_key,
+                    total_amount = excluded.total_amount,
+                    bank_transaction_ids = excluded.bank_transaction_ids,
+                    source_versions = excluded.source_versions,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    batch_id,
+                    text(payload.get("status") or "draft"),
+                    text(payload.get("status_bucket")),
+                    int_value(payload.get("version"), 1),
+                    month_start(payload.get("scope_month") or payload.get("month")),
+                    text(payload.get("account_key")),
+                    decimal_text(payload.get("total_amount") or payload.get("amount") or 0),
+                    text_list(payload.get("bank_transaction_ids") or payload.get("row_ids")),
+                    jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+                    jsonb({"normalized_payload": payload}),
+                ),
+            )
+            row_ids = text_list(payload.get("bank_transaction_ids") or payload.get("row_ids"))
+            connection.execute(
+                """
+                insert into read_model.no_oa_bank_batch_rows(
+                    batch_id, scope_month, batch_type, status, status_bucket, account_key,
+                    total_amount, row_count, submitted_at, withdrawn_at, source_versions,
+                    generated_at, cache_status, payload, raw_payload
+                )
+                values (
+                    %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
+                    %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                )
+                on conflict (batch_id) do update set
+                    scope_month = excluded.scope_month,
+                    batch_type = excluded.batch_type,
+                    status = excluded.status,
+                    status_bucket = excluded.status_bucket,
+                    account_key = excluded.account_key,
+                    total_amount = excluded.total_amount,
+                    row_count = excluded.row_count,
+                    submitted_at = excluded.submitted_at,
+                    withdrawn_at = excluded.withdrawn_at,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    cache_status = excluded.cache_status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    batch_id,
+                    month_start(payload.get("scope_month") or payload.get("month")),
+                    text(payload.get("batch_type") or payload.get("type")),
+                    text(payload.get("status") or "draft") or "draft",
+                    text(payload.get("status_bucket")),
+                    text(payload.get("account_key")),
+                    decimal_text(payload.get("total_amount") or payload.get("amount") or 0) or "0",
+                    int_value(payload.get("row_count"), len(row_ids)),
+                    text(payload.get("submitted_at")),
+                    text(payload.get("withdrawn_at")),
+                    jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+                    text(payload.get("updated_at") or payload.get("generated_at")),
+                    text(payload.get("cache_status") or "fresh") or "fresh",
+                    jsonb(serialize_value(payload)),
+                    jsonb({"normalized_payload": serialize_value(payload)}),
+                ),
+            )
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(

@@ -19,7 +19,11 @@ class NoOaBankBatchReadModelPersistencePort:
     def __init__(self, state_store: Any) -> None:
         self._state_store = state_store
 
-    def save_public_snapshot(self, snapshot: dict[str, Any]) -> None:
+    def save_public_snapshot(self, snapshot: dict[str, Any], *, scope_key: str = "all") -> None:
+        save_scope = getattr(self._state_store, "save_no_oa_bank_batches_scope", None)
+        if callable(save_scope):
+            save_scope(snapshot, scope_key=scope_key)
+            return
         save_snapshot = getattr(self._state_store, "save_no_oa_bank_batches", None)
         if not callable(save_snapshot):
             raise RuntimeError("No-OA read model persistence requires save_no_oa_bank_batches.")
@@ -81,7 +85,7 @@ class NoOaBankBatchReadModelRefreshService:
             scope_key=scope_key,
         )
         snapshot = self._no_oa_bank_batch_service.public_snapshot()
-        self._read_model_persistence.save_public_snapshot(snapshot)
+        self._read_model_persistence.save_public_snapshot(snapshot, scope_key=scope_key)
         self._complete_dirty_scope(event, scope_key=scope_key)
         batches = snapshot.get("batches") if isinstance(snapshot, dict) else {}
         return {

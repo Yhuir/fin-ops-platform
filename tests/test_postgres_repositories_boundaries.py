@@ -251,6 +251,68 @@ def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None
     assert events_delete_index < batches_delete_index
 
 
+def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_no_oa_bank_batches_scope(
+        {
+            "batches": {
+                "march-batch": {
+                    "batch_id": "march-batch",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "version": 1,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-1"],
+                    "total_amount": "10.00",
+                },
+                "april-batch": {
+                    "batch_id": "april-batch",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "version": 1,
+                    "scope_month": "2026-04",
+                    "account_key": "acct",
+                    "row_ids": ["txn-2"],
+                    "total_amount": "20.00",
+                },
+            },
+            "audit_log": [
+                {"batch_id": "march-batch", "operation": "refresh"},
+                {"batch_id": "april-batch", "operation": "refresh"},
+            ],
+        },
+        scope_key="2026-03",
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert "delete from read_model.no_oa_bank_batch_rows where scope_month = %s::date" in executed_sql[0]
+    assert "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in executed_sql[1]
+    assert "delete from app.no_oa_bank_batches where scope_month = %s::date" in executed_sql[2]
+    assert connection.executed[0][1] == ("2026-03-01", ["march-batch"])
+    assert connection.executed[1][1] == ("2026-03-01", ["march-batch"])
+    assert connection.executed[2][1] == ("2026-03-01", ["march-batch"])
+    assert not any(
+        sql == "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))"
+        for sql in executed_sql
+    )
+    upsert_batch_params = [
+        params
+        for sql, params in connection.executed
+        if sql.startswith("insert into app.no_oa_bank_batches(")
+    ]
+    assert len(upsert_batch_params) == 1
+    assert upsert_batch_params[0][0] == "march-batch"
+    replaced_event_params = [
+        params
+        for sql, params in connection.executed
+        if sql == "delete from app.no_oa_bank_batch_events where batch_id = %s"
+    ]
+    assert replaced_event_params == [("march-batch",)]
+
+
 def test_workbench_category_confirmation_uses_confirmation_fact_table() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)

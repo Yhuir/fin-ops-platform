@@ -63,6 +63,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
             state_store=PostgresInputInvoiceUsagePaymentRulesStateStore(connection),
         )
         self._policy = InvoiceLifecyclePolicy(input_payment_rules_provider=self._payment_rules_provider)
+        self._read_model_dependency_source_versions: dict[str, object] = {}
 
     def list_invoice_lifecycle_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope_key = str(scope_key or "").strip()
@@ -77,6 +78,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
 
     def rebuild_invoice_lifecycle_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        self._read_model_dependency_source_versions = {}
         rows = []
         rows.extend(self._pending_invoice_lifecycle_rows(normalized_scope_key))
         rows.extend(self._input_invoice_lifecycle_rows(normalized_scope_key))
@@ -127,6 +129,19 @@ class InvoiceLifecycleSqlProjectionBuilder:
         return rows
 
     def _input_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        page_rows = self._fresh_read_model_rows(
+            "list_input_invoice_usage_rows",
+            month=month,
+            sort_field="invoice_date",
+            sort_direction="desc",
+            source_versions_key="input_invoice_usage_read_model_source_versions",
+        )
+        if page_rows is not None:
+            return [
+                row
+                for page_row in page_rows
+                if (row := self._input_invoice_lifecycle_row(page_row, month)) is not None
+            ]
         service = InputInvoiceUsageQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
@@ -146,29 +161,26 @@ class InvoiceLifecycleSqlProjectionBuilder:
             sort_field="invoice_date",
             sort_direction="desc",
         )
-        rows = []
-        for row in page_rows:
-            status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
-            subject_id = str(row.get("invoiceId") or "").strip()
-            if not subject_id:
-                continue
-            rows.append(
-                {
-                    "subject_id": subject_id,
-                    "subject_type": "input_invoice",
-                    "scope_key": month,
-                    "scope_month": month,
-                    "invoice_identity_key": row.get("invoiceIdentityKey"),
-                    "lifecycle_status": _status_code(status),
-                    "acquisition_status": {},
-                    "payment_status": status,
-                    "collection_status": {},
-                    "certification_status": {},
-                }
-            )
-        return rows
+        return [
+            row
+            for page_row in page_rows
+            if (row := self._input_invoice_lifecycle_row(page_row, month)) is not None
+        ]
 
     def _output_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        page_rows = self._fresh_read_model_rows(
+            "list_output_invoice_collection_rows",
+            month=month,
+            sort_field="invoice_date",
+            sort_direction="desc",
+            source_versions_key="output_invoice_collection_read_model_source_versions",
+        )
+        if page_rows is not None:
+            return [
+                row
+                for page_row in page_rows
+                if (row := self._output_invoice_lifecycle_row(page_row, month)) is not None
+            ]
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
@@ -187,29 +199,27 @@ class InvoiceLifecycleSqlProjectionBuilder:
             sort_field="invoice_date",
             sort_direction="desc",
         )
-        rows = []
-        for row in page_rows:
-            status = row.get("collectionStatus") if isinstance(row.get("collectionStatus"), dict) else {}
-            subject_id = str(row.get("invoiceId") or "").strip()
-            if not subject_id:
-                continue
-            rows.append(
-                {
-                    "subject_id": subject_id,
-                    "subject_type": "output_invoice",
-                    "scope_key": month,
-                    "scope_month": month,
-                    "invoice_identity_key": row.get("invoiceIdentityKey"),
-                    "lifecycle_status": _status_code(status),
-                    "acquisition_status": {},
-                    "payment_status": {},
-                    "collection_status": status,
-                    "certification_status": {},
-                }
-            )
-        return rows
+        return [
+            row
+            for page_row in page_rows
+            if (row := self._output_invoice_lifecycle_row(page_row, month)) is not None
+        ]
 
     def _oa_pending_payment_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        page_rows = self._fresh_read_model_rows(
+            "list_oa_pending_payment_rows",
+            month=month,
+            sort_field="bank_trade_time",
+            sort_direction="desc",
+            source_versions_key="oa_pending_payment_read_model_source_versions",
+            view_mode="completed",
+        )
+        if page_rows is not None:
+            return [
+                row
+                for page_row in page_rows
+                if (row := self._oa_pending_payment_lifecycle_row(page_row, month)) is not None
+            ]
         service = OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
@@ -230,27 +240,109 @@ class InvoiceLifecycleSqlProjectionBuilder:
             sort_field="bank_trade_time",
             sort_direction="desc",
         )
-        rows = []
-        for row in page_rows:
-            oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
-            status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
-            subject_id = str(oa.get("id") or row.get("id") or "").strip()
-            if not subject_id:
-                continue
-            rows.append(
-                {
-                    "subject_id": subject_id,
-                    "subject_type": "oa_application",
-                    "scope_key": month,
-                    "scope_month": month,
-                    "lifecycle_status": _status_code(status),
-                    "acquisition_status": {},
-                    "payment_status": status,
-                    "collection_status": {},
-                    "certification_status": {},
-                }
-            )
-        return rows
+        return [
+            row
+            for page_row in page_rows
+            if (row := self._oa_pending_payment_lifecycle_row(page_row, month)) is not None
+        ]
+
+    def _fresh_read_model_rows(
+        self,
+        list_method_name: str,
+        *,
+        month: str,
+        sort_field: str,
+        sort_direction: str,
+        source_versions_key: str,
+        view_mode: str | None = None,
+    ) -> list[dict[str, Any]] | None:
+        list_rows = getattr(self._read_repository, list_method_name, None)
+        if not callable(list_rows):
+            return None
+        rows: list[dict[str, Any]] = []
+        page = 1
+        page_size = 200
+        while True:
+            kwargs: dict[str, Any] = {
+                "month": month,
+                "page": page,
+                "page_size": page_size,
+                "sort_field": sort_field,
+                "sort_direction": sort_direction,
+            }
+            if view_mode is not None:
+                kwargs["view_mode"] = view_mode
+            payload = list_rows(**kwargs)
+            if not isinstance(payload, dict) or payload.get("refresh_status") != "fresh":
+                return None
+            if page == 1:
+                source_versions = payload.get("source_versions")
+                if isinstance(source_versions, dict) and source_versions:
+                    self._read_model_dependency_source_versions[source_versions_key] = dict(source_versions)
+            page_rows = [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
+            rows.extend(page_rows)
+            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+            total = int(pagination.get("total") or len(rows))
+            if len(rows) >= total or not page_rows:
+                return rows
+            page += 1
+
+    @staticmethod
+    def _input_invoice_lifecycle_row(row: dict[str, Any], month: str) -> dict[str, Any] | None:
+        status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+        subject_id = str(row.get("invoiceId") or "").strip()
+        if not subject_id:
+            return None
+        return {
+            "subject_id": subject_id,
+            "subject_type": "input_invoice",
+            "scope_key": month,
+            "scope_month": month,
+            "invoice_identity_key": row.get("invoiceIdentityKey"),
+            "lifecycle_status": _status_code(status),
+            "acquisition_status": {},
+            "payment_status": status,
+            "collection_status": {},
+            "certification_status": {},
+        }
+
+    @staticmethod
+    def _output_invoice_lifecycle_row(row: dict[str, Any], month: str) -> dict[str, Any] | None:
+        status = row.get("collectionStatus") if isinstance(row.get("collectionStatus"), dict) else {}
+        subject_id = str(row.get("invoiceId") or "").strip()
+        if not subject_id:
+            return None
+        return {
+            "subject_id": subject_id,
+            "subject_type": "output_invoice",
+            "scope_key": month,
+            "scope_month": month,
+            "invoice_identity_key": row.get("invoiceIdentityKey"),
+            "lifecycle_status": _status_code(status),
+            "acquisition_status": {},
+            "payment_status": {},
+            "collection_status": status,
+            "certification_status": {},
+        }
+
+    @staticmethod
+    def _oa_pending_payment_lifecycle_row(row: dict[str, Any], month: str) -> dict[str, Any] | None:
+        oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+        status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+        subject_id = str(oa.get("id") or row.get("id") or "").strip()
+        if not subject_id:
+            return None
+        return {
+            "subject_id": subject_id,
+            "subject_type": "oa_application",
+            "scope_key": month,
+            "scope_month": month,
+            "lifecycle_status": _status_code(status),
+            "acquisition_status": {},
+            "payment_status": status,
+            "collection_status": {},
+            "certification_status": {},
+        }
 
     def _source_versions(self) -> dict[str, object]:
         source_versions: dict[str, object] = {
@@ -264,6 +356,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
         }
         if self._workbench_relation_read_facade.last_source_versions:
             source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        source_versions.update(self._read_model_dependency_source_versions)
         return source_versions
 
     def _import_service(self) -> ImportNormalizationService:

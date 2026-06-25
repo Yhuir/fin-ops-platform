@@ -595,9 +595,14 @@ class RecordingInvoiceRelationReadRepository:
 class WriteRecordingConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, object]] = []
+        self.executed_many: list[tuple[str, list[object]]] = []
 
     def execute(self, sql: str, params: object = ()) -> None:
         self.executed.append((" ".join(sql.lower().split()), params))
+
+    def execute_many(self, sql: str, params_seq: list[object]) -> int:
+        self.executed_many.append((" ".join(sql.lower().split()), list(params_seq)))
+        return len(params_seq)
 
 
 class OaPendingRelationCleanupConnection(EmptyTransactionConnection):
@@ -911,9 +916,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             source_versions=input_invoice_usage_source_versions(),
         )
 
-        insert_calls = [(sql, params) for sql, params in connection.executed if "insert into read_model.input_invoice_usage_rows" in sql]
+        insert_calls = [
+            (sql, params_seq)
+            for sql, params_seq in connection.executed_many
+            if "insert into read_model.input_invoice_usage_rows" in sql
+        ]
         self.assertEqual(len(insert_calls), 1)
-        sql, params = insert_calls[0]
+        sql, params_seq = insert_calls[0]
+        params = params_seq[0]
         self.assertIn("bank_account", sql)
         self.assertIn("bank_direction", sql)
         self.assertEqual(params["bank_account"], "交通银行 3847")
@@ -1053,9 +1063,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             source_versions=output_invoice_collection_source_versions(),
         )
 
-        insert_calls = [(sql, params) for sql, params in connection.executed if "insert into read_model.output_invoice_collection_rows" in sql]
+        insert_calls = [
+            (sql, params_seq)
+            for sql, params_seq in connection.executed_many
+            if "insert into read_model.output_invoice_collection_rows" in sql
+        ]
         self.assertEqual(len(insert_calls), 1)
-        sql, params = insert_calls[0]
+        sql, params_seq = insert_calls[0]
+        params = params_seq[0]
         self.assertIn("oa_relation_count", sql)
         self.assertEqual(params["oa_applicant"], "张三")
         self.assertEqual(params["oa_application_type"], "付款申请")
@@ -1169,9 +1184,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             source_versions=oa_pending_payment_source_versions(),
         )
 
-        insert_calls = [(sql, params) for sql, params in connection.executed if "insert into read_model.oa_pending_payment_rows" in sql]
+        insert_calls = [
+            (sql, params_seq)
+            for sql, params_seq in connection.executed_many
+            if "insert into read_model.oa_pending_payment_rows" in sql
+        ]
         self.assertEqual(len(insert_calls), 1)
-        sql, params = insert_calls[0]
+        sql, params_seq = insert_calls[0]
+        params = params_seq[0]
         self.assertIn("bank_paid_total", sql)
         self.assertIn("oa_workflow_status", sql)
         self.assertEqual(params["oa_workflow_status"], "in_progress")

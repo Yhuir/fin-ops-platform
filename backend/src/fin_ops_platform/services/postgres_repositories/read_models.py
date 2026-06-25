@@ -57,7 +57,7 @@ def _parse_postgres_timestamp(value: str | None) -> datetime | None:
         return None
 
 
-def _execute_many(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
+def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
     if not params_seq:
         return 0
     execute_many_values = getattr(connection, "execute_many_values", None)
@@ -561,11 +561,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 connection.execute("delete from read_model.oa_pending_payment_rows")
             else:
                 connection.execute("delete from read_model.oa_pending_payment_rows where scope_key = %s", (normalized_scope_key,))
+            insert_rows: list[dict[str, Any]] = []
             for row in rows_to_save:
                 row_payload = dict(row) if isinstance(row, dict) else {}
                 row_payload["sourceVersions"] = normalized_source_versions
-                connection.execute(
-                    """
+                insert_rows.append(_oa_pending_payment_read_model_record(row_payload, normalized_scope_key))
+            _execute_many(
+                connection,
+                """
                     insert into read_model.oa_pending_payment_rows(
                         row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
                         oa_workflow_status, oa_project_name, oa_amount, payment_status, payment_status_label,
@@ -613,9 +616,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                         payload = excluded.payload,
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
-                    """,
-                    _oa_pending_payment_read_model_record(row_payload, normalized_scope_key),
-                )
+                """,
+                insert_rows,
+            )
             self._upsert_invoice_relation_scope(
                 connection,
                 scope_table_name="read_model.oa_pending_payment_scopes",
@@ -797,12 +800,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 connection.execute(f"delete from {table_name}")
             else:
                 connection.execute(f"delete from {table_name} where scope_key = %s", (normalized_scope_key,))
+            insert_rows: list[dict[str, Any]] = []
             for row in rows_to_save:
                 row_payload = dict(row) if isinstance(row, dict) else {}
                 row_payload["sourceVersions"] = normalized_source_versions
-                record = row_builder(row_payload, normalized_scope_key)
-                connection.execute(
-                    f"""
+                insert_rows.append(row_builder(row_payload, normalized_scope_key))
+            _execute_many(
+                connection,
+                f"""
                     insert into {table_name}(
                         row_id, scope_key, scope_month, invoice_id, invoice_identity_key, invoice_no, invoice_date,
                         seller_name, seller_tax_no, buyer_name, buyer_tax_no, total_with_tax, amount, tax_amount, tax_rate,
@@ -870,9 +875,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                         payload = excluded.payload,
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
-                    """,
-                    record,
-                )
+                """,
+                insert_rows,
+            )
             self._upsert_invoice_relation_scope(
                 connection,
                 scope_table_name=scope_table_name,

@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-26 - Read model production SLO optimization
+
+- 目标：压缩生产 read model refresh 的 hot path，使 scoped incremental projection 在高行数月份仍能满足 operation-to-fresh SLO。
+- 影响范围：invoice lifecycle SQL projection、input/output invoice usage read model 持久化、OA pending payment read model 持久化、no-OA bank batch scoped persistence、state-store/protocol 边界和对应 runtime tests；不改变 HTTP API shape、dirty/outbox schema、readiness/freshness 事实源或业务状态机。
+- 关键决策：invoice lifecycle 在依赖页面 read model 已 fresh 时复用其 scoped rows 和 source versions，避免重复 live projection；invoice usage/OA pending payment 保存路径改为批量 insert；no-OA month scope refresh 只替换目标月份 rows/events/batches，不再通过公开 snapshot 全量重写其它月份。
+- 文档影响：本实施记录和 no-OA 模块实施记录同步 runtime persistence/freshness 边界；长期产品口径不变。
+- 测试覆盖：新增 invoice lifecycle 复用 fresh dependency read model 测试，更新 invoice usage/OA 批量保存回归、no-OA scoped save repository 测试和 refresh persistence port 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_invoice_lifecycle_sql_projection.py tests/test_invoice_usage_collection_sql_runtime.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_postgres_repositories_boundaries.py -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：生产 authenticated HTTP/SSE、operation-to-fresh write samples 和最终 runtime closure gate 需在部署后以当前 main release 采集；写操作样本在用户确认候选前不执行。
+- 后续事项：部署当前 main 后运行 production scope contract、read model SLO apply、HTTP/SSE probe、runtime closure gate，并用只读 discovery 给出可控写操作样本候选。
+
 ## 2026-06-24 - T8 module IO contract reconciliation
 
 - 目标：按 T8 worker scope 补齐共享 read model 模块的输入、输出、事件、权限、public/internal surface、legacy status、read model refresh、force refresh、operation barrier 和 partitioned scoped incremental projection 合同。

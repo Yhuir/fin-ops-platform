@@ -39,6 +39,27 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         self.assertEqual(state_store.saved_snapshots, [{"batches": {"batch-1": {"status": "draft"}}}])
 
+    def test_persistence_port_uses_scoped_store_save_when_available(self) -> None:
+        class StateStore:
+            def __init__(self) -> None:
+                self.saved_scopes: list[tuple[str, dict[str, object]]] = []
+
+            def save_no_oa_bank_batches_scope(self, snapshot: dict[str, object], *, scope_key: str) -> None:
+                self.saved_scopes.append((scope_key, dict(snapshot)))
+
+            def save_no_oa_bank_batches(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("scoped no-OA refresh should not fall back to full snapshot save")
+
+        state_store = StateStore()
+        port = NoOaBankBatchReadModelPersistencePort(state_store)
+
+        port.save_public_snapshot({"batches": {"batch-1": {"status": "draft"}}}, scope_key="2026-03")
+
+        self.assertEqual(
+            state_store.saved_scopes,
+            [("2026-03", {"batches": {"batch-1": {"status": "draft"}}})],
+        )
+
     def test_refresh_persists_through_explicit_persistence_boundary(self) -> None:
         class StateStore:
             def save_no_oa_bank_batches(self, *_args, **_kwargs) -> None:
@@ -46,10 +67,10 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         class Persistence:
             def __init__(self) -> None:
-                self.saved_snapshots: list[dict[str, object]] = []
+                self.saved_snapshots: list[tuple[str, dict[str, object]]] = []
 
-            def save_public_snapshot(self, snapshot: dict[str, object]) -> None:
-                self.saved_snapshots.append(dict(snapshot))
+            def save_public_snapshot(self, snapshot: dict[str, object], *, scope_key: str = "all") -> None:
+                self.saved_snapshots.append((scope_key, dict(snapshot)))
 
         app = build_application()
         persistence = Persistence()
@@ -85,6 +106,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["scope_key"], "all")
         self.assertEqual(len(persistence.saved_snapshots), 1)
+        self.assertEqual(persistence.saved_snapshots[0][0], "all")
 
     def test_refresh_does_not_repair_workbench_relations_from_read_model_path(self) -> None:
         class ImportService:

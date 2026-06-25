@@ -604,6 +604,9 @@ class PostgresStateStore:
         self._workbench_repository.save_no_oa_bank_batches(snapshot)
         self._save_snapshot("no_oa_bank_batches", snapshot)
 
+    def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
+        self._workbench_repository.save_no_oa_bank_batches_scope(snapshot, scope_key=scope_key)
+
     def load_workbench_read_models(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_workbench_read_models()
         if snapshot:

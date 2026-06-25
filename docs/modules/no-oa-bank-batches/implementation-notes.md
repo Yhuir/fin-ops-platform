@@ -23,6 +23,15 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-26 - scoped persistence SLO optimization
+
+- 目标：修复 no-OA 月度 read model refresh 在生产 SLO smoke 中因持久化全量 snapshot 而超时的问题，保持目标月份 scoped incremental projection。
+- 影响范围：`NoOaBankBatchReadModelPersistencePort`、`NoOaBankBatchReadModelRefreshService`、`PostgresStateStore`、`ApplicationStateStoreProtocol`、`PostgresWorkbenchRepository.save_no_oa_bank_batches_scope(...)` 和 no-OA scoped persistence tests；不改变 no-OA API response shape、业务状态机、dirty/outbox schema、readiness 事实源、权限、审计或前端行为。
+- 关键决策：month scope refresh 通过 state-store scope capability 进入 repository，只删除并重写目标 `scope_month` 的 read model rows、events 和 batches；`all` scope 仍保留原全量保存语义。
+- 测试覆盖：新增 persistence port 使用 scoped store capability 的测试，并新增 repository scoped save 只清理目标月份的回归测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_postgres_repositories_boundaries.py -q`；共享 read-models 模块记录本轮完整回归。
+- 未测风险：生产 operation-to-fresh write sample 需等用户确认候选后执行；部署后以 read model SLO apply 和 runtime closure gate 补生产证据。
+
 ## 2026-06-25 - refresh producer extraction
 
 - 目标：执行 `server-py:no-oa-bank-batch-refresh-producer-extraction`，把 no-OA read model refresh scope normalize 和 durable queue enqueue 从 `Application` 移到显式 producer service。
