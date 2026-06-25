@@ -4937,6 +4937,81 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_events_stream_route_owner_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        routes_path = APP_ROOT / "routes_workbench.py"
+        routes_source = routes_path.read_text(encoding="utf-8")
+        routes_tree = _parse(routes_path)
+        events_route_source = _class_source(routes_tree, routes_source, "WorkbenchEventsApiRoutes")
+        events_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_events")
+        builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-events-stream-route-owner-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for marker in (
+            "def events(",
+            "event_stream",
+            "_mark_stream_started",
+            "_mark_stream_closed",
+            "_serialize_sse_event",
+            '"heartbeat"',
+            '"X-Accel-Buffering"',
+        ):
+            if marker not in events_route_source:
+                violations.append(f"WorkbenchEventsApiRoutes missing marker: {marker}")
+        for forbidden in (
+            "while True",
+            "serialize_sse_event",
+            "_workbench_refresh_status_payload_for_scope",
+            "_workbench_refresh_status_event_name",
+            "_mark_workbench_events_stream_started",
+            "_mark_workbench_events_stream_closed",
+            "text/event-stream",
+            "X-Accel-Buffering",
+        ):
+            if forbidden in events_handler_source:
+                violations.append(f"server.py events handler still owns SSE stream behavior: {forbidden}")
+        if "_workbench_events_routes().events(" not in events_handler_source:
+            violations.append("server.py events handler does not delegate to WorkbenchEventsApiRoutes")
+        for marker in (
+            "scope_key_for_month=self._workbench_read_model_scope_key",
+            "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
+            "event_name_for_payload=self._workbench_refresh_status_event_name",
+            "serialize_sse_event=self._app_health_service.serialize_sse_event",
+            "mark_stream_started=self._mark_workbench_events_stream_started",
+            "mark_stream_closed=self._mark_workbench_events_stream_closed",
+        ):
+            if marker not in builder_source:
+                violations.append(f"Workbench events route builder missing explicit port: {marker}")
+        for forbidden in (
+            "WorkbenchRelationCommandService",
+            "ReadModelRefreshGateway",
+            "dirty_scope",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+        ):
+            if forbidden in events_route_source:
+                violations.append(f"WorkbenchEventsApiRoutes gained write/runtime side effect: {forbidden}")
+        for marker in (
+            "server-py:workbench-events-stream-route-owner-extraction",
+            "GET /api/workbench/events",
+            "WorkbenchEventsApiRoutes",
+            "heartbeat",
+            "stream close cleanup",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench events extraction analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

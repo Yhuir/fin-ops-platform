@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-events-stream-route-owner-extraction-selected`
+Current state: `workbench-read-route-owner-post-events-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-read-route-owner-post-refresh-status-audit` as `analysis-closed` in `analysis/server-py-workbench-read-route-owner-post-refresh-status-audit-2026-06-25.md`. The next local implementation boundary is `server-py:workbench-events-stream-route-owner-extraction`; refresh-status payload normalization and legacy `/api/workbench` SQL fallback/payload handling remain deferred to dedicated boundaries. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-events-stream-route-owner-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-events-stream-route-owner-extraction-2026-06-25.md`. `WorkbenchEventsApiRoutes` now owns Workbench SSE stream body/header mapping behind explicit ports; `Application` keeps response wrapping plus refresh-status payload/App Health/legacy payload support. The next local boundary is `server-py:workbench-read-route-owner-post-events-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

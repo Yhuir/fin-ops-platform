@@ -66,6 +66,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchApiRoutes,
+    WorkbenchEventsApiRoutes,
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
     WorkbenchRowDetailApiRoutes,
@@ -3678,41 +3679,12 @@ class Application:
         return self._json_response(status_code, payload)
 
     def _handle_api_workbench_events(self, month: str | None) -> Response:
-        current_month = month or "all"
-        scope_key = self._workbench_read_model_scope_key(current_month)
-
-        def event_stream() -> Iterable[str]:
-            self._mark_workbench_events_stream_started(scope_key)
-            try:
-                while True:
-                    status_payload = self._workbench_refresh_status_payload_for_scope(scope_key)
-                    event_name = self._workbench_refresh_status_event_name(status_payload)
-                    yield self._app_health_service.serialize_sse_event(event_name, status_payload)
-                    yield self._app_health_service.serialize_sse_event(
-                        "heartbeat",
-                        {
-                            "scope_key": scope_key,
-                            "generated_at": status_payload.get("generated_at"),
-                            "read_model_status": status_payload.get("read_model_status"),
-                        },
-                    )
-                    sleep(5)
-            finally:
-                self._mark_workbench_events_stream_closed(scope_key)
-
+        status_code, body, headers = self._workbench_events_routes().events(month)
         return Response(
-            status_code=int(HTTPStatus.OK),
-            body=event_stream(),
+            status_code=int(status_code),
+            body=body,
             stream=True,
-            headers={
-                "Content-Type": "text/event-stream; charset=utf-8",
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            },
+            headers=headers,
         )
 
     def _mark_workbench_events_stream_started(self, scope_key: str) -> None:
@@ -8514,6 +8486,24 @@ class Application:
 
     def _build_workbench_read_api_routes(self) -> WorkbenchReadApiRoutes:
         return WorkbenchReadApiRoutes(query_facade_provider=self._workbench_query_facade)
+
+    def _workbench_events_routes(self) -> WorkbenchEventsApiRoutes:
+        routes = getattr(self, "_workbench_events_api_routes", None)
+        if routes is None:
+            routes = self._build_workbench_events_api_routes()
+            self._workbench_events_api_routes = routes
+        return routes
+
+    def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
+        return WorkbenchEventsApiRoutes(
+            scope_key_for_month=self._workbench_read_model_scope_key,
+            status_payload_for_scope=self._workbench_refresh_status_payload_for_scope,
+            event_name_for_payload=self._workbench_refresh_status_event_name,
+            serialize_sse_event=self._app_health_service.serialize_sse_event,
+            mark_stream_started=self._mark_workbench_events_stream_started,
+            mark_stream_closed=self._mark_workbench_events_stream_closed,
+            sleep_seconds=sleep,
+        )
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)

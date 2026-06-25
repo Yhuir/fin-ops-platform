@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_groups_page_cache import (
@@ -208,6 +208,66 @@ class WorkbenchReadApiRoutes:
             raise ValueError(f"{name} must be a JSON object.")
         normalized = stable_json_value(parsed)
         return normalized if isinstance(normalized, dict) else {}
+
+
+class WorkbenchEventsApiRoutes:
+    """Read-only owner for Workbench refresh status SSE stream construction."""
+
+    def __init__(
+        self,
+        *,
+        scope_key_for_month: Callable[[str], str],
+        status_payload_for_scope: Callable[[str], dict[str, object]],
+        event_name_for_payload: Callable[[dict[str, object]], str],
+        serialize_sse_event: Callable[[str, dict[str, object]], str],
+        mark_stream_started: Callable[[str], None],
+        mark_stream_closed: Callable[[str], None],
+        sleep_seconds: Callable[[float], None],
+    ) -> None:
+        self._scope_key_for_month = scope_key_for_month
+        self._status_payload_for_scope = status_payload_for_scope
+        self._event_name_for_payload = event_name_for_payload
+        self._serialize_sse_event = serialize_sse_event
+        self._mark_stream_started = mark_stream_started
+        self._mark_stream_closed = mark_stream_closed
+        self._sleep_seconds = sleep_seconds
+
+    def events(self, month: str | None) -> tuple[HTTPStatus, Iterable[str], dict[str, str]]:
+        current_month = month or "all"
+        scope_key = self._scope_key_for_month(current_month)
+
+        def event_stream() -> Iterable[str]:
+            self._mark_stream_started(scope_key)
+            try:
+                while True:
+                    status_payload = self._status_payload_for_scope(scope_key)
+                    event_name = self._event_name_for_payload(status_payload)
+                    yield self._serialize_sse_event(event_name, status_payload)
+                    yield self._serialize_sse_event(
+                        "heartbeat",
+                        {
+                            "scope_key": scope_key,
+                            "generated_at": status_payload.get("generated_at"),
+                            "read_model_status": status_payload.get("read_model_status"),
+                        },
+                    )
+                    self._sleep_seconds(5)
+            finally:
+                self._mark_stream_closed(scope_key)
+
+        return (
+            HTTPStatus.OK,
+            event_stream(),
+            {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
 
 
 class WorkbenchApiRoutes:
