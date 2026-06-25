@@ -23,12 +23,23 @@ Night-run expectation:
 - If a future production write validation needs a concrete business object, record the exact object criteria and safe rollback requirements in the production runbook, then defer that evidence until after local closure.
 - The intended overnight result is not another analysis-only stop. If analysis identifies a safe local implementation slice, execute it in the same run, verify it locally, update state, commit/push it, and continue.
 - Missing staging/PostgreSQL/browser/admin/write evidence must be separated from local implementation status. It may prevent global production closure, but it must not prevent local code modularization, local tests, static guards or docs/state-machine updates.
+- Interpret the three previously discussed production gates narrowly:
+  - Browser evidence gate does not mean the user merely opens Chrome. It means T0 needs an approved no-secret browser or browser-like evidence path after local closure. If unavailable, record it as production evidence deferred and keep doing local work.
+  - Admin authentication evidence does not mean the user should inspect OA and extract an admin token. T0 must not ask for tokens/cookies/secrets. Use existing non-secret seams, root SSH runtime tools, or defer this production evidence after local closure.
+  - Controlled write apply gate does not require the user to hand-pick live business rows before local implementation. If a reversible production write is later required, T0 must first write a bounded runbook with target-object criteria, rollback/cleanup and post-checks; otherwise defer it.
+- For the overnight local implementation phase, the absence of those three gates is not a reason to stop and not a reason to ask the user questions.
 
 Primary local implementation mandate:
 - First complete local modularization code. This includes splitting module-specific route, service, repository, read model, worker, freshness/barrier and IO responsibilities out of oversized catch-all owners when those responsibilities violate the architecture gates.
 - Then prove those local boundaries with targeted unit/service/API/contract/frontend tests where applicable, static architecture guards, docs impact decisions and state-machine evidence.
 - Only after local implementation closure is proven should T0 run production validation gates. Production validation must verify deployed/runtime behavior; it must not substitute for unfinished local code.
 - If local closure is partial, keep generating and executing the next local implementation prompt until every safe local slice is implemented, explicitly deferred as production-only, or blocked by a hard stop.
+- The local implementation phase must explicitly cover, as applicable:
+  - code localization: move module-specific behavior out of catch-all files into route owners, services, repositories, read model owners, worker/service owners and frontend boundary owners;
+  - boundary setting: define public/internal module surfaces and forbidden dependencies;
+  - I/O setting: define inputs, outputs, state, events, read model/freshness, permissions, audit and test contracts;
+  - old-path retirement: delete, quarantine or mark compat-only paths with owner, caller, deletion condition and static guard evidence;
+  - local proof: tests, static guards, docs impact and state-machine updates.
 
 Definition of local modular implementation closure:
 - `server.py` owns only route registration, dependency assembly, request/session/auth extraction, HTTP response mapping and explicitly documented compat-only wrappers with deletion conditions.
@@ -73,6 +84,14 @@ Local evidence hierarchy:
 - Secondary local proof: fake/stub/contract tests that prove IO shape, freshness status, force refresh, operation barrier behavior, dirty-scope enqueue contract, worker dependency boundaries and old-path quarantine.
 - Not valid as local proof by itself: line-count reduction, prompt generation, state-file status changes, unreviewed worker claims, production-only manual smoke, or "will validate later" notes.
 - A boundary may be marked `local-implementation-closed` only when its old path cannot still write canonical facts, dirty scopes, outbox events, readiness, cache, App Status or user-visible stale-as-fresh payloads.
+- Without staging DB or local `PGSQL_URL`, prefer local substitutes in this order:
+  1. pure unit tests for business rules and state transitions;
+  2. service tests with fake repositories/stores/queues/settings providers;
+  3. API contract tests through the existing in-process harness;
+  4. static architecture guards proving forbidden dependencies and residual handlers cannot return;
+  5. frontend mocked tests for user-visible freshness/barrier states;
+  6. production read-only SSH evidence only when local evidence cannot answer a runtime question safely.
+- Do not weaken assertions, skip tests, use `ignore_errors=True`, or mark stale-as-fresh merely because PostgreSQL is unavailable.
 
 Required operating mode:
 - Act as T0 only. Do not become a worker.
@@ -85,6 +104,8 @@ Required operating mode:
 - You may execute implementation inline when a slice touches tightly coupled files or when thread tooling is unavailable. Parallelism is useful, not mandatory.
 - Every loop must end with one of: committed/pushed local slice, committed/pushed state-only reconciliation, explicit deferred production evidence after local closure, or a hard-stop report.
 - Use GSD as the operating discipline: analyze, select one bounded boundary, execute it, verify it, update the state machine, generate the next prompt from current evidence, and immediately execute that prompt. Do not produce a static backlog and stop.
+- GSD loop output must be executable, not descriptive only. Each loop must either produce a verified code/test/docs/state commit or a precise hard-stop/defer record with the next executable local boundary.
+- The next prompt is a control artifact, not the deliverable. Writing `NEXT-PROMPT.md` is incomplete unless T0 then uses it to continue the same run, or a hard stop gate prevents execution.
 
 Communication language:
 - All user-facing T0 updates, T0 final answers, worker prompts, worker final answers, blocker reports, handoff summaries and closure reports must be written in Simplified Chinese.
@@ -166,6 +187,8 @@ Environment constraints:
 - Local/fake/stub tests, contract tests, static guards, API response-shape tests, frontend mocked tests and non-secret production read-only SSH evidence are valid local progress evidence.
 - Do not claim real production DB/worker/App Status/browser closure unless it was actually proven through non-secret production evidence or a controlled production operation with rollback/post-check evidence.
 - When a local test would normally require PostgreSQL, prefer existing fake repositories, temporary stores, contract tests, direct service tests, static guards or mocked API harnesses. If no local substitute can prove the contract, record the exact production-only evidence needed and continue the next safe local boundary.
+- Do not treat "no staging database" or "no pgsql URL" as an implementation blocker. They only limit which evidence can be used for final production/runtime closure.
+- Do not wait for user-supplied credentials. If a command would need a secret, replace it with a non-secret local/static/fake test or defer that production evidence after local closure.
 
 Controlled production gate:
 - `ssh finops-prod-root` is available for root SSH.
@@ -369,6 +392,10 @@ Run this loop until local modular implementation closure is proven, then continu
    - Worker handoff path format:
      `.planning/refactors/modular-io-boundaries/parallel/handoffs/<wave>-<worker-slug>.md`
    - Workers must write a handoff even for no-op/deferred/blocked results.
+   - Worker creation decision policy:
+     - Use workers when work can be split by disjoint files or independent evidence production, such as one worker for route-owner extraction analysis, one for read model repository split analysis, and one for static guard/test mapping.
+     - Execute inline when the slice touches the same hot files, especially `server.py`, a single route owner, a shared repository file, controller-only state files, or a migration where interleaved edits would be risky.
+     - Never block local progress merely because worker tools are unavailable. Fall back to inline T0 execution and record the fallback.
 
 4. Worker prompt required read list
    Every worker must read:
@@ -430,6 +457,12 @@ Run this loop until local modular implementation closure is proven, then continu
      - the exact next stop condition.
    - If implementation code changed, state updates must distinguish `analysis-closed`, `local-implementation-closed`, `static-guard-closed`, `contract-guard-closed`, `production-evidence-deferred` and `blocked-by-prerequisite` precisely. Do not collapse them into a vague `done`.
    - If the selected prompt was only partially completed, `NEXT-PROMPT.md` must continue from the remaining concrete gap, not restart the whole topic.
+   - `NEXT-PROMPT.md` generation must include:
+     - previous prompt completion percentage or status, based on git/tests/state evidence;
+     - exact remaining gap from the previous prompt, if partial;
+     - the next queue row or newly inserted local-code row;
+     - why the next prompt is local implementation, local guard, production evidence or hard-stop follow-up;
+     - explicit stop condition for the next execution slice.
    - Use precise slice statuses:
      - `analysis-closed`
      - `contract-guard-closed`
@@ -472,6 +505,8 @@ Run this loop until local modular implementation closure is proven, then continu
      - how the state machine should transition when the slice closes.
    - Execute the generated prompt in the same controller run. Do not stop after writing `NEXT-PROMPT.md`.
    - If the next prompt would require production browser/admin/write evidence but local closure is not proven, reject that prompt as premature and select the highest-risk remaining local implementation boundary instead.
+   - If the previous prompt ended in partial code changes, the next prompt must finish or revert that precise slice before opening an unrelated implementation boundary.
+   - If the previous prompt ended in analysis-only and identified a safe implementation, the next prompt must be implementation-first, not another broad analysis pass.
 
 10. Local implementation closure audit
    Only claim local modular implementation closure when all are proven:
