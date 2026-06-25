@@ -31,6 +31,7 @@
 | 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service |
 | Refresh scope | `cost_statistics` manifest | active/all month + parent aggregate |
 | 关系变更 | workbench relation/downstream lifecycle | 转换为受影响 cost_statistics scopes |
+| 导入确认 | import processing service/job result | 返回规范化后的 cost_statistics operation barrier targets，月份输入经 scope policy 展开为 active/all shards 与 parent aggregate |
 
 ## 输出 I/O
 
@@ -39,6 +40,7 @@
 | 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness |
 | Parent rollup | read model repository | scoped parent aggregate |
 | Dirty scope | runtime queue | fan-out 到必要 parent/month scopes |
+| Write target visibility | 导入/关系写 API | 上游写操作必须显式透出 `cost_statistics` targets，成本统计页面自身保持纯读面 |
 
 ## 持久化与投影
 
@@ -71,10 +73,12 @@
 - `tests/test_cost_statistics_sql_runtime.py`
 - `tests/test_cost_statistics_api.py`
 - `tests/test_cost_statistics_runtime_service.py`
+- `tests/test_import_processing_service.py`
 - `web/e2e/cost-statistics-flow.spec.ts`
 - `web/e2e/cost-statistics-relation-fanout.spec.ts`
 
 ## 当前缺口和删除条件
 
 - 将后端 read model 文件范围同步回模块 README。
-- 删除旧查询路径前必须验证 parent rollup、relation fan-out、fresh/stale UI。
+- 删除旧查询路径前必须验证 parent rollup、relation/import fan-out、fresh/stale UI。
+- 成本统计页面无直接写 API；若新增设置或来源修正写入口，必须返回 cost_statistics operation barrier targets，不能只依赖页面刷新兜底。

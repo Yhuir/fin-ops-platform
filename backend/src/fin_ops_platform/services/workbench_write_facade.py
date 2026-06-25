@@ -2557,7 +2557,7 @@ class WorkbenchWriteFacade:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cash_pass_through_request", "message": str(exc)},
             )
-        self._after_cash_special_relation_update(
+        affected_scope_keys = self._after_cash_special_relation_update(
             month=month,
             relation=updated_relation,
             request_id=request_id,
@@ -2571,6 +2571,8 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "affected_months": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来过账。",
             },
@@ -2624,7 +2626,7 @@ class WorkbenchWriteFacade:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cash_ticket_purchase_request", "message": str(exc)},
             )
-        self._after_cash_special_relation_update(
+        affected_scope_keys = self._after_cash_special_relation_update(
             month=month,
             relation=updated_relation,
             request_id=request_id,
@@ -2638,6 +2640,8 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "affected_months": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来买票情况。",
             },
@@ -2672,7 +2676,7 @@ class WorkbenchWriteFacade:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cancel_cash_special_request", "message": str(exc)},
             )
-        self._after_cash_special_relation_update(
+        affected_scope_keys = self._after_cash_special_relation_update(
             month=month,
             relation=updated_relation,
             request_id=request_id,
@@ -2686,6 +2690,8 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "affected_months": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已取消现金往来特殊处理。",
             },
@@ -2901,6 +2907,9 @@ class WorkbenchWriteFacade:
             request_id=request_id,
             schedule_started_at=monotonic(),
         )
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(
+            {"affected_scope_keys": changed_scope_keys}
+        )
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -2910,6 +2919,8 @@ class WorkbenchWriteFacade:
                 "case_id": str(relation.get("case_id") or ""),
                 "exception_case_id": str(exception_case["id"]),
                 "affected_row_ids": row_ids,
+                "affected_months": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "amount_summary": amount_summary,
                 "message": "已确认还清个人暂借款。",
             },
@@ -3021,6 +3032,9 @@ class WorkbenchWriteFacade:
             )
         except _WorkbenchWritePersistenceError as exc:
             return self._persistence_unavailable_result(str(exc))
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(
+            {"affected_scope_keys": changed_scope_keys}
+        )
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -3028,6 +3042,8 @@ class WorkbenchWriteFacade:
                 "action": "cancel_exception",
                 "month": month,
                 "affected_row_ids": [row["id"] for row in updated_rows],
+                "affected_scope_keys": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_ids": exception_case_ids,
                 "message": f"已取消 {len(updated_rows)} 条记录的异常处理。",
@@ -3074,6 +3090,7 @@ class WorkbenchWriteFacade:
             )
 
         case_payload = result["case"]
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -3081,6 +3098,8 @@ class WorkbenchWriteFacade:
                 "action": "oa_bank_exception",
                 "month": month,
                 "affected_row_ids": list(result.get("affected_row_ids") or row_ids),
+                "affected_scope_keys": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": list(result.get("updated_rows") or []),
                 "exception_case_id": str(case_payload.get("id") or ""),
                 "exception_case_ids": [str(case_payload.get("id") or "")],
@@ -3139,6 +3158,9 @@ class WorkbenchWriteFacade:
             )
         except _WorkbenchWritePersistenceError as exc:
             return self._persistence_unavailable_result(str(exc))
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(
+            {"affected_scope_keys": changed_scope_keys}
+        )
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -3146,6 +3168,8 @@ class WorkbenchWriteFacade:
                 "action": "ignore_row",
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
+                "affected_scope_keys": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_id": exception_case_id,
                 "exception_case_ids": [exception_case_id],
@@ -3189,6 +3213,9 @@ class WorkbenchWriteFacade:
             )
         except _WorkbenchWritePersistenceError as exc:
             return self._persistence_unavailable_result(str(exc))
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(
+            {"affected_scope_keys": changed_scope_keys}
+        )
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -3196,6 +3223,8 @@ class WorkbenchWriteFacade:
                 "action": "unignore_row",
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
+                "affected_scope_keys": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_ids": exception_case_ids,
                 "message": "已撤回忽略 1 条记录。",
@@ -3287,7 +3316,7 @@ class WorkbenchWriteFacade:
         relation: dict[str, object],
         request_id: str | None,
         action_name: str,
-    ) -> None:
+    ) -> list[str]:
         row_ids = self._normalize_row_ids(list(relation.get("row_ids") or []))
         changed_scope_keys = list(
             self._scope_keys_for_row_ids(
@@ -3307,6 +3336,9 @@ class WorkbenchWriteFacade:
             metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
             request_id=request_id,
             schedule_started_at=monotonic(),
+        )
+        return WorkbenchWriteFacade._operation_affected_scope_keys(
+            {"affected_scope_keys": changed_scope_keys}
         )
 
     @staticmethod

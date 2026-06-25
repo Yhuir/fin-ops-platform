@@ -117,6 +117,9 @@ export type TaxCertifiedImportConfirmedResult = {
   fileCount: number;
   months: string[];
   persistedRecordCount: number;
+  readModelScopeKeys: string[];
+  freshnessTargets: OperationBarrierTarget[];
+  operationBarrierTargets: OperationBarrierTarget[];
 };
 
 export type TaxCertifiedImportQueuedResult = {

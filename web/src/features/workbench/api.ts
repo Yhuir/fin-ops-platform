@@ -528,6 +528,22 @@ type ApiWorkbenchActionResult = {
     scopeKey?: unknown;
     scope_key?: unknown;
   }>;
+  operationBarrierTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operation_barrier_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
   operationProjection?: ApiWorkbenchOperationProjection;
   operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
@@ -555,9 +571,10 @@ export type WorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "affectedScopeKeys"> & {
+export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "operationBarrierTargets" | "affectedScopeKeys"> & {
   affectedScopeKeys: string[];
   freshnessTargets: WorkbenchActionFreshnessTarget[];
+  operationBarrierTargets: WorkbenchActionFreshnessTarget[];
   operationProjection?: WorkbenchOperationProjection;
 };
 
@@ -657,6 +674,22 @@ type ApiWorkbenchExceptionApplyResult = {
     scope_key?: unknown;
   }>;
   freshnessTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operation_barrier_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operationBarrierTargets?: Array<{
     readModelKey?: unknown;
     read_model_key?: unknown;
     scopeType?: unknown;
@@ -1737,6 +1770,8 @@ function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): Wo
 function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
@@ -1745,7 +1780,8 @@ function mapWorkbenchExceptionApplyResult(
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
     affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
       .filter((scopeKey) => scopeKey !== "all"),
-    freshnessTargets: cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
@@ -3028,17 +3064,24 @@ function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchA
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
   const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
   const {
     operationProjection: _rawOperationProjection,
+    operation_projection: _rawOperationProjectionSnake,
     freshnessTargets: _rawFreshnessTargets,
+    freshness_targets: _rawFreshnessTargetsSnake,
+    operationBarrierTargets: _rawOperationBarrierTargets,
+    operation_barrier_targets: _rawOperationBarrierTargetsSnake,
     affectedScopeKeys: _rawAffectedScopeKeys,
+    affected_scope_keys: _rawAffectedScopeKeysSnake,
     ...rest
   } = payload;
   return {
     ...rest,
     affectedScopeKeys,
     freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     ...(operationProjection ? { operationProjection } : {}),
   };
 }

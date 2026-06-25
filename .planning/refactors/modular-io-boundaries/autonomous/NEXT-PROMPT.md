@@ -12,20 +12,20 @@ Continue the user-authorized `main-read-model-closure` run from the expanded 202
 - Wave 1 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-1-static-guard-and-write-target-inventory-2026-06-26.md`.
 - Wave 2 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-2-write-target-envelope-and-frontend-freshness-2026-06-26.md`.
 - Wave 3 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-3-remaining-write-target-coverage-and-legacy-path-quarantine-2026-06-26.md`.
+- Wave 4 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-4-import-cost-tax-balance-and-legacy-deletion-2026-06-26.md`.
 - Admin Token was acquired through secure popup for the current controller session. Never print, hash, encode, persist or copy it into prompts, logs, files, docs, shell history, screenshots, test fixtures or worker prompts.
 - User has approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
 - Missing business inverse restore path is not a blocker by itself. It must route into the preapproved bounded DB restore protocol; only missing operation-before snapshot, exact predicate, transaction safety, or post-restore verification can hard-stop sample recovery.
 
 ## Next Boundary
 
-`main-read-model-closure:wave-4-import-cost-tax-balance-and-legacy-deletion`
+`main-read-model-closure:wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep`
 
 Goal:
 
-- Close the remaining high-impact write families that can still leave page read models stale or old-path polluted.
-- Either add unified target envelopes and frontend barrier waits, or produce tested non-applicability/deletion proof.
+- Close the remaining OA-driven/manual import and queued job completion read-model freshness paths.
 - Delete old code when caller proof is complete; otherwise hard-quarantine compat-only paths with owner, caller list, deletion condition and static guard.
-- Keep the wave high-efficiency and multi-module, but do not claim PSCIP-L4 until production rollout/evidence gates pass.
+- Prepare the production evidence wave after local PSCIP-L3 gates pass, without claiming PSCIP-L4 early.
 
 Required first steps:
 
@@ -35,7 +35,7 @@ Required first steps:
    - `AGENTS.md`
    - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-write-target-inventory-2026-06-26.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-3-remaining-write-target-coverage-and-legacy-path-quarantine-2026-06-26.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-4-import-cost-tax-balance-and-legacy-deletion-2026-06-26.md`
    - `docs/modules/read-models/boundary-io.md`
    - `docs/modules/runtime-workers/boundary-io.md`
    - affected module `boundary-io.md` files for every module touched in this wave.
@@ -43,33 +43,28 @@ Required first steps:
 
 Implementation priorities:
 
-- Imports/OA-driven writes:
-  - confirm/revoke/delete/reopen/import flows must expose affected read model scopes or be routed to existing owners that do.
-  - confirm no normal production path returns stale-as-fresh after import mutation.
-- Cost statistics:
-  - source/settings writes and parent aggregate visibility must have target envelopes or tested non-applicability.
-  - preserve cost/tax shared projection boundaries and avoid making `tax_offset` the source for cost facts.
-- Tax offset:
-  - tax certified import confirm/apply/warmup/rebuild flows must return or enqueue explicit scoped targets.
-  - ensure frontend import confirm waits on operation barrier or job completion plus fresh reload.
-- Bank account balance induced writes:
-  - bank-detail/import/category paths that affect `bank_account_balance` must have explicit target evidence or documented owner handoff.
-- Remaining Workbench/cash-special/personal-advance action surfaces:
-  - normal production actions must not drop affected scopes.
-  - relation writes target `workbench_relation`; active generation `workbench` remains the special projection exception.
+- OA/manual import:
+  - OA manual import/create/refresh/remove flows must expose or be routed to explicit read model targets.
+  - Confirm affected scopes include workbench/workbench_relation/search/invoice_lifecycle/pending/input/output/oa_pending_payment/cost/tax as applicable.
+- Queued import job completion:
+  - When a queued import job finishes and the UI consumes job result payload/summary, the result must expose operation barrier targets or a tested non-applicability proof.
+  - Do not fabricate targets on queued admission before the affected scopes are knowable.
 - Legacy deletion/quarantine:
   - stale-as-fresh defaults
   - legacy Workbench action route surfaces
-  - legacy ETC batch route surfaces
+  - legacy ETC/import route surfaces
   - direct dirty/outbox SQL writes outside approved gateway/transaction boundaries
   - live-scan fallback that can return fresh-looking payloads
   - compat repository methods callable from normal production paths
+- Production evidence prep:
+  - Prepare scripts/runbook for post-rollout read/write/freshness/performance samples.
+  - Every mutating sample must have a restore plan before apply: business inverse preferred; otherwise preapproved bounded DB restore with operation-before snapshot, exact predicate, single transaction and post-restore verification.
 
 Acceptance:
 
 - Do not implement Go, Go Fiber or Go Worker.
 - No secret values are printed or written.
-- No production DB write, queue mutation, readiness mutation, force refresh, repair, rollout or mutating HTTP sample unless the wave explicitly transitions into a separate production evidence wave after verified local L3.
+- No production DB write, queue mutation, readiness mutation, force refresh, repair, rollout or mutating HTTP sample unless this wave explicitly transitions into a separate production evidence wave after verified local L3.
 - Existing API response shape remains backward-compatible unless the change is documented and tests are updated.
 - Every write family touched by this wave has tests proving target envelope behavior, deletion/quarantine proof or non-applicability.
 - Frontend touched pages fail closed on missing/unknown/non-fresh status and wait for operation barrier/fresh reload when the write affects read model visibility.
@@ -94,8 +89,8 @@ Run frontend targeted tests for every touched page/API module. If a broad verifi
 
 End of boundary:
 
-- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-4-import-cost-tax-balance-and-legacy-deletion-2026-06-26.md`.
+- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`.
 - Update `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
 - Update this `NEXT-PROMPT.md` with the next executable wave.
-- Commit verified Wave 4 artifacts on `main`.
+- Commit verified Wave 5 artifacts on `main`.
 - Immediately continue to the next wave if safe implementation work remains.

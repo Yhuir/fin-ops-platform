@@ -377,7 +377,10 @@ export default function TaxOffsetPage() {
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
-      const synced = await waitForTaxOffsetBarrier();
+      const barrierTargets = result.operationBarrierTargets.filter((target) => target.scopeKey);
+      const synced = barrierTargets.length > 0
+        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
+        : await waitForTaxOffsetBarrier();
       if (!synced) {
         setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，后台同步尚未完成，请稍后刷新。`);
         setPlanFeedback(null);

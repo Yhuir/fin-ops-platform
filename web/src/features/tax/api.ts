@@ -165,6 +165,12 @@ type ApiTaxCertifiedImportConfirmPayload = {
   success?: boolean;
   batch?: ApiTaxCertifiedImportBatch;
   import_job?: ApiTaxCertifiedImportJob;
+  read_model_scope_keys?: unknown;
+  readModelScopeKeys?: unknown;
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
 };
 
 type ApiTaxCertifiedImportJobPayload = {
@@ -345,7 +351,12 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
   };
 }
 
-function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifiedImportConfirmedResult {
+function mapCertifiedImportBatch(
+  batch: ApiTaxCertifiedImportBatch,
+  payload?: ApiTaxCertifiedImportConfirmPayload,
+): TaxCertifiedImportConfirmedResult {
+  const freshnessTargets = targetList(payload?.freshness_targets ?? payload?.freshnessTargets);
+  const operationBarrierTargets = targetList(payload?.operation_barrier_targets ?? payload?.operationBarrierTargets);
   return {
     status: "confirmed",
     batchId: batch.id,
@@ -354,6 +365,9 @@ function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifie
     fileCount: batch.file_count,
     months: batch.months,
     persistedRecordCount: batch.persisted_record_count,
+    readModelScopeKeys: stringList(payload?.read_model_scope_keys ?? payload?.readModelScopeKeys),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 
@@ -535,7 +549,7 @@ export async function confirmTaxCertifiedImport(sessionId: string): Promise<TaxC
   if (!payload.batch) {
     throw new Error("Confirmed tax certified import response is missing batch.");
   }
-  return mapCertifiedImportBatch(payload.batch);
+  return mapCertifiedImportBatch(payload.batch, payload);
 }
 
 export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {

@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | Refresh scope | `bank_account_balance` manifest | 仅支持 `all` |
 | 查询请求 | `BankDetailsApplicationService` | 读取快照，不现场扫描全量流水 |
+| 银行流水导入确认 | import processing service/job result | 通过银行导入的 write target envelope 暴露 `bank_account_balance:all` operation barrier target |
 | Backfill 请求 | `bank_account_balance_backfill.py` | 显式运维入口 |
 
 ## 输出 I/O
@@ -38,6 +39,7 @@
 | --- | --- | --- |
 | 账户余额 snapshot | bank details API | fresh gate 后返回 |
 | Dirty scope/status | runtime queue/app status | all-only scope |
+| Write target visibility | 导入页面/后台 job | 银行流水导入完成后必须让调用方可等待 `read_model_key=bank_account_balance`、`scope_key=all` |
 
 ## 持久化与投影
 
@@ -69,8 +71,10 @@
 
 - `tests/test_bank_account_balance_read_model.py`
 - `tests/test_bank_account_balance_derived_lifecycle_executor.py`
+- `tests/test_import_processing_service.py`
 - `tests/test_read_model_manifest.py`
 
 ## 当前缺口和删除条件
 
 - 若未来账户余额变为按账号/月分区，必须先更新 manifest、scope policy、worker 和本文档。
+- 删除旧账户余额即时计算路径前，必须保留银行流水导入确认/job result 的 `bank_account_balance:all` operation barrier 回归。

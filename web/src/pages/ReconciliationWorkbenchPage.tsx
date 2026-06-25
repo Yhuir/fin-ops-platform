@@ -311,6 +311,9 @@ function actionFreshnessTargets(result: WorkbenchActionResult | null): Operation
   if (!result) {
     return [];
   }
+  if (result.operationBarrierTargets.length > 0) {
+    return result.operationBarrierTargets.filter((target) => target.scopeKey !== "all");
+  }
   if (result.freshnessTargets.length > 0) {
     return result.freshnessTargets.filter((target) => target.scopeKey !== "all");
   }
@@ -1579,9 +1582,11 @@ export default function ReconciliationWorkbenchPage() {
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    const targets = result.freshnessTargets.length > 0
-      ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
-      : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
+    const targets = result.operationBarrierTargets.length > 0
+      ? result.operationBarrierTargets.filter((target) => target.scopeKey !== "all")
+      : result.freshnessTargets.length > 0
+        ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
+        : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
     if (targets.length > 0) {
       onProgress({
         phase: "syncing",

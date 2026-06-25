@@ -80,6 +80,7 @@ export type WorkbenchExceptionApplyResult = {
   affectedRowIds: string[];
   affectedScopeKeys: string[];
   freshnessTargets: WorkbenchExceptionFreshnessTarget[];
+  operationBarrierTargets: WorkbenchExceptionFreshnessTarget[];
   workbenchRefreshRequired: boolean;
   message?: string;
 };

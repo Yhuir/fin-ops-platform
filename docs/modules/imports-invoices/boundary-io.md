@@ -17,6 +17,7 @@
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
 - 将导入结果转化为发票源事实和 lifecycle event。
 - 通过 derived lifecycle 触发相关 read model。
+- 导入确认结果或完成后的 job result 必须透出 read model write target envelope，覆盖 tax/invoice/search/pending/input/output/cost/workbench 下游 targets。
 
 ### 不负责
 
@@ -39,11 +40,12 @@
 | 预览 rows/errors | 前端页面 | 未确认前不作为业务事实 |
 | 导入结果 | state store/repository | 可审计、可幂等 |
 | Dirty scope | derived lifecycle/runtime queue | invoice lifecycle/search/input/output/pending invoice |
+| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`，前端同步完成时优先等待 targets |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 影响 read model：`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`。
+- 影响 read model：`tax_offset`、`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`、`workbench`、`workbench_relation`、`oa_pending_payment`、`cost_statistics`。
 - Worker：import job/runtime handlers。
 
 ## 文件范围
@@ -69,8 +71,11 @@
 - `tests/test_import_formalization_api.py`
 - `tests/test_import_preview_audit.py`
 - `tests/test_import_service.py`
+- `tests/test_import_processing_service.py`
+- `web/src/test/ImportsApi.test.ts`
 - `web/e2e/imports-invoices-flow.spec.ts`
 
 ## 当前缺口和删除条件
 
 - 发票模板变更必须覆盖进项/销项/待找/search 的 downstream fresh 状态。
+- 删除旧同步导入路径前，必须证明确认响应/job result 仍能给出所有下游 read model 的 operation barrier targets。

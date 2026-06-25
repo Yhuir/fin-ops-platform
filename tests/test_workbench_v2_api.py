@@ -4329,6 +4329,95 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertNotIn("updated_rows", cancel_payload)
 
+        app_for_cash_special = build_application()
+        cash_special_open = json.loads(app_for_cash_special.handle_request("GET", "/api/workbench?month=2026-03").body)
+        cash_oa_row = flatten_groups(cash_special_open["open"]["groups"], "oa")[0]
+        cash_bank_row = flatten_groups(cash_special_open["open"]["groups"], "bank")[0]
+        app_for_cash_special._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-CASH-SPECIAL-001",
+            row_ids=[cash_oa_row["id"], cash_bank_row["id"]],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="2026-03",
+        )
+        cash_pass_response = app_for_cash_special.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-cash-pass-through",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [cash_oa_row["id"], cash_bank_row["id"]],
+                    "note": "cash pass target envelope regression",
+                }
+            ),
+        )
+        self.assertEqual(cash_pass_response.status_code, 200)
+        cash_pass_payload = json.loads(cash_pass_response.body)
+        self.assertEqual(cash_pass_payload["action"], "confirm_cash_pass_through")
+        self.assertEqual(cash_pass_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(cash_pass_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            cash_pass_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
+        cash_cancel_response = app_for_cash_special.handle_request(
+            "POST",
+            "/api/workbench/actions/cancel-cash-special",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [cash_oa_row["id"], cash_bank_row["id"]],
+                    "note": "cash cancel target envelope regression",
+                }
+            ),
+        )
+        self.assertEqual(cash_cancel_response.status_code, 200)
+        cash_cancel_payload = json.loads(cash_cancel_response.body)
+        self.assertEqual(cash_cancel_payload["action"], "cancel_cash_special")
+        self.assertEqual(cash_cancel_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(cash_cancel_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            cash_cancel_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
+
+        app_for_cash_ticket = build_application()
+        cash_ticket_open = json.loads(app_for_cash_ticket.handle_request("GET", "/api/workbench?month=2026-03").body)
+        ticket_oa_row = flatten_groups(cash_ticket_open["open"]["groups"], "oa")[0]
+        ticket_bank_row = flatten_groups(cash_ticket_open["open"]["groups"], "bank")[0]
+        ticket_invoice_row = flatten_groups(cash_ticket_open["open"]["groups"], "invoice")[0]
+        app_for_cash_ticket._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-CASH-TICKET-001",
+            row_ids=[ticket_oa_row["id"], ticket_bank_row["id"], ticket_invoice_row["id"]],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="2026-03",
+        )
+        cash_ticket_response = app_for_cash_ticket.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-cash-ticket-purchase",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [ticket_oa_row["id"], ticket_bank_row["id"], ticket_invoice_row["id"]],
+                    "cash_amount": "100.00",
+                    "ticket_cost_amount": "0.00",
+                    "note": "cash ticket target envelope regression",
+                }
+            ),
+        )
+        self.assertEqual(cash_ticket_response.status_code, 200)
+        cash_ticket_payload = json.loads(cash_ticket_response.body)
+        self.assertEqual(cash_ticket_payload["action"], "confirm_cash_ticket_purchase")
+        self.assertEqual(cash_ticket_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(cash_ticket_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            cash_ticket_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
+
         app_for_bank_exception = build_application()
         initial_open_for_exception = json.loads(app_for_bank_exception.handle_request("GET", "/api/workbench?month=2026-03").body)
         bank_exception_row = flatten_groups(initial_open_for_exception["open"]["groups"], "bank")[0]
@@ -4684,6 +4773,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["amount_summary"]["bank_credit_total"], "300000.00")
         self.assertEqual(payload["amount_summary"]["bank_net_total"], "0.00")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
+        self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
 
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["case_id"])
         self.assertIsNotNone(relation)
@@ -6089,6 +6184,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(cancel_payload["success"])
         self.assertEqual(cancel_payload["action"], "cancel_exception")
         self.assertEqual(cancel_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+        self.assertEqual(cancel_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            cancel_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         updated_oa = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
@@ -6287,6 +6388,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(ignore_payload["success"])
         self.assertEqual(ignore_payload["action"], "ignore_row")
         self.assertEqual(ignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
+        self.assertEqual(ignore_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(ignore_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            ignore_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         ignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(ignored_case["status"], "ignored")
 
@@ -6313,6 +6420,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(unignore_payload["success"])
         self.assertEqual(unignore_payload["action"], "unignore_row")
         self.assertEqual(unignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
+        self.assertEqual(unignore_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(unignore_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            unignore_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         unignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(unignored_case["status"], "cancelled")
 
@@ -6344,6 +6457,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(response_payload["success"])
         self.assertEqual(response_payload["action"], "oa_bank_exception")
         self.assertEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+        self.assertEqual(response_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            response_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         self.assertEqual(response_payload["exception_case_ids"], [response_payload["exception_case_id"]])
         exception_case = app._workbench_exception_case_service.snapshot()["cases"][response_payload["exception_case_id"]]
         self.assertEqual(exception_case["status"], "open")
@@ -6386,6 +6505,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(response_payload["success"])
         self.assertEqual(response_payload["action"], "oa_bank_exception")
         self.assertCountEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"], invoice_row["id"]])
+        self.assertEqual(response_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            response_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         self.assertIn(response_payload["exception_case_id"], app._workbench_exception_case_service.snapshot()["cases"])
 
     def test_confirm_link_supports_cross_month_selection_in_all_time_view(self) -> None:

@@ -10526,7 +10526,18 @@ class Application:
             self._background_job_service.run_job(job, run_file_import)
 
         response_payload = self._serialize_file_session(session)
-        response_payload["job"] = job.to_payload()
+        job_payload = job.to_payload()
+        result_summary = job_payload.get("result_summary") if isinstance(job_payload, dict) else None
+        if isinstance(result_summary, dict):
+            for key in (
+                "affected_scope_keys",
+                "read_model_scope_keys",
+                "freshness_targets",
+                "operation_barrier_targets",
+            ):
+                if key in result_summary:
+                    response_payload[key] = result_summary[key]
+        response_payload["job"] = job_payload
         return self._json_response(HTTPStatus.ACCEPTED, response_payload)
 
     @staticmethod

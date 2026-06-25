@@ -248,6 +248,7 @@ describe("workbench api bank amount mapping", () => {
           affected_months: ["2026-05"],
           affected_scope_keys: ["2026-05"],
           freshness_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
+          operation_barrier_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
           operation_projection: {
             after: {
               paired_groups: [],
@@ -306,6 +307,7 @@ describe("workbench api bank amount mapping", () => {
     expect(result.operationProjection?.after.openGroups[0].rows.oa.map((row) => row.id)).toEqual(["oa-partial"]);
     expect(result.operationProjection?.after.openGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
     expect(result.operationProjection?.after.openGroups[0].rows.invoice).toEqual([]);
+    expect(result.operationBarrierTargets).toEqual([{ readModelKey: "workbench_relation", scopeKey: "2026-05" }]);
   });
 
   test("loads initial workbench page from summary and zone group endpoints", async () => {
@@ -2688,6 +2690,12 @@ describe("workbench exception api", () => {
               scope_key: "2026-05",
             },
           ],
+          operation_barrier_targets: [
+            {
+              read_model_key: "workbench_relation",
+              scope_key: "2026-05",
+            },
+          ],
           workbench_refresh_required: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -2731,6 +2739,12 @@ describe("workbench exception api", () => {
       affectedRowIds: ["bank-1"],
       affectedScopeKeys: ["2026-05"],
       freshnessTargets: [
+        {
+          readModelKey: "workbench_relation",
+          scopeKey: "2026-05",
+        },
+      ],
+      operationBarrierTargets: [
         {
           readModelKey: "workbench_relation",
           scopeKey: "2026-05",

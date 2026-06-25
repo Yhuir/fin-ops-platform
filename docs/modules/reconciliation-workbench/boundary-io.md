@@ -17,7 +17,7 @@
 - 关联台页面展示、候选分组、异常处理、配对/撤回等用户交互入口。
 - 读取 `workbench` active generation read model，展示 fresh/stale/refreshing 状态。
 - 通过公开 action/relation 边界触发业务写操作和下游 dirty scope。
-- 配对确认、取消关联、撤回关联、旧异常分类/标记等写操作返回统一 write target envelope；关系写目标是 `workbench_relation`，不是普通 `workbench` active generation。
+- 配对确认、取消关联、撤回关联、旧异常分类/标记、现金特殊、票款购买、个人垫付还款、忽略/取消忽略等写操作返回统一 write target envelope；关系写目标是 `workbench_relation`，不是普通 `workbench` active generation。
 
 ### 不负责
 
@@ -77,7 +77,7 @@
 - Read model/cache/worker：`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_dirty_queue_wiring.py`。
 - Service/API：`tests/test_workbench_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_query_facade.py`。
 - Frontend/e2e：`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts`。
-- `WorkbenchV2ApiTests.test_api_workbench_actions_return_unified_result_structure` 覆盖 confirm/cancel/update-bank-exception/mark-exception 的 target envelope。
+- `WorkbenchV2ApiTests.test_api_workbench_actions_return_unified_result_structure` 覆盖 confirm/cancel/update-bank-exception/mark-exception/cash-special/cash-ticket 的 target envelope；其他异常与 ignore/unignore 路径由相邻 WorkbenchV2ApiTests 覆盖。
 
 ## 当前缺口和删除条件
 
