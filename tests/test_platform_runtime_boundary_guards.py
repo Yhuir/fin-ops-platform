@@ -521,6 +521,49 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_pending_invoice_read_export_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_path = APP_ROOT / "routes_pending_invoices.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "PendingInvoiceApiRoutes")
+        for marker in (
+            "def route",
+            "/api/pending-invoices/rows",
+            "/api/pending-invoices/filter-options",
+            "/api/pending-invoices/invoice-candidates",
+            "/api/pending-invoices/export",
+            "def _export_read",
+            "export_response",
+        ):
+            if marker not in route_class:
+                violations.append(f"pending invoice route owner is missing marker {marker}")
+
+        if "_pending_invoice_routes().route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("server.py does not delegate pending invoice route dispatch to the route owner")
+        if "def _pending_invoice_export_response" not in server_source:
+            violations.append("server.py no longer provides the pending invoice export platform response port")
+
+        for forbidden in (
+            "def _handle_api_pending_invoice_rows",
+            "def _handle_api_pending_invoice_filter_options",
+            "def _handle_api_pending_invoice_candidates",
+            "def _handle_api_pending_invoice_batch_candidates",
+            "def _handle_api_pending_invoice_relation_detail",
+            "def _handle_api_pending_invoice_bank_transaction_detail",
+            "def _handle_api_pending_invoice_invoice_detail",
+            "def _handle_api_pending_invoice_oa_detail",
+            "def _handle_api_pending_invoice_export_preview",
+            "def _handle_api_pending_invoice_export",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns pending invoice read/export callback {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_exception_apply_mapping_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

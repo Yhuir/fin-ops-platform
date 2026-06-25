@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - read/export route callback collapse
+
+- 目标：把待找发票 rows/filter-options/candidates/detail/export-preview/export 的 HTTP mapping 从 `server.py` 迁入 `PendingInvoiceApiRoutes.route(...)`，继续收敛 `server.py` 路由边界。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_pending_invoices.py`、`backend/src/fin_ops_platform/app/server.py`、`tests/test_platform_runtime_boundary_guards.py` 和 modular IO autonomous state。
+- 关键决策：读侧和导出 mapping 通过显式端口接入 read-session、JSON response、JSON body loader、PendingInvoiceError response 和导出审计/XLSX response；导出审计与 HTTP Response 仍留在 `server.py` 平台端口，避免 route owner 直接依赖具体 HTTP adapter。rules、attach existing 和 income status 写侧 callback 暂不迁移，等待写边界审计。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品口径、API response shape、read model freshness/source-version 合同和前端行为未变化。
+- 测试覆盖：`tests/test_pending_invoice_api.py` 覆盖 rows/filter-options/candidates/detail/export/rules/attach/income status 既有 API 回归；`tests/test_platform_runtime_boundary_guards.py` 新增 Guard，禁止迁回 app-owned pending invoice read/export callbacks。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_pending_invoices.py backend/src/fin_ops_platform/app/server.py tests/test_pending_invoice_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_pending_invoice_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明待找发票模块或全局闭环。
+- 后续事项：审计 remaining rules/attach-existing/income-status 写侧 callback，明确权限、write-session、persist-state、idempotency 和恢复语义后再选择迁移切片。
+
 ## 2026-06-25 - route-owner audit
 
 - 目标：审计 `/api/pending-invoices*` 在 `server.py` 中的剩余 HTTP callback，并选择首个安全 route-owner 拆分切片。

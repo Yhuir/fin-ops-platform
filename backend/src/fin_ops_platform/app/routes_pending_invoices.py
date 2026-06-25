@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
@@ -22,6 +23,13 @@ class PendingInvoiceExportFile:
     content_type: str
 
 
+ReadSessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
+JsonResponse = Callable[[HTTPStatus, object], Any]
+JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
+ErrorResponse = Callable[[PendingInvoiceError], Any]
+ExportResponse = Callable[[Any | None, dict[str, list[str]], PendingInvoiceExportFile], Any]
+
+
 class PendingInvoiceApiRoutes:
     def __init__(
         self,
@@ -31,12 +39,72 @@ class PendingInvoiceApiRoutes:
         read_model_service: PendingInvoiceReadModelService,
         rules_service: PendingInvoiceRulesApplicationService,
         export_content_type: str,
+        resolve_read_session: ReadSessionResolver | None = None,
+        json_response: JsonResponse | None = None,
+        load_json_body: JsonBodyLoader | None = None,
+        error_response: ErrorResponse | None = None,
+        export_response: ExportResponse | None = None,
     ) -> None:
         self._query_service = query_service
         self._application_service = application_service
         self._read_model_service = read_model_service
         self._rules_service = rules_service
         self._export_content_type = export_content_type
+        self._resolve_read_session = resolve_read_session
+        self._json_response = json_response
+        self._load_json_body = load_json_body
+        self._error_response = error_response
+        self._export_response = export_response
+
+    def configure_platform_ports(
+        self,
+        *,
+        resolve_read_session: ReadSessionResolver,
+        json_response: JsonResponse,
+        load_json_body: JsonBodyLoader,
+        error_response: ErrorResponse,
+        export_response: ExportResponse,
+    ) -> "PendingInvoiceApiRoutes":
+        self._resolve_read_session = resolve_read_session
+        self._json_response = json_response
+        self._load_json_body = load_json_body
+        self._error_response = error_response
+        self._export_response = export_response
+        return self
+
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any | None:
+        if method == "GET" and route_path == "/api/pending-invoices/rows":
+            return self._json_read(headers, lambda: self.rows(query))
+        if method == "GET" and route_path == "/api/pending-invoices/filter-options":
+            return self._json_read(headers, lambda: self.filter_options(query))
+        if method == "GET" and route_path == "/api/pending-invoices/invoice-candidates":
+            return self._json_read(headers, lambda: (HTTPStatus.OK, self.invoice_candidates(query)))
+        if method == "POST" and route_path == "/api/pending-invoices/invoice-candidates/batch":
+            return self._json_body_read(body, headers, lambda payload: self.invoice_candidates_batch(payload))
+        if method == "GET" and route_path == "/api/pending-invoices/export-preview":
+            return self._json_read(headers, lambda: self.export_preview(query))
+        if method == "GET" and route_path == "/api/pending-invoices/export":
+            return self._export_read(query, headers)
+        if method == "GET" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/relation-detail"):
+            transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda: (HTTPStatus.OK, self.relation_detail(transaction_id, query)))
+        if method == "GET" and route_path.startswith("/api/pending-invoices/bank-transactions/") and route_path.endswith("/detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda: (HTTPStatus.OK, self.bank_transaction_detail(bank_transaction_id)))
+        if method == "GET" and route_path.startswith("/api/pending-invoices/invoices/") and route_path.endswith("/detail"):
+            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda: (HTTPStatus.OK, self.invoice_detail(invoice_id)))
+        if method == "GET" and route_path.startswith("/api/pending-invoices/oa/") and route_path.endswith("/detail"):
+            oa_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda: (HTTPStatus.OK, self.oa_detail(oa_id)))
+        return None
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         payload = self._read_model_service.rows(query)
@@ -218,6 +286,65 @@ class PendingInvoiceApiRoutes:
     def _require_mutation(session: OARequestSession | None, message: str) -> None:
         if not bool(getattr(session, "can_mutate_data", True)):
             raise PendingInvoiceError("permission_denied", message, status_code=HTTPStatus.FORBIDDEN)
+
+    def _json_read(self, headers: dict[str, str] | None, action: Callable[[], tuple[HTTPStatus, dict[str, Any]]]) -> Any:
+        _session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            status_code, payload = action()
+        except PendingInvoiceError as exc:
+            return self._error(exc)
+        return self._json(status_code, payload)
+
+    def _json_body_read(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        action: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> Any:
+        if not callable(self._load_json_body):
+            raise RuntimeError("Pending invoice body loader is not configured.")
+        _session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            result = action(payload)
+        except PendingInvoiceError as exc:
+            return self._error(exc)
+        return self._json(HTTPStatus.OK, result)
+
+    def _export_read(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            status_code, result = self.export(query)
+        except PendingInvoiceError as exc:
+            return self._error(exc)
+        if not isinstance(result, PendingInvoiceExportFile):
+            return self._json(status_code, result)
+        if not callable(self._export_response):
+            return status_code, result
+        return self._export_response(session, query, result)
+
+    def _read_session(self, headers: dict[str, str] | None) -> tuple[Any | None, Any | None]:
+        if not callable(self._resolve_read_session):
+            return None, None
+        return self._resolve_read_session(headers)
+
+    def _json(self, status_code: HTTPStatus, payload: object) -> Any:
+        if not callable(self._json_response):
+            return status_code, payload
+        return self._json_response(status_code, payload)
+
+    def _error(self, exc: PendingInvoiceError) -> Any:
+        if callable(self._error_response):
+            return self._error_response(exc)
+        raise exc
 
 
 def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:

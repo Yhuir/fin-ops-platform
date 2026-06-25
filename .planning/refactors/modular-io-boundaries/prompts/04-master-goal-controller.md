@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:pending-invoice-write-route-callback-audit-selected` after pending invoice read/export route callback collapse.
 
 ```text
 $gsd-autonomous --auto
