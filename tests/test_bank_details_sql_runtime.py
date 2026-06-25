@@ -63,6 +63,10 @@ class FakeConnection:
         self.calls.append(("execute", sql, params))
         return 0
 
+    def execute_many(self, sql: str, params_seq: list[tuple[object, ...]]) -> int:
+        self.calls.append(("execute_many", sql, tuple(params_seq)))
+        return len(params_seq)
+
     def transaction(self):
         connection = self
 
@@ -661,10 +665,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         insert_calls = [
             (sql, params)
             for method, sql, params in connection.calls
-            if method == "execute" and "insert into read_model.bank_detail_rows" in sql
+            if method == "execute_many" and "insert into read_model.bank_detail_rows" in sql
         ]
         self.assertEqual(len(insert_calls), 1)
-        insert_sql, params = insert_calls[0]
+        insert_sql, params_seq = insert_calls[0]
+        self.assertEqual(len(params_seq), 1)
+        params = params_seq[0]
         columns_match = re.search(
             r"insert into read_model\.bank_detail_rows\s*\((.*?)\)\s*values",
             insert_sql,

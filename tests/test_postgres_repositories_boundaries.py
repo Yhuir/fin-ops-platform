@@ -59,6 +59,37 @@ class RecordingConnection:
         return None
 
 
+class ValuesBulkConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple]] = []
+        self.executed_many_values: list[tuple[str, list[tuple]]] = []
+
+    def transaction(self) -> "ValuesBulkConnection":
+        return self
+
+    def __enter__(self) -> "ValuesBulkConnection":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.executed.append((" ".join(sql.split()), params))
+        return 1
+
+    def execute_many_values(self, sql: str, params_seq: list[tuple], *, chunk_size: int = 200) -> int:
+        _ = chunk_size
+        rows = list(params_seq)
+        self.executed_many_values.append((" ".join(sql.split()), rows))
+        return len(rows)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        return None
+
+
 class WorkbenchRelationWriteConnection(RecordingConnection):
     def __init__(self) -> None:
         super().__init__()
@@ -236,6 +267,73 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
     assert connection.executed[removed_events_delete_index][1] == (["retained-batch"],)
     assert connection.executed[removed_batches_delete_index][1] == (["retained-batch"],)
+
+
+def test_read_model_bulk_insert_prefers_multi_values_path() -> None:
+    connection = ValuesBulkConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_turnover_ledger_rows(
+        {
+            "scope_key": "all",
+            "rows": [
+                {
+                    "relation_id": "turnover-1",
+                    "scope_month": "2026-05",
+                    "family": "business",
+                    "status": "open",
+                    "amount": "10.00",
+                    "source_versions": {"source_version": 7},
+                }
+            ],
+        },
+        scope_key="all",
+    )
+
+    insert_calls = [
+        (sql, params)
+        for sql, params in connection.executed_many_values
+        if "insert into read_model.turnover_ledger_rows" in sql
+    ]
+    assert len(insert_calls) == 1
+    assert len(insert_calls[0][1]) == 1
+
+
+def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_workbench_relation_distribution(
+        scope_key="2026-05",
+        groups=[
+            {
+                "group_id": "case-1",
+                "relation_source": "manual",
+                "relation_kind": "linked",
+                "relation_status": "linked",
+                "bank_transaction_ids": ["txn-1"],
+                "payload": {"case_id": "case-1", "row_ids": ["txn-1"]},
+            }
+        ],
+        rows=[
+            {
+                "row_id": "txn-1",
+                "row_type": "bank_transaction",
+                "relation_status": "linked",
+                "group_ids": ["case-1"],
+            }
+        ],
+        source_versions={"source_version": 9},
+    )
+
+    bulk_sql = [sql for sql, _params in connection.executed_many]
+    assert any("insert into read_model.workbench_relation_groups" in sql for sql in bulk_sql)
+    assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
+    assert not any(
+        "insert into read_model.workbench_relation_groups" in sql
+        or "insert into read_model.workbench_relation_rows" in sql
+        for sql, _params in connection.executed
+    )
 
 
 def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:

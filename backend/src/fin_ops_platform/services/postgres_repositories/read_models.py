@@ -74,10 +74,7 @@ def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
 
 def _should_execute_many_values(sql: str) -> bool:
     normalized = " ".join(str(sql or "").lower().split())
-    return (
-        "insert into read_model.workbench_group_rows" in normalized
-        or "insert into read_model.search_index_rows" in normalized
-    )
+    return "insert into read_model." in normalized
 
 
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
@@ -1767,123 +1764,126 @@ class PostgresBankReadModelRepository:
                 "delete from read_model.bank_detail_rows where tenant_id = %s and scope_key = %s",
                 (tenant_id, normalized_scope_key),
             )
+            params_seq: list[tuple[Any, ...]] = []
             for row in list(rows or []):
                 record = _bank_detail_row_record(row, scope_key=normalized_scope_key, scope_month=scope_month, tenant_id=tenant_id)
-                connection.execute(
-                    """
-                    insert into read_model.bank_detail_rows(
-                        tenant_id, transaction_id, scope_key, scope_month, source_batch_id,
-                        legacy_source_batch_id, account_key, bank_name, account_last4, account_no,
-                        account_name, trade_time, trade_date, trade_time_sort, direction,
-                        direction_label, amount, signed_amount, balance, currency,
-                        counterparty_name, summary, purpose, manual_category_code,
-                        manual_category_label, manual_category_path, manual_category_primary_label,
-                        manual_category_sub_label, manual_category_third_label, manual_category_label_path, manual_category_source,
-                        manual_category_version, manual_confirmed_category_code, auto_category_code, auto_category_label,
-                        auto_category_path, auto_category_primary_label, auto_category_sub_label, auto_category_third_label,
-                        auto_category_label_path, auto_category_source, auto_category_rule_code,
-                        auto_category_reason, auto_category_confidence, auto_category_rule_version,
-                        auto_candidate_category_codes, auto_candidate_categories,
-                        effective_category_code, effective_category_label, effective_category_path,
-                        effective_category_primary_label, effective_category_sub_label, effective_category_third_label,
-                        effective_category_label_path, effective_category_source,
-                        effective_turnover_role, effective_turnover_action_type, effective_turnover_family,
-                        category_version, category_source,
-                        category_resolution_status, category_rule_version,
-                        oa_relation_tag, invoice_relation_tag, relation_tags, relation_case_id,
-                        search_text, schema_version, source_versions, generated_at, payload, raw_payload
-                    )
-                    values (
-                        %s, %s, %s, %s::date, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s::timestamptz, %s::date, %s::timestamptz, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
-                    )
-                    on conflict (tenant_id, transaction_id) do update set
-                        scope_key = excluded.scope_key,
-                        scope_month = excluded.scope_month,
-                        source_batch_id = excluded.source_batch_id,
-                        legacy_source_batch_id = excluded.legacy_source_batch_id,
-                        account_key = excluded.account_key,
-                        bank_name = excluded.bank_name,
-                        account_last4 = excluded.account_last4,
-                        account_no = excluded.account_no,
-                        account_name = excluded.account_name,
-                        trade_time = excluded.trade_time,
-                        trade_date = excluded.trade_date,
-                        trade_time_sort = excluded.trade_time_sort,
-                        direction = excluded.direction,
-                        direction_label = excluded.direction_label,
-                        amount = excluded.amount,
-                        signed_amount = excluded.signed_amount,
-                        balance = excluded.balance,
-                        currency = excluded.currency,
-                        counterparty_name = excluded.counterparty_name,
-                        summary = excluded.summary,
-                        purpose = excluded.purpose,
-                        manual_category_code = excluded.manual_category_code,
-                        manual_category_label = excluded.manual_category_label,
-                        manual_category_path = excluded.manual_category_path,
-                        manual_category_primary_label = excluded.manual_category_primary_label,
-                        manual_category_sub_label = excluded.manual_category_sub_label,
-                        manual_category_third_label = excluded.manual_category_third_label,
-                        manual_category_label_path = excluded.manual_category_label_path,
-                        manual_category_source = excluded.manual_category_source,
-                        manual_category_version = excluded.manual_category_version,
-                        manual_confirmed_category_code = excluded.manual_confirmed_category_code,
-                        auto_category_code = excluded.auto_category_code,
-                        auto_category_label = excluded.auto_category_label,
-                        auto_category_path = excluded.auto_category_path,
-                        auto_category_primary_label = excluded.auto_category_primary_label,
-                        auto_category_sub_label = excluded.auto_category_sub_label,
-                        auto_category_third_label = excluded.auto_category_third_label,
-                        auto_category_label_path = excluded.auto_category_label_path,
-                        auto_category_source = excluded.auto_category_source,
-                        auto_category_rule_code = excluded.auto_category_rule_code,
-                        auto_category_reason = excluded.auto_category_reason,
-                        auto_category_confidence = excluded.auto_category_confidence,
-                        auto_category_rule_version = excluded.auto_category_rule_version,
-                        auto_candidate_category_codes = excluded.auto_candidate_category_codes,
-                        auto_candidate_categories = excluded.auto_candidate_categories,
-                        effective_category_code = excluded.effective_category_code,
-                        effective_category_label = excluded.effective_category_label,
-                        effective_category_path = excluded.effective_category_path,
-                        effective_category_primary_label = excluded.effective_category_primary_label,
-                        effective_category_sub_label = excluded.effective_category_sub_label,
-                        effective_category_third_label = excluded.effective_category_third_label,
-                        effective_category_label_path = excluded.effective_category_label_path,
-                        effective_category_source = excluded.effective_category_source,
-                        effective_turnover_role = excluded.effective_turnover_role,
-                        effective_turnover_action_type = excluded.effective_turnover_action_type,
-                        effective_turnover_family = excluded.effective_turnover_family,
-                        category_version = excluded.category_version,
-                        category_source = excluded.category_source,
-                        category_resolution_status = excluded.category_resolution_status,
-                        category_rule_version = excluded.category_rule_version,
-                        oa_relation_tag = excluded.oa_relation_tag,
-                        invoice_relation_tag = excluded.invoice_relation_tag,
-                        relation_tags = excluded.relation_tags,
-                        relation_case_id = excluded.relation_case_id,
-                        search_text = excluded.search_text,
-                        schema_version = excluded.schema_version,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    record,
+                params_seq.append(record)
+            _execute_many(
+                connection,
+                """
+                insert into read_model.bank_detail_rows(
+                    tenant_id, transaction_id, scope_key, scope_month, source_batch_id,
+                    legacy_source_batch_id, account_key, bank_name, account_last4, account_no,
+                    account_name, trade_time, trade_date, trade_time_sort, direction,
+                    direction_label, amount, signed_amount, balance, currency,
+                    counterparty_name, summary, purpose, manual_category_code,
+                    manual_category_label, manual_category_path, manual_category_primary_label,
+                    manual_category_sub_label, manual_category_third_label, manual_category_label_path, manual_category_source,
+                    manual_category_version, manual_confirmed_category_code, auto_category_code, auto_category_label,
+                    auto_category_path, auto_category_primary_label, auto_category_sub_label, auto_category_third_label,
+                    auto_category_label_path, auto_category_source, auto_category_rule_code,
+                    auto_category_reason, auto_category_confidence, auto_category_rule_version,
+                    auto_candidate_category_codes, auto_candidate_categories,
+                    effective_category_code, effective_category_label, effective_category_path,
+                    effective_category_primary_label, effective_category_sub_label, effective_category_third_label,
+                    effective_category_label_path, effective_category_source,
+                    effective_turnover_role, effective_turnover_action_type, effective_turnover_family,
+                    category_version, category_source,
+                    category_resolution_status, category_rule_version,
+                    oa_relation_tag, invoice_relation_tag, relation_tags, relation_case_id,
+                    search_text, schema_version, source_versions, generated_at, payload, raw_payload
                 )
+                values (
+                    %s, %s, %s, %s::date, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s::timestamptz, %s::date, %s::timestamptz, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
+                )
+                on conflict (tenant_id, transaction_id) do update set
+                    scope_key = excluded.scope_key,
+                    scope_month = excluded.scope_month,
+                    source_batch_id = excluded.source_batch_id,
+                    legacy_source_batch_id = excluded.legacy_source_batch_id,
+                    account_key = excluded.account_key,
+                    bank_name = excluded.bank_name,
+                    account_last4 = excluded.account_last4,
+                    account_no = excluded.account_no,
+                    account_name = excluded.account_name,
+                    trade_time = excluded.trade_time,
+                    trade_date = excluded.trade_date,
+                    trade_time_sort = excluded.trade_time_sort,
+                    direction = excluded.direction,
+                    direction_label = excluded.direction_label,
+                    amount = excluded.amount,
+                    signed_amount = excluded.signed_amount,
+                    balance = excluded.balance,
+                    currency = excluded.currency,
+                    counterparty_name = excluded.counterparty_name,
+                    summary = excluded.summary,
+                    purpose = excluded.purpose,
+                    manual_category_code = excluded.manual_category_code,
+                    manual_category_label = excluded.manual_category_label,
+                    manual_category_path = excluded.manual_category_path,
+                    manual_category_primary_label = excluded.manual_category_primary_label,
+                    manual_category_sub_label = excluded.manual_category_sub_label,
+                    manual_category_third_label = excluded.manual_category_third_label,
+                    manual_category_label_path = excluded.manual_category_label_path,
+                    manual_category_source = excluded.manual_category_source,
+                    manual_category_version = excluded.manual_category_version,
+                    manual_confirmed_category_code = excluded.manual_confirmed_category_code,
+                    auto_category_code = excluded.auto_category_code,
+                    auto_category_label = excluded.auto_category_label,
+                    auto_category_path = excluded.auto_category_path,
+                    auto_category_primary_label = excluded.auto_category_primary_label,
+                    auto_category_sub_label = excluded.auto_category_sub_label,
+                    auto_category_third_label = excluded.auto_category_third_label,
+                    auto_category_label_path = excluded.auto_category_label_path,
+                    auto_category_source = excluded.auto_category_source,
+                    auto_category_rule_code = excluded.auto_category_rule_code,
+                    auto_category_reason = excluded.auto_category_reason,
+                    auto_category_confidence = excluded.auto_category_confidence,
+                    auto_category_rule_version = excluded.auto_category_rule_version,
+                    auto_candidate_category_codes = excluded.auto_candidate_category_codes,
+                    auto_candidate_categories = excluded.auto_candidate_categories,
+                    effective_category_code = excluded.effective_category_code,
+                    effective_category_label = excluded.effective_category_label,
+                    effective_category_path = excluded.effective_category_path,
+                    effective_category_primary_label = excluded.effective_category_primary_label,
+                    effective_category_sub_label = excluded.effective_category_sub_label,
+                    effective_category_third_label = excluded.effective_category_third_label,
+                    effective_category_label_path = excluded.effective_category_label_path,
+                    effective_category_source = excluded.effective_category_source,
+                    effective_turnover_role = excluded.effective_turnover_role,
+                    effective_turnover_action_type = excluded.effective_turnover_action_type,
+                    effective_turnover_family = excluded.effective_turnover_family,
+                    category_version = excluded.category_version,
+                    category_source = excluded.category_source,
+                    category_resolution_status = excluded.category_resolution_status,
+                    category_rule_version = excluded.category_rule_version,
+                    oa_relation_tag = excluded.oa_relation_tag,
+                    invoice_relation_tag = excluded.invoice_relation_tag,
+                    relation_tags = excluded.relation_tags,
+                    relation_case_id = excluded.relation_case_id,
+                    search_text = excluded.search_text,
+                    schema_version = excluded.schema_version,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                params_seq,
+            )
             self._upsert_bank_detail_scope(
                 connection,
                 tenant_id=tenant_id,
@@ -3125,30 +3125,10 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 "delete from read_model.workbench_relation_groups where tenant_id = %s and scope_key = %s",
                 (tenant_id, normalized_scope_key),
             )
+            group_params: list[tuple[Any, ...]] = []
             for group in groups_to_save:
                 payload = group.get("payload") if isinstance(group.get("payload"), dict) else group
-                connection.execute(
-                    """
-                    insert into read_model.workbench_relation_groups(
-                        tenant_id, group_id, scope_key, scope_month, relation_source, relation_kind, relation_status,
-                        oa_row_ids, bank_transaction_ids, input_invoice_ids, output_invoice_ids,
-                        source_versions, payload, raw_payload, generated_at
-                    )
-                    values (%s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
-                    on conflict (tenant_id, scope_key, group_id) do update set
-                        relation_source = excluded.relation_source,
-                        relation_kind = excluded.relation_kind,
-                        relation_status = excluded.relation_status,
-                        oa_row_ids = excluded.oa_row_ids,
-                        bank_transaction_ids = excluded.bank_transaction_ids,
-                        input_invoice_ids = excluded.input_invoice_ids,
-                        output_invoice_ids = excluded.output_invoice_ids,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        generated_at = excluded.generated_at,
-                        updated_at = now()
-                    """,
+                group_params.append(
                     (
                         tenant_id,
                         text(group.get("group_id")),
@@ -3167,33 +3147,36 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                         text(group.get("generated_at")),
                     ),
                 )
+            _execute_many(
+                connection,
+                """
+                insert into read_model.workbench_relation_groups(
+                    tenant_id, group_id, scope_key, scope_month, relation_source, relation_kind, relation_status,
+                    oa_row_ids, bank_transaction_ids, input_invoice_ids, output_invoice_ids,
+                    source_versions, payload, raw_payload, generated_at
+                )
+                values (%s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
+                on conflict (tenant_id, scope_key, group_id) do update set
+                    relation_source = excluded.relation_source,
+                    relation_kind = excluded.relation_kind,
+                    relation_status = excluded.relation_status,
+                    oa_row_ids = excluded.oa_row_ids,
+                    bank_transaction_ids = excluded.bank_transaction_ids,
+                    input_invoice_ids = excluded.input_invoice_ids,
+                    output_invoice_ids = excluded.output_invoice_ids,
+                    source_versions = excluded.source_versions,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    generated_at = excluded.generated_at,
+                    updated_at = now()
+                """,
+                group_params,
+            )
+            row_params: list[tuple[Any, ...]] = []
             for row in rows_to_save:
                 payload = _workbench_relation_row_payload(row)
                 row_scope_month = month_start(row.get("scope_month") or normalized_scope_key) or scope_month
-                connection.execute(
-                    """
-                    insert into read_model.workbench_relation_rows(
-                        tenant_id, row_id, row_type, scope_key, scope_month, relation_status, group_ids,
-                        linked_oa, linked_bank_transactions, linked_input_invoices, linked_output_invoices,
-                        source_versions, payload, raw_payload, generated_at
-                    )
-                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
-                    on conflict (tenant_id, row_id) do update set
-                        row_type = excluded.row_type,
-                        scope_key = excluded.scope_key,
-                        scope_month = excluded.scope_month,
-                        relation_status = excluded.relation_status,
-                        group_ids = excluded.group_ids,
-                        linked_oa = excluded.linked_oa,
-                        linked_bank_transactions = excluded.linked_bank_transactions,
-                        linked_input_invoices = excluded.linked_input_invoices,
-                        linked_output_invoices = excluded.linked_output_invoices,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        generated_at = excluded.generated_at,
-                        updated_at = now()
-                    """,
+                row_params.append(
                     (
                         tenant_id,
                         text(payload.get("row_id")),
@@ -3224,6 +3207,33 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                         text(row.get("generated_at")),
                     ),
                 )
+            _execute_many(
+                connection,
+                """
+                insert into read_model.workbench_relation_rows(
+                    tenant_id, row_id, row_type, scope_key, scope_month, relation_status, group_ids,
+                    linked_oa, linked_bank_transactions, linked_input_invoices, linked_output_invoices,
+                    source_versions, payload, raw_payload, generated_at
+                )
+                values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
+                on conflict (tenant_id, row_id) do update set
+                    row_type = excluded.row_type,
+                    scope_key = excluded.scope_key,
+                    scope_month = excluded.scope_month,
+                    relation_status = excluded.relation_status,
+                    group_ids = excluded.group_ids,
+                    linked_oa = excluded.linked_oa,
+                    linked_bank_transactions = excluded.linked_bank_transactions,
+                    linked_input_invoices = excluded.linked_input_invoices,
+                    linked_output_invoices = excluded.linked_output_invoices,
+                    source_versions = excluded.source_versions,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    generated_at = excluded.generated_at,
+                    updated_at = now()
+                """,
+                row_params,
+            )
             self._upsert_workbench_relation_scope(
                 connection,
                 tenant_id=tenant_id,
@@ -3906,36 +3916,14 @@ class PostgresSummaryReadModelRepository:
                     "delete from read_model.turnover_ledger_rows where scope_month = %s::date",
                     (month_start(normalized_scope_key),),
                 )
+            params_seq: list[tuple[Any, ...]] = []
             for index, item in enumerate(rows):
                 if not isinstance(item, dict):
                     continue
                 row = serialize_value(item)
                 relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
                 bank_row_ids = text_list(row.get("bank_row_ids"))
-                connection.execute(
-                    """
-                    insert into read_model.turnover_ledger_rows(
-                        relation_id, scope_month, family, status, relation_type, source,
-                        counterparty_name, amount, bank_row_ids, source_versions,
-                        generated_at, cache_status, payload, raw_payload
-                    )
-                    values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'fresh', %s, %s)
-                    on conflict (relation_id) do update set
-                        scope_month = excluded.scope_month,
-                        family = excluded.family,
-                        status = excluded.status,
-                        relation_type = excluded.relation_type,
-                        source = excluded.source,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        bank_row_ids = excluded.bank_row_ids,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
+                params_seq.append(
                     (
                         relation_id,
                         month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
@@ -3951,6 +3939,33 @@ class PostgresSummaryReadModelRepository:
                         jsonb({"normalized_payload": row}),
                     ),
                 )
+            _execute_many(
+                connection,
+                """
+                insert into read_model.turnover_ledger_rows(
+                    relation_id, scope_month, family, status, relation_type, source,
+                    counterparty_name, amount, bank_row_ids, source_versions,
+                    generated_at, cache_status, payload, raw_payload
+                )
+                values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'fresh', %s, %s)
+                on conflict (relation_id) do update set
+                    scope_month = excluded.scope_month,
+                    family = excluded.family,
+                    status = excluded.status,
+                    relation_type = excluded.relation_type,
+                    source = excluded.source,
+                    counterparty_name = excluded.counterparty_name,
+                    amount = excluded.amount,
+                    bank_row_ids = excluded.bank_row_ids,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    cache_status = excluded.cache_status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                params_seq,
+            )
 
         run_in_transaction(self._connection, write)
 
