@@ -6276,6 +6276,76 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_group_row_payload_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_group_row_payload_helper.py").read_text(encoding="utf-8")
+        group_source = _function_source(server_tree, server_source, "_group_row_payload")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-row-payload-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "WorkbenchGroupRowPayloadHelper(" not in group_source:
+            violations.append("Application _group_row_payload does not delegate to group row payload helper")
+        for marker in (
+            "grouping_service=WorkbenchCandidateGroupingService()",
+            "serialize_value=Application._serialize_value",
+            ").group(payload, turnover_relations=turnover_relations)",
+        ):
+            if marker not in group_source:
+                violations.append(f"Application group row helper missing explicit dependency: {marker}")
+        for forbidden in (
+            "oa_rows =",
+            "bank_rows =",
+            "invoice_rows =",
+            "group_payload(",
+            "row.get(\"ignored\")",
+            "grouped[\"oa_status\"]",
+        ):
+            if forbidden in group_source:
+                violations.append(f"Application still owns group row payload detail: {forbidden}")
+        for marker in (
+            "class WorkbenchGroupRowPayloadHelper",
+            "def group(",
+            "def _active_rows(",
+            "group_payload",
+            "turnover_relations",
+            "row.get(\"ignored\")",
+            "serialize_value",
+            "oa_status",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchGroupRowPayloadHelper missing marker: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchGroupRowPayloadHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-group-row-payload-helper-extraction",
+            "WorkbenchGroupRowPayloadHelper",
+            "ignored-row filtering",
+            "cache/read payload helpers",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench group row payload helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

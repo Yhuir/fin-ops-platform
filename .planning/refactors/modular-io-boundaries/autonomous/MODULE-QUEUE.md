@@ -459,7 +459,9 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 445 | `server-py:workbench-oa-raw-payload-signal-month-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaRawPayloadSignalMonthHelper`, moved OA row month extraction, raw payload OA month collection and OA attachment signal detection out of `Application` helper bodies. |
 | 446 | `server-py:workbench-live-oa-merge-helper-audit` | analysis-closed | implementation-gap-open | Audited live/OA row merge and row-id dedupe; selected merge helper extraction while deferring group row payload helper extraction. |
 | 447 | `server-py:workbench-live-oa-merge-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchLiveOaMergeHelper`, moved OA status merge, OA row replacement, OA attachment invoice append and row-id dedupe out of `Application` helper bodies. |
-| 448 | `server-py:workbench-group-row-payload-helper-audit` | pending | implementation-gap-open | Audit `_group_row_payload(...)`, grouping service ownership, ignored-row filtering and grouped merge compatibility; select the next narrow local implementation or guard boundary. |
+| 448 | `server-py:workbench-group-row-payload-helper-audit` | analysis-closed | implementation-gap-open | Audited raw-to-grouped payload behavior; selected group helper extraction while deferring cache/read payload helpers. |
+| 449 | `server-py:workbench-group-row-payload-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchGroupRowPayloadHelper`, moved paired/open extraction, ignored-row filtering, grouping service invocation and OA status carry-over out of `Application._group_row_payload(...)`. |
+| 450 | `server-py:workbench-cache-read-payload-helper-audit` | pending | implementation-gap-open | Audit `_can_use_cached_workbench_payload(...)`, `_can_persist_workbench_payload(...)`, `_can_fallback_to_stale_workbench_payload(...)`, `_oa_status_is_ready_for_cache(...)` and cache/read payload readiness helpers; select the next narrow local implementation or guard boundary. |
 
 ## Status Values
 

@@ -506,6 +506,7 @@ from fin_ops_platform.services.workbench_oa_raw_payload_signal_month_helper impo
     WorkbenchOaRawPayloadSignalMonthHelper,
 )
 from fin_ops_platform.services.workbench_live_oa_merge_helper import WorkbenchLiveOaMergeHelper
+from fin_ops_platform.services.workbench_group_row_payload_helper import WorkbenchGroupRowPayloadHelper
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13060,23 +13061,10 @@ class Application:
         *,
         turnover_relations: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        grouping_service = WorkbenchCandidateGroupingService()
-        paired = payload.get("paired", {})
-        open_rows = payload.get("open", {})
-        oa_rows = [row for row in [*list(paired.get("oa", [])), *list(open_rows.get("oa", []))] if not row.get("ignored")]
-        bank_rows = [row for row in [*list(paired.get("bank", [])), *list(open_rows.get("bank", []))] if not row.get("ignored")]
-        invoice_rows = [row for row in [*list(paired.get("invoice", [])), *list(open_rows.get("invoice", []))] if not row.get("ignored")]
-        grouped = grouping_service.group_payload(
-            str(payload.get("month", "")),
-            oa_rows=oa_rows,
-            bank_rows=bank_rows,
-            invoice_rows=invoice_rows,
-            turnover_relations=turnover_relations,
-        )
-        oa_status = payload.get("oa_status")
-        if isinstance(oa_status, dict):
-            grouped["oa_status"] = Application._serialize_value(oa_status)
-        return grouped
+        return WorkbenchGroupRowPayloadHelper(
+            grouping_service=WorkbenchCandidateGroupingService(),
+            serialize_value=Application._serialize_value,
+        ).group(payload, turnover_relations=turnover_relations)
 
     def _can_use_cached_workbench_payload(self, payload: dict[str, object]) -> bool:
         if not self._oa_status_is_ready_for_cache(payload):
