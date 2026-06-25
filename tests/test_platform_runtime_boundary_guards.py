@@ -6128,6 +6128,82 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_raw_payload_signal_month_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_oa_raw_payload_signal_month_helper.py").read_text(encoding="utf-8")
+        months_source = _function_source(server_tree, server_source, "_oa_months_from_raw_workbench_payload")
+        signal_source = _function_source(server_tree, server_source, "_raw_payload_has_oa_attachment_invoice_signal")
+        first_month_source = _function_source(server_tree, server_source, "_first_month_from_oa_row")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_oa_raw_payload_signal_month_helper")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-raw-payload-signal-month-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_oa_months_from_raw_workbench_payload", months_source),
+            ("_raw_payload_has_oa_attachment_invoice_signal", signal_source),
+            ("_first_month_from_oa_row", first_month_source),
+        ):
+            if "WorkbenchOaRawPayloadSignalMonthHelper" not in method_source and "_workbench_oa_raw_payload_signal_month_helper()" not in method_source:
+                violations.append(f"Application {method_name} does not delegate to OA raw payload signal/month helper")
+        combined_method_source = "\n".join([months_source, signal_source, first_month_source])
+        for forbidden in (
+            "附件发票数量",
+            "附件证据数量",
+            "附件发票明细",
+            "申请日期",
+            "审批完成时间",
+            "for section_name in (\"paired\", \"open\")",
+        ):
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns OA raw payload signal/month detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaRawPayloadSignalMonthHelper",
+            "def months_from_raw_payload(",
+            "def has_oa_attachment_invoice_signal(",
+            "def first_month_from_oa_row(",
+            "附件发票数量",
+            "附件证据数量",
+            "附件发票明细",
+            "申请日期",
+            "审批完成时间",
+            "is_month_prefix",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchOaRawPayloadSignalMonthHelper missing marker: {marker}")
+        if "is_month_prefix=lambda value: bool(SEARCH_MONTH_RE.match(value))" not in builder_source_in_app:
+            violations.append("Application OA raw payload signal/month helper missing SEARCH_MONTH_RE dependency injection")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchOaRawPayloadSignalMonthHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-raw-payload-signal-month-helper-extraction",
+            "WorkbenchOaRawPayloadSignalMonthHelper",
+            "signal/month extraction",
+            "live/OA merge helper",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA raw payload signal/month helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

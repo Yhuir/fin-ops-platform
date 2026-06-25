@@ -502,6 +502,9 @@ from fin_ops_platform.services.workbench_oa_retention_date_parser import Workben
 from fin_ops_platform.services.workbench_oa_attachment_source_link_resolver import (
     WorkbenchOaAttachmentSourceLinkResolver,
 )
+from fin_ops_platform.services.workbench_oa_raw_payload_signal_month_helper import (
+    WorkbenchOaRawPayloadSignalMonthHelper,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13010,59 +13013,21 @@ class Application:
 
     @staticmethod
     def _oa_months_from_raw_workbench_payload(payload: dict[str, object]) -> set[str]:
-        months: set[str] = set()
-        for section_name in ("paired", "open"):
-            section_payload = payload.get(section_name)
-            if not isinstance(section_payload, dict):
-                continue
-            for row in list(section_payload.get("oa") or []):
-                if isinstance(row, dict):
-                    month = Application._first_month_from_oa_row(row)
-                    if month:
-                        months.add(month)
-        return months
+        return Application._workbench_oa_raw_payload_signal_month_helper().months_from_raw_payload(payload)
 
     @staticmethod
     def _raw_payload_has_oa_attachment_invoice_signal(payload: dict[str, object]) -> bool:
-        for section_name in ("paired", "open"):
-            section_payload = payload.get(section_name)
-            if not isinstance(section_payload, dict):
-                continue
-            for row in list(section_payload.get("oa") or []):
-                if not isinstance(row, dict):
-                    continue
-                tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}
-                if "OA附件" in tags:
-                    return True
-                for fields_key in ("detail_fields", "summary_fields"):
-                    fields = row.get(fields_key)
-                    if not isinstance(fields, dict):
-                        continue
-                    for key in ("附件发票数量", "附件证据数量", "附件发票明细"):
-                        value = str(fields.get(key) or "").strip()
-                        if value and value not in {"0", "0 张", "—", "--"}:
-                            return True
-        return False
+        return WorkbenchOaRawPayloadSignalMonthHelper.has_oa_attachment_invoice_signal(payload)
 
     @staticmethod
     def _first_month_from_oa_row(row: dict[str, object]) -> str | None:
-        candidates: list[object] = [
-            row.get("month"),
-            row.get("application_date"),
-            row.get("apply_date"),
-        ]
-        for fields_key in ("detail_fields", "summary_fields"):
-            fields = row.get(fields_key)
-            if isinstance(fields, dict):
-                candidates.extend(
-                    fields.get(key)
-                    for key in ("申请日期", "报销日期", "审批完成时间", "单据日期", "日期")
-                )
-        for candidate in candidates:
-            text = str(candidate or "").strip()
-            if len(text) >= 7 and SEARCH_MONTH_RE.match(text[:7]):
-                return text[:7]
-        return None
+        return Application._workbench_oa_raw_payload_signal_month_helper().first_month_from_oa_row(row)
+
+    @staticmethod
+    def _workbench_oa_raw_payload_signal_month_helper() -> WorkbenchOaRawPayloadSignalMonthHelper:
+        return WorkbenchOaRawPayloadSignalMonthHelper(
+            is_month_prefix=lambda value: bool(SEARCH_MONTH_RE.match(value)),
+        )
 
     @staticmethod
     def _refresh_raw_workbench_payload_summary(payload: dict[str, object]) -> None:
