@@ -168,6 +168,7 @@ from fin_ops_platform.services.etc_document_parsers import (
 )
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, ParseIssue, ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_legacy_batch_delete_service import EtcLegacyBatchDeleteService
+from fin_ops_platform.services.etc_legacy_batch_lifecycle_service import EtcLegacyBatchLifecycleService
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
@@ -5234,6 +5235,18 @@ class Application:
         self._etc_legacy_batch_delete = service
         return service
 
+    def _etc_legacy_batch_lifecycle_service(self) -> EtcLegacyBatchLifecycleService:
+        service = getattr(self, "_etc_legacy_batch_lifecycle", None)
+        if isinstance(service, EtcLegacyBatchLifecycleService):
+            return service
+        service = EtcLegacyBatchLifecycleService(
+            etc_service=self._etc_service,
+            reconciliation_task_service=self._etc_reconciliation_task_service,
+            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+        )
+        self._etc_legacy_batch_lifecycle = service
+        return service
+
     def _etc_business_batch_summary_row_ids(self, batch: object) -> list[str]:
         external_ids = {
             str(getattr(batch, "external_etc_batch_id", "") or "").strip(),
@@ -6926,27 +6939,11 @@ class Application:
         invoice_ids: list[str],
         headers: dict[str, str] | None = None,
     ) -> Response:
-        reconciliation_task = None
         try:
-            invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
-            import_batch_ids = [
-                str(getattr(invoice, "import_batch_id", "") or "")
-                for invoice in invoices
-                if str(getattr(invoice, "import_batch_id", "") or "").strip()
-            ]
-            reconciliation_task = self._etc_reconciliation_task_service.find_task_for_import_batch_ids(import_batch_ids)
-            result = self._etc_service.create_oa_draft(
+            result = self._etc_legacy_batch_lifecycle_service().create_draft_from_invoice_ids(
                 invoice_ids,
                 oa_client=self._build_etc_oa_client(headers),
-                reconciliation_task=reconciliation_task,
             )
-            if reconciliation_task is not None:
-                self._etc_reconciliation_task_service.record_oa_draft_created(
-                    task_id=str(getattr(reconciliation_task, "task_id")),
-                    oa_draft_batch_id=result.batch_id,
-                    etc_batch_id=result.etc_batch_id,
-                    actor="system",
-                )
         except EtcInvoiceNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
         except ValueError as error:
@@ -6961,19 +6958,12 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_draft_request", "message": str(error)},
             )
-        changed_months = self._link_etc_invoices_to_existing_invoices(
-            self._etc_service.list_invoices_by_ids(invoice_ids),
-        )
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_draft_created")
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "batchId": result.batch_id,
-                "etcBatchId": result.etc_batch_id,
-                "oaDraftId": result.oa_draft_id,
-                "oaDraftUrl": result.oa_draft_url,
-            },
-        )
+        for refresh_event in result.refresh_events:
+            self._refresh_after_etc_invoice_link(
+                refresh_event.changed_months,
+                reason=refresh_event.reason,
+            )
+        return self._json_response(HTTPStatus.OK, result.payload)
 
     def _build_etc_oa_client(self, headers: dict[str, str] | None) -> HttpEtcOAClient | None:
         if not isinstance(self._etc_service.oa_client, NotConfiguredEtcOAClient):
@@ -6985,14 +6975,7 @@ class Application:
 
     def _handle_api_etc_batch_confirm_submitted(self, batch_id: str) -> Response:
         try:
-            batch = self._etc_service.confirm_submitted(batch_id)
-            task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(batch, "id", "")))
-            if task is not None:
-                self._etc_reconciliation_task_service.record_oa_submitted_confirmed(
-                    task_id=str(getattr(task, "task_id")),
-                    oa_draft_batch_id=str(getattr(batch, "id", "")),
-                    actor="system",
-                )
+            result = self._etc_legacy_batch_lifecycle_service().confirm_submitted(batch_id)
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
         except ValueError as error:
@@ -7002,22 +6985,24 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_batch_request", "message": str(error)},
             )
-        changed_months = self._link_etc_invoices_to_existing_invoices(
-            self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
-        )
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_submission_confirmed")
-        return self._json_response(HTTPStatus.OK, {"batch": batch})
+        for refresh_event in result.refresh_events:
+            self._refresh_after_etc_invoice_link(
+                refresh_event.changed_months,
+                reason=refresh_event.reason,
+            )
+        return self._json_response(HTTPStatus.OK, result.payload)
 
     def _handle_api_etc_batch_mark_not_submitted(self, batch_id: str) -> Response:
         try:
-            batch = self._etc_service.mark_not_submitted(batch_id)
+            result = self._etc_legacy_batch_lifecycle_service().mark_not_submitted(batch_id)
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        changed_months = self._link_etc_invoices_to_existing_invoices(
-            self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
-        )
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_submission_reopened")
-        return self._json_response(HTTPStatus.OK, {"batch": batch})
+        for refresh_event in result.refresh_events:
+            self._refresh_after_etc_invoice_link(
+                refresh_event.changed_months,
+                reason=refresh_event.reason,
+            )
+        return self._json_response(HTTPStatus.OK, result.payload)
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
         try:

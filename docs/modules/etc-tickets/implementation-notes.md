@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC legacy batch lifecycle side-effect service
+
+- 目标：把 legacy `/api/etc/batches*` 的 OA draft、confirm-submitted、mark-not-submitted 生命周期副作用从 `Application` 抽到显式 service。
+- 影响范围：新增 `EtcLegacyBatchLifecycleService`；`server.py` 新增 lifecycle service factory，并将 `_create_etc_batch_draft_from_invoice_ids`、confirm 和 reopen handler 收缩为 HTTP/error/refresh event 映射。
+- 关键决策：OA token/header 解析仍留在 `Application` HTTP 层，service 只接收已构造的 OA client；draft-for-batch 的 detail/status 校验仍留在 `Application`，因为 legacy batch read payload ownership 尚未迁移。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `tests/test_etc_legacy_batch_lifecycle_service.py` service-layer 测试，新增 `test_etc_legacy_batch_lifecycle_side_effects_use_service_boundary` 静态 guard，并回归 targeted legacy draft/confirm API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`。
+- 未测风险：legacy batch list/detail payload helpers 仍在 `Application`；route owner 仍通过 callbacks 调用 list/detail/draft/confirm/reopen；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计 legacy batch read payload/list/detail ownership，选择 read facade extraction、route-owner read ownership 或更窄 payload/static guard slice。
+
 ## 2026-06-25 - ETC legacy batch delete side-effect service
 
 - 目标：把 legacy `/api/etc/batches/{batch_id}` DELETE 的非 business-batch 副作用从 `Application` 抽到显式 service，继续收窄 `server.py` 的业务所有权。

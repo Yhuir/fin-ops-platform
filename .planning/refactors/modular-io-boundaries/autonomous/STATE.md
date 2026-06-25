@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-legacy-batch-delete-side-effects-service-owned`
+Current state: `etc-legacy-batch-lifecycle-side-effects-service-owned`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-legacy-batch-delete-side-effect-service-audit` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`. T0 added `EtcLegacyBatchDeleteService`, moved non-business legacy batch DELETE side effects out of `Application`, returned explicit refresh/persist events, and kept HTTP mapping plus business-batch v2 fallback in `server.py`. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-draft-confirm-callback-audit`.
+Completed `server-py:etc-legacy-batch-draft-confirm-callback-audit` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`. T0 added `EtcLegacyBatchLifecycleService`, moved legacy batch OA draft/confirm/reopen lifecycle side effects out of `Application`, returned explicit refresh events, and kept HTTP body/header/detail/error mapping in `server.py`. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-read-payload-facade-audit`.
 
 ## Closed Or Deferred Slices
 

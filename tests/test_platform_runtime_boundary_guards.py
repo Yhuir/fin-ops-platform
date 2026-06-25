@@ -1976,6 +1976,52 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_legacy_batch_lifecycle_side_effects_use_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_path = SERVICES_ROOT / "etc_legacy_batch_lifecycle_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+
+        draft_helper = _function_source(server_tree, server_source, "_create_etc_batch_draft_from_invoice_ids")
+        confirm_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_confirm_submitted")
+        reopen_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_mark_not_submitted")
+        service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_lifecycle_service")
+        service_imports = _imported_modules(service_tree)
+
+        violations: list[str] = []
+        if "EtcLegacyBatchLifecycleService(" not in service_factory:
+            violations.append("server.py does not construct EtcLegacyBatchLifecycleService")
+        if "create_draft_from_invoice_ids(" not in draft_helper:
+            violations.append("legacy batch draft helper does not delegate lifecycle side effects")
+        if "confirm_submitted(batch_id)" not in confirm_handler:
+            violations.append("legacy batch confirm handler does not delegate lifecycle side effects")
+        if "mark_not_submitted(batch_id)" not in reopen_handler:
+            violations.append("legacy batch reopen handler does not delegate lifecycle side effects")
+        forbidden_handler_markers = (
+            "create_oa_draft(",
+            "record_oa_draft_created(",
+            "record_oa_submitted_confirmed(",
+            "self._etc_service.confirm_submitted(",
+            "self._etc_service.mark_not_submitted(",
+        )
+        for marker in forbidden_handler_markers:
+            if marker in draft_helper or marker in confirm_handler or marker in reopen_handler:
+                violations.append(f"legacy batch lifecycle handler still performs {marker}")
+        forbidden_imports = {
+            "fin_ops_platform.app.server",
+            "fin_ops_platform.app.auth",
+            "http.cookies",
+        }
+        leaked_imports = sorted(forbidden_imports.intersection(service_imports))
+        if leaked_imports:
+            violations.append(f"legacy batch lifecycle service imports forbidden modules: {leaked_imports}")
+        if "Response" in service_source or "_json_response" in service_source:
+            violations.append("legacy batch lifecycle service constructs HTTP response details")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
