@@ -5912,6 +5912,74 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_attachment_source_link_resolver_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        resolver_source = (SERVICES_ROOT / "workbench_oa_attachment_source_link_resolver.py").read_text(encoding="utf-8")
+        source_link_source = _function_source(server_tree, server_source, "_oa_attachment_source_link_for_invoice")
+        source_oa_id_source = _function_source(server_tree, server_source, "_source_oa_id_for_attachment_link")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-attachment-source-link-resolver-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_oa_attachment_source_link_for_invoice", source_link_source),
+            ("_source_oa_id_for_attachment_link", source_oa_id_source),
+        ):
+            if "WorkbenchOaAttachmentSourceLinkResolver." not in method_source:
+                violations.append(f"Application {method_name} does not delegate to source-link resolver")
+        for forbidden in (
+            "source_links",
+            "source_type",
+            "oa_attachment_best_source_link",
+            "oa_attachment_matches_oa",
+            "source_workbench_row_id",
+            "source_expense_item_id",
+        ):
+            combined_method_source = "\n".join([source_link_source, source_oa_id_source])
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns OA attachment source-link detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaAttachmentSourceLinkResolver",
+            "def source_link_for_invoice(",
+            "def source_oa_id_for_attachment_link(",
+            "oa_attachment_best_source_link",
+            "oa_attachment_matches_oa",
+            "source_workbench_row_id",
+            "source_expense_item_id",
+        ):
+            if marker not in resolver_source:
+                violations.append(f"WorkbenchOaAttachmentSourceLinkResolver missing marker: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in resolver_source:
+                violations.append(f"WorkbenchOaAttachmentSourceLinkResolver gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-attachment-source-link-resolver-extraction",
+            "WorkbenchOaAttachmentSourceLinkResolver",
+            "source link normalization",
+            "oa_attachment_best_source_link",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA attachment source-link resolver analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

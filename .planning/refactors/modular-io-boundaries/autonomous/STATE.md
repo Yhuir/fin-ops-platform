@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-canonical-oa-attachment-raw-payload-repairer-extraction-closed`
+Current state: `workbench-oa-attachment-source-link-resolver-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-canonical-oa-attachment-raw-payload-repairer-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-canonical-oa-attachment-raw-payload-repairer-extraction-2026-06-25.md`. `WorkbenchCanonicalOaAttachmentRawPayloadRepairer` now owns payload OA scan/imported invoice iteration/append-vs-replace/dedupe-summary orchestration; source-link parsing, canonical row construction and raw payload helper extraction remain deferred. The next local boundary is `server-py:workbench-oa-attachment-source-link-resolver-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-oa-attachment-source-link-resolver-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-attachment-source-link-resolver-extraction-2026-06-25.md`. `WorkbenchOaAttachmentSourceLinkResolver` now owns source link filtering/normalization, `oa_form_id` fallback, best-link selection and source OA id matching; canonical row construction and raw payload helper extraction remain deferred. The next local boundary is `server-py:workbench-canonical-oa-attachment-invoice-row-builder-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
