@@ -198,9 +198,853 @@ OA_PENDING_PAYMENT_SORT_EXPRESSIONS = {
 }
 
 
+class PostgresInvoiceUsageCollectionReadModelRepository:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
+        executor = connection or self._connection
+        dirty_row = executor.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type, scope_key),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    def list_input_invoice_usage_rows(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        return self._list_invoice_relation_rows(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+            filter_fields=INPUT_INVOICE_USAGE_FILTER_FIELDS,
+            sort_expressions=INPUT_INVOICE_USAGE_SORT_EXPRESSIONS,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            page=page,
+            page_size=page_size,
+            summary_kind="input",
+        )
+
+    def save_input_invoice_usage_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        self._save_invoice_relation_rows(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            scope_key=scope_key,
+            rows=rows,
+            source_versions=source_versions,
+            row_builder=_input_invoice_usage_read_model_record,
+        )
+
+    def mark_input_invoice_usage_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        self._mark_invoice_relation_scope(
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_key=scope_key,
+            row_count=row_count,
+            source_versions=source_versions,
+        )
+
+    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            current_scope_keys=current_scope_keys,
+        )
+
+    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.input_invoice_usage_rows
+            where row_id = %s
+            order by generated_at desc, scope_key desc, row_id
+            limit 1
+            """,
+            (text(row_id),),
+        )
+        if not isinstance(row, dict):
+            return None
+        payload = _read_model_payload(row)
+        scope_key = text(row.get("scope_key")) or "all"
+        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        return {
+            "row": payload if isinstance(payload, dict) else None,
+            "refresh_status": self._invoice_relation_refresh_status(
+                scope_type="input_invoice_usage",
+                scope_key=scope_key,
+            ),
+            "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
+        }
+
+    def list_output_invoice_collection_rows(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        return self._list_invoice_relation_rows(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+            filter_fields=OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS,
+            sort_expressions=OUTPUT_INVOICE_COLLECTION_SORT_EXPRESSIONS,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            page=page,
+            page_size=page_size,
+            summary_kind="output",
+        )
+
+    def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.output_invoice_collection_rows
+            where row_id = %s
+            order by generated_at desc, scope_key desc, row_id
+            limit 1
+            """,
+            (text(row_id),),
+        )
+        if not isinstance(row, dict):
+            return None
+        payload = _read_model_payload(row)
+        scope_key = text(row.get("scope_key")) or "all"
+        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        return {
+            "row": payload if isinstance(payload, dict) else None,
+            "refresh_status": self._invoice_relation_refresh_status(
+                scope_type="output_invoice_collection",
+                scope_key=scope_key,
+            ),
+            "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
+        }
+
+    def save_output_invoice_collection_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        self._save_invoice_relation_rows(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            scope_key=scope_key,
+            rows=rows,
+            source_versions=source_versions,
+            row_builder=_output_invoice_collection_read_model_record,
+        )
+
+    def mark_output_invoice_collection_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        self._mark_invoice_relation_scope(
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_key=scope_key,
+            row_count=row_count,
+            source_versions=source_versions,
+        )
+
+    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            current_scope_keys=current_scope_keys,
+        )
+
+    def list_oa_pending_payment_rows(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        trade_date_from: str | None = None,
+        trade_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+        view_mode: str | None = None,
+    ) -> dict[str, Any] | None:
+        scope_key = _invoice_relation_scope_key(month)
+        page_number = max(int_value(page, 1), 1)
+        page_limit = min(max(int_value(page_size, 50), 1), 200)
+        base_where: list[str] = []
+        base_params: list[Any] = []
+        view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
+        if scope_key != "all":
+            base_where.append("scope_key = %s")
+            base_params.append(scope_key)
+        if trade_date_from:
+            base_where.append("bank_trade_time >= %s::date")
+            base_params.append(trade_date_from)
+        if trade_date_to:
+            base_where.append("bank_trade_time < (%s::date + interval '1 day')")
+            base_params.append(trade_date_to)
+        if keyword:
+            base_where.append("searchable_text ilike %s")
+            base_params.append(f"%{keyword}%")
+        for clause, clause_params in _invoice_relation_filter_clauses(filters, OA_PENDING_PAYMENT_FILTER_FIELDS):
+            base_where.append(clause)
+            base_params.extend(clause_params)
+        where = list(base_where)
+        params = list(base_params)
+        if view_mode_clause:
+            where.append(view_mode_clause)
+        where_sql = " and ".join(where) if where else "true"
+        base_where_sql = " and ".join(base_where) if base_where else "true"
+        summary_row = self._connection.fetch_one(
+            f"""
+            select
+                count(*) as count,
+                coalesce(sum(oa_amount), 0) as oa_amount_total,
+                coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
+            from read_model.oa_pending_payment_rows
+            where {where_sql}
+            """,
+            tuple(params),
+        )
+        view_counts_row = self._connection.fetch_one(
+            f"""
+            select
+                coalesce(sum(case when oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed' then 1 else 0 end), 0) as completed_count,
+                coalesce(sum(case when oa_workflow_status = 'in_progress' then 1 else 0 end), 0) as in_progress_count
+            from read_model.oa_pending_payment_rows
+            where {base_where_sql}
+            """,
+            tuple(base_params),
+        )
+        view_counts = {
+            "completed": int_value(view_counts_row.get("completed_count") if isinstance(view_counts_row, dict) else 0, 0),
+            "in_progress": int_value(view_counts_row.get("in_progress_count") if isinstance(view_counts_row, dict) else 0, 0),
+        }
+        total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
+        refresh_status = self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key)
+        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key=scope_key)
+        source_versions = self._oa_pending_payment_scope_source_versions(scope_key=scope_key, scope_row=scope_row)
+        if total == 0:
+            if scope_row is None and sum(view_counts.values()) == 0:
+                return None
+            return {
+                "rows": [],
+                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
+                "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00", "viewCounts": view_counts},
+                "refresh_status": refresh_status,
+                "source_versions": source_versions,
+                "read_model_scope_key": scope_key,
+            }
+        order_sql = _invoice_relation_order_sql(
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select payload, raw_payload
+            from read_model.oa_pending_payment_rows
+            where {where_sql}
+            order by {order_sql}
+            limit %s offset %s
+            """,
+            tuple([*params, page_limit, (page_number - 1) * page_limit]),
+        )
+        payload_rows = [_read_model_payload(row) for row in rows]
+        return {
+            "rows": [row for row in payload_rows if isinstance(row, dict)],
+            "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
+            "summary": {
+                "rowCount": total,
+                "oaAmountTotal": decimal_text(summary_row.get("oa_amount_total") if isinstance(summary_row, dict) else None) or "0.00",
+                "bankPaidTotal": decimal_text(summary_row.get("bank_paid_total") if isinstance(summary_row, dict) else None) or "0.00",
+                "viewCounts": view_counts,
+            },
+            "refresh_status": refresh_status,
+            "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
+        }
+
+    def _oa_pending_payment_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        scope_row: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if scope_key == "all":
+            rows = self._connection.fetch_all(
+                """
+                select distinct scope_key, source_versions
+                from read_model.oa_pending_payment_rows
+                where scope_key <> 'all'
+                order by scope_key desc
+                """
+            )
+            if rows:
+                return self._common_source_versions([dict(row) for row in rows if isinstance(row, dict)])
+        return (
+            scope_row.get("source_versions")
+            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+            else {}
+        )
+
+    def save_oa_pending_payment_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        rows_to_save = list(rows or [])
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            if normalized_scope_key == "all":
+                connection.execute("delete from read_model.oa_pending_payment_rows")
+            else:
+                connection.execute("delete from read_model.oa_pending_payment_rows where scope_key = %s", (normalized_scope_key,))
+            for row in rows_to_save:
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["sourceVersions"] = normalized_source_versions
+                connection.execute(
+                    """
+                    insert into read_model.oa_pending_payment_rows(
+                        row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
+                        oa_workflow_status, oa_project_name, oa_amount, payment_status, payment_status_label,
+                        bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name, bank_account, bank_direction,
+                        bank_counterparty_name, bank_summary, invoice_id, invoice_no,
+                        invoice_date, seller_name, invoice_total_with_tax, searchable_text,
+                        source_versions, payload, raw_payload
+                    )
+                    values (
+                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
+                        %(oa_application_type)s, %(oa_workflow_status)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
+                        %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
+                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
+                        %(bank_counterparty_name)s, %(bank_summary)s,
+                        %(invoice_id)s, %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s,
+                        %(invoice_total_with_tax)s, %(searchable_text)s, %(source_versions)s,
+                        %(payload)s, %(raw_payload)s
+                    )
+                    on conflict (row_id, scope_key) do update set
+                        scope_month = excluded.scope_month,
+                        oa_id = excluded.oa_id,
+                        oa_applicant = excluded.oa_applicant,
+                        oa_application_type = excluded.oa_application_type,
+                        oa_workflow_status = excluded.oa_workflow_status,
+                        oa_project_name = excluded.oa_project_name,
+                        oa_amount = excluded.oa_amount,
+                        payment_status = excluded.payment_status,
+                        payment_status_label = excluded.payment_status_label,
+                        bank_transaction_id = excluded.bank_transaction_id,
+                        bank_trade_time = excluded.bank_trade_time,
+                        bank_amount = excluded.bank_amount,
+                        bank_paid_total = excluded.bank_paid_total,
+                        bank_name = excluded.bank_name,
+                        bank_account = excluded.bank_account,
+                        bank_direction = excluded.bank_direction,
+                        bank_counterparty_name = excluded.bank_counterparty_name,
+                        bank_summary = excluded.bank_summary,
+                        invoice_id = excluded.invoice_id,
+                        invoice_no = excluded.invoice_no,
+                        invoice_date = excluded.invoice_date,
+                        seller_name = excluded.seller_name,
+                        invoice_total_with_tax = excluded.invoice_total_with_tax,
+                        searchable_text = excluded.searchable_text,
+                        source_versions = excluded.source_versions,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    _oa_pending_payment_read_model_record(row_payload, normalized_scope_key),
+                )
+            self._upsert_invoice_relation_scope(
+                connection,
+                scope_table_name="read_model.oa_pending_payment_scopes",
+                scope_key=normalized_scope_key,
+                row_count=len(rows_to_save),
+                scope_type="oa_pending_payment",
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def mark_oa_pending_payment_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
+        self._mark_invoice_relation_scope(
+            scope_table_name="read_model.oa_pending_payment_scopes",
+            scope_key=scope_key,
+            row_count=row_count,
+            source_versions=source_versions,
+        )
+
+    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._prune_invoice_relation_scope_shards(
+            table_name="read_model.oa_pending_payment_rows",
+            scope_table_name="read_model.oa_pending_payment_scopes",
+            current_scope_keys=current_scope_keys,
+        )
+
+    def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("row_id = %s", (text(row_id),))
+
+    def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("oa_id = %s", (text(oa_id),))
+
+    def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("bank_transaction_id = %s", (text(bank_transaction_id),))
+
+    def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("invoice_id = %s", (text(invoice_id),))
+
+    def _get_oa_pending_payment_row(self, predicate_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            f"""
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.oa_pending_payment_rows
+            where {predicate_sql}
+            order by generated_at desc, scope_key desc, row_id
+            limit 1
+            """,
+            params,
+        )
+        if isinstance(row, dict):
+            payload = _read_model_payload(row)
+            scope_key = text(row.get("scope_key")) or "all"
+            source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            return {
+                "row": payload if isinstance(payload, dict) else None,
+                "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key),
+                "source_versions": source_versions,
+                "read_model_scope_key": scope_key,
+            }
+        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key="all")
+        if not isinstance(scope_row, dict):
+            return None
+        return {
+            "row": None,
+            "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key="all"),
+            "source_versions": scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
+            "read_model_scope_key": text(scope_row.get("scope_key")) or "all",
+        }
+
+    def _list_invoice_relation_rows(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        scope_type: str,
+        month: str | None,
+        keyword: str | None,
+        invoice_date_from: str | None,
+        invoice_date_to: str | None,
+        filters: str | list[dict[str, Any]] | None,
+        filter_fields: dict[str, tuple[str, str, set[str]]],
+        sort_expressions: dict[str, str],
+        sort_field: str | None,
+        sort_direction: str | None,
+        page: int | str | None,
+        page_size: int | str | None,
+        summary_kind: str,
+    ) -> dict[str, Any] | None:
+        scope_key = _invoice_relation_scope_key(month)
+        page_number = max(int_value(page, 1), 1)
+        page_limit = min(max(int_value(page_size, 50), 1), 200)
+        where: list[str] = []
+        params: list[Any] = []
+        if scope_key != "all":
+            where.append("scope_key = %s")
+            params.append(scope_key)
+        if invoice_date_from:
+            where.append("invoice_date >= %s::date")
+            params.append(invoice_date_from)
+        if invoice_date_to:
+            where.append("invoice_date <= %s::date")
+            params.append(invoice_date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _invoice_relation_filter_clauses(filters, filter_fields):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        summary_row = self._connection.fetch_one(
+            _invoice_relation_summary_sql(table_name=table_name, where_sql=where_sql, summary_kind=summary_kind),
+            tuple(params),
+        )
+        total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
+        refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
+        scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
+        source_versions = (
+            scope_row.get("source_versions")
+            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+            else {}
+        )
+        if total == 0:
+            if scope_row is None:
+                return None
+            return {
+                "rows": [],
+                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
+                "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=0),
+                "refresh_status": refresh_status,
+                "source_versions": source_versions,
+            }
+        order_sql = _invoice_relation_order_sql(
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            sort_expressions=sort_expressions,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select payload, raw_payload
+            from {table_name}
+            where {where_sql}
+            order by {order_sql}
+            limit %s offset %s
+            """,
+            tuple([*params, page_limit, (page_number - 1) * page_limit]),
+        )
+        payload_rows = [_read_model_payload(row) for row in rows]
+        return {
+            "rows": [row for row in payload_rows if isinstance(row, dict)],
+            "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
+            "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
+            "refresh_status": refresh_status,
+            "source_versions": source_versions,
+        }
+
+    def _save_invoice_relation_rows(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        scope_type: str,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None,
+        row_builder: Any,
+    ) -> None:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        rows_to_save = list(rows or [])
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            if normalized_scope_key == "all":
+                connection.execute(f"delete from {table_name}")
+            else:
+                connection.execute(f"delete from {table_name} where scope_key = %s", (normalized_scope_key,))
+            for row in rows_to_save:
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["sourceVersions"] = normalized_source_versions
+                record = row_builder(row_payload, normalized_scope_key)
+                connection.execute(
+                    f"""
+                    insert into {table_name}(
+                        row_id, scope_key, scope_month, invoice_id, invoice_identity_key, invoice_no, invoice_date,
+                        seller_name, seller_tax_no, buyer_name, buyer_tax_no, total_with_tax, amount, tax_amount, tax_rate,
+                        specific_business_type, taxable_item_name, payment_status, payment_status_label,
+                        collection_status, collection_status_label, collected_amount, pending_amount,
+                        oa_applicant, oa_application_type, oa_project_name, bank_counterparty_name, bank_trade_time,
+                        bank_amount, bank_name, bank_account, bank_direction, bank_summary, receipt_status, receipt_status_label,
+                        oa_relation_count, bank_relation_count, red_invoice_relation_count, searchable_text,
+                        source_versions, generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(invoice_id)s, %(invoice_identity_key)s,
+                        %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s, %(seller_tax_no)s, %(buyer_name)s,
+                        %(buyer_tax_no)s, %(total_with_tax)s, %(amount)s, %(tax_amount)s, %(tax_rate)s,
+                        %(specific_business_type)s, %(taxable_item_name)s, %(payment_status)s, %(payment_status_label)s,
+                        %(collection_status)s, %(collection_status_label)s, %(collected_amount)s, %(pending_amount)s,
+                        %(oa_applicant)s, %(oa_application_type)s, %(oa_project_name)s, %(bank_counterparty_name)s,
+                        %(bank_trade_time)s::timestamptz, %(bank_amount)s, %(bank_name)s, %(bank_account)s,
+                        %(bank_direction)s, %(bank_summary)s,
+                        %(receipt_status)s, %(receipt_status_label)s, %(oa_relation_count)s, %(bank_relation_count)s,
+                        %(red_invoice_relation_count)s, %(searchable_text)s, %(source_versions)s,
+                        coalesce(%(generated_at)s::timestamptz, now()), %(cache_status)s, %(payload)s, %(raw_payload)s
+                    )
+                    on conflict (row_id, scope_key) do update set
+                        scope_month = excluded.scope_month,
+                        invoice_id = excluded.invoice_id,
+                        invoice_identity_key = excluded.invoice_identity_key,
+                        invoice_no = excluded.invoice_no,
+                        invoice_date = excluded.invoice_date,
+                        seller_name = excluded.seller_name,
+                        seller_tax_no = excluded.seller_tax_no,
+                        buyer_name = excluded.buyer_name,
+                        buyer_tax_no = excluded.buyer_tax_no,
+                        total_with_tax = excluded.total_with_tax,
+                        amount = excluded.amount,
+                        tax_amount = excluded.tax_amount,
+                        tax_rate = excluded.tax_rate,
+                        specific_business_type = excluded.specific_business_type,
+                        taxable_item_name = excluded.taxable_item_name,
+                        payment_status = excluded.payment_status,
+                        payment_status_label = excluded.payment_status_label,
+                        collection_status = excluded.collection_status,
+                        collection_status_label = excluded.collection_status_label,
+                        collected_amount = excluded.collected_amount,
+                        pending_amount = excluded.pending_amount,
+                        oa_applicant = excluded.oa_applicant,
+                        oa_application_type = excluded.oa_application_type,
+                        oa_project_name = excluded.oa_project_name,
+                        bank_counterparty_name = excluded.bank_counterparty_name,
+                        bank_trade_time = excluded.bank_trade_time,
+                        bank_amount = excluded.bank_amount,
+                        bank_name = excluded.bank_name,
+                        bank_account = excluded.bank_account,
+                        bank_direction = excluded.bank_direction,
+                        bank_summary = excluded.bank_summary,
+                        receipt_status = excluded.receipt_status,
+                        receipt_status_label = excluded.receipt_status_label,
+                        oa_relation_count = excluded.oa_relation_count,
+                        bank_relation_count = excluded.bank_relation_count,
+                        red_invoice_relation_count = excluded.red_invoice_relation_count,
+                        searchable_text = excluded.searchable_text,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    record,
+                )
+            self._upsert_invoice_relation_scope(
+                connection,
+                scope_table_name=scope_table_name,
+                scope_key=normalized_scope_key,
+                row_count=len(rows_to_save),
+                scope_type=scope_type,
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def _mark_invoice_relation_scope(
+        self,
+        *,
+        scope_table_name: str,
+        scope_key: str,
+        row_count: int,
+        source_versions: dict[str, Any] | None,
+    ) -> None:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            self._upsert_invoice_relation_scope(
+                connection,
+                scope_table_name=scope_table_name,
+                scope_key=normalized_scope_key,
+                row_count=max(int_value(row_count, 0), 0),
+                scope_type="",
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def _prune_invoice_relation_scope_shards(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        current_scope_keys: list[str],
+    ) -> None:
+        normalized_scope_keys: list[str] = []
+        for scope_key in list(current_scope_keys or []):
+            normalized_scope_key = str(scope_key or "").strip()
+            if MONTH_SCOPE_RE.match(normalized_scope_key) and normalized_scope_key not in normalized_scope_keys:
+                normalized_scope_keys.append(normalized_scope_key)
+
+        def write(connection: Any) -> None:
+            if normalized_scope_keys:
+                placeholders = ", ".join(["%s"] * len(normalized_scope_keys))
+                params = tuple(normalized_scope_keys)
+                connection.execute(
+                    f"delete from {table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
+                    params,
+                )
+                connection.execute(
+                    f"delete from {scope_table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
+                    params,
+                )
+                return
+            connection.execute(f"delete from {table_name} where scope_key <> 'all'")
+            connection.execute(f"delete from {scope_table_name} where scope_key <> 'all'")
+
+        run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _upsert_invoice_relation_scope(
+        connection: Any,
+        *,
+        scope_table_name: str,
+        scope_key: str,
+        row_count: int,
+        scope_type: str,
+        source_versions: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            f"""
+            insert into {scope_table_name}(
+                scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
+            )
+            values (%s, %s::date, %s, now(), 'fresh', %s, %s)
+            on conflict (scope_key) do update set
+                scope_month = excluded.scope_month,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                scope_key,
+                month_start(scope_key) if MONTH_SCOPE_RE.match(scope_key) else None,
+                row_count,
+                jsonb(source_versions),
+                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+            ),
+        )
+
+    def _invoice_relation_scope_row(self, *, scope_table_name: str, scope_key: str) -> dict[str, Any] | None:
+        if scope_key == "all":
+            rows = self._connection.fetch_all(
+                f"""
+                select scope_key, row_count, source_versions, cache_status
+                from {scope_table_name}
+                where scope_key <> 'all'
+                order by generated_at desc, scope_key desc
+                """
+            )
+            if not rows:
+                row = self._connection.fetch_one(
+                    f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
+                )
+                return dict(row) if isinstance(row, dict) else None
+            rows_for_all_status = self._invoice_relation_all_scope_effective_rows(rows)
+            for row in rows_for_all_status:
+                if not isinstance(row, dict):
+                    continue
+                if text(row.get("cache_status")) not in {"", "fresh"}:
+                    return {"scope_key": "all", "source_versions": {}}
+            return {"scope_key": "all", "source_versions": self._common_source_versions(rows_for_all_status)}
+        row = self._connection.fetch_one(
+            f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
+            (scope_key,),
+        )
+        return dict(row) if isinstance(row, dict) else None
+
+    def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
+        if scope_key != "all":
+            return self._refresh_status(scope_type=scope_type, scope_key=scope_key)
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type,),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    @staticmethod
+    def _invoice_relation_all_scope_effective_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        non_empty_rows = [row for row in rows if isinstance(row, dict) and int_value(row.get("row_count"), 0) > 0]
+        return non_empty_rows or rows
+
+    @staticmethod
+    def _common_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        common_versions: dict[str, Any] | None = None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            if common_versions is None:
+                common_versions = deepcopy(row_versions)
+                continue
+            for key in list(common_versions):
+                if row_versions.get(key) != common_versions[key]:
+                    common_versions.pop(key, None)
+        return common_versions or {}
+
+
+
 class PostgresReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
 
     def search_index(
         self,
@@ -1235,823 +2079,59 @@ class PostgresReadModelRepository:
             ),
         )
 
-    def list_input_invoice_usage_rows(
-        self,
-        *,
-        month: str | None = None,
-        keyword: str | None = None,
-        invoice_date_from: str | None = None,
-        invoice_date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = None,
-        sort_direction: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-    ) -> dict[str, Any] | None:
-        return self._list_invoice_relation_rows(
-            table_name="read_model.input_invoice_usage_rows",
-            scope_table_name="read_model.input_invoice_usage_scopes",
-            scope_type="input_invoice_usage",
-            month=month,
-            keyword=keyword,
-            invoice_date_from=invoice_date_from,
-            invoice_date_to=invoice_date_to,
-            filters=filters,
-            filter_fields=INPUT_INVOICE_USAGE_FILTER_FIELDS,
-            sort_expressions=INPUT_INVOICE_USAGE_SORT_EXPRESSIONS,
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            page=page,
-            page_size=page_size,
-            summary_kind="input",
-        )
+    def list_input_invoice_usage_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_input_invoice_usage_rows(**kwargs)
 
-    def save_input_invoice_usage_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        self._save_invoice_relation_rows(
-            table_name="read_model.input_invoice_usage_rows",
-            scope_table_name="read_model.input_invoice_usage_scopes",
-            scope_type="input_invoice_usage",
-            scope_key=scope_key,
-            rows=rows,
-            source_versions=source_versions,
-            row_builder=_input_invoice_usage_read_model_record,
-        )
+    def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
 
-    def mark_input_invoice_usage_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        self._mark_invoice_relation_scope(
-            scope_table_name="read_model.input_invoice_usage_scopes",
-            scope_key=scope_key,
-            row_count=row_count,
-            source_versions=source_versions,
-        )
+    def mark_input_invoice_usage_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_input_invoice_usage_scope(**kwargs)
 
     def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._prune_invoice_relation_scope_shards(
-            table_name="read_model.input_invoice_usage_rows",
-            scope_table_name="read_model.input_invoice_usage_scopes",
-            current_scope_keys=current_scope_keys,
-        )
+        self._invoice_usage_collection_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
 
     def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            """
-            select scope_key, source_versions, payload, raw_payload
-            from read_model.input_invoice_usage_rows
-            where row_id = %s
-            order by generated_at desc, scope_key desc, row_id
-            limit 1
-            """,
-            (text(row_id),),
-        )
-        if not isinstance(row, dict):
-            return None
-        payload = _read_model_payload(row)
-        scope_key = text(row.get("scope_key")) or "all"
-        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-        return {
-            "row": payload if isinstance(payload, dict) else None,
-            "refresh_status": self._invoice_relation_refresh_status(
-                scope_type="input_invoice_usage",
-                scope_key=scope_key,
-            ),
-            "source_versions": source_versions,
-            "read_model_scope_key": scope_key,
-        }
+        return self._invoice_usage_collection_repository.get_input_invoice_usage_row_by_row_id(row_id)
 
-    def list_output_invoice_collection_rows(
-        self,
-        *,
-        month: str | None = None,
-        keyword: str | None = None,
-        invoice_date_from: str | None = None,
-        invoice_date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = None,
-        sort_direction: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-    ) -> dict[str, Any] | None:
-        return self._list_invoice_relation_rows(
-            table_name="read_model.output_invoice_collection_rows",
-            scope_table_name="read_model.output_invoice_collection_scopes",
-            scope_type="output_invoice_collection",
-            month=month,
-            keyword=keyword,
-            invoice_date_from=invoice_date_from,
-            invoice_date_to=invoice_date_to,
-            filters=filters,
-            filter_fields=OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS,
-            sort_expressions=OUTPUT_INVOICE_COLLECTION_SORT_EXPRESSIONS,
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            page=page,
-            page_size=page_size,
-            summary_kind="output",
-        )
+    def list_output_invoice_collection_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_output_invoice_collection_rows(**kwargs)
 
     def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            """
-            select scope_key, source_versions, payload, raw_payload
-            from read_model.output_invoice_collection_rows
-            where row_id = %s
-            order by generated_at desc, scope_key desc, row_id
-            limit 1
-            """,
-            (text(row_id),),
-        )
-        if not isinstance(row, dict):
-            return None
-        payload = _read_model_payload(row)
-        scope_key = text(row.get("scope_key")) or "all"
-        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-        return {
-            "row": payload if isinstance(payload, dict) else None,
-            "refresh_status": self._invoice_relation_refresh_status(
-                scope_type="output_invoice_collection",
-                scope_key=scope_key,
-            ),
-            "source_versions": source_versions,
-            "read_model_scope_key": scope_key,
-        }
+        return self._invoice_usage_collection_repository.get_output_invoice_collection_row_by_row_id(row_id)
 
-    def save_output_invoice_collection_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        self._save_invoice_relation_rows(
-            table_name="read_model.output_invoice_collection_rows",
-            scope_table_name="read_model.output_invoice_collection_scopes",
-            scope_type="output_invoice_collection",
-            scope_key=scope_key,
-            rows=rows,
-            source_versions=source_versions,
-            row_builder=_output_invoice_collection_read_model_record,
-        )
+    def save_output_invoice_collection_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_output_invoice_collection_rows(**kwargs)
 
-    def mark_output_invoice_collection_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        self._mark_invoice_relation_scope(
-            scope_table_name="read_model.output_invoice_collection_scopes",
-            scope_key=scope_key,
-            row_count=row_count,
-            source_versions=source_versions,
-        )
+    def mark_output_invoice_collection_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_output_invoice_collection_scope(**kwargs)
 
     def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._prune_invoice_relation_scope_shards(
-            table_name="read_model.output_invoice_collection_rows",
-            scope_table_name="read_model.output_invoice_collection_scopes",
-            current_scope_keys=current_scope_keys,
-        )
+        self._invoice_usage_collection_repository.prune_output_invoice_collection_scope_shards(current_scope_keys)
 
-    def list_oa_pending_payment_rows(
-        self,
-        *,
-        month: str | None = None,
-        keyword: str | None = None,
-        trade_date_from: str | None = None,
-        trade_date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = None,
-        sort_direction: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-        view_mode: str | None = None,
-    ) -> dict[str, Any] | None:
-        scope_key = _invoice_relation_scope_key(month)
-        page_number = max(int_value(page, 1), 1)
-        page_limit = min(max(int_value(page_size, 50), 1), 200)
-        base_where: list[str] = []
-        base_params: list[Any] = []
-        view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
-        if scope_key != "all":
-            base_where.append("scope_key = %s")
-            base_params.append(scope_key)
-        if trade_date_from:
-            base_where.append("bank_trade_time >= %s::date")
-            base_params.append(trade_date_from)
-        if trade_date_to:
-            base_where.append("bank_trade_time < (%s::date + interval '1 day')")
-            base_params.append(trade_date_to)
-        if keyword:
-            base_where.append("searchable_text ilike %s")
-            base_params.append(f"%{keyword}%")
-        for clause, clause_params in _invoice_relation_filter_clauses(filters, OA_PENDING_PAYMENT_FILTER_FIELDS):
-            base_where.append(clause)
-            base_params.extend(clause_params)
-        where = list(base_where)
-        params = list(base_params)
-        if view_mode_clause:
-            where.append(view_mode_clause)
-        where_sql = " and ".join(where) if where else "true"
-        base_where_sql = " and ".join(base_where) if base_where else "true"
-        summary_row = self._connection.fetch_one(
-            f"""
-            select
-                count(*) as count,
-                coalesce(sum(oa_amount), 0) as oa_amount_total,
-                coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
-            from read_model.oa_pending_payment_rows
-            where {where_sql}
-            """,
-            tuple(params),
-        )
-        view_counts_row = self._connection.fetch_one(
-            f"""
-            select
-                coalesce(sum(case when oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed' then 1 else 0 end), 0) as completed_count,
-                coalesce(sum(case when oa_workflow_status = 'in_progress' then 1 else 0 end), 0) as in_progress_count
-            from read_model.oa_pending_payment_rows
-            where {base_where_sql}
-            """,
-            tuple(base_params),
-        )
-        view_counts = {
-            "completed": int_value(view_counts_row.get("completed_count") if isinstance(view_counts_row, dict) else 0, 0),
-            "in_progress": int_value(view_counts_row.get("in_progress_count") if isinstance(view_counts_row, dict) else 0, 0),
-        }
-        total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
-        refresh_status = self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key)
-        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key=scope_key)
-        source_versions = self._oa_pending_payment_scope_source_versions(scope_key=scope_key, scope_row=scope_row)
-        if total == 0:
-            if scope_row is None and sum(view_counts.values()) == 0:
-                return None
-            return {
-                "rows": [],
-                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
-                "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00", "viewCounts": view_counts},
-                "refresh_status": refresh_status,
-                "source_versions": source_versions,
-                "read_model_scope_key": scope_key,
-            }
-        order_sql = _invoice_relation_order_sql(
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
-        )
-        rows = self._connection.fetch_all(
-            f"""
-            select payload, raw_payload
-            from read_model.oa_pending_payment_rows
-            where {where_sql}
-            order by {order_sql}
-            limit %s offset %s
-            """,
-            tuple([*params, page_limit, (page_number - 1) * page_limit]),
-        )
-        payload_rows = [_read_model_payload(row) for row in rows]
-        return {
-            "rows": [row for row in payload_rows if isinstance(row, dict)],
-            "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
-            "summary": {
-                "rowCount": total,
-                "oaAmountTotal": decimal_text(summary_row.get("oa_amount_total") if isinstance(summary_row, dict) else None) or "0.00",
-                "bankPaidTotal": decimal_text(summary_row.get("bank_paid_total") if isinstance(summary_row, dict) else None) or "0.00",
-                "viewCounts": view_counts,
-            },
-            "refresh_status": refresh_status,
-            "source_versions": source_versions,
-            "read_model_scope_key": scope_key,
-        }
+    def list_oa_pending_payment_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_oa_pending_payment_rows(**kwargs)
 
-    def _oa_pending_payment_scope_source_versions(
-        self,
-        *,
-        scope_key: str,
-        scope_row: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        if scope_key == "all":
-            rows = self._connection.fetch_all(
-                """
-                select distinct scope_key, source_versions
-                from read_model.oa_pending_payment_rows
-                where scope_key <> 'all'
-                order by scope_key desc
-                """
-            )
-            if rows:
-                return self._common_source_versions([dict(row) for row in rows if isinstance(row, dict)])
-        return (
-            scope_row.get("source_versions")
-            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
-            else {}
-        )
+    def save_oa_pending_payment_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_oa_pending_payment_rows(**kwargs)
 
-    def save_oa_pending_payment_rows(
-        self,
-        *,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        normalized_scope_key = _invoice_relation_scope_key(scope_key)
-        rows_to_save = list(rows or [])
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
-
-        def write(connection: Any) -> None:
-            if normalized_scope_key == "all":
-                connection.execute("delete from read_model.oa_pending_payment_rows")
-            else:
-                connection.execute("delete from read_model.oa_pending_payment_rows where scope_key = %s", (normalized_scope_key,))
-            for row in rows_to_save:
-                row_payload = dict(row) if isinstance(row, dict) else {}
-                row_payload["sourceVersions"] = normalized_source_versions
-                connection.execute(
-                    """
-                    insert into read_model.oa_pending_payment_rows(
-                        row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
-                        oa_workflow_status, oa_project_name, oa_amount, payment_status, payment_status_label,
-                        bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name, bank_account, bank_direction,
-                        bank_counterparty_name, bank_summary, invoice_id, invoice_no,
-                        invoice_date, seller_name, invoice_total_with_tax, searchable_text,
-                        source_versions, payload, raw_payload
-                    )
-                    values (
-                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
-                        %(oa_application_type)s, %(oa_workflow_status)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
-                        %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
-                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
-                        %(bank_counterparty_name)s, %(bank_summary)s,
-                        %(invoice_id)s, %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s,
-                        %(invoice_total_with_tax)s, %(searchable_text)s, %(source_versions)s,
-                        %(payload)s, %(raw_payload)s
-                    )
-                    on conflict (row_id, scope_key) do update set
-                        scope_month = excluded.scope_month,
-                        oa_id = excluded.oa_id,
-                        oa_applicant = excluded.oa_applicant,
-                        oa_application_type = excluded.oa_application_type,
-                        oa_workflow_status = excluded.oa_workflow_status,
-                        oa_project_name = excluded.oa_project_name,
-                        oa_amount = excluded.oa_amount,
-                        payment_status = excluded.payment_status,
-                        payment_status_label = excluded.payment_status_label,
-                        bank_transaction_id = excluded.bank_transaction_id,
-                        bank_trade_time = excluded.bank_trade_time,
-                        bank_amount = excluded.bank_amount,
-                        bank_paid_total = excluded.bank_paid_total,
-                        bank_name = excluded.bank_name,
-                        bank_account = excluded.bank_account,
-                        bank_direction = excluded.bank_direction,
-                        bank_counterparty_name = excluded.bank_counterparty_name,
-                        bank_summary = excluded.bank_summary,
-                        invoice_id = excluded.invoice_id,
-                        invoice_no = excluded.invoice_no,
-                        invoice_date = excluded.invoice_date,
-                        seller_name = excluded.seller_name,
-                        invoice_total_with_tax = excluded.invoice_total_with_tax,
-                        searchable_text = excluded.searchable_text,
-                        source_versions = excluded.source_versions,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    _oa_pending_payment_read_model_record(row_payload, normalized_scope_key),
-                )
-            self._upsert_invoice_relation_scope(
-                connection,
-                scope_table_name="read_model.oa_pending_payment_scopes",
-                scope_key=normalized_scope_key,
-                row_count=len(rows_to_save),
-                scope_type="oa_pending_payment",
-                source_versions=normalized_source_versions,
-            )
-
-        run_in_transaction(self._connection, write)
-
-    def mark_oa_pending_payment_scope(
-        self,
-        *,
-        scope_key: str,
-        row_count: int = 0,
-        source_versions: dict[str, Any] | None = None,
-    ) -> None:
-        self._mark_invoice_relation_scope(
-            scope_table_name="read_model.oa_pending_payment_scopes",
-            scope_key=scope_key,
-            row_count=row_count,
-            source_versions=source_versions,
-        )
+    def mark_oa_pending_payment_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_oa_pending_payment_scope(**kwargs)
 
     def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._prune_invoice_relation_scope_shards(
-            table_name="read_model.oa_pending_payment_rows",
-            scope_table_name="read_model.oa_pending_payment_scopes",
-            current_scope_keys=current_scope_keys,
-        )
+        self._invoice_usage_collection_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
     def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        return self._get_oa_pending_payment_row("row_id = %s", (text(row_id),))
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_row_id(row_id)
 
     def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, Any] | None:
-        return self._get_oa_pending_payment_row("oa_id = %s", (text(oa_id),))
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_oa_id(oa_id)
 
     def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, Any] | None:
-        return self._get_oa_pending_payment_row("bank_transaction_id = %s", (text(bank_transaction_id),))
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_bank_transaction_id(bank_transaction_id)
 
     def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
-        return self._get_oa_pending_payment_row("invoice_id = %s", (text(invoice_id),))
-
-    def _get_oa_pending_payment_row(self, predicate_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            f"""
-            select scope_key, source_versions, payload, raw_payload
-            from read_model.oa_pending_payment_rows
-            where {predicate_sql}
-            order by generated_at desc, scope_key desc, row_id
-            limit 1
-            """,
-            params,
-        )
-        if isinstance(row, dict):
-            payload = _read_model_payload(row)
-            scope_key = text(row.get("scope_key")) or "all"
-            source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-            return {
-                "row": payload if isinstance(payload, dict) else None,
-                "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key),
-                "source_versions": source_versions,
-                "read_model_scope_key": scope_key,
-            }
-        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key="all")
-        if not isinstance(scope_row, dict):
-            return None
-        return {
-            "row": None,
-            "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key="all"),
-            "source_versions": scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
-            "read_model_scope_key": text(scope_row.get("scope_key")) or "all",
-        }
-
-    def _list_invoice_relation_rows(
-        self,
-        *,
-        table_name: str,
-        scope_table_name: str,
-        scope_type: str,
-        month: str | None,
-        keyword: str | None,
-        invoice_date_from: str | None,
-        invoice_date_to: str | None,
-        filters: str | list[dict[str, Any]] | None,
-        filter_fields: dict[str, tuple[str, str, set[str]]],
-        sort_expressions: dict[str, str],
-        sort_field: str | None,
-        sort_direction: str | None,
-        page: int | str | None,
-        page_size: int | str | None,
-        summary_kind: str,
-    ) -> dict[str, Any] | None:
-        scope_key = _invoice_relation_scope_key(month)
-        page_number = max(int_value(page, 1), 1)
-        page_limit = min(max(int_value(page_size, 50), 1), 200)
-        where: list[str] = []
-        params: list[Any] = []
-        if scope_key != "all":
-            where.append("scope_key = %s")
-            params.append(scope_key)
-        if invoice_date_from:
-            where.append("invoice_date >= %s::date")
-            params.append(invoice_date_from)
-        if invoice_date_to:
-            where.append("invoice_date <= %s::date")
-            params.append(invoice_date_to)
-        if keyword:
-            where.append("searchable_text ilike %s")
-            params.append(f"%{keyword}%")
-        for clause, clause_params in _invoice_relation_filter_clauses(filters, filter_fields):
-            where.append(clause)
-            params.extend(clause_params)
-        where_sql = " and ".join(where) if where else "true"
-        summary_row = self._connection.fetch_one(
-            _invoice_relation_summary_sql(table_name=table_name, where_sql=where_sql, summary_kind=summary_kind),
-            tuple(params),
-        )
-        total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
-        refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
-        scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
-        source_versions = (
-            scope_row.get("source_versions")
-            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
-            else {}
-        )
-        if total == 0:
-            if scope_row is None:
-                return None
-            return {
-                "rows": [],
-                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
-                "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=0),
-                "refresh_status": refresh_status,
-                "source_versions": source_versions,
-            }
-        order_sql = _invoice_relation_order_sql(
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            sort_expressions=sort_expressions,
-        )
-        rows = self._connection.fetch_all(
-            f"""
-            select payload, raw_payload
-            from {table_name}
-            where {where_sql}
-            order by {order_sql}
-            limit %s offset %s
-            """,
-            tuple([*params, page_limit, (page_number - 1) * page_limit]),
-        )
-        payload_rows = [_read_model_payload(row) for row in rows]
-        return {
-            "rows": [row for row in payload_rows if isinstance(row, dict)],
-            "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
-            "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
-            "refresh_status": refresh_status,
-            "source_versions": source_versions,
-        }
-
-    def _save_invoice_relation_rows(
-        self,
-        *,
-        table_name: str,
-        scope_table_name: str,
-        scope_type: str,
-        scope_key: str,
-        rows: list[dict[str, Any]],
-        source_versions: dict[str, Any] | None,
-        row_builder: Any,
-    ) -> None:
-        normalized_scope_key = _invoice_relation_scope_key(scope_key)
-        rows_to_save = list(rows or [])
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
-
-        def write(connection: Any) -> None:
-            if normalized_scope_key == "all":
-                connection.execute(f"delete from {table_name}")
-            else:
-                connection.execute(f"delete from {table_name} where scope_key = %s", (normalized_scope_key,))
-            for row in rows_to_save:
-                row_payload = dict(row) if isinstance(row, dict) else {}
-                row_payload["sourceVersions"] = normalized_source_versions
-                record = row_builder(row_payload, normalized_scope_key)
-                connection.execute(
-                    f"""
-                    insert into {table_name}(
-                        row_id, scope_key, scope_month, invoice_id, invoice_identity_key, invoice_no, invoice_date,
-                        seller_name, seller_tax_no, buyer_name, buyer_tax_no, total_with_tax, amount, tax_amount, tax_rate,
-                        specific_business_type, taxable_item_name, payment_status, payment_status_label,
-                        collection_status, collection_status_label, collected_amount, pending_amount,
-                        oa_applicant, oa_application_type, oa_project_name, bank_counterparty_name, bank_trade_time,
-                        bank_amount, bank_name, bank_account, bank_direction, bank_summary, receipt_status, receipt_status_label,
-                        oa_relation_count, bank_relation_count, red_invoice_relation_count, searchable_text,
-                        source_versions, generated_at, cache_status, payload, raw_payload
-                    )
-                    values (
-                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(invoice_id)s, %(invoice_identity_key)s,
-                        %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s, %(seller_tax_no)s, %(buyer_name)s,
-                        %(buyer_tax_no)s, %(total_with_tax)s, %(amount)s, %(tax_amount)s, %(tax_rate)s,
-                        %(specific_business_type)s, %(taxable_item_name)s, %(payment_status)s, %(payment_status_label)s,
-                        %(collection_status)s, %(collection_status_label)s, %(collected_amount)s, %(pending_amount)s,
-                        %(oa_applicant)s, %(oa_application_type)s, %(oa_project_name)s, %(bank_counterparty_name)s,
-                        %(bank_trade_time)s::timestamptz, %(bank_amount)s, %(bank_name)s, %(bank_account)s,
-                        %(bank_direction)s, %(bank_summary)s,
-                        %(receipt_status)s, %(receipt_status_label)s, %(oa_relation_count)s, %(bank_relation_count)s,
-                        %(red_invoice_relation_count)s, %(searchable_text)s, %(source_versions)s,
-                        coalesce(%(generated_at)s::timestamptz, now()), %(cache_status)s, %(payload)s, %(raw_payload)s
-                    )
-                    on conflict (row_id, scope_key) do update set
-                        scope_month = excluded.scope_month,
-                        invoice_id = excluded.invoice_id,
-                        invoice_identity_key = excluded.invoice_identity_key,
-                        invoice_no = excluded.invoice_no,
-                        invoice_date = excluded.invoice_date,
-                        seller_name = excluded.seller_name,
-                        seller_tax_no = excluded.seller_tax_no,
-                        buyer_name = excluded.buyer_name,
-                        buyer_tax_no = excluded.buyer_tax_no,
-                        total_with_tax = excluded.total_with_tax,
-                        amount = excluded.amount,
-                        tax_amount = excluded.tax_amount,
-                        tax_rate = excluded.tax_rate,
-                        specific_business_type = excluded.specific_business_type,
-                        taxable_item_name = excluded.taxable_item_name,
-                        payment_status = excluded.payment_status,
-                        payment_status_label = excluded.payment_status_label,
-                        collection_status = excluded.collection_status,
-                        collection_status_label = excluded.collection_status_label,
-                        collected_amount = excluded.collected_amount,
-                        pending_amount = excluded.pending_amount,
-                        oa_applicant = excluded.oa_applicant,
-                        oa_application_type = excluded.oa_application_type,
-                        oa_project_name = excluded.oa_project_name,
-                        bank_counterparty_name = excluded.bank_counterparty_name,
-                        bank_trade_time = excluded.bank_trade_time,
-                        bank_amount = excluded.bank_amount,
-                        bank_name = excluded.bank_name,
-                        bank_account = excluded.bank_account,
-                        bank_direction = excluded.bank_direction,
-                        bank_summary = excluded.bank_summary,
-                        receipt_status = excluded.receipt_status,
-                        receipt_status_label = excluded.receipt_status_label,
-                        oa_relation_count = excluded.oa_relation_count,
-                        bank_relation_count = excluded.bank_relation_count,
-                        red_invoice_relation_count = excluded.red_invoice_relation_count,
-                        searchable_text = excluded.searchable_text,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    record,
-                )
-            self._upsert_invoice_relation_scope(
-                connection,
-                scope_table_name=scope_table_name,
-                scope_key=normalized_scope_key,
-                row_count=len(rows_to_save),
-                scope_type=scope_type,
-                source_versions=normalized_source_versions,
-            )
-
-        run_in_transaction(self._connection, write)
-
-    def _mark_invoice_relation_scope(
-        self,
-        *,
-        scope_table_name: str,
-        scope_key: str,
-        row_count: int,
-        source_versions: dict[str, Any] | None,
-    ) -> None:
-        normalized_scope_key = _invoice_relation_scope_key(scope_key)
-        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
-
-        def write(connection: Any) -> None:
-            self._upsert_invoice_relation_scope(
-                connection,
-                scope_table_name=scope_table_name,
-                scope_key=normalized_scope_key,
-                row_count=max(int_value(row_count, 0), 0),
-                scope_type="",
-                source_versions=normalized_source_versions,
-            )
-
-        run_in_transaction(self._connection, write)
-
-    def _prune_invoice_relation_scope_shards(
-        self,
-        *,
-        table_name: str,
-        scope_table_name: str,
-        current_scope_keys: list[str],
-    ) -> None:
-        normalized_scope_keys: list[str] = []
-        for scope_key in list(current_scope_keys or []):
-            normalized_scope_key = str(scope_key or "").strip()
-            if MONTH_SCOPE_RE.match(normalized_scope_key) and normalized_scope_key not in normalized_scope_keys:
-                normalized_scope_keys.append(normalized_scope_key)
-
-        def write(connection: Any) -> None:
-            if normalized_scope_keys:
-                placeholders = ", ".join(["%s"] * len(normalized_scope_keys))
-                params = tuple(normalized_scope_keys)
-                connection.execute(
-                    f"delete from {table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
-                    params,
-                )
-                connection.execute(
-                    f"delete from {scope_table_name} where scope_key <> 'all' and scope_key not in ({placeholders})",
-                    params,
-                )
-                return
-            connection.execute(f"delete from {table_name} where scope_key <> 'all'")
-            connection.execute(f"delete from {scope_table_name} where scope_key <> 'all'")
-
-        run_in_transaction(self._connection, write)
-
-    @staticmethod
-    def _upsert_invoice_relation_scope(
-        connection: Any,
-        *,
-        scope_table_name: str,
-        scope_key: str,
-        row_count: int,
-        scope_type: str,
-        source_versions: dict[str, Any],
-    ) -> None:
-        connection.execute(
-            f"""
-            insert into {scope_table_name}(
-                scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
-            )
-            values (%s, %s::date, %s, now(), 'fresh', %s, %s)
-            on conflict (scope_key) do update set
-                scope_month = excluded.scope_month,
-                row_count = excluded.row_count,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                source_versions = excluded.source_versions,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                scope_key,
-                month_start(scope_key) if MONTH_SCOPE_RE.match(scope_key) else None,
-                row_count,
-                jsonb(source_versions),
-                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
-            ),
-        )
-
-    def _invoice_relation_scope_row(self, *, scope_table_name: str, scope_key: str) -> dict[str, Any] | None:
-        if scope_key == "all":
-            rows = self._connection.fetch_all(
-                f"""
-                select scope_key, row_count, source_versions, cache_status
-                from {scope_table_name}
-                where scope_key <> 'all'
-                order by generated_at desc, scope_key desc
-                """
-            )
-            if not rows:
-                row = self._connection.fetch_one(
-                    f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
-                )
-                return dict(row) if isinstance(row, dict) else None
-            rows_for_all_status = self._invoice_relation_all_scope_effective_rows(rows)
-            for row in rows_for_all_status:
-                if not isinstance(row, dict):
-                    continue
-                if text(row.get("cache_status")) not in {"", "fresh"}:
-                    return {"scope_key": "all", "source_versions": {}}
-            return {"scope_key": "all", "source_versions": self._common_source_versions(rows_for_all_status)}
-        row = self._connection.fetch_one(
-            f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
-            (scope_key,),
-        )
-        return dict(row) if isinstance(row, dict) else None
-
-    def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
-        if scope_key != "all":
-            return self._refresh_status(scope_type=scope_type, scope_key=scope_key)
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """,
-            (scope_type,),
-        )
-        if dirty_row is None:
-            return "fresh"
-        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-
-    @staticmethod
-    def _invoice_relation_all_scope_effective_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        non_empty_rows = [row for row in rows if isinstance(row, dict) and int_value(row.get("row_count"), 0) > 0]
-        return non_empty_rows or rows
-
-    @staticmethod
-    def _common_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
-        common_versions: dict[str, Any] | None = None
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-            if common_versions is None:
-                common_versions = deepcopy(row_versions)
-                continue
-            for key in list(common_versions):
-                if row_versions.get(key) != common_versions[key]:
-                    common_versions.pop(key, None)
-        return common_versions or {}
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_invoice_id(invoice_id)
 
     def list_pending_invoice_rows(
         self,

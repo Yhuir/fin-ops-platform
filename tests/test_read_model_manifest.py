@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 import unittest
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.operation_freshness_barrier import OperationFreshnessTarget
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    PostgresInvoiceUsageCollectionReadModelRepository,
+    PostgresReadModelRepository,
+)
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
     read_model_manifest_by_refresh_event_type,
@@ -206,6 +210,37 @@ class ReadModelManifestTests(unittest.TestCase):
         for key, repository_owner in expected_port_owners.items():
             with self.subTest(read_model_key=key):
                 self.assertEqual(READ_MODEL_MANIFEST[key].repository_owner, repository_owner)
+
+    def test_invoice_usage_collection_physical_sql_owner_is_split_from_shared_repository(self) -> None:
+        owned_methods = {
+            "list_input_invoice_usage_rows",
+            "save_input_invoice_usage_rows",
+            "mark_input_invoice_usage_scope",
+            "prune_input_invoice_usage_scope_shards",
+            "get_input_invoice_usage_row_by_row_id",
+            "list_output_invoice_collection_rows",
+            "get_output_invoice_collection_row_by_row_id",
+            "save_output_invoice_collection_rows",
+            "mark_output_invoice_collection_scope",
+            "prune_output_invoice_collection_scope_shards",
+            "list_oa_pending_payment_rows",
+            "save_oa_pending_payment_rows",
+            "mark_oa_pending_payment_scope",
+            "prune_oa_pending_payment_scope_shards",
+            "get_oa_pending_payment_row_by_row_id",
+            "get_oa_pending_payment_row_by_oa_id",
+            "get_oa_pending_payment_row_by_bank_transaction_id",
+            "get_oa_pending_payment_row_by_invoice_id",
+        }
+
+        for method_name in owned_methods:
+            with self.subTest(method_name=method_name):
+                self.assertTrue(callable(getattr(PostgresInvoiceUsageCollectionReadModelRepository, method_name, None)))
+                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
+                self.assertIn("_invoice_usage_collection_repository", shared_source)
+                self.assertNotIn("read_model.input_invoice_usage_rows", shared_source)
+                self.assertNotIn("read_model.output_invoice_collection_rows", shared_source)
+                self.assertNotIn("read_model.oa_pending_payment_rows", shared_source)
 
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]

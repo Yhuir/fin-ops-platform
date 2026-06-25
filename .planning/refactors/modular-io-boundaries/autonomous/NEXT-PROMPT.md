@@ -7,9 +7,11 @@ Continue the user-authorized `main-read-model-closure` run.
 - Branch: `main`.
 - Backup branch: `codex/backup-main-before-read-model-closure-20260625-230543`.
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
-- Latest completed wave: `main-read-model-closure:wave-1-repository-owner-contract-reconciliation`.
+- Latest completed wave: `main-read-model-closure:wave-2-physical-sql-owner-split:invoice-usage-collection`.
 - Reconciliation file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-25.md`.
 - Wave 1 aligned non-Workbench manifest `repository_owner` values to existing narrow read model repository ports and added a manifest guard.
+- Wave 2 first subwave split physical SQL ownership for `input_invoice_usage`, `output_invoice_collection`, and `oa_pending_payment` into `PostgresInvoiceUsageCollectionReadModelRepository`.
+- Wave 2 analysis file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-2-physical-sql-owner-split-2026-06-25.md`.
 - No production/server/DB access was used. No secret, production DB mutation, queue mutation, readiness mutation or worker replay occurred.
 - No PSCIP-L4 global closure is claimed.
 
@@ -32,21 +34,19 @@ Continue the user-authorized `main-read-model-closure` run.
 
 ## Next Boundary
 
-`main-read-model-closure:wave-2-physical-sql-owner-split`
+`main-read-model-closure:wave-2-physical-sql-owner-split:pending-invoice-lifecycle`
 
-Recommended first family: invoice read models.
+Remaining family for this wave: pending invoice + invoice lifecycle.
 
 Scope:
 - `pending_invoice`
 - `invoice_lifecycle`
-- `input_invoice_usage`
-- `output_invoice_collection`
-- `oa_pending_payment`
 
 Goal:
 - Move from “narrow port wrapping broad `PostgresReadModelRepository` methods” toward clearer physical SQL ownership without changing API behavior.
 - Prefer a coherent extraction pattern that keeps public port APIs stable.
 - Do not split every method one-by-one if a family-level owner can be extracted safely with tests.
+- Preserve the already-completed `PostgresInvoiceUsageCollectionReadModelRepository` owner split.
 
 Acceptance:
 - No API response shape change unless explicitly tested.
@@ -54,9 +54,10 @@ Acceptance:
 - No new direct dirty/outbox SQL outside allowed owners.
 - No broad `all` fake fresh.
 - No Redis/RabbitMQ freshness truth.
+- Do not implement Go, Go Fiber or Go Worker.
 - Existing repository port tests remain green.
 - Add or update at least one guard proving the selected family no longer treats shared `PostgresReadModelRepository` as its physical owner once extracted.
-- Record PSCIP level movement in a new `analysis/read-model-main-wave-2-physical-sql-owner-split-2026-06-25.md`.
+- Update `analysis/read-model-main-wave-2-physical-sql-owner-split-2026-06-25.md` with pending/lifecycle PSCIP movement.
 - Update this `NEXT-PROMPT.md` at the end of the wave.
 
 Suggested verification:
@@ -68,9 +69,5 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.p
 bash scripts/verify.sh docs
 git diff --check
 ```
-
-If this family is too broad for one verified wave, split it into two coherent subwaves:
-- lifecycle + pending invoice
-- invoice usage collection + OA pending payment
 
 Do not claim PSCIP-L4 without production or equivalent runtime evidence.
