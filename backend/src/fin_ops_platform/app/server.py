@@ -467,6 +467,7 @@ from fin_ops_platform.services.workbench_events_active_stream_registry import Wo
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
@@ -2823,7 +2824,7 @@ class Application:
             missing_read_model_error=self._is_missing_workbench_groups_read_model_error,
             transient_read_model_error=self._is_transient_workbench_read_model_error,
             refresh_status_with_source_freshness=self._workbench_refresh_status_with_source_freshness,
-            normalize_refresh_status_payload=self._normalize_workbench_refresh_status_payload,
+            normalize_refresh_status_payload=self._workbench_refresh_status_payload_normalizer().normalize,
             groups_redis_version_key=self._workbench_groups_redis_version_key,
             groups_cache_key_from_version=self._workbench_groups_redis_cache_key_from_version,
             groups_cache_key=self._workbench_groups_redis_cache_key,
@@ -3698,7 +3699,7 @@ class Application:
         repository = getattr(self, "_workbench_sql_read_repository", None)
         get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
         if not callable(get_refresh_status):
-            return self._normalize_workbench_refresh_status_payload(
+            return self._workbench_refresh_status_payload_normalizer().normalize(
                 {},
                 scope_key=scope_key,
                 fallback_status="unavailable",
@@ -3706,98 +3707,11 @@ class Application:
         payload = get_refresh_status(scope_key=scope_key)
         if isinstance(payload, dict):
             payload = self._workbench_refresh_status_with_source_freshness(payload, scope_key=scope_key)
-        return self._normalize_workbench_refresh_status_payload(
+        return self._workbench_refresh_status_payload_normalizer().normalize(
             payload if isinstance(payload, dict) else {},
             scope_key=scope_key,
             fallback_status="unavailable" if not isinstance(payload, dict) else "fresh",
         )
-
-    @staticmethod
-    def _normalize_workbench_refresh_status_payload(
-        payload: dict[str, object],
-        *,
-        scope_key: str,
-        fallback_status: str = "fresh",
-    ) -> dict[str, object]:
-        dirty_scopes = payload.get("dirty_scopes") if isinstance(payload.get("dirty_scopes"), list) else []
-        running_scopes = payload.get("running_scopes") if isinstance(payload.get("running_scopes"), list) else []
-        dirty_statuses = {
-            str(scope.get("status") or "").strip().lower()
-            for scope in dirty_scopes
-            if isinstance(scope, dict)
-        }
-        has_active_dirty_scope = bool(dirty_statuses.intersection({"pending", "processing", "queued", "running"}))
-        raw_status = str(payload.get("read_model_status") or payload.get("status") or fallback_status).strip().lower()
-        if has_active_dirty_scope:
-            read_model_status = "refreshing"
-        elif dirty_statuses.intersection({"failed", "dead_lettered"}):
-            read_model_status = "failed"
-        elif raw_status in {"failed", "error"}:
-            read_model_status = "failed"
-        elif raw_status in {"refreshing", "rebuilding", "pending", "processing", "queued", "running"}:
-            read_model_status = "refreshing"
-        elif raw_status in {"stale", "dirty"}:
-            read_model_status = "stale"
-        elif raw_status == "unavailable":
-            read_model_status = "unavailable"
-        else:
-            read_model_status = "fresh"
-
-        last_error = payload.get("last_error")
-        if not last_error:
-            last_error = next(
-                (
-                    scope.get("last_error")
-                    for scope in dirty_scopes
-                    if isinstance(scope, dict) and scope.get("last_error")
-                ),
-                None,
-            )
-        if read_model_status == "refreshing":
-            last_error = None
-        read_model_version = (
-            payload.get("active_generation_id")
-            or payload.get("read_model_version")
-            or payload.get("source_version")
-            or payload.get("version")
-            or next(
-                (
-                    scope.get("source_version")
-                    for scope in dirty_scopes
-                    if isinstance(scope, dict) and scope.get("source_version") is not None
-                ),
-                None,
-            )
-        )
-        generated_at = payload.get("generated_at") or payload.get("read_model_generated_at")
-        return {
-            **payload,
-            "scope_key": str(payload.get("scope_key") or scope_key or "all"),
-            "read_model_status": read_model_status,
-            "generated_at": generated_at,
-            "active_generation_id": payload.get("active_generation_id"),
-            "building_generation_id": payload.get("building_generation_id"),
-            "failed_generation_id": payload.get("failed_generation_id"),
-            "read_model_version": read_model_version,
-            "dirty_scopes": dirty_scopes,
-            "running_scopes": running_scopes,
-            "processed_count": payload.get("processed_count") if payload.get("processed_count") is not None else None,
-            "total_count": payload.get("total_count") if payload.get("total_count") is not None else None,
-            "worker_lag_seconds": payload.get("worker_lag_seconds") if payload.get("worker_lag_seconds") is not None else None,
-            "last_error": last_error,
-            "retryable": bool(read_model_status in {"failed", "stale", "unavailable"}),
-        }
-
-    @staticmethod
-    def _workbench_refresh_status_event_name(payload: dict[str, object]) -> str:
-        status = str(payload.get("read_model_status") or "").strip().lower()
-        if status == "fresh":
-            return "workbench.read_model.completed"
-        if status == "failed":
-            return "workbench.read_model.failed"
-        if status in {"refreshing", "stale"}:
-            return "workbench.read_model.progress"
-        return "workbench.read_model.progress"
 
     @staticmethod
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
@@ -8480,15 +8394,23 @@ class Application:
 
     def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
         stream_registry = self._workbench_events_stream_registry()
+        status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()
         return WorkbenchEventsApiRoutes(
             scope_key_for_month=self._workbench_read_model_scope_key,
             status_payload_for_scope=self._workbench_refresh_status_payload_for_scope,
-            event_name_for_payload=self._workbench_refresh_status_event_name,
+            event_name_for_payload=status_payload_normalizer.event_name,
             serialize_sse_event=self._app_health_service.serialize_sse_event,
             mark_stream_started=stream_registry.mark_started,
             mark_stream_closed=stream_registry.mark_closed,
             sleep_seconds=sleep,
         )
+
+    def _workbench_refresh_status_payload_normalizer(self) -> WorkbenchRefreshStatusPayloadNormalizer:
+        normalizer = getattr(self, "_workbench_refresh_status_payload_normalizer_instance", None)
+        if normalizer is None:
+            normalizer = WorkbenchRefreshStatusPayloadNormalizer()
+            self._workbench_refresh_status_payload_normalizer_instance = normalizer
+        return normalizer
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)

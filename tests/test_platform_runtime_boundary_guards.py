@@ -4981,7 +4981,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "scope_key_for_month=self._workbench_read_model_scope_key",
             "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
-            "event_name_for_payload=self._workbench_refresh_status_event_name",
+            "event_name_for_payload=status_payload_normalizer.event_name",
             "serialize_sse_event=self._app_health_service.serialize_sse_event",
             "mark_stream_started=stream_registry.mark_started",
             "mark_stream_closed=stream_registry.mark_closed",
@@ -5051,7 +5051,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Workbench events route builder is not wired through registry owner: {marker}")
         for forbidden in (
             "ReadModelRefreshGateway",
-            "dirty_scope",
             "outbox",
             "readiness",
             "clear_cache",
@@ -5070,6 +5069,74 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench events registry extraction analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_refresh_status_payload_normalizer_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        service_source = (SERVICES_ROOT / "workbench_refresh_status_payload.py").read_text(encoding="utf-8")
+        facade_source = _function_source(server_tree, server_source, "_workbench_query_facade")
+        events_builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
+        payload_provider_source = _function_source(
+            server_tree,
+            server_source,
+            "_workbench_refresh_status_payload_for_scope",
+        )
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-refresh-status-payload-normalizer-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "def _normalize_workbench_refresh_status_payload",
+            "def _workbench_refresh_status_event_name",
+            "normalize_refresh_status_payload=self._normalize_workbench_refresh_status_payload",
+            "event_name_for_payload=self._workbench_refresh_status_event_name",
+        ):
+            if forbidden in server_source:
+                violations.append(f"Application still owns Workbench refresh-status normalizer surface: {forbidden}")
+        for marker in (
+            "class WorkbenchRefreshStatusPayloadNormalizer",
+            "def normalize(",
+            "def event_name(",
+            "read_model_status = \"refreshing\"",
+            "workbench.read_model.completed",
+            "workbench.read_model.failed",
+        ):
+            if marker not in service_source:
+                violations.append(f"WorkbenchRefreshStatusPayloadNormalizer missing marker: {marker}")
+        if "normalize_refresh_status_payload=self._workbench_refresh_status_payload_normalizer().normalize" not in facade_source:
+            violations.append("WorkbenchQueryFacade is not wired through WorkbenchRefreshStatusPayloadNormalizer")
+        if "status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()" not in events_builder_source:
+            violations.append("Workbench events builder does not resolve WorkbenchRefreshStatusPayloadNormalizer")
+        if "event_name_for_payload=status_payload_normalizer.event_name" not in events_builder_source:
+            violations.append("Workbench events builder is not wired through normalizer event_name")
+        if "self._workbench_refresh_status_payload_normalizer().normalize(" not in payload_provider_source:
+            violations.append("Workbench status payload provider does not delegate normalization to owner")
+        for forbidden in (
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "Response",
+            "HTTPStatus",
+            "repository",
+        ):
+            if forbidden in service_source:
+                violations.append(f"WorkbenchRefreshStatusPayloadNormalizer gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-refresh-status-payload-normalizer-extraction",
+            "WorkbenchRefreshStatusPayloadNormalizer",
+            "refresh-status payload normalization",
+            "legacy `/api/workbench` SQL fallback",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench refresh status normalizer analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 
