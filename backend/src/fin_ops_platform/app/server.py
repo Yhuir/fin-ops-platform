@@ -49,6 +49,7 @@ from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
+from fin_ops_platform.app.routes_etc_reconciliation import EtcReconciliationTaskApiRoutes
 from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
@@ -2147,14 +2148,8 @@ class Application:
             return self._handle_api_etc_import_confirm(body, headers)
         if method == "POST" and route_path == "/api/etc/import":
             return self._handle_api_etc_import(body, headers)
-        if method == "GET" and route_path == "/api/etc/reconciliation-tasks/ready-for-import":
-            return self._handle_api_etc_reconciliation_ready_for_import()
-        if method == "GET" and route_path == "/api/etc/reconciliation-tasks":
-            return self._handle_api_etc_reconciliation_tasks()
-        if method == "POST" and route_path == "/api/etc/reconciliation-tasks":
-            return self._handle_api_etc_reconciliation_task_create(body)
-        if route_path.startswith("/api/etc/reconciliation-tasks/"):
-            return self._route_api_etc_reconciliation_task(method, route_path, body, headers)
+        if route_path == "/api/etc/reconciliation-tasks" or route_path.startswith("/api/etc/reconciliation-tasks/"):
+            return self._etc_reconciliation_routes().route(method, route_path, body, headers)
         if route_path == "/api/etc/business-batches":
             return self._handle_api_etc_business_batches_route(method, query, body, headers)
         if route_path.startswith("/api/etc/business-batches/"):
@@ -4887,100 +4882,29 @@ class Application:
             },
         )
 
-    def _handle_api_etc_reconciliation_tasks(self) -> Response:
-        return self._json_response(
-            HTTPStatus.OK,
-            {"tasks": [self._etc_reconciliation_task_payload(task) for task in self._etc_reconciliation_task_service.list_tasks()]},
+    def _etc_reconciliation_routes(self) -> EtcReconciliationTaskApiRoutes:
+        routes = getattr(self, "_etc_reconciliation_task_api_routes", None)
+        if isinstance(routes, EtcReconciliationTaskApiRoutes):
+            return routes
+        routes = EtcReconciliationTaskApiRoutes(
+            task_service=self._etc_reconciliation_task_service,
+            json_response=self._json_response,
+            load_json_body=self._load_json_body,
+            task_payload=self._etc_reconciliation_task_payload,
+            unavailable_task_payload=self._etc_reconciliation_unavailable_task_payload,
+            upload_source=self._handle_api_etc_reconciliation_upload,
+            upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload,
+            submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts,
+            delete_source_file=self._handle_api_etc_reconciliation_source_file_delete,
+            patch_item=self._handle_api_etc_reconciliation_item_patch,
+            confirm_task=self._handle_api_etc_reconciliation_confirm,
+            reopen_task=self._handle_api_etc_reconciliation_reopen,
+            refresh_matches=self._handle_api_etc_reconciliation_refresh_matches,
+            delete_imported_invoices=self._handle_api_etc_reconciliation_imported_invoices_delete,
+            delete_task=self._handle_api_etc_reconciliation_task_delete,
         )
-
-    def _handle_api_etc_reconciliation_ready_for_import(self) -> Response:
-        ready_tasks = self._etc_reconciliation_task_service.list_ready_for_import_tasks()
-        unavailable_tasks = [
-            task
-            for task in self._etc_reconciliation_task_service.list_tasks()
-            if getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) != "ready_for_import"
-        ]
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "tasks": [self._etc_reconciliation_task_payload(task) for task in ready_tasks],
-                "unavailableTasks": [self._etc_reconciliation_unavailable_task_payload(task) for task in unavailable_tasks],
-            },
-        )
-
-    def _handle_api_etc_reconciliation_task_create(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        task = self._etc_reconciliation_task_service.create_task(
-            title=str(payload.get("title") or "").strip(),
-            created_by=str(payload.get("createdBy") or payload.get("created_by") or "web_finance_user"),
-        )
-        return self._json_response(HTTPStatus.CREATED, self._etc_reconciliation_task_payload(task))
-
-    def _route_api_etc_reconciliation_task(
-        self,
-        method: str,
-        route_path: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        relative = route_path.removeprefix("/api/etc/reconciliation-tasks/").strip("/")
-        parts = [unquote(part) for part in relative.split("/") if part]
-        if not parts:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        task_id = parts[0]
-        if method == "GET" and len(parts) == 1:
-            try:
-                task = self._etc_reconciliation_task_service.get_task(task_id)
-            except KeyError:
-                return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-            return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-        if method == "DELETE" and len(parts) == 1:
-            return self._handle_api_etc_reconciliation_task_delete(task_id, body)
-        if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
-            return self._handle_api_etc_reconciliation_source_file_delete(task_id, parts[2], body)
-        if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
-            return self._handle_api_etc_reconciliation_upload(
-                task_id=task_id,
-                source_kind=SourceFileKind.CREDIT_CARD_STATEMENT,
-                body=body,
-                headers=headers,
-            )
-        if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-files":
-            return self._handle_api_etc_reconciliation_upload(
-                task_id=task_id,
-                source_kind=SourceFileKind.TICKET_ROOT,
-                body=body,
-                headers=headers,
-            )
-        if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-texts":
-            return self._handle_api_etc_reconciliation_ticket_root_texts(task_id, body)
-        if method == "POST" and len(parts) == 2 and parts[1] == "supplement-evidences":
-            return self._handle_api_etc_reconciliation_upload(
-                task_id=task_id,
-                source_kind=SourceFileKind.SUPPLEMENT_EVIDENCE,
-                body=body,
-                headers=headers,
-            )
-        if method == "POST" and len(parts) == 3 and parts[1] == "supplement-evidences":
-            return self._handle_api_etc_reconciliation_supplement_for_card_upload(
-                task_id=task_id,
-                item_id=parts[2],
-                body=body,
-                headers=headers,
-            )
-        if method == "PATCH" and len(parts) == 3 and parts[1] == "items":
-            return self._handle_api_etc_reconciliation_item_patch(task_id, parts[2], body)
-        if method == "POST" and len(parts) == 2 and parts[1] == "confirm":
-            return self._handle_api_etc_reconciliation_confirm(task_id, body)
-        if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
-            return self._handle_api_etc_reconciliation_reopen(task_id, body)
-        if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
-            return self._handle_api_etc_reconciliation_refresh_matches(task_id)
-        if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
-            return self._handle_api_etc_reconciliation_imported_invoices_delete(task_id, body)
-        return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
+        self._etc_reconciliation_task_api_routes = routes
+        return routes
 
     def _handle_api_etc_reconciliation_upload(
         self,

@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC reconciliation task route owner facade
+
+- 目标：把 `/api/etc/reconciliation-tasks*` 的根路由、ready-for-import、detail 和子路由分发从 `Application` 中抽到显式 route owner，继续推进 `server.py` 模块化。
+- 影响范围：新增 `EtcReconciliationTaskApiRoutes`；`server.py` 主分发改为委托；删除不再使用的 app-owned list/create/ready/detail/subroute dispatch helper；上传、source file 删除、confirm/reopen、imported-invoice 删除和 task delete 的复杂副作用暂时保留为显式回调。
+- 关键决策：本轮不改变 API shape、业务状态、权限、read model 或 Workbench side effect；route owner 不接收整个 `Application`，只接收 task service、payload 序列化、JSON helper 和明确回调。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `test_etc_reconciliation_task_routes_delegate_to_route_owner` 静态 guard，并回归 ETC reconciliation task targeted API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-task-route-owner-facade-extraction-2026-06-25.md`。
+- 未测风险：未迁移 task delete/imported-invoice delete 内部副作用、`/api/etc/import/*` 和 legacy `/api/etc/batches*`；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：继续审计 task delete/imported-invoice delete 的 service/port 边界，再推进 import 或 legacy batch route ownership。
+
 ## 2026-06-24 - ETC business-batches 未调用 legacy handler 删除
 
 - 目标：删除 `server.py` 中已被 `EtcBusinessBatchApiRoutes` 替代且无调用点的 ETC business-batch 私有 handler，防止旧路径重新绕过 route/application service 边界。

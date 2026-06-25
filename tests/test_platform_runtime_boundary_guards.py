@@ -1724,6 +1724,56 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_reconciliation_task_routes_delegate_to_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_etc_reconciliation.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+
+        handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
+        route_factory = _function_source(server_tree, server_source, "_etc_reconciliation_routes")
+        route_owner_names = [
+            node.name
+            for node in ast.walk(route_tree)
+            if isinstance(node, ast.ClassDef)
+        ]
+        route_owner_init = _function_source(route_tree, route_source, "__init__")
+        route_owner_route = _function_source(route_tree, route_source, "route")
+
+        violations: list[str] = []
+        if "EtcReconciliationTaskApiRoutes" not in server_source:
+            violations.append("server.py does not import/use EtcReconciliationTaskApiRoutes")
+        if "_etc_reconciliation_routes().route(" not in handle_request:
+            violations.append("handle_request no longer delegates ETC reconciliation task routes to route owner")
+        if "EtcReconciliationTaskApiRoutes(" not in route_factory:
+            violations.append("_etc_reconciliation_routes does not construct the route owner")
+        if "task_service=self._etc_reconciliation_task_service" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit task service injection")
+        if "delete_task=self._handle_api_etc_reconciliation_task_delete" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit task delete callback")
+        if "Application" in route_owner_init:
+            violations.append("ETC reconciliation route owner accepts the whole Application")
+        if "EtcReconciliationTaskApiRoutes" not in route_owner_names:
+            violations.append("routes_etc_reconciliation.py does not define EtcReconciliationTaskApiRoutes")
+        for required_route in (
+            'route_path == "/api/etc/reconciliation-tasks"',
+            'route_path == "/api/etc/reconciliation-tasks/ready-for-import"',
+            'route_path.startswith("/api/etc/reconciliation-tasks/")',
+        ):
+            if required_route not in route_owner_route:
+                violations.append(f"ETC reconciliation route owner missing dispatch branch {required_route}")
+        for out_of_scope_route in (
+            "/api/etc/import/preview",
+            "/api/etc/import/confirm",
+            "/api/etc/batches",
+        ):
+            if out_of_scope_route in route_source:
+                violations.append(f"ETC reconciliation route owner took out-of-scope route {out_of_scope_route}")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
