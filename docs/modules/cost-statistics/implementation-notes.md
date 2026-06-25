@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - cost statistics route-owner audit
+
+- 目标：执行 `server-py:cost-statistics-route-owner-audit`，审计 `/api/cost-statistics*` 在 `server.py` 的剩余 route ownership。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、cost-statistics 实施记录；不改变成本归因、项目范围、read model freshness、parent aggregate、cache、worker、导出或前端行为。
+- 关键决策：`CostStatisticsApiRoutes` 已拥有 month/explorer/project/export/export-preview/transaction 的 response mapping；`server.py` 剩余 `_handle_api_cost_statistics*` callback 是 query/path 参数解析后的薄委托。下一条边界选择 route callback collapse，把 `/api/cost-statistics*` dispatch/query parsing 移入 route owner。
+- 文档影响：新增 modular IO cost statistics route-owner audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；成本统计状态机定义不变。
+- 测试覆盖：本轮为分析/状态机闭合，未改运行时代码；下一实现边界需更新 `tests/test_platform_runtime_boundary_guards.py` 并复跑 `tests/test_cost_statistics_api.py`。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `cost-statistics` worker drain、真实生产高行数、真实浏览器生产样本和 admin/write evidence 仍为最终验证范围。
+- 后续事项：执行 `server-py:cost-statistics-route-callback-collapse`。
+
 ## 2026-06-24 - Modular IO post-full-state local closure audit
 
 - 目标：执行 `read-models:cost-statistics-post-full-state-local-implementation-closure-audit`，在 full-state snapshot quarantine 后复核成本统计本地实现是否还有必须先修的 implementation gap。

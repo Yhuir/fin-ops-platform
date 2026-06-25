@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `cost-statistics-route-owner-audit-selected`
+Current state: `cost-statistics-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:tax-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-tax-route-owner-local-closure-audit-2026-06-25.md`. Tax route-owner local support is accounted for: no `_handle_api_tax*` callbacks remain, and remaining tax `Application` surfaces are explicit composition-root, auth/session, body/import-job, runtime/query/read-model/cache/worker/source-version or scope-adapter ports. T0 selected cost statistics route-owner audit next.
+Completed `server-py:cost-statistics-route-owner-audit` as `analysis-closed` in `analysis/server-py-cost-statistics-route-owner-audit-2026-06-25.md`. Cost statistics route callbacks are thin delegates around `CostStatisticsApiRoutes`; T0 selected cost statistics route callback collapse next.
 
 ## Closed Or Deferred Slices
 
