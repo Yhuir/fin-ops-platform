@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `planning:post-no-oa-server-local-support-next-boundary-selection-selected` after no-OA local `server.py` support was accounted with production evidence deferred.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `workbench-groups-read-route-owner-extraction-selected` after T0 selected Workbench summary/groups read route-owner extraction as the next local implementation slice.
 
 ```text
 $gsd-autonomous --auto

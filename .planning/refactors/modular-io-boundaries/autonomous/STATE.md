@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `post-no-oa-server-local-support-next-boundary-selection-selected`
+Current state: `workbench-groups-read-route-owner-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` as `production-evidence-deferred` in `analysis/server-py-no-oa-bank-batch-post-display-policy-local-closure-audit-2026-06-25.md`. No remaining no-OA local implementation gap was found in the audited `server.py` support surface, so local server support is accounted for; real PostgreSQL/worker/App Status/high-row/browser/write-flow evidence remains deferred and no module/global closure is claimed. T0 selected `planning:post-no-oa-server-local-support-next-boundary-selection` next.
+Completed `planning:post-no-oa-server-local-support-next-boundary-selection` as `analysis-closed` in `analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`. The next local implementation boundary is `server-py:workbench-groups-read-route-owner-extraction`: move Workbench summary/groups read HTTP validation and mapping into `routes_workbench.py` while preserving `Application` dispatch/response/metrics and leaving SSE events/refresh-status for later slices. Production browser/admin/write evidence remains deferred until local modularization gaps are closed.
 
 ## Closed Or Deferred Slices
 

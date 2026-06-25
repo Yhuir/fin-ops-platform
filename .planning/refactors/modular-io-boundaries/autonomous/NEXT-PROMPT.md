@@ -1,48 +1,51 @@
 # Next Prompt
 
-Continue after `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`.
+Continue after `planning:post-no-oa-server-local-support-next-boundary-selection`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`.
-- Row405 status: `production-evidence-deferred`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-display-policy-local-closure-audit-2026-06-25.md`.
-- No remaining no-OA local implementation gap was found in the audited `server.py` support surface.
-- Local no-OA `server.py` support is accounted for, but real PostgreSQL/worker/App Status/high-row/browser/write-flow evidence remains deferred.
-- No-OA module/global closure is not claimed.
+- Last completed boundary: `planning:post-no-oa-server-local-support-next-boundary-selection`.
+- Row406 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`.
+- Selected next local implementation boundary: `server-py:workbench-groups-read-route-owner-extraction`.
+- Workbench group detail is already route-owned, but summary/groups list validation and facade mapping still live in `Application`.
+- Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
 
 ## Previous Prompt Completion
 
-`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` is complete:
+`planning:post-no-oa-server-local-support-next-boundary-selection` is complete:
 
-- confirmed removed no-OA route/refresh/payload helpers remain absent;
-- confirmed no direct no-OA refresh enqueue bypass remains in `server.py`;
-- classified remaining route/factory/session/source-version/internal-transfer/display/decorator surfaces as route dispatch, dependency assembly, platform adapter or provider ports;
-- found no further no-OA local implementation gap in `server.py`;
+- read current state/queue and Workbench module docs;
+- inspected `routes_workbench.py` and residual Workbench `server.py` read route handlers;
+- identified `GET /api/workbench/summary` and `GET /api/workbench/groups` as the next narrow local route-owner gap;
+- explicitly deferred `GET /api/workbench/events` and `GET /api/workbench/refresh-status` to later slices;
 - avoided production validation.
 
 ## Next Boundary
 
-`planning:post-no-oa-server-local-support-next-boundary-selection`
+`server-py:workbench-groups-read-route-owner-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-display-policy-local-closure-audit-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/planning-post-no-oa-server-local-support-next-boundary-selection-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
-   - `backend/src/fin_ops_platform/app/server.py`
-   - latest residual `server.py` analysis files if selecting another route/support boundary
-3. Select the next safe non-production local boundary from residual `server.py` route/support surfaces.
-4. Do not start production validation while local modularization gaps remain elsewhere.
-5. If selecting an implementation boundary, write analysis first, then implement narrowly with tests/Guard/docs and commit/push.
-6. If selecting an audit-only boundary, write the audit, update state/queue/journal/next prompt, run docs/diff checks and commit/push.
+   - `backend/src/fin_ops_platform/app/routes_workbench.py`
+   - `backend/src/fin_ops_platform/app/server.py` Workbench summary/groups handlers
+   - `tests/test_workbench_routes.py`
+   - relevant Workbench static guards in `tests/test_platform_runtime_boundary_guards.py`
+3. Write the implementation analysis for `server-py:workbench-groups-read-route-owner-extraction`.
+4. Move Workbench summary/groups read validation and facade mapping into `routes_workbench.py` behind explicit ports.
+5. Keep `Application` responsible for top-level route dispatch, JSON response construction and Workbench metrics.
+6. Add local route-owner tests and a static Guard preventing group-list validation from returning to `Application`.
+7. Update state/queue/journal/next prompt, run targeted tests/docs/diff checks, commit/push.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not claim global closure from no-OA local server support accounting.
+- Do not claim global closure from Workbench route-owner extraction.
 - Do not choose Go implementation; Go admission remains blocked.
-- Keep the next boundary narrow and local-first.
+- Do not move SSE events or controlled production browser/admin/write evidence in this slice.
