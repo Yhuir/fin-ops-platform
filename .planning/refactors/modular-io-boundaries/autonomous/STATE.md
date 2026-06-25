@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-browser-token-broker-runbook-selected`
+Current state: `production-browser-runner-runtime-classification-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-runner-bundle-implementation` as `implementation-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-implementation-2026-06-25.md`. T0 added `scripts/package_production_browser_smoke.py`, tests for approved archive contents/manifest/exclusions/no concrete secrets, and long-term docs in `docs/dev/testing.md`, `docs/operations/deployment.md` and `deploy/oa/README.md`. The bundle remains local-only runner input and does not deploy, run browser smoke, install/download browsers or implement token broker. Next boundary is `deployment:production-browser-smoke-token-broker-runbook`.
+Completed `deployment:production-browser-smoke-token-broker-runbook` as `analysis-closed` in `analysis/deployment-production-browser-smoke-token-broker-runbook-2026-06-25.md`. T0 designed a future root-owned in-memory target OA token broker protocol with session scope checks, non-logged token descriptor handoff, sanitized metadata, and stop gates. No broker was implemented/installed, no token was output and no production command ran. Next boundary is `deployment:production-browser-smoke-runner-runtime-availability-classification`.
 
 ## Closed Or Deferred Slices
 
