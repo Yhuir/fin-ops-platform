@@ -650,3 +650,13 @@
 - 测试覆盖：扩展 route-owner Guard，禁止 `_handle_api_etc_reconciliation_upload(...)` 和 `_handle_api_etc_reconciliation_ticket_root_texts(...)` 回流到 `server.py`；重跑 source upload 和 ticket-root text API 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；source upload/text targeted API 回归 9 条通过。
 - 未测风险：需要下一步 reconciliation route-owner local closure audit 确认是否还有 app-owned residual。
+
+## 2026-06-25 - ETC reconciliation route owner本地闭环审计
+
+- 目标：确认 reconciliation task route owner 在 callback 收敛后是否可以标记本地闭环。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`Application._etc_reconciliation_routes(...)`、reconciliation task payload helper、route-owner Guard。
+- 关键决策：不能标记本地闭环。`server.py` 已无 `_handle_api_etc_reconciliation*` callback，但 `_etc_reconciliation_task_payload(...)`、`_etc_reconciliation_unavailable_task_payload(...)`、`_etc_reconciliation_import_blockers(...)`、`_etc_reconciliation_imported_invoice_summary(...)` 和 `_etc_reconciliation_task_can_confirm(...)` 仍在 `Application`，并编码 route response shape。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 payload response shape 回归和 static Guard。
+- 验证命令：只读审计 `server.py`、route owner、source upload service 和 Guard；未运行测试。
+- 未测风险：payload helper 仍在 `Application`，等待 payload facade audit/extraction。

@@ -1,41 +1,46 @@
 # Next Prompt
 
-Continue after `server-py:etc-reconciliation-upload-route-callback-collapse`.
+Continue after `server-py:etc-reconciliation-route-owner-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:etc-reconciliation-upload-route-callback-collapse`.
-- Row331 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-upload-route-callback-collapse-2026-06-25.md`.
-- ETC reconciliation generic upload and ticket-root text HTTP mapping now live in `EtcReconciliationTaskApiRoutes`.
-- `server.py` no longer defines `_handle_api_etc_reconciliation_upload(...)` or `_handle_api_etc_reconciliation_ticket_root_texts(...)`.
+- Last completed boundary: `server-py:etc-reconciliation-route-owner-local-closure-audit`.
+- Row332 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-route-owner-local-closure-audit-2026-06-25.md`.
+- `server.py` no longer defines `_handle_api_etc_reconciliation*` callbacks.
+- ETC reconciliation route-owner local closure is not proven because task payload/read-shaping helpers still live in `Application`.
 - Local modular implementation closure is not proven.
 - Production browser/admin/write gates remain final validation gates, not the next local implementation step.
 
 ## Next Boundary
 
-`server-py:etc-reconciliation-route-owner-local-closure-audit`
+`server-py:etc-reconciliation-task-payload-facade-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-upload-route-callback-collapse-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-route-owner-local-closure-audit-2026-06-25.md`
+   - `backend/src/fin_ops_platform/app/server.py` payload helpers:
+     - `_etc_reconciliation_task_payload(...)`
+     - `_etc_reconciliation_unavailable_task_payload(...)`
+     - `_etc_reconciliation_import_blockers(...)`
+     - `_etc_reconciliation_imported_invoice_summary(...)`
+     - `_etc_reconciliation_task_can_confirm(...)`
    - `backend/src/fin_ops_platform/app/routes_etc_reconciliation.py`
-   - `backend/src/fin_ops_platform/app/server.py` ETC reconciliation factory and residual helper references
-   - `backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py`
+   - relevant payload tests in `tests/test_etc_backend.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Use CodeGraph before editing to inspect residual ETC reconciliation route/helper symbols and callers.
-4. Audit only ETC reconciliation route-owner residuals:
-   - confirm whether `server.py` still owns reconciliation task route behavior beyond dependency assembly;
-   - classify any remaining app-owned helper as removable, service-owned, route-owned, or compat-only;
-   - select the next smallest implementation boundary or local closure/defer accounting.
+3. Use CodeGraph before editing to inspect payload helper callers/callees.
+4. Audit only the payload facade boundary:
+   - classify payload helpers as route facade, service, or reusable serializer ownership;
+   - identify tests that freeze response shape;
+   - select the next smallest implementation boundary.
 5. Update analysis/state/docs and commit/push if verification passes.
 
 ## Stop Gates
 
+- Do not change task payload response shape.
+- Do not change import blockers, imported invoice summary or `canConfirm` semantics.
 - Do not run production browser/admin/write validation.
 - Do not perform production mutation.
-- Do not pass `Application` into route owner or service.
-- Do not broaden into unrelated ETC import, legacy batch, invoice or business-batch routes unless the audit proves the reconciliation route owner is locally closed.

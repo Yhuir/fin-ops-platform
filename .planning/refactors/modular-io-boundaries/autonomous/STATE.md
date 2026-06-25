@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-route-owner-local-closure-audit-selected`
+Current state: `etc-reconciliation-task-payload-facade-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-upload-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-upload-route-callback-collapse-2026-06-25.md`. T0 moved the remaining generic upload and ticket-root text HTTP mapping into `EtcReconciliationTaskApiRoutes` and removed their app-owned callbacks. Next boundary is a reconciliation route-owner local closure audit. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-route-owner-local-closure-audit-2026-06-25.md`. T0 confirmed no `_handle_api_etc_reconciliation*` callbacks remain in `server.py`, but route payload/read-shaping helpers still live in `Application`; selected task payload facade audit next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
