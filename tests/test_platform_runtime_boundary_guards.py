@@ -6512,6 +6512,90 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_invoice_offset_desired_relation_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (
+            SERVICES_ROOT / "workbench_oa_invoice_offset_desired_relation_builder.py"
+        ).read_text(encoding="utf-8")
+        desired_source = _function_source(server_tree, server_source, "_oa_invoice_offset_desired_relations")
+        builder_factory_source = _function_source(
+            server_tree,
+            server_source,
+            "_workbench_oa_invoice_offset_desired_relation_builder",
+        )
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-invoice-offset-desired-relation-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "_workbench_oa_invoice_offset_desired_relation_builder()" not in desired_source:
+            violations.append("Application desired relation method does not delegate to builder")
+        for forbidden in (
+            "get_oa_invoice_offset_applicant_names",
+            "CASE-OA-OFFSET",
+            "row_types",
+            "month_scope",
+            "_auto_pair_conflicts_with_manual_relation",
+            "attachment_invoice_rows",
+            "section in (\"paired\", \"open\")",
+        ):
+            if forbidden in desired_source:
+                violations.append(f"Application still owns OA invoice offset desired relation detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaInvoiceOffsetDesiredRelationBuilder",
+            "def build(",
+            "applicant_names_provider",
+            "serialize_value",
+            "attachment_invoice_rows_for_oa",
+            "auto_pair_conflicts_with_manual_relation",
+            "month_scope_for_relation",
+            "CASE-OA-OFFSET",
+            "row_types",
+            "month_scope",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchOaInvoiceOffsetDesiredRelationBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchOaInvoiceOffsetDesiredRelationBuilder(",
+            "applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names",
+            "serialize_value=self._serialize_value",
+            "attachment_invoice_rows_for_oa=self._oa_attachment_invoice_rows_for_oa",
+            "auto_pair_conflicts_with_manual_relation=self._auto_pair_conflicts_with_manual_relation",
+            "month_scope_for_relation=self._month_scope_for_oa_invoice_offset_relation",
+        ):
+            if marker not in builder_factory_source:
+                violations.append(f"Application desired relation builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+            "confirm_relation",
+            "cancel_relation",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchOaInvoiceOffsetDesiredRelationBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-invoice-offset-desired-relation-builder-extraction",
+            "WorkbenchOaInvoiceOffsetDesiredRelationBuilder",
+            "desired relation construction",
+            "relation sync side effects remain deferred",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA invoice offset desired relation builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

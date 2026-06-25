@@ -511,6 +511,9 @@ from fin_ops_platform.services.workbench_cache_read_payload_helper import Workbe
 from fin_ops_platform.services.workbench_oa_invoice_offset_rebuild_helper import (
     WorkbenchOaInvoiceOffsetRebuildHelper,
 )
+from fin_ops_platform.services.workbench_oa_invoice_offset_desired_relation_builder import (
+    WorkbenchOaInvoiceOffsetDesiredRelationBuilder,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13817,58 +13820,20 @@ class Application:
         return row_ids
 
     def _oa_invoice_offset_desired_relations(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
-        applicant_names = {
-            str(name).strip()
-            for name in self._app_settings_service.get_oa_invoice_offset_applicant_names()
-            if str(name).strip()
-        }
-        if not applicant_names:
-            return {}
+        return self._workbench_oa_invoice_offset_desired_relation_builder().build(payload)
 
-        oa_rows: list[dict[str, object]] = []
-        invoice_rows: list[dict[str, object]] = []
-        for section in ("paired", "open"):
-            section_payload = payload.get(section, {})
-            if not isinstance(section_payload, dict):
-                continue
-            oa_rows.extend(
-                self._serialize_value(row)
-                for row in list(section_payload.get("oa", []))
-                if isinstance(row, dict)
+    def _workbench_oa_invoice_offset_desired_relation_builder(self) -> WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
+        builder = getattr(self, "_workbench_oa_invoice_offset_desired_relation_builder_instance", None)
+        if builder is None:
+            builder = WorkbenchOaInvoiceOffsetDesiredRelationBuilder(
+                applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names,
+                serialize_value=self._serialize_value,
+                attachment_invoice_rows_for_oa=self._oa_attachment_invoice_rows_for_oa,
+                auto_pair_conflicts_with_manual_relation=self._auto_pair_conflicts_with_manual_relation,
+                month_scope_for_relation=self._month_scope_for_oa_invoice_offset_relation,
             )
-            invoice_rows.extend(
-                self._serialize_value(row)
-                for row in list(section_payload.get("invoice", []))
-                if isinstance(row, dict)
-            )
-
-        desired_relations: dict[str, dict[str, object]] = {}
-        for oa_row in oa_rows:
-            if str(oa_row.get("applicant", "")).strip() not in applicant_names:
-                continue
-            attachment_invoice_rows = self._oa_attachment_invoice_rows_for_oa(oa_row, invoice_rows)
-            if not attachment_invoice_rows:
-                continue
-            row_ids = [
-                str(oa_row.get("id", "")).strip(),
-                *[
-                    str(invoice_row.get("id", "")).strip()
-                    for invoice_row in attachment_invoice_rows
-                    if str(invoice_row.get("id", "")).strip()
-                ],
-            ]
-            row_ids = [row_id for row_id in row_ids if row_id]
-            if len(row_ids) < 2 or self._auto_pair_conflicts_with_manual_relation(row_ids):
-                continue
-            case_id = f"CASE-OA-OFFSET-{row_ids[0]}"
-            month_scope = self._month_scope_for_oa_invoice_offset_relation([oa_row, *attachment_invoice_rows])
-            desired_relations[case_id] = {
-                "case_id": case_id,
-                "row_ids": row_ids,
-                "row_types": ["oa", *(["invoice"] * (len(row_ids) - 1))],
-                "month_scope": month_scope,
-            }
-        return desired_relations
+            self._workbench_oa_invoice_offset_desired_relation_builder_instance = builder
+        return builder
 
     def _oa_attachment_invoice_rows_for_oa(
         self,
