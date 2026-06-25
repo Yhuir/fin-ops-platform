@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - write route callback collapse
+
+- 目标：把待找发票 rules、attach existing 和 income status 的剩余 HTTP mapping 从 `server.py` 迁入 `PendingInvoiceApiRoutes.route(...)`，完成 pending invoice route-owner callback 收敛。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_pending_invoices.py`、`backend/src/fin_ops_platform/app/server.py`、`tests/test_platform_runtime_boundary_guards.py` 和 modular IO autonomous state。
+- 关键决策：write-session 与 persist-state 作为显式平台端口注入 route owner；保留原 callback 副作用顺序：body 解析先于写 session，rules update 不持久化，attach confirm 在成功、`PendingInvoiceError` 和未知异常时持久化，income status 在成功和未知异常时持久化但 `PendingInvoiceError` 不持久化。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品口径、API response shape、read model freshness/source-version 合同和前端行为未变化。
+- 测试覆盖：`tests/test_pending_invoice_api.py` 覆盖 rules/attach/income status 既有 API、权限、idempotency 和 lifecycle 回归；`tests/test_platform_runtime_boundary_guards.py` 新增/扩展 Guard，禁止迁回 app-owned pending invoice write callbacks。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_pending_invoices.py backend/src/fin_ops_platform/app/server.py tests/test_pending_invoice_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_pending_invoice_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_pending_invoice_write_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明待找发票模块或全局闭环。
+- 后续事项：审计 route callback collapse 后剩余 pending invoice `Application` surface，判断本地 `server.py` 支持是否已 accounted。
+
 ## 2026-06-25 - write route callback audit
 
 - 目标：审计待找发票剩余 rules、attach existing 和 income status HTTP callback，明确下一步是否可以从 `server.py` 迁入 route owner。

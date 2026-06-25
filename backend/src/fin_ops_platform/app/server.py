@@ -1886,25 +1886,6 @@ class Application:
             pending_invoice_response = self._pending_invoice_routes().route(method, route_path, query, body, headers)
             if pending_invoice_response is not None:
                 return pending_invoice_response
-        if method == "GET" and route_path == "/api/pending-invoices/rules":
-            return self._handle_api_pending_invoice_rules(query, headers)
-        if method == "PUT" and route_path == "/api/pending-invoices/rules":
-            return self._handle_api_pending_invoice_rules_update(query, body, headers)
-        if method == "PUT" and route_path == "/api/pending-invoices/income-statuses":
-            return self._handle_api_pending_invoice_income_statuses_update(body, headers)
-        if method == "PUT" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/income-status"):
-            transaction_id = route_path.removeprefix("/api/pending-invoices/rows/").removesuffix("/income-status").strip("/")
-            return self._handle_api_pending_invoice_income_status_update(transaction_id, body, headers)
-        if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice/preview"):
-            transaction_id = unquote(route_path.rsplit("/", 3)[-3])
-            return self._handle_api_pending_invoice_attach_existing_preview(transaction_id, body, headers)
-        if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice"):
-            transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_pending_invoice_attach_existing_confirm(transaction_id, body, headers)
-        if method == "POST" and route_path == "/api/pending-invoices/attach-existing-invoices/preview":
-            return self._handle_api_pending_invoice_attach_existing_batch_preview(body, headers)
-        if method == "POST" and route_path == "/api/pending-invoices/attach-existing-invoices":
-            return self._handle_api_pending_invoice_attach_existing_batch_confirm(body, headers)
         if route_path.startswith("/api/input-invoice-usage"):
             input_usage_response = self._input_invoice_usage_routes().route(method, route_path, query, body, headers)
             if input_usage_response is not None:
@@ -7385,10 +7366,12 @@ class Application:
         if isinstance(routes, PendingInvoiceApiRoutes):
             return routes.configure_platform_ports(
                 resolve_read_session=self._resolve_pending_invoice_read_session,
+                resolve_write_session=self._resolve_pending_invoice_write_session,
                 json_response=self._json_response,
                 load_json_body=self._load_json_body,
                 error_response=self._pending_invoice_error_response,
                 export_response=self._pending_invoice_export_response,
+                persist_state=self._persist_state,
             )
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         query_service = getattr(self, "_pending_invoice_query_service", None)
@@ -7420,194 +7403,15 @@ class Application:
             rules_service=rules_service,
             export_content_type=XLSX_MIME_TYPE,
             resolve_read_session=self._resolve_pending_invoice_read_session,
+            resolve_write_session=self._resolve_pending_invoice_write_session,
             json_response=self._json_response,
             load_json_body=self._load_json_body,
             error_response=self._pending_invoice_error_response,
             export_response=self._pending_invoice_export_response,
+            persist_state=self._persist_state,
         )
         self._pending_invoice_api_routes = routes
         return routes
-
-    def _handle_api_pending_invoice_attach_existing_preview(
-        self,
-        transaction_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            preview = self._pending_invoice_routes().attach_existing_preview(transaction_id, payload)
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, preview)
-
-    def _handle_api_pending_invoice_attach_existing_batch_preview(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            preview = self._pending_invoice_routes().attach_existing_batch_preview(payload)
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, preview)
-
-    def _handle_api_pending_invoice_attach_existing_confirm(
-        self,
-        transaction_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
-        try:
-            result = self._pending_invoice_routes().attach_existing_confirm(
-                transaction_id,
-                payload,
-                session=session,
-            )
-        except PendingInvoiceError as exc:
-            self._persist_state()
-            return self._pending_invoice_error_response(exc)
-        except Exception:
-            self._persist_state()
-            raise
-        self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_pending_invoice_attach_existing_batch_confirm(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
-        try:
-            result = self._pending_invoice_routes().attach_existing_batch_confirm(
-                payload,
-                session=session,
-            )
-        except PendingInvoiceError as exc:
-            self._persist_state()
-            return self._pending_invoice_error_response(exc)
-        except Exception:
-            self._persist_state()
-            raise
-        self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_pending_invoice_rules(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_pending_invoice_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        return self._json_response(HTTPStatus.OK, self._pending_invoice_routes().rules(query, session=session))
-
-    def _handle_api_pending_invoice_rules_update(self, query: dict[str, list[str]], body: str | bytes | None, headers: dict[str, str] | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
-        except UnauthorizedOASessionError as exc:
-            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
-        except ForbiddenOAAccessError as exc:
-            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        try:
-            status_code, result = self._pending_invoice_routes().update_rules(query, payload, session=session)
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        return self._json_response(status_code, result)
-
-    def _handle_api_pending_invoice_income_status_update(
-        self,
-        transaction_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
-        except UnauthorizedOASessionError as exc:
-            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
-        except ForbiddenOAAccessError as exc:
-            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        try:
-            result = self._pending_invoice_routes().update_income_status(
-                transaction_id,
-                payload if isinstance(payload, dict) else {},
-                session=session,
-            )
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        except Exception:
-            self._persist_state()
-            raise
-        self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_pending_invoice_income_statuses_update(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
-        except UnauthorizedOASessionError as exc:
-            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
-        except ForbiddenOAAccessError as exc:
-            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        try:
-            result = self._pending_invoice_routes().update_income_statuses(
-                payload if isinstance(payload, dict) else {},
-                session=session,
-            )
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        except Exception:
-            self._persist_state()
-            raise
-        self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
 
     def _pending_invoice_export_response(
         self,
@@ -7639,6 +7443,22 @@ class Application:
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
         return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问待找发票页面权限。")
+
+    def _resolve_pending_invoice_write_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except UnauthorizedOASessionError as exc:
+            return None, self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
+        except ForbiddenOAAccessError as exc:
+            return None, self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
+        return session, None
 
     def _resolve_output_invoice_collection_read_session(
         self,

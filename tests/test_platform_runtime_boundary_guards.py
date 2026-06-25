@@ -564,6 +564,50 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_pending_invoice_write_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_path = APP_ROOT / "routes_pending_invoices.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "PendingInvoiceApiRoutes")
+        for marker in (
+            "/api/pending-invoices/rules",
+            "/api/pending-invoices/income-statuses",
+            "/api/pending-invoices/attach-existing-invoices",
+            "resolve_write_session",
+            "persist_on_pending_error=True",
+            "persist_on_success=True",
+            "persist_on_unexpected=True",
+        ):
+            if marker not in route_class:
+                violations.append(f"pending invoice write route owner is missing marker {marker}")
+
+        route_factory = _function_source(_parse(server_path), server_source, "_pending_invoice_routes")
+        for marker in (
+            "resolve_write_session=self._resolve_pending_invoice_write_session",
+            "persist_state=self._persist_state",
+        ):
+            if marker not in route_factory:
+                violations.append(f"pending invoice route factory is missing port {marker}")
+
+        for forbidden in (
+            "def _handle_api_pending_invoice_rules",
+            "def _handle_api_pending_invoice_rules_update",
+            "def _handle_api_pending_invoice_attach_existing_preview",
+            "def _handle_api_pending_invoice_attach_existing_batch_preview",
+            "def _handle_api_pending_invoice_attach_existing_confirm",
+            "def _handle_api_pending_invoice_attach_existing_batch_confirm",
+            "def _handle_api_pending_invoice_income_status_update",
+            "def _handle_api_pending_invoice_income_statuses_update",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns pending invoice write callback {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_exception_apply_mapping_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
