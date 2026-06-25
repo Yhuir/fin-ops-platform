@@ -4980,7 +4980,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py events handler does not delegate to WorkbenchEventsApiRoutes")
         for marker in (
             "scope_key_for_month=self._workbench_read_model_scope_key",
-            "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
+            "status_payload_provider = self._workbench_refresh_status_payload_provider()",
+            "status_payload_for_scope=status_payload_provider.payload_for_scope",
             "event_name_for_payload=status_payload_normalizer.event_name",
             "serialize_sse_event=self._app_health_service.serialize_sse_event",
             "mark_stream_started=stream_registry.mark_started",
@@ -5079,11 +5080,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_source = (SERVICES_ROOT / "workbench_refresh_status_payload.py").read_text(encoding="utf-8")
         facade_source = _function_source(server_tree, server_source, "_workbench_query_facade")
         events_builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
-        payload_provider_source = _function_source(
-            server_tree,
-            server_source,
-            "_workbench_refresh_status_payload_for_scope",
-        )
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-refresh-status-payload-normalizer-extraction-2026-06-25.md"
@@ -5114,8 +5110,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Workbench events builder does not resolve WorkbenchRefreshStatusPayloadNormalizer")
         if "event_name_for_payload=status_payload_normalizer.event_name" not in events_builder_source:
             violations.append("Workbench events builder is not wired through normalizer event_name")
-        if "self._workbench_refresh_status_payload_normalizer().normalize(" not in payload_provider_source:
-            violations.append("Workbench status payload provider does not delegate normalization to owner")
         for forbidden in (
             "ReadModelRefreshGateway",
             "outbox",
@@ -5137,6 +5131,75 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench refresh status normalizer analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_refresh_status_payload_provider_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        provider_source = (SERVICES_ROOT / "workbench_refresh_status_payload_provider.py").read_text(encoding="utf-8")
+        events_builder_source = _function_source(server_tree, server_source, "_build_workbench_events_api_routes")
+        provider_builder_source = _function_source(server_tree, server_source, "_workbench_refresh_status_payload_provider")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-refresh-status-payload-provider-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "def _workbench_refresh_status_payload_for_scope",
+            "status_payload_for_scope=self._workbench_refresh_status_payload_for_scope",
+        ):
+            if forbidden in server_source:
+                violations.append(f"Application still owns Workbench refresh-status payload provider surface: {forbidden}")
+        for marker in (
+            "class WorkbenchRefreshStatusPayloadProvider",
+            "repository_provider",
+            "source_freshness",
+            "normalizer",
+            "def payload_for_scope",
+            "get_workbench_refresh_status",
+            "fallback_status=\"unavailable\"",
+        ):
+            if marker not in provider_source:
+                violations.append(f"WorkbenchRefreshStatusPayloadProvider missing marker: {marker}")
+        for marker in (
+            "status_payload_provider = self._workbench_refresh_status_payload_provider()",
+            "status_payload_for_scope=status_payload_provider.payload_for_scope",
+        ):
+            if marker not in events_builder_source:
+                violations.append(f"Workbench events builder missing provider marker: {marker}")
+        for marker in (
+            "WorkbenchRefreshStatusPayloadProvider(",
+            "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
+            "source_freshness=self._workbench_refresh_status_with_source_freshness",
+            "normalizer=self._workbench_refresh_status_payload_normalizer()",
+        ):
+            if marker not in provider_builder_source:
+                violations.append(f"Application provider builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in provider_source:
+                violations.append(f"WorkbenchRefreshStatusPayloadProvider gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-refresh-status-payload-provider-extraction",
+            "WorkbenchRefreshStatusPayloadProvider",
+            "repository status lookup",
+            "legacy `/api/workbench` SQL fallback",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench refresh status provider analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 

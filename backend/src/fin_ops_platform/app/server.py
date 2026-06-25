@@ -468,6 +468,9 @@ from fin_ops_platform.services.workbench_reconciliation_dirty_queue import Workb
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
+from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
+    WorkbenchRefreshStatusPayloadProvider,
+)
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
@@ -3694,24 +3697,6 @@ class Application:
             registry = WorkbenchEventsActiveStreamRegistry()
             self._workbench_events_active_stream_registry = registry
         return registry
-
-    def _workbench_refresh_status_payload_for_scope(self, scope_key: str) -> dict[str, object]:
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
-        if not callable(get_refresh_status):
-            return self._workbench_refresh_status_payload_normalizer().normalize(
-                {},
-                scope_key=scope_key,
-                fallback_status="unavailable",
-            )
-        payload = get_refresh_status(scope_key=scope_key)
-        if isinstance(payload, dict):
-            payload = self._workbench_refresh_status_with_source_freshness(payload, scope_key=scope_key)
-        return self._workbench_refresh_status_payload_normalizer().normalize(
-            payload if isinstance(payload, dict) else {},
-            scope_key=scope_key,
-            fallback_status="unavailable" if not isinstance(payload, dict) else "fresh",
-        )
 
     @staticmethod
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
@@ -8395,9 +8380,10 @@ class Application:
     def _build_workbench_events_api_routes(self) -> WorkbenchEventsApiRoutes:
         stream_registry = self._workbench_events_stream_registry()
         status_payload_normalizer = self._workbench_refresh_status_payload_normalizer()
+        status_payload_provider = self._workbench_refresh_status_payload_provider()
         return WorkbenchEventsApiRoutes(
             scope_key_for_month=self._workbench_read_model_scope_key,
-            status_payload_for_scope=self._workbench_refresh_status_payload_for_scope,
+            status_payload_for_scope=status_payload_provider.payload_for_scope,
             event_name_for_payload=status_payload_normalizer.event_name,
             serialize_sse_event=self._app_health_service.serialize_sse_event,
             mark_stream_started=stream_registry.mark_started,
@@ -8411,6 +8397,17 @@ class Application:
             normalizer = WorkbenchRefreshStatusPayloadNormalizer()
             self._workbench_refresh_status_payload_normalizer_instance = normalizer
         return normalizer
+
+    def _workbench_refresh_status_payload_provider(self) -> WorkbenchRefreshStatusPayloadProvider:
+        provider = getattr(self, "_workbench_refresh_status_payload_provider_instance", None)
+        if provider is None:
+            provider = WorkbenchRefreshStatusPayloadProvider(
+                repository_provider=lambda: getattr(self, "_workbench_sql_read_repository", None),
+                source_freshness=self._workbench_refresh_status_with_source_freshness,
+                normalizer=self._workbench_refresh_status_payload_normalizer(),
+            )
+            self._workbench_refresh_status_payload_provider_instance = provider
+        return provider
 
     def _workbench_group_detail_routes(self) -> WorkbenchGroupDetailApiRoutes:
         routes = getattr(self, "_workbench_group_detail_api_routes", None)
