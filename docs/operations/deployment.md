@@ -56,6 +56,16 @@ worker env、并 `enable/restart` 最小生产正确性必须长期运行的 wor
 
 `git push main` 不是部署动作。标准顺序是：本地验证、提交、推送、执行 release 发布、发布后 smoke check。默认脚本会拒绝 dirty worktree；生产发布必须能追溯到具体 commit。
 
+生产 browser route-shell smoke 的 Playwright bundle 是独立 runner 输入，不属于 release archive。生成命令：
+
+```bash
+python3 scripts/package_production_browser_smoke.py \
+  --release-name <active-release-name> \
+  --output /tmp/fin-ops-production-browser-smoke.tar.gz
+```
+
+该命令只在本地生成包含批准文件和 manifest 的 tarball，不会上传、部署、安装浏览器、下载依赖、登录 OA 或执行生产浏览器测试。正常 release archive 仍只包含 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要把 `web/e2e`、`node_modules` 或浏览器二进制加入 `scripts/deploy_oa.py` 的 release 打包路径。真正执行生产 browser evidence 前，还必须有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、dirty scope、App Status readiness、read-model outbox 和 dead-letter 聚合检查。
+
 release 目录会占用磁盘。默认保留最近 8 个 release，同时永远保护 deploy-control status 中仍被引用的 active release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，会被跳过并输出原因，需要单独做一次 root 清理。可按磁盘容量调整：
 
 ```bash

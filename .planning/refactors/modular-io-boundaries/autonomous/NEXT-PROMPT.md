@@ -1,60 +1,50 @@
 # Next Prompt
 
-Continue after `frontend:production-strict-diagnostics-sanitized-output-contract`.
+Continue after `deployment:production-browser-smoke-runner-bundle-implementation`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row304 added production-only strict diagnostics redaction gated by `FIN_OPS_E2E_PRODUCTION_SMOKE=1`.
-- Local deterministic e2e diagnostics remain raw and useful.
-- Production route-shell smoke diagnostics now redact console/pageerror/dialog detail and requestfailed URLs/details.
-- Verification passed:
-  - `python -m pytest tests/test_playwright_e2e_strict_diagnostics.py -q` with 9/9 tests;
-  - `npm --prefix web run build` passed with existing CSS minification warnings.
-- Browser production evidence remains deferred until bundle, runner runtime/token broker and production execution are complete.
+- Row305 added `scripts/package_production_browser_smoke.py`, bundle manifest/exclusion tests and long-term docs.
+- Bundle generation is local-only runner input; it does not deploy, run browser smoke, install/download browsers, implement token broker or alter normal app release packaging.
+- Verification passed: `python -m pytest tests/test_production_browser_smoke_bundle.py tests/test_deploy_oa_script.py -q` with 14/14 tests.
+- Browser production evidence remains deferred until token broker, runner runtime and production execution are complete.
 - Admin evidence remains deferred because no admin HTTP SLO token/cookie seam exists and target OA applicant sessions are full-access non-admin.
 - Write apply remains blocked pending explicit approval, reviewed reversible business object, rollback/idempotency/audit acceptance, convergence expectations and suitable auth.
 - Global/module closure remains open.
 
 ## Next Boundary
 
-`deployment:production-browser-smoke-runner-bundle-implementation`
+`deployment:production-browser-smoke-token-broker-runbook`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row304 implementation evidence if it is not already committed.
+2. Commit/push Row305 implementation evidence if it is not already committed.
 3. Review:
-   - `analysis/deployment-production-browser-smoke-runner-bundle-contract-2026-06-25.md`;
-   - `web/e2e/production-route-shell.spec.ts`;
-   - `web/e2e/fixtures/strictTest.ts`;
-   - `web/playwright.config.ts`;
-   - `web/package.json`;
-   - `scripts/deploy_oa.py`;
-   - `tests/test_deploy_oa_script.py` and nearby deploy/package tests.
-4. Implement the minimal local bundle packager/manifest contract for production route-shell smoke outside normal app release packaging.
+   - `analysis/deployment-production-browser-smoke-runner-bundle-implementation-2026-06-25.md`;
+   - `analysis/production-read-model-authenticated-browser-page-smoke-runbook-2026-06-25.md`;
+   - `backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`;
+   - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`;
+   - `deploy/oa/README.md`;
+   - `docs/operations/deployment.md`.
+4. Design a root-owned in-memory target OA token broker runbook for the future dedicated browser runner.
 
 ## Constraints
 
-- Do not modify normal app release packaging or `_tar_filter(...)`.
-- Do not package `node_modules` or browser binaries.
-- Do not deploy, run production browser smoke, install/download browsers or implement token broker.
-- Do not print/store secrets, tokens, cookies, env values, response bodies, payload rows or business identifiers.
-- Bundle output must be local-only and safe to inspect; it must include manifest hashes and no secrets.
-
-## Expected Output
-
-- A scoped script/tool or deploy helper that builds a local browser-smoke bundle from the approved file list.
-- Tests proving bundle contents, manifest fields, exclusions and no `node_modules`/browser artifacts.
-- Analysis evidence and controller state updates.
+- Do not implement or install the broker in this slice.
+- Do not run production browser smoke.
+- Do not print/store tokens, cookies, passwords, env values, DSNs, response bodies, payload rows or business identifiers.
+- Do not grant admin access or change app auth semantics.
+- Do not deploy or mutate production.
+- The runbook must define stop gates, command shape, stdout/stderr redaction, session scope checks and post-run cleanup/no-op behavior.
 
 ## Required Verification
 
-- Run targeted tests for the bundle implementation.
 - Run `bash scripts/verify.sh docs`.
 - Run `git diff --check` and `git diff --cached --check`.
 
 ## Stop Gates
 
-- Stop before production browser execution, deploy, token broker or production host mutation.
-- Do not claim browser evidence or global closure from bundle packaging alone.
+- Stop before production execution, helper installation, browser runner execution or token output.
+- Do not claim browser evidence or global closure from broker design alone.

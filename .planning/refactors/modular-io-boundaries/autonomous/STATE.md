@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-browser-runner-bundle-implementation-selected`
+Current state: `production-browser-token-broker-runbook-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `frontend:production-strict-diagnostics-sanitized-output-contract` as `implementation-closed` in `analysis/frontend-production-strict-diagnostics-sanitized-output-contract-2026-06-25.md`. T0 added production-only strict diagnostics redaction gated by `FIN_OPS_E2E_PRODUCTION_SMOKE=1`, preserving local diagnostics while redacting production console/pageerror/dialog detail and requestfailed URLs/details. Static guard and frontend build verification passed. Next boundary is `deployment:production-browser-smoke-runner-bundle-implementation`.
+Completed `deployment:production-browser-smoke-runner-bundle-implementation` as `implementation-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-implementation-2026-06-25.md`. T0 added `scripts/package_production_browser_smoke.py`, tests for approved archive contents/manifest/exclusions/no concrete secrets, and long-term docs in `docs/dev/testing.md`, `docs/operations/deployment.md` and `deploy/oa/README.md`. The bundle remains local-only runner input and does not deploy, run browser smoke, install/download browsers or implement token broker. Next boundary is `deployment:production-browser-smoke-token-broker-runbook`.
 
 ## Closed Or Deferred Slices
 

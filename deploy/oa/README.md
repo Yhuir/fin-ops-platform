@@ -180,6 +180,20 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/env/fin-ops.worker.workbench.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
+## 生产 Browser Route-Shell Smoke Bundle
+
+生产 route-shell browser smoke 使用独立 runner 输入，不属于 OA app release archive。需要准备 bundle 时，在本地执行：
+
+```bash
+python3 scripts/package_production_browser_smoke.py \
+  --release-name <active-release-name> \
+  --output /tmp/fin-ops-production-browser-smoke.tar.gz
+```
+
+该 bundle 只包含批准的生产 route-shell spec、strict diagnostics fixture、Playwright 配置、package metadata/lockfile 和 manifest。它不包含 `web/dist`、`node_modules`、Playwright browser binaries、admin production spec、截图、trace、video、HTML report、token、cookie 或 secret env。生成 bundle 不会上传、部署、安装依赖、下载浏览器、登录 OA 或访问生产。
+
+正常 OA release 仍由 `scripts/deploy_oa.py` 打包 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要为了 browser smoke 修改正常 release archive 去携带 `web/e2e`、`node_modules` 或浏览器二进制。真正执行生产 browser evidence 前，必须先有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、dirty scope、App Status readiness、read-model outbox 和 dead-letter 聚合检查。
+
 ### OA 支付状态 MySQL 写回解锁
 
 生产启用“进行中 OA 确认已支付”前，必须由 DBA 或具备 MySQL 管理权限的运维账号创建最小权限用户。不要复用 SSH 密码、宝塔面板密码或 PostgreSQL 密码作为 MySQL 应用密码。

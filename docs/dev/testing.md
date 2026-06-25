@@ -67,6 +67,16 @@ npm run e2e:smoke
 
 `tests/test_nightly_ci.py` 会校验每个非生产 `web/e2e/*.spec.ts` 都列入 `npm run e2e:smoke`，并且默认 smoke 不包含生产 opt-in specs。新增 deterministic Browser spec 后，必须同步更新 `web/package.json` 的 `e2e:smoke`；新增生产 smoke 则应放在单独 `e2e:production-*` 脚本中。
 
+生产 route-shell browser smoke 的测试文件不进入默认 deterministic smoke，也不随正常 app release 打包。需要准备独立 runner 输入时，只能使用本地 bundle 工具生成脱敏 manifest 和批准文件集：
+
+```bash
+python3 scripts/package_production_browser_smoke.py \
+  --release-name <active-release-name> \
+  --output /tmp/fin-ops-production-browser-smoke.tar.gz
+```
+
+该 bundle 只包含 `production-route-shell.spec.ts`、`strictTest.ts`、Playwright 配置和 package metadata/lockfile；不包含 `node_modules`、浏览器二进制、`web/dist`、admin production spec、截图、trace、video、HTML report、token、cookie 或环境 secret。生成 bundle 不会运行浏览器，不会登录 OA，也不会访问生产。实际生产 browser evidence 仍需要单独批准的 runner runtime、内存 token broker、pre/post health/read-model aggregate checks 和脱敏 artifact contract。
+
 所有 `web/e2e/*.spec.ts` 必须从 `web/e2e/fixtures/strictTest.ts` 导入 `test` / `expect`。该 fixture 默认捕获 app 主动打印的 `console.error`、`pageerror`、非预期 `requestfailed` 和原生 `dialog`，因此“业务操作成功但浏览器报错、弹窗报错或请求异常”的场景会让 E2E 失败。浏览器自动生成的 HTTP status resource log 属于 API response 结果，不作为隐藏 JS 错误；对应 spec 必须用页面 alert、禁用下载、零 mutation、零半写等业务断言证明 400/401/403/409/500/503 等响应已被正确消费。SPA 路由切换导致的 `net::ERR_ABORTED` 生命周期中断也不作为隐藏错误。Playwright 配置在 CI 下启用 `forbidOnly`，且 `tests/test_playwright_e2e_strict_diagnostics.py` 会阻止后续 spec 绕过 strict fixture 或提交 `test.only` / `describe.only`。
 
 本轮新增 OA pending rows/detail non-fresh Browser 覆盖：rows `read_model_status=refreshing` 时显示刷新诊断而不显示真实空态，detail 202 时 drawer 显示“详情暂不可用”。
