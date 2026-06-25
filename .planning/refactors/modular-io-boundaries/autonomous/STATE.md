@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `global-closure-hard-stop-report-selected`
+Current state: `global-closure-hard-stop-reported`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-runner-runtime-availability-classification` as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-runtime-availability-classification-2026-06-25.md`. T0 classified runner runtime availability without installing/downloading browsers or running production smoke. Local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296. Browser, admin and write-apply gates are now external/operational hard-stop gates. Next boundary is `planning:global-closure-hard-stop-report`.
+Completed `planning:global-closure-hard-stop-report` as `hard-stop-reported` in `analysis/global-closure-hard-stop-report-2026-06-25.md`. T0 recorded commit-backed progress and the remaining browser/admin/write-apply blockers, and explicitly did not claim global closure. No further safe owned local/app-code/planning boundary remains until external/operational gates provide an approved browser runner runtime/wrapper, a supported admin auth seam, or an approved reversible write target with rollback/idempotency/audit acceptance.
 
 ## Closed Or Deferred Slices
 

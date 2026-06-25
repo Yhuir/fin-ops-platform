@@ -119,7 +119,7 @@ Current state expected on start:
 - `deployment:production-browser-smoke-runner-bundle-implementation` is complete as `implementation-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-implementation-2026-06-25.md`: added local bundle packager, manifest/exclusion tests and docs; normal app release packaging remains unchanged and no production browser smoke/token broker/deploy occurred.
 - `deployment:production-browser-smoke-token-broker-runbook` is complete as `analysis-closed` in `analysis/deployment-production-browser-smoke-token-broker-runbook-2026-06-25.md`: designed future root-owned in-memory target OA token broker protocol with session scope checks, private token descriptor handoff, sanitized metadata and stop gates; no broker was implemented/installed and no token was output.
 - `deployment:production-browser-smoke-runner-runtime-availability-classification` is complete as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-runtime-availability-classification-2026-06-25.md`: local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296.
-- The next pending boundary is `planning:global-closure-hard-stop-report`.
+- `planning:global-closure-hard-stop-report` is complete as `hard-stop-reported` in `analysis/global-closure-hard-stop-report-2026-06-25.md`; there is no next pending owned boundary until an external/operational gate is supplied.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -364,7 +364,14 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `planning:read-model-browser-data-harness-coverage-map`.
+None. The latest completed boundary is `planning:global-closure-hard-stop-report`, recorded in `analysis/global-closure-hard-stop-report-2026-06-25.md` as `hard-stop-reported`.
+
+Current hard stop:
+- Do not claim global/module closure.
+- Browser production evidence requires an approved pinned runner runtime/wrapper and private non-logged token broker handoff.
+- Admin production evidence requires a supported non-secret admin auth seam.
+- Controlled write apply requires explicit approval, reviewed reversible target, rollback/idempotency/audit acceptance and suitable auth.
+- Resume only after one of those external/operational gates is supplied.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.

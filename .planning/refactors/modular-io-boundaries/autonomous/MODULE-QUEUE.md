@@ -319,7 +319,7 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 305 | `deployment:production-browser-smoke-runner-bundle-implementation` | implementation-closed | not-module-closed | Added local `scripts/package_production_browser_smoke.py`, bundle manifest/exclusion tests, and docs. Bundle includes only approved route-shell files/package metadata plus manifest, excludes `node_modules`, browser binaries, `web/dist`, admin spec and secrets, and does not affect normal app release packaging. |
 | 306 | `deployment:production-browser-smoke-token-broker-runbook` | analysis-closed | not-module-closed | Designed future root-owned in-memory target OA token broker protocol with session scope checks, private token descriptor handoff, sanitized metadata and stop gates. No broker was implemented/installed, no token was output and no production command ran. |
 | 307 | `deployment:production-browser-smoke-runner-runtime-availability-classification` | analysis-closed | not-module-closed | Classified runner runtime availability without installing/downloading browsers or running production smoke. Local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296. |
-| 308 | `planning:global-closure-hard-stop-report` | pending | not-module-closed | Produce the hard-stop report required by the goal: commit-backed progress references, completed evidence, precise browser/admin/write blockers, and smallest safe next action. Do not claim global closure. |
+| 308 | `planning:global-closure-hard-stop-report` | hard-stop-reported | not-module-closed | Wrote `analysis/global-closure-hard-stop-report-2026-06-25.md`: recorded current commit-backed progress (`307/308` non-pending before this row, `325` commits beyond `origin/main`), completed evidence since reconciliation, precise browser/admin/write-apply blockers, why no further safe owned boundary remains, and the smallest safe external action. No global closure, production browser smoke, token broker, admin probe, write apply or mutation occurred. |
 
 ## Status Values
 
@@ -340,6 +340,7 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 - `go-candidate-deferred`
 - `blocked-by-prerequisite`
 - `needs-human-production-gate`
+- `hard-stop-reported`
 
 ## Module Closure Values
 
