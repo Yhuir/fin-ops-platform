@@ -520,6 +520,9 @@ from fin_ops_platform.services.workbench_oa_invoice_offset_sync_executor import 
 from fin_ops_platform.services.workbench_oa_attachment_repair_context_executor import (
     WorkbenchOaAttachmentRepairContextExecutor,
 )
+from fin_ops_platform.services.workbench_oa_attachment_context_row_index import (
+    WorkbenchOaAttachmentContextRowIndex,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13624,63 +13627,32 @@ class Application:
 
     @staticmethod
     def _raw_workbench_payload_rows_by_id(payload: dict[str, object]) -> dict[str, dict[str, object]]:
-        rows_by_id: dict[str, dict[str, object]] = {}
-        for section_name in ("paired", "open"):
-            section_payload = payload.get(section_name)
-            if not isinstance(section_payload, dict):
-                continue
-            for pane in ("oa", "bank", "invoice"):
-                for row in list(section_payload.get(pane) or []):
-                    if not isinstance(row, dict):
-                        continue
-                    row_id = str(row.get("id") or "").strip()
-                    if row_id:
-                        rows_by_id[row_id] = row
-        return rows_by_id
+        return Application._workbench_oa_attachment_context_row_index().raw_payload_rows_by_id(payload)
 
     def _oa_attachment_context_row_ids_by_oa_id(
         self,
         rows_by_id: dict[str, dict[str, object]],
     ) -> dict[str, list[str]]:
-        attachment_row_ids_by_oa_id: dict[str, list[str]] = {}
-        oa_row_ids = {
-            row_id
-            for row_id, row in rows_by_id.items()
-            if str(row.get("type") or "").strip() == "oa"
-        }
-        if not oa_row_ids:
-            return attachment_row_ids_by_oa_id
-        for row_id, row in rows_by_id.items():
-            if not self._invoice_row_is_oa_attachment_context(row):
-                continue
-            derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
-            matched_oa_id = None
-            for oa_row_id in sorted(oa_row_ids):
-                if (
-                    derived_from_oa_id == oa_row_id
-                    or oa_attachment_parent_oa_id(derived_from_oa_id) == oa_row_id
-                    or oa_attachment_matches_oa(row, oa_row_id)
-                ):
-                    matched_oa_id = oa_row_id
-                    break
-            if matched_oa_id is None:
-                matched_oa_id = self._oa_id_from_attachment_invoice_id(row_id, list(oa_row_ids))
-            if matched_oa_id:
-                attachment_row_ids_by_oa_id.setdefault(matched_oa_id, []).append(row_id)
-        return attachment_row_ids_by_oa_id
+        return self._workbench_oa_attachment_context_row_index().attachment_row_ids_by_oa_id(rows_by_id)
 
     @staticmethod
     def _invoice_row_is_oa_attachment_context(row: dict[str, object]) -> bool:
-        if str(row.get("type") or "").strip() != "invoice":
-            return False
-        return str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
+        return Application._workbench_oa_attachment_context_row_index().invoice_row_is_attachment_context(row)
 
     @staticmethod
     def _oa_id_from_attachment_invoice_id(invoice_id: str, oa_row_ids: list[str]) -> str | None:
-        for oa_row_id in sorted(oa_row_ids, key=len, reverse=True):
-            if oa_attachment_row_id_matches_oa(invoice_id, oa_row_id):
-                return oa_row_id
-        return None
+        return Application._workbench_oa_attachment_context_row_index().oa_id_from_attachment_invoice_id(
+            invoice_id,
+            oa_row_ids,
+        )
+
+    @staticmethod
+    def _workbench_oa_attachment_context_row_index() -> WorkbenchOaAttachmentContextRowIndex:
+        return WorkbenchOaAttachmentContextRowIndex(
+            attachment_parent_oa_id=oa_attachment_parent_oa_id,
+            attachment_matches_oa=oa_attachment_matches_oa,
+            attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa,
+        )
 
     @staticmethod
     def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:

@@ -3571,6 +3571,92 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_attachment_context_row_index_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        index_source = (SERVICES_ROOT / "workbench_oa_attachment_context_row_index.py").read_text(encoding="utf-8")
+        method_sources = {
+            method_name: _function_source(server_tree, server_source, method_name)
+            for method_name in (
+                "_raw_workbench_payload_rows_by_id",
+                "_oa_attachment_context_row_ids_by_oa_id",
+                "_invoice_row_is_oa_attachment_context",
+                "_oa_id_from_attachment_invoice_id",
+            )
+        }
+        factory_source = _function_source(server_tree, server_source, "_workbench_oa_attachment_context_row_index")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-attachment-context-row-index-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in method_sources.items():
+            if "_workbench_oa_attachment_context_row_index()" not in method_source:
+                violations.append(f"Application {method_name} does not delegate to OA attachment context row index")
+        combined_method_source = "\n".join(method_sources.values())
+        for forbidden in (
+            "source_kind",
+            "oa_attachment_invoice",
+            "derived_from_oa_id",
+            "oa_attachment_parent_oa_id",
+            "oa_attachment_matches_oa",
+            "oa_attachment_row_id_matches_oa",
+            "for section_name in",
+            "for pane in",
+        ):
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns OA attachment context row-index detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaAttachmentContextRowIndex",
+            "def raw_payload_rows_by_id(",
+            "def attachment_row_ids_by_oa_id(",
+            "def invoice_row_is_attachment_context(",
+            "def oa_id_from_attachment_invoice_id(",
+            "attachment_parent_oa_id",
+            "attachment_matches_oa",
+            "attachment_row_id_matches_oa",
+            "source_kind",
+            "oa_attachment_invoice",
+            "derived_from_oa_id",
+        ):
+            if marker not in index_source:
+                violations.append(f"WorkbenchOaAttachmentContextRowIndex missing marker: {marker}")
+        for marker in (
+            "WorkbenchOaAttachmentContextRowIndex(",
+            "attachment_parent_oa_id=oa_attachment_parent_oa_id",
+            "attachment_matches_oa=oa_attachment_matches_oa",
+            "attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa",
+        ):
+            if marker not in factory_source:
+                violations.append(f"Application row index factory missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in index_source:
+                violations.append(f"WorkbenchOaAttachmentContextRowIndex gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-attachment-context-row-index-extraction",
+            "WorkbenchOaAttachmentContextRowIndex",
+            "raw payload row indexing",
+            "attachment invoice id fallback matching",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA attachment context row index analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_server_confirm_link_context_uses_relation_read_port(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
