@@ -580,3 +580,13 @@
 - 测试覆盖：扩展 reconciliation route-owner Guard，禁止 simple mutation callbacks 回流到 `server.py`，同时明确上传/parser callbacks 仍为本轮 stop gate；回归 source-file delete、confirm、stale confirmability 和 refresh-matches API。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_reconciliation_confirm_route_accepts_selected_credit_card_item_ids tests.test_etc_backend.EtcApiTests.test_delete_reconciliation_source_file_route_removes_file_parse_result_and_items tests.test_etc_backend.EtcApiTests.test_delete_reconciliation_source_file_route_requires_version_and_mutable_status tests.test_etc_backend.EtcApiTests.test_reconciliation_task_payload_is_not_confirmable_with_stale_included_etc_resolution -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_refresh_reconciliation_matches_route_recalculates_and_returns_task tests.test_etc_backend.EtcApiTests.test_refresh_reconciliation_matches_route_returns_404_for_unknown_task -v`。
 - 未测风险：曾两次使用旧测试名运行 refresh-matches 失败，随后用 `rg` 查到准确测试名并通过；上传/parser-heavy callbacks 尚未迁移。
+
+## 2026-06-25 - ETC reconciliation upload/parser callback审计
+
+- 目标：审计剩余 upload/parser-heavy callbacks，选择下一条最小安全实现边界。
+- 影响范围：`_handle_api_etc_reconciliation_upload`、`_handle_api_etc_reconciliation_supplement_for_card_upload`、`_handle_api_etc_reconciliation_ticket_root_texts`、ticket-root source-mode helpers、对象存储错误映射和 upload/parser 回归测试。
+- 关键决策：先迁移 supplement-for-card upload。该路径的业务校验、重复检测、金额差异说明、对象存储回滚和 parse-result 应用已在 `EtcReconciliationTaskService.upload_supplement_evidences_for_card(...)`，route 层只剩 multipart 和错误映射。通用 source upload 与 ticket-root text 仍包含 parser/source-mode/wrong-slot/source-name 逻辑，后续独立处理。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要静态 Guard 和 supplement upload targeted API 回归。
+- 验证命令：只读审计 `server.py` callback、`EtcReconciliationTaskService.upload_supplement_evidences_for_card(...)` 和相关 tests；未运行测试。
+- 未测风险：generic source upload 和 ticket-root text 仍在 `Application` callback，等待后续 parser/source-mode 边界。

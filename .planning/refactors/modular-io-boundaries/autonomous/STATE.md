@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-simple-mutations-owned`
+Current state: `etc-reconciliation-supplement-upload-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-simple-mutation-callback-collapse` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-simple-mutation-callback-collapse-2026-06-25.md`. T0 moved source-file delete, item patch, confirm, reopen and refresh-match HTTP mapping into `EtcReconciliationTaskApiRoutes`; upload/parser-heavy callbacks remain in `Application` pending a dedicated audit. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-upload-parser-callback-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-upload-parser-callback-audit-2026-06-25.md`. T0 selected `server-py:etc-reconciliation-supplement-for-card-upload-callback-collapse` as the next narrow implementation boundary. Generic source upload and ticket-root text remain separate parser/source-mode boundaries. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
