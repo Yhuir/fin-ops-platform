@@ -105,6 +105,7 @@ class NoOaBankBatchReadModelRefreshService:
             bank_rows=bank_rows,
             categories_by_transaction_id=categories,
             active_relations=active_relations,
+            source_versions=source_versions,
             apply_relation_repairs=False,
             scope_key=scope_key,
         )

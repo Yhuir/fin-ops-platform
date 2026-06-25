@@ -615,10 +615,12 @@ class NoOaBankBatchApplicationService:
         bank_rows: list[dict[str, object]],
         categories_by_transaction_id: dict[str, dict[str, object]],
         active_relations: list[dict[str, object]] | None = None,
+        source_versions: dict[str, object] | None = None,
         apply_relation_repairs: bool,
         scope_key: str,
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
+        source_version_payload = dict(source_versions) if isinstance(source_versions, dict) else self.no_oa_bank_batch_source_versions()
         self._apply_categories_to_rows(bank_rows, categories_by_transaction_id)
         self._no_oa_bank_batch_service.build_batches(
             bank_rows,
@@ -626,7 +628,7 @@ class NoOaBankBatchApplicationService:
             active_relations
             if active_relations is not None
             else self._workbench_relation_active_relations_for_bank_rows(bank_rows),
-            self.no_oa_bank_batch_source_versions(),
+            source_version_payload,
             eligible_batch_types=self.selected_tag_codes(),
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key=refresh_scope_key,

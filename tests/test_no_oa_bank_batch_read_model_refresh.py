@@ -371,12 +371,21 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                     }
                 }
 
+        class CategoryService:
+            def __init__(self) -> None:
+                self.snapshot_calls = 0
+
+            def snapshot(self):
+                self.snapshot_calls += 1
+                return {}
+
         class StateStore:
             def save_no_oa_bank_batches(self, _snapshot) -> None:
                 return None
 
         app = build_application()
         provider = EffectiveCategoryProvider()
+        category_service = CategoryService()
         service = NoOaBankBatchReadModelRefreshService(
             import_service=ImportService(),
             effective_category_provider=provider,
@@ -391,7 +400,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                     }
                 },
             )(),
-            bank_transaction_category_service=app._bank_transaction_category_service,
+            bank_transaction_category_service=category_service,
             pair_relation_service=app._workbench_pair_relation_service,
             workbench_read_model_service=app._workbench_read_model_service,
             state_store=StateStore(),
@@ -416,6 +425,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         )
 
         self.assertEqual(provider.calls, [["txn-once"]])
+        self.assertEqual(category_service.snapshot_calls, 2)
 
     def test_unchanged_scope_skips_rebuild_and_snapshot_save(self) -> None:
         class ImportService:
