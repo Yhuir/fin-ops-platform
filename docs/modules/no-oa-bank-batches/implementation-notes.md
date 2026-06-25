@@ -81,6 +81,17 @@
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
 - 后续事项：执行 `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`。
 
+## 2026-06-25 - post-display-policy local closure audit
+
+- 目标：执行 `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`，复审 no-OA Workbench display policy extraction 后 `Application` 中的 no-OA 残留职责。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
+- 关键决策：no-OA route/refresh/decorator/display/factory/session/source-version surfaces 已局部 accounted；本轮未发现新的 no-OA local implementation gap in `server.py`。
+- 状态：记录为 `production-evidence-deferred`，不是 module/global closed；真实 PostgreSQL/worker/App Status/high-row/browser/write-flow evidence 仍 deferred。
+- 文档影响：新增 modular IO post-display-policy closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt和本实施记录；长期事实源不变。
+- 测试覆盖：本轮 analysis-only，不新增运行时测试。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 后续事项：执行 `planning:post-no-oa-server-local-support-next-boundary-selection`，选择下一个非生产本地边界。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。

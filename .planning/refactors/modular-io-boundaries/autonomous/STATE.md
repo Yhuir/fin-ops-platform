@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batch-post-display-policy-local-closure-audit-selected`
+Current state: `post-no-oa-server-local-support-next-boundary-selection-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:no-oa-bank-batch-workbench-display-policy-extraction` as `local-implementation-closed` in `analysis/server-py-no-oa-bank-batch-workbench-display-policy-extraction-2026-06-25.md`. `NoOaBankBatchWorkbenchDisplayPolicy` now owns no-OA Workbench row tag derivation and relation display payload labels. T0 selected `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` next; no no-OA module/global closure is claimed.
+Completed `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` as `production-evidence-deferred` in `analysis/server-py-no-oa-bank-batch-post-display-policy-local-closure-audit-2026-06-25.md`. No remaining no-OA local implementation gap was found in the audited `server.py` support surface, so local server support is accounted for; real PostgreSQL/worker/App Status/high-row/browser/write-flow evidence remains deferred and no module/global closure is claimed. T0 selected `planning:post-no-oa-server-local-support-next-boundary-selection` next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:no-oa-bank-batch-workbench-display-policy-extraction`
+`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`
+`planning:post-no-oa-server-local-support-next-boundary-selection`

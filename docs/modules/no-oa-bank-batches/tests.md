@@ -254,6 +254,14 @@ git diff --check
 - Existing feature regression tests：新增 static Guard 防止 no-OA managed-label filtering 和 relation display labels 回到 generic `Application` helpers。
 - 未新增 Business core、read model/cache/background job、frontend component 或 Browser E2E 测试，因为本 slice 不改变 no-OA 批次业务规则、read model/worker 行为、页面交互或真实浏览器流程。
 
+## 2026-06-25 - Modular IO post-display-policy closure audit test note
+
+`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` 已完成为 analysis-only。
+
+- 本轮未新增运行时测试：没有代码、业务状态机、HTTP contract、read model schema、worker event、权限、审计或前端行为变化。
+- 审计结论：no-OA local `server.py` support 已 accounted，但真实 PostgreSQL/worker/App Status/high-row/browser/write-flow evidence 仍 deferred；因此不声明模块全局 closed。
+- 后续若进入生产证据阶段，必须按受控 runbook 覆盖 App Status readiness、dirty/outbox、worker drain、Browser/admin/write-flow，并避免读取或保存 secret。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |
