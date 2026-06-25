@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batch-route-owner-audit-selected`
+Current state: `no-oa-bank-batch-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:bank-details-route-owner-local-closure-audit-retry` as `analysis-closed` in `analysis/server-py-bank-details-route-owner-local-closure-audit-retry-2026-06-25.md`. No app-owned bank-details route callback remains in `server.py`; remaining bank-related surfaces are composition-root, HTTP/platform adapter, read-model/source-version/refresh provider or shared downstream support. T0 selected `server-py:no-oa-bank-batch-route-owner-audit` next and still does not claim bank-details module/global closure.
+Completed `server-py:no-oa-bank-batch-route-owner-audit` as `analysis-closed` in `analysis/server-py-no-oa-bank-batch-route-owner-audit-2026-06-25.md`. Eight no-OA bank batch callbacks remain in `server.py`, and all are thin HTTP dispatch/session/body/json wrappers around existing `NoOaBankBatchApiRoutes` and `NoOaBankBatchApplicationService` boundaries. T0 selected `server-py:no-oa-bank-batch-route-callback-collapse` next; no no-OA module/global closure is claimed.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:bank-details-route-owner-local-closure-audit-retry`
+`server-py:no-oa-bank-batch-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:no-oa-bank-batch-route-owner-audit`
+`server-py:no-oa-bank-batch-route-callback-collapse`

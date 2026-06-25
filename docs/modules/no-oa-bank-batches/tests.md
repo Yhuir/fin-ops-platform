@@ -18,6 +18,27 @@
 
 ## 现有测试入口
 
+## 2026-06-25 - route-owner callback audit test note
+
+`server-py:no-oa-bank-batch-route-owner-audit` 已完成为 analysis-only：
+
+- Business core unit tests：不适用；本轮不改 no-OA 批次生命周期、标签准入或 relation 业务规则。
+- Service-layer tests：不适用；本轮不改 application service、read model repository、refresh service 或 persistence boundary。
+- API contract tests：下一实现 slice 适用；本轮只选择 route callback collapse 边界。
+- Read model/cache/background job tests：不适用；本轮不改 read model/worker/cache。
+- Frontend component and interaction tests：不适用；本轮不改前端。
+- End-to-end business-flow integration tests：不适用；本轮不改业务流。
+- Existing feature regression tests：本轮沿用 CodeGraph/literal audit；下一实现 slice 必须覆盖 route owner、防 callback 回流 Guard 和 no-OA API 回归。
+
+验证命令：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
+
 ## 2026-06-25 - Production API source-version schema alignment
 
 - 变更类型：narrow implementation slice。

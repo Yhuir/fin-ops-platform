@@ -23,6 +23,17 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-25 - route-owner callback audit
+
+- 目标：执行 `server-py:no-oa-bank-batch-route-owner-audit`，审计 `server.py` 中 `/api/no-oa-bank-batches*` route callback 残留。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
+- 关键决策：当前 8 个 no-OA bank batch callbacks 都是 dispatch/session/body/json wrappers；业务行为、relation command、persist/rollback、refresh enqueue 和 source-version/stale reason 仍由 `NoOaBankBatchApiRoutes` / `NoOaBankBatchApplicationService` / lower services 拥有。下一实现边界选择 route callback collapse，并通过显式 ports 注入 mutation session、JSON body loader 和 JSON response。
+- 文档影响：新增 modular IO route-owner audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期事实源不变。
+- 测试覆盖：本轮 analysis-only，不新增运行时测试；下一实现 slice 必须补 route-owner/API/static Guard 测试。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
+- 后续事项：执行 `server-py:no-oa-bank-batch-route-callback-collapse`。
+
 ## 2026-06-24 - Modular IO refresh persistence boundary extraction
 
 - 目标：把 no-OA read model refresh worker 的 public snapshot 持久化从 broad state-store 直接调用中抽出。
