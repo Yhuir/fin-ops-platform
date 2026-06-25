@@ -69,6 +69,18 @@
 - 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
 
+## 2026-06-25 - Workbench display policy extraction
+
+- 目标：执行 `server-py:no-oa-bank-batch-workbench-display-policy-extraction`，把 no-OA Workbench row tag derivation 和 relation display payload policy 从通用 `Application` helpers 移到专用 display policy service。
+- 影响范围：`NoOaBankBatchWorkbenchDisplayPolicy`、`Application._derive_workbench_row_tags(...)` 的 no-OA delegation、`Application._pair_relation_display_payload(...)` 的 no-OA delegation、display policy tests、platform Guard 和 targeted Workbench/no-OA regressions；不改变 Workbench API shape、no-OA 业务状态机、read model schema、dirty/outbox schema、权限、审计、前端行为或生产数据。
+- 关键决策：no-OA visible tag 派生、managed-label filtering、batch type label lookup、batch label fallback 和 relation display payload label 由 display policy service 拥有；`Application` 保留通用 Workbench display dispatcher。
+- 保留语义：display payload 仍返回 `code=no_oa_bank_batch`、`tone=success` 和 `已匹配：<batch_label>` / `已匹配：免OA流水`；no-OA tags 仍合并 relation/group/special metadata display tags，过滤 managed labels，并通过当前 bank tag label provider 展示 batch type。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 display policy unit tests 和 static Guard，复跑 no-OA Workbench integration 与 Workbench grouping 回归。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-workbench-display-policy-extraction-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。

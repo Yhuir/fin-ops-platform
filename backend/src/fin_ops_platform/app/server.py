@@ -277,6 +277,9 @@ from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh_producer impo
 from fin_ops_platform.services.no_oa_bank_batch_tag_selection_service import (
     NoOaBankBatchTagSelectionApplicationService,
 )
+from fin_ops_platform.services.no_oa_bank_batch_workbench_display_policy import (
+    NoOaBankBatchWorkbenchDisplayPolicy,
+)
 from fin_ops_platform.services.no_oa_bank_batch_workbench_payload_decorator import (
     NoOaBankBatchWorkbenchPayloadDecorator,
 )
@@ -9377,6 +9380,9 @@ class Application:
     def _no_oa_bank_batch_workbench_payload_decorator(self) -> NoOaBankBatchWorkbenchPayloadDecorator:
         return NoOaBankBatchWorkbenchPayloadDecorator(batch_provider=self._no_oa_bank_batch_service.get_batch)
 
+    def _no_oa_bank_batch_workbench_display_policy(self) -> NoOaBankBatchWorkbenchDisplayPolicy:
+        return NoOaBankBatchWorkbenchDisplayPolicy(label_provider=self._bank_transaction_tag_label_current)
+
     def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
         return TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=self._read_model_refresh_gateway,
@@ -15790,26 +15796,12 @@ class Application:
         special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else row.get("special_metadata")
         special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
-            managed_labels = set(NO_OA_MANAGED_LABELS.values())
-            for tag in list(relation.get("display_tags") or []) if isinstance(relation, dict) else []:
-                tag_text = str(tag).strip()
-                if tag_text not in managed_labels:
-                    add(tag_text)
-            for tag in list(group.get("display_tags") or []):
-                tag_text = str(tag).strip()
-                if tag_text not in managed_labels:
-                    add(tag_text)
-            if isinstance(special_metadata, dict):
-                for tag in list(special_metadata.get("display_tags") or []):
-                    tag_text = str(tag).strip()
-                    if tag_text not in managed_labels:
-                        add(tag_text)
-                batch_type = str(special_metadata.get("batch_type") or "").strip()
-                if batch_type:
-                    add(self._bank_transaction_tag_label_current(batch_type))
-                batch_label = str(special_metadata.get("batch_label") or "").strip()
-                if batch_label and batch_label not in managed_labels:
-                    add(batch_label)
+            for tag in self._no_oa_bank_batch_workbench_display_policy().row_tags(
+                relation=relation if isinstance(relation, dict) else None,
+                group=group,
+                special_metadata=special_metadata if isinstance(special_metadata, dict) else None,
+            ):
+                add(tag)
         if special_type == CASH_PASS_THROUGH_MODE:
             add(CASH_TURNOVER_TAG)
             add("过账")
@@ -16094,14 +16086,7 @@ class Application:
         special_metadata: dict[str, object] | None = None,
     ) -> dict[str, str]:
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
-            batch_label = ""
-            if isinstance(special_metadata, dict):
-                batch_label = str(special_metadata.get("batch_label") or "").strip()
-            return {
-                "code": NO_OA_BANK_BATCH_RELATION_MODE,
-                "label": f"已匹配：{batch_label}" if batch_label else "已匹配：免OA流水",
-                "tone": "success",
-            }
+            return self._no_oa_bank_batch_workbench_display_policy().relation_display_payload(special_metadata)
         if relation_mode == "internal_transfer_pair":
             return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
         if relation_mode == "salary_personal_auto_match":

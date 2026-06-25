@@ -244,6 +244,16 @@ git diff --check
 - 下一实现 slice 必须新增或扩展 static Guard，防止 no-OA tag/display policy 直接回到 `Application._derive_workbench_row_tags(...)` 和 `_pair_relation_display_payload(...)`。
 - 若只抽出 display policy 且 Workbench row payload shape 不变，优先用 service unit + existing Workbench/no-OA display regression + static Guard 保护；前端/Browser E2E 不作为本地必需项。
 
+## 2026-06-25 - Modular IO Workbench display policy extraction test note
+
+`server-py:no-oa-bank-batch-workbench-display-policy-extraction` 已完成。测试覆盖如下：
+
+- Service-layer tests：新增 `tests/test_no_oa_bank_batch_workbench_display_policy.py`，覆盖 no-OA relation display payload、fallback label、display tag source merging、managed-label filtering 和 batch type label lookup。
+- API contract regression：复跑 Workbench candidate grouping 和 no-OA Workbench integration 目标测试，保护 relation display payload、display tags、summary row 和 withdraw action shape。
+- End-to-end business-flow integration regression：复跑 no-OA salary/internal-transfer/fee Workbench integration 目标测试，保护提交后 Workbench 配对展示和撤回入口。
+- Existing feature regression tests：新增 static Guard 防止 no-OA managed-label filtering 和 relation display labels 回到 generic `Application` helpers。
+- 未新增 Business core、read model/cache/background job、frontend component 或 Browser E2E 测试，因为本 slice 不改变 no-OA 批次业务规则、read model/worker 行为、页面交互或真实浏览器流程。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

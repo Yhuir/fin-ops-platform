@@ -4070,6 +4070,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_bank_batch_workbench_display_policy_uses_service_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        display_policy_path = SERVICES_ROOT / "no_oa_bank_batch_workbench_display_policy.py"
+        display_policy_source = display_policy_path.read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        derive_tags_source = _function_source(server_tree, server_source, "_derive_workbench_row_tags")
+        display_payload_source = _function_source(server_tree, server_source, "_pair_relation_display_payload")
+        if "NO_OA_MANAGED_LABELS" in derive_tags_source:
+            violations.append("Application still owns no-OA managed-label filtering for Workbench row tags")
+        if "relation.get(\"display_tags\")" in derive_tags_source or "special_metadata.get(\"display_tags\")" in derive_tags_source:
+            violations.append("Application still owns no-OA display tag source selection")
+        if "已匹配：免OA流水" in display_payload_source or "已匹配：{batch_label}" in display_payload_source:
+            violations.append("Application still owns no-OA relation display payload labels")
+
+        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_workbench_display_policy")
+        if "NoOaBankBatchWorkbenchDisplayPolicy" not in app_factory_source:
+            violations.append("Application no longer assembles NoOaBankBatchWorkbenchDisplayPolicy")
+        for expected_delegate in (
+            ".row_tags(",
+            ".relation_display_payload(special_metadata)",
+        ):
+            if expected_delegate not in server_source:
+                violations.append(f"server.py does not delegate no-OA display policy through {expected_delegate}")
+
+        for service_marker in (
+            "class NoOaBankBatchWorkbenchDisplayPolicy",
+            "def relation_display_payload(",
+            "def row_tags(",
+            "NO_OA_MANAGED_LABELS",
+            "已匹配：免OA流水",
+        ):
+            if service_marker not in display_policy_source:
+                violations.append(f"NoOaBankBatchWorkbenchDisplayPolicy missing {service_marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_bank_batch_routes_delegate_to_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `no-oa-bank-batch-workbench-display-policy-extraction-selected`
+Current state: `no-oa-bank-batch-post-display-policy-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:no-oa-bank-batch-post-decorator-local-closure-audit` as `analysis-closed` in `analysis/server-py-no-oa-bank-batch-post-decorator-local-closure-audit-2026-06-25.md`. Route/refresh/decorator/factory/session/source-version surfaces are accounted for, but no-OA Workbench tag/display policy still lives in generic app helpers. T0 selected `server-py:no-oa-bank-batch-workbench-display-policy-extraction` next; no no-OA module/global closure is claimed.
+Completed `server-py:no-oa-bank-batch-workbench-display-policy-extraction` as `local-implementation-closed` in `analysis/server-py-no-oa-bank-batch-workbench-display-policy-extraction-2026-06-25.md`. `NoOaBankBatchWorkbenchDisplayPolicy` now owns no-OA Workbench row tag derivation and relation display payload labels. T0 selected `server-py:no-oa-bank-batch-post-display-policy-local-closure-audit` next; no no-OA module/global closure is claimed.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:no-oa-bank-batch-post-decorator-local-closure-audit`
+`server-py:no-oa-bank-batch-workbench-display-policy-extraction`
 
 ## Next Prompt
 
-`server-py:no-oa-bank-batch-workbench-display-policy-extraction`
+`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`
