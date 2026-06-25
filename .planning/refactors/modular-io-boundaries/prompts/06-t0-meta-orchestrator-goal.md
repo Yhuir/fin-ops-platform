@@ -4,6 +4,8 @@
 **Use with:** `/goal`
 **Purpose:** Run the modular IO refactor from one controller thread with local implementation closure first. The controller performs commit-backed reconciliation, runs full pre-implementation analysis, finishes local modularization code and boundary guards, updates the state machine after each implementation slice, generates the next bounded prompt from the updated state and previous prompt completion, creates worker threads when useful, monitors them, reviews handoffs, commits/pushes to `dev`, and repeats until local modular implementation closure is proven. Only after local code/tests/static guards prove the boundary should T0 move to production evidence and controlled production operations.
 
+**Local-first rule:** This prompt is for an overnight autonomous local implementation run. Production browser/admin/write evidence is a final validation layer, not a prerequisite for continuing local modularization. In the absence of staging DB and local PostgreSQL URL, T0 must use local tests, fake/stub repositories, in-process API tests, contract tests, static guards, docs/state-machine evidence and non-secret read-only SSH evidence where appropriate.
+
 ## How To Use
 
 Paste the following prompt into one Codex thread as the only starting prompt:
@@ -40,6 +42,25 @@ Primary local implementation mandate:
   - I/O setting: define inputs, outputs, state, events, read model/freshness, permissions, audit and test contracts;
   - old-path retirement: delete, quarantine or mark compat-only paths with owner, caller, deletion condition and static guard evidence;
   - local proof: tests, static guards, docs impact and state-machine updates.
+
+Required local work products before production validation:
+- A current pre-implementation analysis file for each selected boundary, including current owner, target owner, inputs, outputs, state, events, permissions, read model/freshness impact, tests, docs impact, rollback/defer criteria and explicit out-of-scope notes.
+- Code changes that move the selected responsibility into a cohesive module owner or explicitly quarantine it as compat-only with deletion conditions.
+- Static guards that prevent the old ownership path from returning, especially for `server.py`, read model refresh, worker dependencies, stale-as-fresh reads, direct SQL from services and old paths that can still write facts/dirty scopes/outbox/readiness/cache/App Status.
+- Local tests that prove the selected boundary through the narrowest reliable layer available without PostgreSQL: pure unit tests, fake repository/service tests, in-process API tests, contract tests, frontend mocked tests or static architecture tests.
+- State-machine updates in `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and `04-master-goal-controller.md` that distinguish `analysis-closed`, `local-implementation-closed`, guard-only closure, deferred production evidence and real blockers.
+- A regenerated `NEXT-PROMPT.md` based on the just-completed prompt status and the next first actionable queue row, followed by immediate execution unless a hard stop gate is hit.
+
+Non-negotiable local-first sequencing:
+1. Full implementation analysis.
+2. State-machine alignment from commit-backed evidence.
+3. One bounded local implementation or local guard slice.
+4. Local verification and docs verification.
+5. State-machine update.
+6. Next prompt generation from the updated state and the measured completion of the previous prompt.
+7. Immediate execution of the next prompt.
+
+Do not replace this sequence with production validation, manual user requests, broad analysis-only loops or prompt generation without execution while local implementation work remains.
 
 Definition of local modular implementation closure:
 - `server.py` owns only route registration, dependency assembly, request/session/auth extraction, HTTP response mapping and explicitly documented compat-only wrappers with deletion conditions.
@@ -189,6 +210,8 @@ Environment constraints:
 - When a local test would normally require PostgreSQL, prefer existing fake repositories, temporary stores, contract tests, direct service tests, static guards or mocked API harnesses. If no local substitute can prove the contract, record the exact production-only evidence needed and continue the next safe local boundary.
 - Do not treat "no staging database" or "no pgsql URL" as an implementation blocker. They only limit which evidence can be used for final production/runtime closure.
 - Do not wait for user-supplied credentials. If a command would need a secret, replace it with a non-secret local/static/fake test or defer that production evidence after local closure.
+- If a selected boundary normally depends on PostgreSQL behavior, prove the boundary locally by asserting the port contract, repository call shape, dirty-scope/readiness enqueue intent, idempotency semantics, stale/fresh status mapping and failure behavior through fakes or contract guards. Record the missing real PostgreSQL evidence separately as production/runtime evidence after local closure.
+- If a selected boundary normally depends on authenticated browser/admin behavior, prove the local route/service/frontend contract without secrets first. Do not ask the user to open Chrome, export tokens, inspect cookies or select live rows as a prerequisite for local modular code completion.
 
 Controlled production gate:
 - `ssh finops-prod-root` is available for root SSH.
@@ -396,6 +419,12 @@ Run this loop until local modular implementation closure is proven, then continu
      - Use workers when work can be split by disjoint files or independent evidence production, such as one worker for route-owner extraction analysis, one for read model repository split analysis, and one for static guard/test mapping.
      - Execute inline when the slice touches the same hot files, especially `server.py`, a single route owner, a shared repository file, controller-only state files, or a migration where interleaved edits would be risky.
      - Never block local progress merely because worker tools are unavailable. Fall back to inline T0 execution and record the fallback.
+   - Worker wave examples for this refactor:
+     - route-owner worker: owns one route group and matching API/static guard tests;
+     - read-model worker: owns one read model repository boundary and matching freshness/contract tests;
+     - worker-boundary worker: owns worker dependency and queue/readiness guards;
+     - frontend-boundary worker: owns mocked freshness/barrier UI tests for one page.
+   - Do not split one tightly coupled route/service/repository migration across workers if the same files would be edited concurrently.
 
 4. Worker prompt required read list
    Every worker must read:
@@ -489,6 +518,16 @@ Run this loop until local modular implementation closure is proven, then continu
      - `test(<module>): <bounded guard>`
      - `docs(refactor): <state/accounting update>`
    - Push `origin/dev`.
+
+8a. Dirty worktree and continuation safety
+   - If T0 resumes with existing dirty files, classify them before any new edit:
+     - `own-in-progress`: current T0's unfinished slice;
+     - `accepted-worker-diff`: worker output awaiting review;
+     - `unrelated-user-change`: do not stage or overwrite;
+     - `conflict/unknown`: hard stop only if it overlaps the selected boundary and cannot be classified.
+   - If dirty files are `own-in-progress`, finish or safely checkpoint that exact slice before opening a new unrelated boundary.
+   - Do not overwrite dirty controller-only files. Reconcile them against git and state before editing.
+   - Release the direct-dev write lease before final/stopping response unless another verified active writer owns it.
 
 9. Generate and execute next prompt
    - If local modular implementation closure is not proven, derive the next bounded local code/test/guard boundary from current state and execute it immediately.
@@ -601,4 +640,5 @@ Minimum acceptable overnight outcome if global closure is not reached:
 - `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md`, `NEXT-PROMPT.md` and `04-master-goal-controller.md` match commit-backed evidence;
 - every deferred production item is classified separately from local implementation status;
 - the final answer states the current local implementation closure percentage, global closure percentage, production evidence percentage, pushed commits, verification commands and exact next boundary.
+- no remaining local implementation gap is hidden behind browser/admin/write gates or missing PostgreSQL/staging evidence.
 ```
