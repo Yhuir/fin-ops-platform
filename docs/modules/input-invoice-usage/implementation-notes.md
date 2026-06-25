@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - OA reverse draft mutation callback audit
+
+- 目标：审计 OA reverse 剩余草稿创建、撤回、状态刷新和人工状态 callback，判断是否可以继续收进 route owner。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：剩余 5 个 callback 只是 HTTP/session/body 映射，状态机、幂等、版本冲突、OA evidence detection、relation command 写入、审计和 read model invalidation 均在 `InputInvoiceUsageOaReverseService`；下一步用显式 OA provider/client/parse 端口把这些 callback 收进 `InputInvoiceUsageOaReverseApiRoutes`。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需扩展静态 Guard，并回归 OA reverse draft/revoke/manual/status refresh API。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-draft-mutation-callback-audit-2026-06-25.md`。
+- 未测风险：真实 OA 登录、目标申请人凭据、生产 browser/admin/write 和 worker drain 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse`。
+
 ## 2026-06-25 - OA reverse route owner facade extraction
 
 - 目标：把 `/api/input-invoice-usage/oa-reverse*` 中轻量 preview/history/staged/batch create/get HTTP 映射从 `server.py` 迁入独立 route owner。
