@@ -186,12 +186,12 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "repository fact lookup exposes matched rows from an already materialized read model."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_workbench_relation_rows_by_ids",
+        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_rows_by_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation rows to downstream freshness facade."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_workbench_relation_groups_by_ids",
+        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation groups to downstream freshness facade."),
     (

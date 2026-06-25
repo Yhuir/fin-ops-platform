@@ -2908,15 +2908,43 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         )
 
 
-class PostgresReadModelRepository:
+class PostgresSearchWorkbenchRelationReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
-        self._bank_read_model_repository = PostgresBankReadModelRepository(connection)
-        self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
-        self._pending_invoice_lifecycle_repository = PostgresPendingInvoiceLifecycleReadModelRepository(
-            connection,
-            bank_detail_scope_summary=self.bank_detail_scope_summary,
+
+    def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
+        executor = connection or self._connection
+        dirty_row = executor.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type, scope_key),
         )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    @staticmethod
+    def _common_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        common_versions: dict[str, Any] | None = None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            if common_versions is None:
+                common_versions = deepcopy(row_versions)
+                continue
+            for key in list(common_versions):
+                if row_versions.get(key) != common_versions[key]:
+                    common_versions.pop(key, None)
+        return common_versions or {}
 
     def search_index(
         self,
@@ -2995,6 +3023,7 @@ class PostgresReadModelRepository:
         }
         return result
 
+
     def save_search_index_rows(
         self,
         *,
@@ -3062,154 +3091,6 @@ class PostgresReadModelRepository:
 
         run_in_transaction(self._connection, write)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
-        return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
-
-    def _bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
-        return self._bank_read_model_repository._bank_detail_scope_keys_for_range(*args, **kwargs)
-
-    def _bank_detail_available_month_scope_keys(self, *args: Any, **kwargs: Any) -> list[str]:
-        return self._bank_read_model_repository._bank_detail_available_month_scope_keys(*args, **kwargs)
-
-    def bank_detail_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._bank_read_model_repository.bank_detail_scope_summary(*args, **kwargs)
-
-    def bank_account_balance_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._bank_read_model_repository.bank_account_balance_scope_summary(*args, **kwargs)
-
-    def list_bank_detail_transactions(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._bank_read_model_repository.list_bank_detail_transactions(*args, **kwargs)
-
-    def list_bank_detail_accounts(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._bank_read_model_repository.list_bank_detail_accounts(*args, **kwargs)
-
-    def get_bank_detail_tagged_rows_by_transaction_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._bank_read_model_repository.get_bank_detail_tagged_rows_by_transaction_ids(*args, **kwargs)
-
-    def list_bank_detail_tagged_rows_by_month(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._bank_read_model_repository.list_bank_detail_tagged_rows_by_month(*args, **kwargs)
-
-    def list_bank_account_balances(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._bank_read_model_repository.list_bank_account_balances(*args, **kwargs)
-
-    def save_bank_account_balances(self, *args: Any, **kwargs: Any) -> None:
-        self._bank_read_model_repository.save_bank_account_balances(*args, **kwargs)
-
-    def save_bank_detail_rows(self, *args: Any, **kwargs: Any) -> None:
-        self._bank_read_model_repository.save_bank_detail_rows(*args, **kwargs)
-
-    def mark_bank_detail_scope(self, *args: Any, **kwargs: Any) -> None:
-        self._bank_read_model_repository.mark_bank_detail_scope(*args, **kwargs)
-
-    def list_input_invoice_usage_rows(self, **kwargs: Any) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.list_input_invoice_usage_rows(**kwargs)
-
-    def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
-
-    def mark_input_invoice_usage_scope(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.mark_input_invoice_usage_scope(**kwargs)
-
-    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._invoice_usage_collection_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
-
-    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_input_invoice_usage_row_by_row_id(row_id)
-
-    def list_output_invoice_collection_rows(self, **kwargs: Any) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.list_output_invoice_collection_rows(**kwargs)
-
-    def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_output_invoice_collection_row_by_row_id(row_id)
-
-    def save_output_invoice_collection_rows(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.save_output_invoice_collection_rows(**kwargs)
-
-    def mark_output_invoice_collection_scope(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.mark_output_invoice_collection_scope(**kwargs)
-
-    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._invoice_usage_collection_repository.prune_output_invoice_collection_scope_shards(current_scope_keys)
-
-    def list_oa_pending_payment_rows(self, **kwargs: Any) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.list_oa_pending_payment_rows(**kwargs)
-
-    def save_oa_pending_payment_rows(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.save_oa_pending_payment_rows(**kwargs)
-
-    def mark_oa_pending_payment_scope(self, **kwargs: Any) -> None:
-        self._invoice_usage_collection_repository.mark_oa_pending_payment_scope(**kwargs)
-
-    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
-        self._invoice_usage_collection_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
-
-    def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_row_id(row_id)
-
-    def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_oa_id(oa_id)
-
-    def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_bank_transaction_id(bank_transaction_id)
-
-    def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
-        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_invoice_id(invoice_id)
-
-
-    def list_pending_invoice_rows(self, **kwargs: Any) -> dict[str, Any] | None:
-        return self._pending_invoice_lifecycle_repository.list_pending_invoice_rows(**kwargs)
-
-    def list_pending_invoice_filter_options(self, **kwargs: Any) -> dict[str, Any]:
-        return self._pending_invoice_lifecycle_repository.list_pending_invoice_filter_options(**kwargs)
-
-    def save_pending_invoice_rows(self, **kwargs: Any) -> None:
-        self._pending_invoice_lifecycle_repository.save_pending_invoice_rows(**kwargs)
-
-    def mark_pending_invoice_scope(self, **kwargs: Any) -> None:
-        self._pending_invoice_lifecycle_repository.mark_pending_invoice_scope(**kwargs)
-
-    def pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
-        return self._pending_invoice_lifecycle_repository.pending_invoice_source_summary(**kwargs)
-
-    def pending_invoice_bank_detail_source_versions(self, **kwargs: Any) -> dict[str, Any]:
-        return self._pending_invoice_lifecycle_repository.pending_invoice_bank_detail_source_versions(**kwargs)
-
-    def pending_invoice_workbench_relation_source_versions(self, **kwargs: Any) -> dict[str, Any]:
-        return self._pending_invoice_lifecycle_repository.pending_invoice_workbench_relation_source_versions(**kwargs)
-
-    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
-        return self._pending_invoice_lifecycle_repository._pending_invoice_scope_row(scope_key, connection=connection)
-
-    def _pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
-        return self._pending_invoice_lifecycle_repository._pending_invoice_source_summary(**kwargs)
-
-    def save_invoice_lifecycle_rows(self, **kwargs: Any) -> None:
-        self._pending_invoice_lifecycle_repository.save_invoice_lifecycle_rows(**kwargs)
-
-    def mark_invoice_lifecycle_scope(self, **kwargs: Any) -> None:
-        self._pending_invoice_lifecycle_repository.mark_invoice_lifecycle_scope(**kwargs)
-
-    def get_invoice_lifecycle_rows_by_subject_ids(self, subject_ids: list[str], **kwargs: Any) -> dict[str, Any] | None:
-        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_subject_ids(subject_ids, **kwargs)
-
-    def get_invoice_lifecycle_rows_by_identity_keys(self, invoice_identity_keys: list[str], **kwargs: Any) -> dict[str, Any] | None:
-        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_identity_keys(invoice_identity_keys, **kwargs)
-
-    def list_invoice_lifecycle_rows(self, **kwargs: Any) -> dict[str, Any] | None:
-        return self._pending_invoice_lifecycle_repository.list_invoice_lifecycle_rows(**kwargs)
 
     def save_workbench_relation_distribution(
         self,
@@ -3348,6 +3229,7 @@ class PostgresReadModelRepository:
 
         run_in_transaction(self._connection, write)
 
+
     def mark_workbench_relation_scope_empty(
         self,
         *,
@@ -3380,6 +3262,7 @@ class PostgresReadModelRepository:
             )
 
         run_in_transaction(self._connection, write)
+
 
     def get_workbench_relation_rows_by_ids(
         self,
@@ -3459,6 +3342,7 @@ class PostgresReadModelRepository:
             tenant_id=tenant_id,
         )
 
+
     def list_workbench_relation_rows(
         self,
         *,
@@ -3505,6 +3389,7 @@ class PostgresReadModelRepository:
             tenant_id=tenant_id,
             fallback_source_versions=scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
         )
+
 
     def get_workbench_relation_groups_by_ids(
         self,
@@ -3555,6 +3440,7 @@ class PostgresReadModelRepository:
             fallback_source_versions=_source_versions_from_relation_records(groups),
         )
 
+
     def _workbench_relation_scope_keys_are_fresh(self, *, scope_keys: list[str], tenant_id: str) -> bool:
         normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
         if not normalized_scope_keys:
@@ -3565,6 +3451,7 @@ class PostgresReadModelRepository:
             if self._refresh_status(scope_type="workbench_relation", scope_key=scope_key) != "fresh":
                 return False
         return True
+
 
     def _workbench_relation_scope_row(
         self,
@@ -3583,6 +3470,7 @@ class PostgresReadModelRepository:
             """,
             (tenant_id, scope_key),
         )
+
 
     def workbench_relation_source_versions(
         self,
@@ -3606,6 +3494,7 @@ class PostgresReadModelRepository:
         source_versions = scope_row.get("source_versions") if isinstance(scope_row, dict) else None
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
+
     def _workbench_relation_groups_for_scope_group_ids(
         self,
         *,
@@ -3628,6 +3517,7 @@ class PostgresReadModelRepository:
             """,
             (tenant_id, scope_keys, group_ids),
         )
+
 
     def _workbench_relation_payload_from_rows(
         self,
@@ -3664,6 +3554,7 @@ class PostgresReadModelRepository:
             "read_model_scope_keys": normalized_scope_keys,
             "stale_reasons": stale_reasons,
         }
+
 
     @staticmethod
     def _upsert_workbench_relation_scope(
@@ -3702,6 +3593,190 @@ class PostgresReadModelRepository:
                 jsonb({"scope_key": scope_key, "row_count": row_count, "group_count": group_count, "source_versions": source_versions}),
             ),
         )
+
+
+class PostgresReadModelRepository:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+        self._search_workbench_relation_repository = PostgresSearchWorkbenchRelationReadModelRepository(connection)
+        self._bank_read_model_repository = PostgresBankReadModelRepository(connection)
+        self._invoice_usage_collection_repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+        self._pending_invoice_lifecycle_repository = PostgresPendingInvoiceLifecycleReadModelRepository(
+            connection,
+            bank_detail_scope_summary=self.bank_detail_scope_summary,
+        )
+
+    def search_index(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.search_index(*args, **kwargs)
+
+    def save_search_index_rows(self, *args: Any, **kwargs: Any) -> None:
+        self._search_workbench_relation_repository.save_search_index_rows(*args, **kwargs)
+
+    def save_workbench_relation_distribution(self, *args: Any, **kwargs: Any) -> None:
+        self._search_workbench_relation_repository.save_workbench_relation_distribution(*args, **kwargs)
+
+    def mark_workbench_relation_scope_empty(self, *args: Any, **kwargs: Any) -> None:
+        self._search_workbench_relation_repository.mark_workbench_relation_scope_empty(*args, **kwargs)
+
+    def get_workbench_relation_rows_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.get_workbench_relation_rows_by_ids(*args, **kwargs)
+
+    def list_workbench_relation_rows(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.list_workbench_relation_rows(*args, **kwargs)
+
+    def get_workbench_relation_groups_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.get_workbench_relation_groups_by_ids(*args, **kwargs)
+
+    def workbench_relation_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._search_workbench_relation_repository.workbench_relation_source_versions(*args, **kwargs)
+
+    def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
+
+    def _bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository._bank_detail_scope_keys_for_range(*args, **kwargs)
+
+    def _bank_detail_available_month_scope_keys(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._bank_read_model_repository._bank_detail_available_month_scope_keys(*args, **kwargs)
+
+    def bank_detail_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._bank_read_model_repository.bank_detail_scope_summary(*args, **kwargs)
+
+    def bank_account_balance_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._bank_read_model_repository.bank_account_balance_scope_summary(*args, **kwargs)
+
+    def list_bank_detail_transactions(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_transactions(*args, **kwargs)
+
+    def list_bank_detail_accounts(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_accounts(*args, **kwargs)
+
+    def get_bank_detail_tagged_rows_by_transaction_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.get_bank_detail_tagged_rows_by_transaction_ids(*args, **kwargs)
+
+    def list_bank_detail_tagged_rows_by_month(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_detail_tagged_rows_by_month(*args, **kwargs)
+
+    def list_bank_account_balances(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.list_bank_account_balances(*args, **kwargs)
+
+    def save_bank_account_balances(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.save_bank_account_balances(*args, **kwargs)
+
+    def save_bank_detail_rows(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.save_bank_detail_rows(*args, **kwargs)
+
+    def mark_bank_detail_scope(self, *args: Any, **kwargs: Any) -> None:
+        self._bank_read_model_repository.mark_bank_detail_scope(*args, **kwargs)
+
+    def list_input_invoice_usage_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_input_invoice_usage_rows(**kwargs)
+
+    def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
+
+    def mark_input_invoice_usage_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_input_invoice_usage_scope(**kwargs)
+
+    def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._invoice_usage_collection_repository.prune_input_invoice_usage_scope_shards(current_scope_keys)
+
+    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_input_invoice_usage_row_by_row_id(row_id)
+
+    def list_output_invoice_collection_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_output_invoice_collection_rows(**kwargs)
+
+    def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_output_invoice_collection_row_by_row_id(row_id)
+
+    def save_output_invoice_collection_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_output_invoice_collection_rows(**kwargs)
+
+    def mark_output_invoice_collection_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_output_invoice_collection_scope(**kwargs)
+
+    def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._invoice_usage_collection_repository.prune_output_invoice_collection_scope_shards(current_scope_keys)
+
+    def list_oa_pending_payment_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_oa_pending_payment_rows(**kwargs)
+
+    def save_oa_pending_payment_rows(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.save_oa_pending_payment_rows(**kwargs)
+
+    def mark_oa_pending_payment_scope(self, **kwargs: Any) -> None:
+        self._invoice_usage_collection_repository.mark_oa_pending_payment_scope(**kwargs)
+
+    def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._invoice_usage_collection_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
+
+    def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_row_id(row_id)
+
+    def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_oa_id(oa_id)
+
+    def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_bank_transaction_id(bank_transaction_id)
+
+    def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.get_oa_pending_payment_row_by_invoice_id(invoice_id)
+
+
+    def list_pending_invoice_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.list_pending_invoice_rows(**kwargs)
+
+    def list_pending_invoice_filter_options(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.list_pending_invoice_filter_options(**kwargs)
+
+    def save_pending_invoice_rows(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.save_pending_invoice_rows(**kwargs)
+
+    def mark_pending_invoice_scope(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.mark_pending_invoice_scope(**kwargs)
+
+    def pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_source_summary(**kwargs)
+
+    def pending_invoice_bank_detail_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_bank_detail_source_versions(**kwargs)
+
+    def pending_invoice_workbench_relation_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._pending_invoice_lifecycle_repository.pending_invoice_workbench_relation_source_versions(**kwargs)
+
+    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository._pending_invoice_scope_row(scope_key, connection=connection)
+
+    def _pending_invoice_source_summary(self, **kwargs: Any) -> dict[str, int]:
+        return self._pending_invoice_lifecycle_repository._pending_invoice_source_summary(**kwargs)
+
+    def save_invoice_lifecycle_rows(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.save_invoice_lifecycle_rows(**kwargs)
+
+    def mark_invoice_lifecycle_scope(self, **kwargs: Any) -> None:
+        self._pending_invoice_lifecycle_repository.mark_invoice_lifecycle_scope(**kwargs)
+
+    def get_invoice_lifecycle_rows_by_subject_ids(self, subject_ids: list[str], **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_subject_ids(subject_ids, **kwargs)
+
+    def get_invoice_lifecycle_rows_by_identity_keys(self, invoice_identity_keys: list[str], **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.get_invoice_lifecycle_rows_by_identity_keys(invoice_identity_keys, **kwargs)
+
+    def list_invoice_lifecycle_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.list_invoice_lifecycle_rows(**kwargs)
+
+
+
+
+
+
+
+
+
+
+
+    @staticmethod
 
     def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
         executor = connection or self._connection

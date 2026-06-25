@@ -11,6 +11,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
     PostgresPendingInvoiceLifecycleReadModelRepository,
     PostgresReadModelRepository,
+    PostgresSearchWorkbenchRelationReadModelRepository,
 )
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
@@ -291,6 +292,28 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.bank_detail_rows", shared_source)
                 self.assertNotIn("read_model.bank_detail_scopes", shared_source)
                 self.assertNotIn("read_model.bank_account_balances", shared_source)
+
+    def test_search_workbench_relation_physical_sql_owner_is_split_from_shared_repository(self) -> None:
+        owned_methods = {
+            "search_index",
+            "save_search_index_rows",
+            "save_workbench_relation_distribution",
+            "mark_workbench_relation_scope_empty",
+            "get_workbench_relation_rows_by_ids",
+            "list_workbench_relation_rows",
+            "get_workbench_relation_groups_by_ids",
+            "workbench_relation_source_versions",
+        }
+
+        for method_name in owned_methods:
+            with self.subTest(method_name=method_name):
+                self.assertTrue(callable(getattr(PostgresSearchWorkbenchRelationReadModelRepository, method_name, None)))
+                shared_source = inspect.getsource(getattr(PostgresReadModelRepository, method_name))
+                self.assertIn("_search_workbench_relation_repository", shared_source)
+                self.assertNotIn("read_model.search_index_rows", shared_source)
+                self.assertNotIn("read_model.workbench_relation_rows", shared_source)
+                self.assertNotIn("read_model.workbench_relation_groups", shared_source)
+                self.assertNotIn("read_model.workbench_relation_scopes", shared_source)
 
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]
