@@ -144,6 +144,7 @@ Current state expected on start:
 - `server-py:etc-reconciliation-ticket-root-text-service-extraction` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-ticket-root-text-service-extraction-2026-06-25.md`; selected upload route callback collapse.
 - `server-py:etc-reconciliation-upload-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-upload-route-callback-collapse-2026-06-25.md`; selected reconciliation route-owner local closure audit.
 - `server-py:etc-business-batch-delete-route-callback-collapse-audit` is complete as `analysis-closed` in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-audit-2026-06-25.md`; selected ETC business-batch delete route callback collapse.
+- `server-py:etc-business-batch-delete-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-2026-06-25.md`; business-batch DELETE HTTP mapping now lives in `EtcBusinessBatchApiRoutes`, `_handle_api_etc_business_batch_delete(...)` is removed from `server.py`, and legacy delete compatibility uses an explicit route-owner resolver.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -388,7 +389,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-business-batch-delete-route-callback-collapse`.
+Start with `server-py:etc-business-oa-draft-revoke-callback-audit`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -415,7 +416,8 @@ Current local-first state:
 - `server-py:etc-reconciliation-ticket-root-text-service-extraction` is complete in `analysis/server-py-etc-reconciliation-ticket-root-text-service-extraction-2026-06-25.md`.
 - `server-py:etc-reconciliation-upload-route-callback-collapse` is complete in `analysis/server-py-etc-reconciliation-upload-route-callback-collapse-2026-06-25.md`.
 - `server-py:etc-business-batch-delete-route-callback-collapse-audit` is complete in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-audit-2026-06-25.md`.
-- Row333 is the next local boundary: audit ETC reconciliation task payload facade ownership.
+- `server-py:etc-business-batch-delete-route-callback-collapse` is complete in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-2026-06-25.md`.
+- Row340 is the next local boundary: audit ETC business-batch OA draft revoke callback ownership.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

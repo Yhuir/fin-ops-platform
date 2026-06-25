@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-business-batch-delete-route-callback-collapse-selected`
+Current state: `etc-business-oa-draft-revoke-callback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-business-batch-delete-route-callback-collapse-audit` as `analysis-closed` in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-audit-2026-06-25.md`. T0 confirmed the business-batch DELETE callback is thin after service extraction and selected route-owner callback collapse next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-business-batch-delete-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-etc-business-batch-delete-route-callback-collapse-2026-06-25.md`. T0 moved the business-batch DELETE HTTP mapping into `EtcBusinessBatchApiRoutes`, removed `_handle_api_etc_business_batch_delete(...)` from `server.py`, preserved legacy delete compatibility through an explicit resolver, and kept delete side effects in `EtcBusinessBatchDeleteService`. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-business-batch-delete-route-callback-collapse-audit`
+`server-py:etc-business-batch-delete-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:etc-business-batch-delete-route-callback-collapse`
+`server-py:etc-business-oa-draft-revoke-callback-audit`

@@ -5607,9 +5607,22 @@ class Application:
     def _etc_business_routes(self) -> EtcBusinessBatchApiRoutes:
         service = self._etc_business_application_service()
         routes = getattr(self, "_etc_business_batch_api_routes", None)
-        if isinstance(routes, EtcBusinessBatchApiRoutes) and getattr(routes, "_application_service", None) is service:
+        if (
+            isinstance(routes, EtcBusinessBatchApiRoutes)
+            and getattr(routes, "_application_service", None) is service
+            and getattr(routes, "_delete_service", None) is self._etc_business_batch_delete_service()
+        ):
             return routes
-        routes = EtcBusinessBatchApiRoutes(service)
+        routes = EtcBusinessBatchApiRoutes(
+            service,
+            delete_service=self._etc_business_batch_delete_service(),
+            load_json_body=self._load_json_body,
+            refresh_after_etc_invoice_link=lambda changed_months, reason: self._refresh_after_etc_invoice_link(
+                changed_months,
+                reason=reason,
+            ),
+            persist_state=self._persist_state,
+        )
         self._etc_business_batch_api_routes = routes
         return routes
 
@@ -5682,7 +5695,14 @@ class Application:
             status_code, payload = self._etc_business_routes().detail(business_batch_id, session=session)
             return self._json_response(status_code, payload)
         if len(parts) == 1 and method == "DELETE":
-            return self._handle_api_etc_business_batch_delete(business_batch_id, body)
+            session = self._etc_business_session(headers, require_mutation=True)
+            if isinstance(session, Response):
+                return session
+            result = self._etc_business_routes().delete_batch(business_batch_id, body)
+            if isinstance(result, Response):
+                return result
+            status_code, payload = result
+            return self._json_response(status_code, payload)
         session = self._etc_business_session(headers, require_mutation=True)
         if isinstance(session, Response):
             return session
@@ -5761,29 +5781,6 @@ class Application:
         )
         self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_oa_draft_revoked")
         return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
-
-    def _handle_api_etc_business_batch_delete(self, business_batch_id: str, body: str | bytes | None) -> Response:
-        payload: dict[str, object] = {}
-        if body:
-            payload, error = self._load_json_body(body)
-            if error is not None:
-                return error
-        try:
-            expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
-            delete_result = self._etc_business_batch_delete_service().delete_business_batch(
-                business_batch_id,
-                expected_version=expected_version,
-                reason=str(payload.get("reason") or "").strip() or None,
-            )
-            for event in delete_result.refresh_events:
-                if event.changed_months:
-                    self._refresh_after_etc_invoice_link(event.changed_months, reason=event.reason)
-                if event.persist_required:
-                    self._persist_state()
-            result = delete_result.delete_result
-        except Exception as error:
-            return self._etc_business_error_response(error)
-        return self._etc_business_response(HTTPStatus.OK, result)
 
     def _etc_business_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
         session = resolve_oa_request_session(
@@ -5887,17 +5884,24 @@ class Application:
 
     def _handle_legacy_etc_batch_business_delete(self, batch_id: str) -> Response | None:
         if str(batch_id or "").strip().startswith("etc_business_batch_"):
-            return self._handle_api_etc_business_batch_delete(
+            return self._delete_etc_business_batch_via_route_owner(
                 batch_id,
                 json.dumps({"reason": "legacy_etc_batch_delete"}),
             )
         linked_business_batch = self._etc_service.find_business_batch_by_linked_batch_id(batch_id)
         if linked_business_batch is not None:
-            return self._handle_api_etc_business_batch_delete(
+            return self._delete_etc_business_batch_via_route_owner(
                 str(getattr(linked_business_batch, "business_batch_id")),
                 json.dumps({"reason": "legacy_etc_batch_delete"}),
             )
         return None
+
+    def _delete_etc_business_batch_via_route_owner(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        result = self._etc_business_routes().delete_batch(business_batch_id, body)
+        if isinstance(result, Response):
+            return result
+        status_code, payload = result
+        return self._json_response(status_code, payload)
 
     def _build_etc_oa_client(self, headers: dict[str, str] | None) -> HttpEtcOAClient | None:
         if not isinstance(self._etc_service.oa_client, NotConfiguredEtcOAClient):

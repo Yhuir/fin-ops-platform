@@ -1682,6 +1682,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
+        route_path = APP_ROOT / "routes_etc.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
         business_delete_path = SERVICES_ROOT / "etc_business_batch_delete_service.py"
         business_delete_source = business_delete_path.read_text(encoding="utf-8")
         business_delete_tree = _parse(business_delete_path)
@@ -1689,7 +1692,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         cleanup_source = cleanup_path.read_text(encoding="utf-8")
         cleanup_tree = _parse(cleanup_path)
         cancel_method = _function_source(tree, source, "_cancel_etc_summary_relations_for_batch")
-        delete_method = _function_source(tree, source, "_handle_api_etc_business_batch_delete")
+        route_delete_method = _function_source(route_tree, route_source, "delete_batch")
         business_delete_method = _function_source(business_delete_tree, business_delete_source, "delete_business_batch")
         task_delete_method = _function_source(cleanup_tree, cleanup_source, "delete_reconciliation_task_business_batch_sources")
 
@@ -1700,8 +1703,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_cancel_etc_summary_relations_for_batch directly mutates pair relation service")
         if "_workbench_pair_relation_service" in cancel_method:
             violations.append("_cancel_etc_summary_relations_for_batch reaches app pair relation service directly")
-        if "_etc_business_batch_delete_service().delete_business_batch(" not in delete_method:
-            violations.append("ETC business batch API delete no longer delegates side-effect orchestration to service")
+        if "_handle_api_etc_business_batch_delete" in source:
+            violations.append("server.py reintroduced ETC business batch API delete callback")
+        if "_delete_service.delete_business_batch(" not in route_delete_method:
+            violations.append("ETC business batch route owner delete no longer delegates side-effect orchestration to service")
+        if "_refresh_after_etc_invoice_link(" not in route_delete_method:
+            violations.append("ETC business batch route owner delete does not publish returned refresh events")
+        if "_persist_state(" not in route_delete_method:
+            violations.append("ETC business batch route owner delete does not persist returned persistence events")
         if "_assert_etc_summary_relation_write_precondition_for_batch(batch)" not in business_delete_method:
             violations.append("ETC business batch delete service lacks relation freshness preflight before local mutation")
         if "_cancel_etc_summary_relations_for_batch(batch)" not in business_delete_method:
@@ -1731,6 +1740,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_etc_business_import_confirm",
             "_handle_api_etc_business_oa_draft",
             "_handle_api_etc_business_manual_oa_status",
+            "_handle_api_etc_business_batch_delete",
         }
         present = [
             node.name
@@ -1739,6 +1749,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ]
         v2_route = _function_source(tree, source, "_route_api_etc_business_batch_v2")
         list_route = _function_source(tree, source, "_handle_api_etc_business_batches_route")
+        route_factory = _function_source(tree, source, "_etc_business_routes")
 
         violations: list[str] = []
         if present:
@@ -1749,6 +1760,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "routes.confirm_import(",
             "routes.create_oa_draft(",
             "routes.manual_oa_status(",
+            "self._etc_business_routes().delete_batch(",
         ):
             if required_delegate not in v2_route:
                 violations.append(f"_route_api_etc_business_batch_v2 no longer delegates {required_delegate} to EtcBusinessBatchApiRoutes")
@@ -1758,6 +1770,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required_delegate not in list_route:
                 violations.append(f"_handle_api_etc_business_batches_route no longer delegates {required_delegate} to EtcBusinessBatchApiRoutes")
+        for required_port in (
+            "delete_service=self._etc_business_batch_delete_service()",
+            "load_json_body=self._load_json_body",
+            "refresh_after_etc_invoice_link=",
+            "persist_state=self._persist_state",
+        ):
+            if required_port not in route_factory:
+                violations.append(f"_etc_business_routes lacks explicit route owner port {required_port}")
         if "EtcBusinessBatchActor" in source:
             violations.append("server.py reintroduced direct EtcBusinessBatchActor construction instead of route-owned actor mapping")
 

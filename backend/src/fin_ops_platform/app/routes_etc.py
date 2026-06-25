@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from fin_ops_platform.app.auth import OARequestSession
@@ -20,12 +20,26 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 class EtcBusinessBatchApiRoutes:
-    def __init__(self, application_service: EtcBusinessBatchApplicationService) -> None:
+    def __init__(
+        self,
+        application_service: EtcBusinessBatchApplicationService,
+        *,
+        delete_service: EtcBusinessBatchDeleteService,
+        load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
+        refresh_after_etc_invoice_link: Callable[[list[str], str], None],
+        persist_state: Callable[[], None],
+    ) -> None:
         self._application_service = application_service
+        self._delete_service = delete_service
+        self._load_json_body = load_json_body
+        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
+        self._persist_state = persist_state
 
     def list_batches(
         self,
@@ -61,6 +75,31 @@ class EtcBusinessBatchApiRoutes:
         except Exception as exc:
             return self._error_response(exc)
         return self._success(HTTPStatus.OK, result)
+
+    def delete_batch(
+        self,
+        business_batch_id: str,
+        body: str | bytes | None,
+    ) -> tuple[HTTPStatus, dict[str, Any]] | Any:
+        payload: dict[str, Any] = {}
+        if body:
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+        try:
+            delete_result = self._delete_service.delete_business_batch(
+                business_batch_id,
+                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                reason=str(payload.get("reason") or "").strip() or None,
+            )
+            for event in delete_result.refresh_events:
+                if event.changed_months:
+                    self._refresh_after_etc_invoice_link(event.changed_months, event.reason)
+                if event.persist_required:
+                    self._persist_state()
+        except Exception as exc:
+            return self._error_response(exc)
+        return self._success(HTTPStatus.OK, delete_result.delete_result)
 
     def preview_import(
         self,
@@ -202,6 +241,12 @@ class EtcBusinessBatchApiRoutes:
                     "expectedVersion": exc.expected_version,
                     "actualVersion": exc.actual_version,
                 },
+            )
+        if isinstance(exc, WorkbenchRelationCommandError):
+            return HTTPStatus.CONFLICT, cls._error(
+                exc.error_code,
+                exc.message,
+                details=dict(exc.payload or {}),
             )
         if isinstance(exc, EtcBusinessBatchInvalidTransitionError):
             return HTTPStatus.UNPROCESSABLE_ENTITY, cls._error(

@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC business batch delete route callback collapse
+
+- 目标：把 business-batch DELETE 的 HTTP body/error/response 映射从 `Application` 收回到 `EtcBusinessBatchApiRoutes`。
+- 影响范围：`routes_etc.py` 新增显式 delete service、JSON loader、refresh/persist ports 和 `delete_batch(...)`；`server.py` 删除 `_handle_api_etc_business_batch_delete(...)`，legacy batch business-delete 兼容入口改为显式 route-owner resolver。
+- 关键决策：业务删除副作用继续由 `EtcBusinessBatchDeleteService` 承担；route owner 只执行 HTTP 映射、服务调用和服务返回的 refresh/persist event，不接收整个 `Application`。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：更新 `test_etc_summary_relation_delete_uses_workbench_relation_command_boundary` 和 `test_etc_business_batch_routes_do_not_keep_removed_legacy_handlers` 静态 Guard，并回归 targeted business delete API/service tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-batch-delete-route-callback-collapse-2026-06-25.md`。
+- 未测风险：未做生产 browser/admin/write 验证；business-batch OA draft revoke callback 仍在 `Application`，下一步审计。
+- 后续事项：执行 `server-py:etc-business-oa-draft-revoke-callback-audit`。
+
 ## 2026-06-25 - ETC legacy batch read facade
 
 - 目标：把 legacy `/api/etc/batches` list/detail/count/filter payload composition 从 `Application` 抽到显式 read facade。
