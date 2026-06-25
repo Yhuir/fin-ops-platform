@@ -235,6 +235,15 @@ git diff --check
 - Existing feature regression tests：复跑 Workbench candidate grouping no-OA collapsed summary/display tags regressions，并新增 static Guard 防止 no-OA payload decoration helpers 回到 `Application`。
 - 未新增 Business core、read model/cache/background job、frontend component 或 Browser E2E 测试，因为本 slice 不改变 no-OA 批次业务规则、read model/worker 行为、页面交互或真实浏览器流程。
 
+## 2026-06-25 - Modular IO post-decorator closure audit test note
+
+`server-py:no-oa-bank-batch-post-decorator-local-closure-audit` 已完成为 analysis-only。
+
+- 本轮未新增运行时测试：没有代码、业务状态机、HTTP contract、read model schema、worker event、权限、审计或前端行为变化。
+- 下一实现 slice `server-py:no-oa-bank-batch-workbench-display-policy-extraction` 必须新增 focused unit tests，覆盖 no-OA display tags 派生、managed-label 过滤、batch type label lookup、batch label fallback 和 relation display payload。
+- 下一实现 slice 必须新增或扩展 static Guard，防止 no-OA tag/display policy 直接回到 `Application._derive_workbench_row_tags(...)` 和 `_pair_relation_display_payload(...)`。
+- 若只抽出 display policy 且 Workbench row payload shape 不变，优先用 service unit + existing Workbench/no-OA display regression + static Guard 保护；前端/Browser E2E 不作为本地必需项。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |

@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:no-oa-bank-batch-post-decorator-local-closure-audit-selected` after no-OA Workbench payload decoration moved out of `Application`.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:no-oa-bank-batch-workbench-display-policy-extraction-selected` after the post-decorator audit found no-OA Workbench tag/display policy still owned by generic `Application` helpers.
 
 ```text
 $gsd-autonomous --auto

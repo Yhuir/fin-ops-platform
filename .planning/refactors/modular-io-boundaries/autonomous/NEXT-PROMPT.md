@@ -1,61 +1,53 @@
 # Next Prompt
 
-Continue after `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`.
+Continue after `server-py:no-oa-bank-batch-post-decorator-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`.
-- Row402 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-workbench-payload-decorator-extraction-2026-06-25.md`.
-- `NoOaBankBatchWorkbenchPayloadDecorator` owns no-OA relation metadata enrichment, tag/display tag/cost field decoration and `withdraw_no_oa_batch` action injection.
-- `server.py` no longer defines `_relation_with_no_oa_bank_batch_metadata(...)`, `_apply_no_oa_bank_batch_pair_metadata(...)` or `_apply_no_oa_bank_batch_available_actions(...)`.
+- Last completed boundary: `server-py:no-oa-bank-batch-post-decorator-local-closure-audit`.
+- Row403 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-decorator-local-closure-audit-2026-06-25.md`.
+- no-OA route, refresh, payload decorator, factory, session and source-version surfaces are accounted for locally.
+- Remaining local implementation gap: no-OA Workbench tag/display policy still lives inside generic `Application` helpers.
 - No-OA module/global closure is not claimed and production evidence remains deferred.
 
 ## Previous Prompt Completion
 
-`server-py:no-oa-bank-batch-workbench-payload-decorator-extraction` is complete as a local implementation slice:
+`server-py:no-oa-bank-batch-post-decorator-local-closure-audit` is complete as analysis-only:
 
-- added `backend/src/fin_ops_platform/services/no_oa_bank_batch_workbench_payload_decorator.py`;
-- kept `Application._apply_pair_relation_to_row(...)` as a generic Workbench row decorator dispatcher;
-- delegated no-OA-specific relation payload shaping to the decorator;
-- preserved tags, display tags, `special_metadata`, cost fields and withdraw action behavior;
-- added decorator unit tests, static Guard and targeted Workbench/no-OA regressions;
-- avoided production validation and avoided module/global closure claims.
+- confirmed removed no-OA route/refresh/payload helpers remain absent;
+- classified route/refresh/decorator/factory/session/source-version surfaces as accounted local ports;
+- identified `_derive_workbench_row_tags(...)` and `_pair_relation_display_payload(...)` as still owning no-OA-specific Workbench display behavior;
+- avoided runtime code changes and avoided production validation.
 
 ## Next Boundary
 
-`server-py:no-oa-bank-batch-post-decorator-local-closure-audit`
+`server-py:no-oa-bank-batch-workbench-display-policy-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-workbench-payload-decorator-extraction-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-refresh-producer-local-closure-audit-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-decorator-local-closure-audit-2026-06-25.md`
    - `docs/modules/no-oa-bank-batches/README.md`
    - `docs/modules/no-oa-bank-batches/implementation-notes.md`
    - `docs/modules/no-oa-bank-batches/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_workbench_payload_decorator.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Audit remaining no-OA `Application` surfaces:
-   - route callbacks;
-   - refresh enqueue;
-   - application service factory;
-   - route factory;
-   - mutation session;
-   - source-version provider;
-   - Workbench/internal-transfer provider;
-   - relation payload decoration;
-   - derived lifecycle registry/factory.
-4. Classify each remaining surface as composition-root, platform adapter, provider port, compat-only support, or implementation gap.
-5. If no further local gap remains, record local `server.py` support as accounted but production evidence deferred. If a concrete local gap remains, select the next narrow boundary.
-6. Update analysis/state/queue/journal/next prompt and commit/push if verification passes.
+   - Workbench candidate grouping / no-OA integration tests covering display tags and relation display payload
+3. Implement only the no-OA Workbench display policy extraction:
+   - introduce a focused no-OA Workbench display policy service;
+   - move no-OA row tag derivation out of `_derive_workbench_row_tags(...)`;
+   - move no-OA relation display payload out of `_pair_relation_display_payload(...)`;
+   - keep generic Workbench helpers as dispatchers/delegators;
+   - preserve managed-label filtering, relation/group/special metadata tag inputs, batch type label lookup, batch label fallback and relation display payload shape.
+4. Add focused unit tests and static Guard coverage.
+5. Update analysis/state/queue/journal/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not change runtime code during this audit unless a separate implementation boundary is explicitly selected.
-- Do not claim no-OA module/global closure from local code audit alone.
-- If remaining scope expands beyond no-OA `server.py` support, stop with the smallest next boundary instead of broadening the slice.
+- Do not change Workbench API response shape, no-OA business behavior, read model schema, dirty/outbox semantics, frontend behavior or production data.
+- Do not refactor unrelated Workbench relation modes in this slice.
+- Do not claim no-OA module/global closure.

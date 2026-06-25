@@ -58,6 +58,17 @@
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
 - 后续事项：执行 `server-py:no-oa-bank-batch-post-decorator-local-closure-audit`。
 
+## 2026-06-25 - post-decorator local closure audit
+
+- 目标：执行 `server-py:no-oa-bank-batch-post-decorator-local-closure-audit`，复审 no-OA Workbench payload decorator extraction 后 `Application` 中的 no-OA 残留职责。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
+- 关键决策：route/refresh/decorator/factory/session/source-version surfaces 已局部 accounted；但 `_derive_workbench_row_tags(...)` 和 `_pair_relation_display_payload(...)` 仍在通用 `Application` helper 中拥有 no-OA Workbench tag/display policy。
+- 下一实现边界：`server-py:no-oa-bank-batch-workbench-display-policy-extraction`，把 no-OA tag derivation 和 relation display payload 逻辑移到专用 display policy service/provider。
+- 文档影响：新增 modular IO post-decorator closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt和本实施记录；长期事实源不变。
+- 测试覆盖：本轮 analysis-only，不新增运行时测试；下一实现 slice 必须补 focused unit/static Guard 测试，并复跑 Workbench/no-OA display regressions。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。
