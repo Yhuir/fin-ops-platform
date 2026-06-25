@@ -293,68 +293,7 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
 }
 
-FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
-    (
-        "web/src/features/batchAccounting/api.ts",
-        "helper_default",
-        'readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "fresh"),',
-    ): (1, "legacy API normalizer default; Wave 2 must replace with fail-closed backend status contract."),
-    (
-        "web/src/features/pendingInvoices/api.ts",
-        "helper_default",
-        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRowsResponse["readModelStatus"],',
-    ): (1, "legacy rows normalizer default; Wave 2 must remove default-fresh fallback."),
-    (
-        "web/src/features/pendingInvoices/api.ts",
-        "helper_default",
-        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRulesPayload["readModelStatus"],',
-    ): (1, "legacy rules normalizer default; Wave 2 must remove default-fresh fallback."),
-    (
-        "web/src/features/turnoverLedger/api.ts",
-        "helper_default",
-        'readModelStatus: text(payload.read_model_status, "fresh"),',
-    ): (1, "legacy turnover normalizer default; Wave 2 must require backend status."),
-    (
-        "web/src/features/workbench/api.ts",
-        "nullish_or_logical",
-        'const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";',
-    ): (1, "legacy workbench status fallback; Wave 2 must keep unknown as non-fresh."),
-    (
-        "web/src/pages/BatchAccountingPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
-    (
-        "web/src/pages/BatchAccountingPage.tsx",
-        "logical_or",
-        'const readModelStatus = payload.readModelStatus || "fresh";',
-    ): (1, "legacy page fallback; Wave 2 must remove stale-as-fresh default."),
-    (
-        "web/src/pages/NoOaBankBatchPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
-    (
-        "web/src/pages/OaPendingPaymentsPage.tsx",
-        "use_state",
-        'const [readModelStatus, setReadModelStatus] = useState("fresh");',
-    ): (1, "initial page state; Wave 2 must make loading/unknown non-fresh until payload arrives."),
-    (
-        "web/src/pages/ReconciliationWorkbenchPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial workbench placeholder; Wave 2 must prove backend status gates final display."),
-    (
-        "web/src/pages/TurnoverLedgerPage.tsx",
-        "logical_or",
-        'const readModelStatus = cleanText(ledger?.readModelStatus) || "fresh";',
-    ): (1, "legacy turnover page fallback; Wave 2 must remove default-fresh behavior."),
-    (
-        "web/src/pages/TurnoverLedgerPage.tsx",
-        "logical_or",
-        'if ((cleanText(freshLedger.readModelStatus) || "fresh") !== "fresh") {',
-    ): (1, "legacy turnover post-mutation fallback; Wave 2 must require explicit fresh status."),
-}
+FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
 REQUIRED_WRITE_TARGET_INVENTORY_MODULES = {
     "workbench",

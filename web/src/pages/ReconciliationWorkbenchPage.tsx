@@ -131,7 +131,7 @@ function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageIn
     total: 0,
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
-    readModelStatus: "fresh",
+    readModelStatus: "refreshing",
   };
 }
 
@@ -339,7 +339,7 @@ function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) 
 
 function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", WorkbenchZonePageInfo>) {
   const statuses = [pages.paired.readModelStatus, pages.open.readModelStatus]
-    .map((status) => String(status || "fresh").trim() || "fresh");
+    .map((status) => String(status || "refreshing").trim() || "refreshing");
   if (statuses.some((status) => status === "failed")) {
     return "failed";
   }
@@ -352,7 +352,7 @@ function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", Work
   if (statuses.some((status) => status === "stale")) {
     return "stale";
   }
-  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "fresh";
+  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "refreshing";
 }
 
 function workbenchReadModelStatusMessage(status: string | null, lastError?: string | null) {

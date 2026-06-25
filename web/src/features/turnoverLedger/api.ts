@@ -306,8 +306,14 @@ type ApiTurnoverRelationMutationResponse = {
     relation_mode?: string | null;
   } | null;
   affected_months?: string[];
+  affected_scope_keys?: string[];
+  affectedScopeKeys?: string[];
+  read_model_scope_keys?: string[];
+  readModelScopeKeys?: string[];
   freshnessTargets?: ApiTurnoverFreshnessTarget[];
   freshness_targets?: ApiTurnoverFreshnessTarget[];
+  operationBarrierTargets?: ApiTurnoverFreshnessTarget[];
+  operation_barrier_targets?: ApiTurnoverFreshnessTarget[];
 };
 
 type ApiTurnoverFreshnessTarget = {
@@ -763,13 +769,18 @@ function mapMutation(payload: ApiTurnoverRelationMutationResponse): TurnoverRela
   const relation = payload.relation;
   const turnoverRelation = payload.turnover_relation;
   const pairRelation = payload.workbench_pair_relation;
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     relationId: text(payload.relation_id ?? relation?.relation_id ?? turnoverRelation?.relation_id),
     status: text(payload.status ?? relation?.status ?? turnoverRelation?.status),
     affectedMonths: stringList(payload.affected_months),
+    affectedScopeKeys: stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
+    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
     workbenchPairRelationId: text(pairRelation?.case_id),
     workbenchRelationMode: text(pairRelation?.relation_mode),
-    freshnessTargets: cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets),
+    freshnessTargets,
+    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
   };
 }
 
@@ -867,7 +878,7 @@ export async function fetchTurnoverLedgerGrouped({
       pageSize: payload.pagination?.page_size ?? pageSize,
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
-    readModelStatus: text(payload.read_model_status, "fresh"),
+    readModelStatus: text(payload.read_model_status, "refreshing"),
     readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? undefined),
   };
 }

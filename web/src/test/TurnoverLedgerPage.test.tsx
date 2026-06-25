@@ -598,6 +598,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       page_size: 100,
       total: groups.length,
     },
+    read_model_status: "fresh",
     ...overrides,
   };
 }

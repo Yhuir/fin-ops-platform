@@ -36,8 +36,9 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 待找发票 rows/summary | 前端页面 | fresh/status 可见 |
+| 待找发票 rows/summary | 前端页面 | fresh/status 可见；缺少/未知 read model status 保持 refreshing/non-fresh |
 | 规则保存结果 | API | 持久化规则并触发刷新 |
+| 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Dirty scope | runtime queue | 不允许无界全量 |
 
 ## 持久化与投影

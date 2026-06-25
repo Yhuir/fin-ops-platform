@@ -37,7 +37,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status |
-| 写操作结果 | API | 可审计、幂等或有版本保护 |
+| 写操作结果 | API/frontend operation barrier | 可审计、幂等或有版本保护；返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Dirty scope | runtime queue | `turnover_ledger.read_model.refresh` |
 | 导出 | 用户下载 | 复用查询权限和筛选 |
 
@@ -72,6 +72,8 @@
 - `tests/test_turnover_ledger_api.py`
 - `tests/test_turnover_ledger_uow_contract.py`
 - `tests/test_turnover_ledger_read_model_refresh.py`
+- `web/src/test/TurnoverLedgerApi.test.ts`
+- `web/src/test/TurnoverLedgerPage.test.tsx`
 - `web/e2e/turnover-ledger-flow.spec.ts`
 
 ## 当前缺口和删除条件

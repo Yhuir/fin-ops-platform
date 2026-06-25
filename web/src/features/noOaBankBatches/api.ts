@@ -4,6 +4,7 @@ import type {
   NoOaBankBatchDetailRow,
   NoOaBankBatchesPageInfo,
   NoOaBankBatchReadModelStatus,
+  ReadModelOperationBarrierTarget,
   NoOaBankBatchTagDefinition,
   NoOaBankBatchTagSelection,
   NoOaBankBatchMutationResult,
@@ -203,6 +204,14 @@ type ApiNoOaBankBatchMutationResult = {
   batch?: ApiNoOaBankBatch | null;
   affected_months?: string[];
   affectedMonths?: string[];
+  affected_scope_keys?: string[];
+  affectedScopeKeys?: string[];
+  read_model_scope_keys?: string[];
+  readModelScopeKeys?: string[];
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
   workbench_rebuild_queued?: boolean | null;
   workbenchRebuildQueued?: boolean | null;
   results?: Array<Record<string, unknown>>;
@@ -238,9 +247,48 @@ function unknownStringList(value: unknown) {
 }
 
 function normalizeReadModelStatus(value: string | null | undefined): NoOaBankBatchReadModelStatus {
-  return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
+  return value === "fresh"
+    || value === "refreshing"
+    || value === "stale"
+    || value === "schema_mismatch"
+    || value === "missing"
     ? value
-    : "fresh";
+    : "refreshing";
+}
+
+function readModelTargets(value: unknown): ReadModelOperationBarrierTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const targets: ReadModelOperationBarrierTarget[] = [];
+  const seen = new Set<string>();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const raw = item as Record<string, unknown>;
+    const readModelKey = textValue(raw.read_model_key ?? raw.readModelKey);
+    const scopeKey = textValue(raw.scope_key ?? raw.scopeKey);
+    const scopeType = textValue(raw.scope_type ?? raw.scopeType);
+    if (!readModelKey || !scopeKey) {
+      return;
+    }
+    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    targets.push({
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    });
+  });
+  return targets;
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBatchCountMap {
@@ -415,9 +463,17 @@ function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailR
 }
 
 function mapMutationResult(payload: ApiNoOaBankBatchMutationResult): NoOaBankBatchMutationResult {
+  const affectedScopeKeys = stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys);
+  const readModelScopeKeys = stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
+  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
+  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     batch: payload.batch ? mapBatch(payload.batch) : null,
     affectedMonths: stringList(payload.affected_months ?? payload.affectedMonths),
+    affectedScopeKeys,
+    readModelScopeKeys,
+    freshnessTargets,
+    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
     workbenchRebuildQueued: Boolean(payload.workbench_rebuild_queued ?? payload.workbenchRebuildQueued),
     results: Array.isArray(payload.results) ? payload.results : [],
   };

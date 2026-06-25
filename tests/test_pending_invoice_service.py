@@ -1994,6 +1994,11 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result, retry)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["relation_mode"], "pending_invoice_attach_existing_invoice")
+        self.assertEqual(result["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            result["operation_barrier_targets"],
+            [{"read_model_key": "pending_invoice", "scope_key": "2026-05"}],
+        )
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
 
@@ -2457,6 +2462,14 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["affected_transaction_ids"], [first_txn.id, second_txn.id])
         self.assertEqual(result["status_code"], "cash_income")
         self.assertEqual(result["affected_months"], ["2026-05", "2026-06"])
+        self.assertEqual(result["read_model_scope_keys"], ["2026-05", "2026-06"])
+        self.assertEqual(
+            result["freshness_targets"],
+            [
+                {"read_model_key": "pending_invoice", "scope_key": "2026-05"},
+                {"read_model_key": "pending_invoice", "scope_key": "2026-06"},
+            ],
+        )
         self.assertEqual(len(self.audit_events), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_income_status_override_batch_confirmed")
         self.assertEqual(self.audit_events[0]["transaction_ids"], [first_txn.id, second_txn.id])

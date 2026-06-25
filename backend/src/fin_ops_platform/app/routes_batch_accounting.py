@@ -4,6 +4,7 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 
 
@@ -86,7 +87,11 @@ class BatchAccountingApiRoutes:
             action_name="submit_batch_accounting",
             changed_scope_keys=changed_scope_keys,
         )
-        return HTTPStatus.OK, {**result, "affected_months": changed_scope_keys}
+        return HTTPStatus.OK, {
+            **result,
+            "affected_months": changed_scope_keys,
+            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+        }
 
     def withdraw(
         self,
@@ -120,7 +125,11 @@ class BatchAccountingApiRoutes:
             action_name="withdraw_batch_accounting",
             changed_scope_keys=changed_scope_keys,
         )
-        return HTTPStatus.OK, {**result, "affected_months": changed_scope_keys}
+        return HTTPStatus.OK, {
+            **result,
+            "affected_months": changed_scope_keys,
+            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+        }
 
     @staticmethod
     def _actor(payload: dict[str, Any], session: OARequestSession) -> str:

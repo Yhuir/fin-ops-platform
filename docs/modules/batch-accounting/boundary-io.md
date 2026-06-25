@@ -36,7 +36,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 批量账务操作结果 | 前端页面 | 返回成功/失败和受影响对象 |
+| 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
 | Audit/result | audit/job status | 重要批量操作可追踪 |
 
@@ -67,6 +67,7 @@
 ## 测试与验证
 
 - `tests/test_batch_accounting_api.py`
+- `web/src/test/BatchAccountingApi.test.ts`
 - `web/src/test/BatchAccountingPage.test.tsx`
 - `web/e2e/batch-accounting-flow.spec.ts`
 

@@ -14,6 +14,7 @@ import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageR
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
+import type { OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -53,7 +54,7 @@ const EMPTY_BATCHES: NoOaBankBatchesResponse = {
     categories: [],
   },
   batches: [],
-  readModelStatus: "fresh",
+  readModelStatus: "refreshing",
   readModelStaleReasons: [],
 };
 
@@ -189,8 +190,25 @@ function BatchStatusTag({ status }: { status: string }) {
   );
 }
 
-function mutationEventDetail(result: { affectedMonths?: string[] }) {
-  return { affectedMonths: result.affectedMonths ?? [] };
+function mutationEventDetail(result: {
+  affectedMonths?: string[];
+  affectedScopeKeys?: string[];
+  operationBarrierTargets?: OperationBarrierTarget[];
+}) {
+  return {
+    affectedMonths: result.affectedMonths ?? [],
+    affectedScopeKeys: result.affectedScopeKeys ?? [],
+    operationBarrierTargets: result.operationBarrierTargets ?? [],
+  };
+}
+
+function mutationBarrierTargets(
+  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
+  fallbackScopeKey: string,
+) {
+  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
+    ? result.operationBarrierTargets
+    : operationBarrierTargetsFromMonths("no_oa_bank_batch", result.affectedMonths ?? [], fallbackScopeKey);
 }
 
 type NoOaTagNode = {
@@ -799,7 +817,7 @@ export default function NoOaBankBatchPage() {
           });
           setMessage("正在等待免OA批次读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("no_oa_bank_batch", submitResult.affectedMonths, month),
+            mutationBarrierTargets(submitResult, month),
           );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
@@ -833,7 +851,7 @@ export default function NoOaBankBatchPage() {
           });
           setMessage("正在等待免OA批次读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("no_oa_bank_batch", submitResult.affectedMonths, batch.scopeMonth || month),
+            mutationBarrierTargets(submitResult, batch.scopeMonth || month),
           );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
@@ -871,7 +889,7 @@ export default function NoOaBankBatchPage() {
           setWithdrawReason("");
           setMessage("正在等待免OA批次读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("no_oa_bank_batch", withdrawResult.affectedMonths, target.scopeMonth || month),
+            mutationBarrierTargets(withdrawResult, target.scopeMonth || month),
           );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();

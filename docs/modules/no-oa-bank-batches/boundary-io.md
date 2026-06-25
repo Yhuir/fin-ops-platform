@@ -36,7 +36,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 批次 rows/status | 前端页面 | fresh/status 可见 |
+| 批次 rows/status | 前端页面 | fresh/status 可见；缺少/未知 read model status 保持 refreshing/non-fresh |
+| 提交/撤回/批量提交结果 | 前端页面/operation barrier | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | 关联台展示 payload | workbench decorator/policy | 不修改源事实 |
 | Dirty scope | runtime queue | no-OA、workbench relation、bank detail 相关 scope |
 
@@ -71,6 +72,8 @@
 - `tests/test_no_oa_bank_batch_application_service.py`
 - `tests/test_no_oa_bank_batch_read_model_refresh.py`
 - `tests/test_no_oa_bank_batch_lifecycle_repair.py`
+- `web/src/test/NoOaBankBatchApi.test.ts`
+- `web/src/test/NoOaBankBatchPage.test.tsx`
 - `web/e2e/no-oa-bank-batches-flow.spec.ts`
 
 ## 当前缺口和删除条件

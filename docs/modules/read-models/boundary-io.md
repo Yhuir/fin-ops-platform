@@ -31,6 +31,7 @@
 | Refresh request | 页面 service、writer、worker、API force refresh | 非事务入口必须经 `ReadModelRefreshGateway` normalize/validate/dedupe |
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
+| Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |
 
 ## 输出 I/O
 
@@ -55,6 +56,7 @@
 | --- | --- |
 | Gateway/manifest | `read_model_query_gateway.py`、`read_model_refresh_gateway.py`、`read_model_manifest.py` |
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py` |
+| Write target envelope | `read_model_write_targets.py` |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py` |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
@@ -72,6 +74,7 @@
 - Architecture guards：`tests/test_read_model_architecture_guards.py`、`tests/test_platform_runtime_boundary_guards.py`。
 - Manifest/scope：`tests/test_read_model_manifest.py`、`tests/test_read_model_scope_contract.py`。
 - Gateway/freshness：`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_freshness.py`。
+- Write target envelope：`tests/test_read_model_write_targets.py`，以及 batch/no-OA/OA pending/pending invoice/turnover 的 API/service/page tests。
 
 ## 当前缺口和删除条件
 

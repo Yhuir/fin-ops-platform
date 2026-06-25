@@ -171,6 +171,16 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
                 ("oa_pending_payment", "all", "oa_pending_payment_confirm_paid"),
             ],
         )
+        self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [
+                {"read_model_key": "oa_pending_payment", "scope_key": "2026-06"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-06"},
+                {"read_model_key": "oa_pending_payment", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "all"},
+            ],
+        )
 
     def test_confirm_paid_without_bank_uses_existing_active_relation(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012")
@@ -266,6 +276,8 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
                 ("oa_pending_payment", "all", "oa_pending_payment_link_bank_transactions"),
             ],
         )
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-06", "all"])
+        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "oa_pending_payment", "scope_key": "2026-06"})
 
     def test_link_bank_transactions_keeps_relation_without_writeback_when_amount_mismatches(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439018")
@@ -329,6 +341,8 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
                 ("oa_pending_payment", "all", "oa_pending_payment_auto_reconcile"),
             ],
         )
+        self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
+        self.assertEqual(payload["operation_barrier_targets"][-1], {"read_model_key": "workbench_relation", "scope_key": "all"})
 
     def test_auto_reconcile_all_months_groups_matches_by_month(self) -> None:
         payment_repository = FakePaymentStatusRepository(
@@ -484,6 +498,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["writebackCount"], 0)
         self.assertEqual(payload["oaPaymentWritebacks"], [])
         self.assertEqual(payload["readModelRefresh"]["enqueued"], False)
+        self.assertEqual(payload["operation_barrier_targets"], [])
         self.assertEqual(payment_repository.marked_flow_ids, [])
         self.assertEqual(refresh_calls, [])
         self.assertEqual(relation_command.confirm_calls, [])

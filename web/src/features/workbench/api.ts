@@ -1826,7 +1826,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
 }
 
 function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
-  return String(value ?? "fresh").trim() as WorkbenchReadModelStatus || "fresh";
+  return String(value ?? "refreshing").trim() as WorkbenchReadModelStatus || "refreshing";
 }
 
 function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
@@ -2328,7 +2328,7 @@ function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRe
 }
 
 function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
-  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";
+  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "refreshing").trim() || "refreshing";
   return {
     scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
     readModelStatus: rawStatus as WorkbenchReadModelStatus,

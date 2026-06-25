@@ -267,6 +267,12 @@ describe("turnover ledger API", () => {
             relation_id: "rel-confirmed",
             status: "confirmed",
           },
+          affected_months: ["2026-05"],
+          affected_scope_keys: ["2026-05"],
+          operation_barrier_targets: [
+            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          ],
         }), {
           headers: { "Content-Type": "application/json" },
         });
@@ -274,7 +280,14 @@ describe("turnover ledger API", () => {
       if (url.pathname === "/api/turnover-ledger/relations/rel-001/withdraw") {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toEqual({ note: "撤销原因" });
-        return new Response(JSON.stringify({ relation_id: "rel-001", status: "withdrawn" }), {
+        return new Response(JSON.stringify({
+          relation_id: "rel-001",
+          status: "withdrawn",
+          affected_months: ["2026-05"],
+          freshness_targets: [
+            { read_model_key: "turnover_ledger", scope_key: "all" },
+          ],
+        }), {
           headers: { "Content-Type": "application/json" },
         });
       }
@@ -315,10 +328,18 @@ describe("turnover ledger API", () => {
     await expect(confirmTurnoverRelation({ bankRowIds: ["bank-001"], note: "确认归并" })).resolves.toMatchObject({
       relationId: "rel-confirmed",
       status: "confirmed",
+      affectedScopeKeys: ["2026-05"],
+      operationBarrierTargets: [
+        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "workbench_relation", scopeKey: "2026-05" },
+      ],
     });
     await expect(withdrawTurnoverRelation({ relationId: "rel-001", note: "撤销原因" })).resolves.toMatchObject({
       relationId: "rel-001",
       status: "withdrawn",
+      operationBarrierTargets: [
+        { readModelKey: "turnover_ledger", scopeKey: "all" },
+      ],
     });
   });
 
@@ -343,6 +364,7 @@ describe("turnover ledger API", () => {
           relation_mode: "turnover_manual_closure",
         },
         affected_months: ["2026-05"],
+        affected_scope_keys: ["2026-05"],
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
@@ -360,9 +382,15 @@ describe("turnover ledger API", () => {
       relationId: "turnover_rel_001",
       status: "confirmed",
       affectedMonths: ["2026-05"],
+      affectedScopeKeys: ["2026-05"],
+      readModelScopeKeys: [],
       workbenchPairRelationId: "turnover:turnover_rel_001",
       workbenchRelationMode: "turnover_manual_closure",
       freshnessTargets: [
+        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "workbench_relation", scopeKey: "2026-05" },
+      ],
+      operationBarrierTargets: [
         { readModelKey: "turnover_ledger", scopeKey: "all" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
       ],

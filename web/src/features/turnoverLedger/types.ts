@@ -339,9 +339,12 @@ export type TurnoverRelationMutationResponse = {
   relationId: string;
   status: string;
   affectedMonths: string[];
+  affectedScopeKeys: string[];
+  readModelScopeKeys: string[];
   workbenchPairRelationId: string;
   workbenchRelationMode: string;
   freshnessTargets: OperationBarrierTarget[];
+  operationBarrierTargets: OperationBarrierTarget[];
 };
 
 export type ConfirmTurnoverRelationRequest = {

@@ -133,6 +133,12 @@ export type NoOaBankBatchDetail = {
   directionCounts: NoOaBankBatchCountMap;
 };
 
+export type ReadModelOperationBarrierTarget = {
+  readModelKey: string;
+  scopeKey: string;
+  scopeType?: string;
+};
+
 export type SubmitNoOaBankBatchRequest = {
   batchId: string;
   expectedVersion: number | null;
@@ -158,6 +164,10 @@ export type SubmitNoOaBankBatchesRequest = {
 export type NoOaBankBatchMutationResult = {
   batch: NoOaBankBatch | null;
   affectedMonths: string[];
+  affectedScopeKeys: string[];
+  readModelScopeKeys: string[];
+  freshnessTargets: ReadModelOperationBarrierTarget[];
+  operationBarrierTargets: ReadModelOperationBarrierTarget[];
   workbenchRebuildQueued: boolean;
   results: Array<Record<string, unknown>>;
 };
