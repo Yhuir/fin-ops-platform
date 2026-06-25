@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-strict-diagnostics-sanitized-output-selected`
+Current state: `production-browser-runner-bundle-implementation-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-runner-bundle-contract` as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-contract-2026-06-25.md`. T0 defined the separate runner bundle file/manifest/runtime/artifact contract, but did not implement packaging because `production-route-shell.spec.ts` still depends on `strictTest.ts`, whose raw console/pageerror/requestfailed diagnostic details are not safe for production artifacts. Next boundary is `frontend:production-strict-diagnostics-sanitized-output-contract`.
+Completed `frontend:production-strict-diagnostics-sanitized-output-contract` as `implementation-closed` in `analysis/frontend-production-strict-diagnostics-sanitized-output-contract-2026-06-25.md`. T0 added production-only strict diagnostics redaction gated by `FIN_OPS_E2E_PRODUCTION_SMOKE=1`, preserving local diagnostics while redacting production console/pageerror/dialog detail and requestfailed URLs/details. Static guard and frontend build verification passed. Next boundary is `deployment:production-browser-smoke-runner-bundle-implementation`.
 
 ## Closed Or Deferred Slices
 

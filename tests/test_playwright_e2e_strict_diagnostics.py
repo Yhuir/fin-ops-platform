@@ -181,6 +181,30 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("textSample", source)
         self.assertNotIn("bodyText.slice", source)
 
+    def test_production_smoke_strict_diagnostics_are_redacted(self) -> None:
+        source = STRICT_FIXTURE_PATH.read_text(encoding="utf-8")
+
+        for required in (
+            'process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === "1"',
+            "productionDiagnosticsRedactionEnabled",
+            "redactProductionDiagnosticDetail",
+            "redactProductionPath",
+            '"/api/<redacted>"',
+            '"/fin-ops/"',
+            "request_failed",
+            '"<redacted>"',
+            "pushBrowserDiagnostic",
+            "pushBrowserDiagnostic(diagnostics, { category: \"console.error\"",
+            "pushBrowserDiagnostic(diagnostics, { category: \"pageerror\"",
+            "pushBrowserDiagnostic(diagnostics, {",
+            "category: \"requestfailed\"",
+            "category: \"dialog\"",
+        ):
+            self.assertIn(required, source)
+
+        self.assertNotIn("pushDiagnostic(diagnostics, { category: \"console.error\"", source)
+        self.assertNotIn("pushDiagnostic(diagnostics, { category: \"pageerror\"", source)
+
     def test_production_admin_app_health_smoke_keeps_secret_admin_and_readonly_guards(self) -> None:
         source = PRODUCTION_ADMIN_APP_HEALTH_SPEC_PATH.read_text(encoding="utf-8")
         package_json = WEB_PACKAGE_JSON_PATH.read_text(encoding="utf-8")
