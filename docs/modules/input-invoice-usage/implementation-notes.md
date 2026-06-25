@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - OA reverse route owner audit
+
+- 目标：审计 `/api/input-invoice-usage/oa-reverse*` handler group 的 `server.py` 所有权，选择下一步本地模块化边界。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：业务状态机、idempotency、版本冲突、OA draft/revoke、evidence detection、relation command 写入和 read model invalidation 已由 `InputInvoiceUsageOaReverseService` 承担；下一步先新增 route owner，迁移 preview、submitted history、staged drafts、batch create/get 等轻量 HTTP 映射，OA draft create/revoke/status/manual status 留给后续更窄切片。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需补静态 Guard，并回归 `tests/test_input_invoice_usage_api.py` 的 OA reverse preview/history/staged/batch create/get。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`。
+- 未测风险：真实 OA 登录、目标申请人凭据和生产 worker drain 仍是后续验证风险；本轮不做生产 browser/admin/write 验证。
+- 后续事项：执行 `server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`。
+
 ## 2026-06-24 - rows/filter-options freshness 合并 fail-closed
 
 - 目标：审计前端 stale/refreshing/fresh 行为时，修复进项发票使用页只按 rows payload 的 freshness 判断页面是否 fresh 的缺口；当 rows 为 fresh 但 filter-options 返回 stale/missing/schema_mismatch/refreshing 时，页面不能显示普通空态或允许导出。

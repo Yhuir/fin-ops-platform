@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-oa-reverse-route-owner-audit-selected`
+Current state: `input-invoice-usage-oa-reverse-route-owner-facade-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-business-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-etc-business-route-owner-local-closure-audit-2026-06-25.md`. T0 confirmed ETC business-batch route-owner local support is accounted for after delete/revoke callback collapse and selected the input-invoice usage OA reverse handler group as the next residual `server.py` boundary. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-oa-reverse-route-owner-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`. T0 confirmed OA reverse business behavior already lives in `InputInvoiceUsageOaReverseService` while `server.py` still owns route dispatch and HTTP mapping; selected a route-owner facade extraction for preview/history/staged/batch create/get first. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-business-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-oa-reverse-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-oa-reverse-route-owner-audit`
+`server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`

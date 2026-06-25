@@ -148,6 +148,7 @@ Current state expected on start:
 - `server-py:etc-business-oa-draft-revoke-callback-audit` is complete as `analysis-closed` in `analysis/server-py-etc-business-oa-draft-revoke-callback-audit-2026-06-25.md`; selected application-service payload ownership plus route-owner callback collapse.
 - `server-py:etc-business-oa-draft-revoke-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-etc-business-oa-draft-revoke-route-callback-collapse-2026-06-25.md`; OA draft revoke route mapping now lives in `EtcBusinessBatchApiRoutes`, and `_handle_api_etc_business_oa_draft_revoke(...)` is removed from `server.py`.
 - `server-py:etc-business-route-owner-local-closure-audit` is complete as `analysis-closed` in `analysis/server-py-etc-business-route-owner-local-closure-audit-2026-06-25.md`; ETC business-batch route-owner local support is accounted for, without claiming whole ETC/global closure.
+- `server-py:input-invoice-usage-oa-reverse-route-owner-audit` is complete as `analysis-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`; selected OA reverse route-owner facade extraction for lightweight preview/history/staged/batch create/get paths.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -392,7 +393,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:input-invoice-usage-oa-reverse-route-owner-audit`.
+Start with `server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -423,7 +424,8 @@ Current local-first state:
 - `server-py:etc-business-oa-draft-revoke-callback-audit` is complete in `analysis/server-py-etc-business-oa-draft-revoke-callback-audit-2026-06-25.md`.
 - `server-py:etc-business-oa-draft-revoke-route-callback-collapse` is complete in `analysis/server-py-etc-business-oa-draft-revoke-route-callback-collapse-2026-06-25.md`.
 - `server-py:etc-business-route-owner-local-closure-audit` is complete in `analysis/server-py-etc-business-route-owner-local-closure-audit-2026-06-25.md`.
-- Row343 is the next local boundary: audit input-invoice usage OA reverse route-owner opportunities.
+- `server-py:input-invoice-usage-oa-reverse-route-owner-audit` is complete in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-audit-2026-06-25.md`.
+- Row344 is the next local boundary: extract input-invoice usage OA reverse route-owner facade for lightweight paths.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

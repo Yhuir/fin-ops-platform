@@ -354,7 +354,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 340 | `server-py:etc-business-oa-draft-revoke-callback-audit` | analysis-closed | implementation-gap-open | Audited the remaining ETC business-batch OA draft revoke callback; selected application-service payload ownership plus route-owner callback collapse as the next narrow implementation boundary. |
 | 341 | `server-py:etc-business-oa-draft-revoke-route-callback-collapse` | local-implementation-closed | implementation-gap-open | Moved OA draft revoke HTTP mapping into `EtcBusinessBatchApiRoutes`, added application-service revoke payload ownership, removed `_handle_api_etc_business_oa_draft_revoke(...)` from `server.py`, and added Guard/API regressions. |
 | 342 | `server-py:etc-business-route-owner-local-closure-audit` | analysis-closed | implementation-gap-open | Audited ETC business-batch route owner after delete and revoke callback collapse; local route-owner support is accounted for, while whole ETC/global closure remains open. |
-| 343 | `server-py:input-invoice-usage-oa-reverse-route-owner-audit` | pending | implementation-gap-open | Audit input-invoice usage OA reverse handler group in `server.py`, classify route/application/service ownership, and select the next narrow local implementation boundary. |
+| 343 | `server-py:input-invoice-usage-oa-reverse-route-owner-audit` | analysis-closed | implementation-gap-open | Audited input-invoice usage OA reverse handler group; selected route-owner facade extraction for preview/history/staged/batch create/get as the next narrow local implementation boundary. |
+| 344 | `server-py:input-invoice-usage-oa-reverse-route-owner-facade-extraction` | pending | implementation-gap-open | Add `InputInvoiceUsageOaReverseApiRoutes`, delegate OA reverse route dispatch and lightweight preview/history/staged/batch create/get HTTP mapping from `server.py`, and add Guard/API regressions. |
 
 ## Status Values
 
