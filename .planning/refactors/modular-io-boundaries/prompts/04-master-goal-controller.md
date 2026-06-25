@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `workbench-refresh-status-route-owner-extraction-selected` after Workbench read-route post-groups audit selected refresh-status extraction as the next local slice.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `workbench-read-route-owner-post-refresh-status-audit-selected` after Workbench refresh-status route-owner extraction was locally implemented.
 
 ```text
 $gsd-autonomous --auto

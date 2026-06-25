@@ -4872,6 +4872,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         read_route_source = _class_source(routes_tree, routes_source, "WorkbenchReadApiRoutes")
         groups_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_groups")
         summary_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_summary")
+        refresh_status_handler_source = _function_source(
+            server_tree,
+            server_source,
+            "_handle_api_workbench_refresh_status",
+        )
         analysis_source = (
             REPO_ROOT
             / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-groups-read-route-owner-extraction-2026-06-25.md"
@@ -4880,6 +4885,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         for marker in (
             "def summary(",
+            "def refresh_status(",
             "def groups(",
             "normalize_workbench_group_search_mode",
             "normalize_workbench_group_detail_level",
@@ -4903,6 +4909,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py groups handler does not delegate to WorkbenchReadApiRoutes")
         if "_workbench_read_routes().summary(" not in summary_handler_source:
             violations.append("server.py summary handler does not delegate to WorkbenchReadApiRoutes")
+        if "_workbench_read_routes().refresh_status(" not in refresh_status_handler_source:
+            violations.append("server.py refresh-status handler does not delegate to WorkbenchReadApiRoutes")
+        if "_workbench_query_facade().refresh_status" in refresh_status_handler_source:
+            violations.append("server.py refresh-status handler still calls WorkbenchQueryFacade directly")
         for forbidden in (
             "WorkbenchRelationCommandService",
             "ReadModelRefreshGateway",

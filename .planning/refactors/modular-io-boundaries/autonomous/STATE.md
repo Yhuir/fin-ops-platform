@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-refresh-status-route-owner-extraction-selected`
+Current state: `workbench-read-route-owner-post-refresh-status-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-read-route-owner-post-groups-audit` as `analysis-closed` in `analysis/server-py-workbench-read-route-owner-post-groups-audit-2026-06-25.md`. The next local implementation boundary is `server-py:workbench-refresh-status-route-owner-extraction`; SSE events and legacy `/api/workbench` SQL fallback/payload handling remain deferred to dedicated slices. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-refresh-status-route-owner-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-refresh-status-route-owner-extraction-2026-06-25.md`. `WorkbenchReadApiRoutes` now owns summary, groups and refresh-status facade delegation; `Application` keeps dispatch, response construction, metrics and SSE/legacy payload support. The next local boundary is `server-py:workbench-read-route-owner-post-refresh-status-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

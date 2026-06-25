@@ -30,6 +30,10 @@ class FakeWorkbenchQueryFacade:
         self.calls.append({"endpoint": "summary", "month": month})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "read_model_status": "fresh"})
 
+    def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "refresh_status", "month": month})
+        return WorkbenchQueryResult(HTTPStatus.ACCEPTED, {"month": month, "read_model_status": "refreshing"})
+
     def groups(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
         self.calls.append({"endpoint": "groups", "month": month, **kwargs})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "groups": [], "read_model_status": "fresh"})
@@ -80,6 +84,16 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload, {"month": "2026-05", "read_model_status": "fresh"})
         self.assertEqual(facade.calls, [{"endpoint": "summary", "month": "2026-05"}])
+
+    def test_refresh_status_delegates_to_query_facade(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, payload = routes.refresh_status("2026-05")
+
+        self.assertEqual(status, HTTPStatus.ACCEPTED)
+        self.assertEqual(payload, {"month": "2026-05", "read_model_status": "refreshing"})
+        self.assertEqual(facade.calls, [{"endpoint": "refresh_status", "month": "2026-05"}])
 
     def test_groups_normalizes_query_and_delegates_to_query_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()

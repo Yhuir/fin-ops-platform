@@ -3674,8 +3674,8 @@ class Application:
         return self._json_response(status_code, payload)
 
     def _handle_api_workbench_refresh_status(self, month: str | None) -> Response:
-        result = self._workbench_query_facade().refresh_status(month)
-        return self._json_response(result.status_code, result.payload)
+        status_code, payload = self._workbench_read_routes().refresh_status(month)
+        return self._json_response(status_code, payload)
 
     def _handle_api_workbench_events(self, month: str | None) -> Response:
         current_month = month or "all"

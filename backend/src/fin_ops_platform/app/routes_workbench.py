@@ -141,6 +141,10 @@ class WorkbenchReadApiRoutes:
         result = self._query_facade_provider().summary(month)
         return result.status_code, result.payload
 
+    def refresh_status(self, month: str | None) -> tuple[HTTPStatus, dict[str, object]]:
+        result = self._query_facade_provider().refresh_status(month)
+        return result.status_code, result.payload
+
     def groups(
         self,
         month: str | None,
