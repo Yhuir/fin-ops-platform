@@ -9,23 +9,20 @@ Continue the user-authorized `main-read-model-closure` run from the expanded 202
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
 - Latest reconciliation: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-26.md`.
 - Write target inventory: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-write-target-inventory-2026-06-26.md`.
-- Wave 1 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-1-static-guard-and-write-target-inventory-2026-06-26.md`.
-- Wave 2 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-2-write-target-envelope-and-frontend-freshness-2026-06-26.md`.
-- Wave 3 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-3-remaining-write-target-coverage-and-legacy-path-quarantine-2026-06-26.md`.
-- Wave 4 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-4-import-cost-tax-balance-and-legacy-deletion-2026-06-26.md`.
+- Wave 5 summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`.
 - Admin Token was acquired through secure popup for the current controller session. Never print, hash, encode, persist or copy it into prompts, logs, files, docs, shell history, screenshots, test fixtures or worker prompts.
 - User has approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
 - Missing business inverse restore path is not a blocker by itself. It must route into the preapproved bounded DB restore protocol; only missing operation-before snapshot, exact predicate, transaction safety, or post-restore verification can hard-stop sample recovery.
 
 ## Next Boundary
 
-`main-read-model-closure:wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep`
+`main-read-model-closure:wave-6-queued-job-completion-and-legacy-quarantine`
 
 Goal:
 
-- Close the remaining OA-driven/manual import and queued job completion read-model freshness paths.
+- Close queued import job completion freshness propagation after affected scopes are knowable.
 - Delete old code when caller proof is complete; otherwise hard-quarantine compat-only paths with owner, caller list, deletion condition and static guard.
-- Prepare the production evidence wave after local PSCIP-L3 gates pass, without claiming PSCIP-L4 early.
+- Prepare, but do not prematurely execute, the production evidence wave.
 
 Required first steps:
 
@@ -35,20 +32,19 @@ Required first steps:
    - `AGENTS.md`
    - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-write-target-inventory-2026-06-26.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-4-import-cost-tax-balance-and-legacy-deletion-2026-06-26.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`
    - `docs/modules/read-models/boundary-io.md`
-   - `docs/modules/runtime-workers/boundary-io.md`
+   - `docs/modules/imports-bank-transactions/boundary-io.md`
+   - `docs/modules/imports-invoices/boundary-io.md`
    - affected module `boundary-io.md` files for every module touched in this wave.
-4. Use CodeGraph before shared code edits. Use `codegraph_impact` before modifying shared route helpers, import write flow, Workbench action facade, refresh producer, frontend API normalizer, operation barrier helper or read model registry code.
+4. Use CodeGraph before shared code edits. Use `codegraph_impact` before modifying shared import write flow, job result mapping, frontend import job polling, operation barrier helper, read model registry, route helpers, or compat repository code.
 
 Implementation priorities:
 
-- OA/manual import:
-  - OA manual import/create/refresh/remove flows must expose or be routed to explicit read model targets.
-  - Confirm affected scopes include workbench/workbench_relation/search/invoice_lifecycle/pending/input/output/oa_pending_payment/cost/tax as applicable.
 - Queued import job completion:
   - When a queued import job finishes and the UI consumes job result payload/summary, the result must expose operation barrier targets or a tested non-applicability proof.
   - Do not fabricate targets on queued admission before the affected scopes are knowable.
+  - Frontend import job completion must wait for operation barrier targets before showing final fresh state when the job result affects read model visibility.
 - Legacy deletion/quarantine:
   - stale-as-fresh defaults
   - legacy Workbench action route surfaces
@@ -89,8 +85,8 @@ Run frontend targeted tests for every touched page/API module. If a broad verifi
 
 End of boundary:
 
-- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-5-oa-driven-queued-job-legacy-and-production-evidence-prep-2026-06-26.md`.
+- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-6-queued-job-completion-and-legacy-quarantine-2026-06-26.md`.
 - Update `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
 - Update this `NEXT-PROMPT.md` with the next executable wave.
-- Commit verified Wave 5 artifacts on `main`.
+- Commit verified Wave 6 artifacts on `main`.
 - Immediately continue to the next wave if safe implementation work remains.

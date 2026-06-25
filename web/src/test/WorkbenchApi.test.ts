@@ -7,8 +7,11 @@ import {
   fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
+  importManualOaRows,
   previewWorkbenchException,
   previewWorkbenchWithdrawLink,
+  refreshManualOaImportAttachments,
+  removeManualOaImport,
 } from "../features/workbench/api";
 import {
   buildWorkbenchServerPageQuery,
@@ -2751,6 +2754,119 @@ describe("workbench exception api", () => {
         },
       ],
       workbenchRefreshRequired: true,
+    });
+  });
+});
+
+describe("workbench OA manual import API targets", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const targetEnvelope = {
+    affected_scope_keys: ["all", "2025-12", "active:2025-12", "all:2025-12"],
+    read_model_scope_keys: ["all", "2025-12", "active:2025-12", "all:2025-12"],
+    freshness_targets: [
+      { read_model_key: "workbench", scope_key: "all" },
+      { read_model_key: "workbench", scope_key: "2025-12" },
+      { read_model_key: "workbench_relation", scope_key: "2025-12" },
+      { read_model_key: "cost_statistics", scope_key: "active:2025-12" },
+      { read_model_key: "cost_statistics", scope_key: "all:2025-12" },
+    ],
+    operation_barrier_targets: [
+      { read_model_key: "workbench", scope_key: "all" },
+      { read_model_key: "workbench", scope_key: "2025-12" },
+      { read_model_key: "workbench_relation", scope_key: "2025-12" },
+      { read_model_key: "cost_statistics", scope_key: "active:2025-12" },
+      { read_model_key: "cost_statistics", scope_key: "all:2025-12" },
+    ],
+  };
+
+  test("maps attachment refresh target envelope", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rows: [
+            {
+              row_id: "oa-exp-1981",
+              attachment_file_count: 3,
+              importable_invoice_count: 2,
+              unrecognized_attachment_count: 1,
+            },
+          ],
+          errors: [],
+          ...targetEnvelope,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await refreshManualOaImportAttachments(["oa-exp-1981"]);
+
+    expect(result.rows[0]).toMatchObject({
+      rowId: "oa-exp-1981",
+      attachmentFileCount: 3,
+      importableInvoiceCount: 2,
+      unrecognizedAttachmentCount: 1,
+    });
+    expect(result.affectedScopeKeys).toEqual(["2025-12", "active:2025-12", "all:2025-12"]);
+    expect(result.operationBarrierTargets).toEqual([
+      { readModelKey: "workbench", scopeKey: "2025-12" },
+      { readModelKey: "workbench_relation", scopeKey: "2025-12" },
+      { readModelKey: "cost_statistics", scopeKey: "active:2025-12" },
+      { readModelKey: "cost_statistics", scopeKey: "all:2025-12" },
+    ]);
+  });
+
+  test("maps import and delete target envelopes", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            imported: ["oa-exp-1981"],
+            already_imported: [],
+            failed: [],
+            rows: [{ row_id: "oa-exp-1981", status: "completed", can_import: false }],
+            ...targetEnvelope,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            removed: true,
+            row_id: "oa-exp-1981",
+            ...targetEnvelope,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    const importResult = await importManualOaRows(["oa-exp-1981"]);
+    const deleteResult = await removeManualOaImport("oa-exp-1981");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/workbench/settings/oa/manual-imports",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ row_ids: ["oa-exp-1981"], actor_id: "settings_manual_import" }),
+      }),
+    );
+    expect(importResult.imported).toEqual(["oa-exp-1981"]);
+    expect(importResult.operationBarrierTargets).toContainEqual({
+      readModelKey: "workbench_relation",
+      scopeKey: "2025-12",
+    });
+    expect(deleteResult).toMatchObject({
+      removed: true,
+      rowId: "oa-exp-1981",
+      readModelScopeKeys: ["2025-12", "active:2025-12", "all:2025-12"],
+    });
+    expect(deleteResult.operationBarrierTargets).toContainEqual({
+      readModelKey: "cost_statistics",
+      scopeKey: "active:2025-12",
     });
   });
 });

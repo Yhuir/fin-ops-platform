@@ -47,6 +47,7 @@ import type {
   WorkbenchZonePageInfo,
   OaManualAttachmentRefreshResult,
   OaManualImportList,
+  OaManualImportRemovalResult,
   OaManualImportResult,
   OaManualSearchFilters,
   OaManualSearchItem,
@@ -899,7 +900,27 @@ type ApiOaManualSearchResult = {
   page_size?: number | null;
 };
 
-type ApiOaManualAttachmentRefreshResult = {
+type ApiReadModelTarget = {
+  readModelKey?: unknown;
+  read_model_key?: unknown;
+  scopeType?: unknown;
+  scope_type?: unknown;
+  scopeKey?: unknown;
+  scope_key?: unknown;
+};
+
+type ApiReadModelTargetEnvelope = {
+  affectedScopeKeys?: unknown[] | null;
+  affected_scope_keys?: unknown[] | null;
+  readModelScopeKeys?: unknown[] | null;
+  read_model_scope_keys?: unknown[] | null;
+  freshnessTargets?: ApiReadModelTarget[] | null;
+  freshness_targets?: ApiReadModelTarget[] | null;
+  operationBarrierTargets?: ApiReadModelTarget[] | null;
+  operation_barrier_targets?: ApiReadModelTarget[] | null;
+};
+
+type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
   rows?: Array<{
     row_id?: string | null;
     attachment_file_count?: number | null;
@@ -909,11 +930,16 @@ type ApiOaManualAttachmentRefreshResult = {
   errors?: Array<Record<string, unknown>> | null;
 };
 
-type ApiOaManualImportResult = {
+type ApiOaManualImportResult = ApiReadModelTargetEnvelope & {
   imported?: string[] | null;
   already_imported?: string[] | null;
   failed?: Array<Record<string, unknown>> | null;
   rows?: ApiOaManualSearchRow[] | null;
+};
+
+type ApiOaManualImportRemovalResult = ApiReadModelTargetEnvelope & {
+  removed?: boolean | null;
+  row_id?: string | null;
 };
 
 type ApiOaManualImportList = {
@@ -2889,6 +2915,7 @@ export async function refreshManualOaImportAttachments(
       unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
     })).filter((row) => row.rowId.length > 0),
     errors: payload.errors ?? [],
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -2911,6 +2938,7 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
     failed: payload.failed ?? [],
     rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -2931,14 +2959,15 @@ export async function fetchManualOaImports(): Promise<OaManualImportList> {
   };
 }
 
-export async function removeManualOaImport(rowId: string): Promise<{ removed: boolean; rowId: string }> {
-  const payload = await requestJson<{ removed?: boolean; row_id?: string | null }>(
+export async function removeManualOaImport(rowId: string): Promise<OaManualImportRemovalResult> {
+  const payload = await requestJson<ApiOaManualImportRemovalResult>(
     `/api/workbench/settings/oa/manual-imports/${encodeURIComponent(rowId)}`,
     { method: "DELETE" },
   );
   return {
     removed: payload.removed === true,
     rowId: toDisplayValue(payload.row_id, rowId),
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -3083,6 +3112,23 @@ function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchA
     freshnessTargets,
     operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     ...(operationProjection ? { operationProjection } : {}),
+  };
+}
+
+function mapReadModelTargetEnvelope(payload: ApiReadModelTargetEnvelope) {
+  const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
+    .filter((scopeKey) => scopeKey !== "all");
+  const readModelScopeKeys = cleanScopeList(payload.readModelScopeKeys ?? payload.read_model_scope_keys)
+    .filter((scopeKey) => scopeKey !== "all");
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(
+    payload.operationBarrierTargets ?? payload.operation_barrier_targets,
+  );
+  return {
+    affectedScopeKeys,
+    readModelScopeKeys,
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 

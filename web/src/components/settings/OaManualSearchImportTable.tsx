@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppChrome } from "../../contexts/AppChromeContext";
+import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import {
   importManualOaRows,
   refreshManualOaImportAttachments,
@@ -219,6 +220,9 @@ export default function OaManualSearchImportTable() {
     setError("");
     try {
       const result = await refreshManualOaImportAttachments([row.rowId]);
+      if (result.operationBarrierTargets.length > 0) {
+        await waitForOperationFreshness(result.operationBarrierTargets);
+      }
       const updatedCounts = result.rows[0];
       if (updatedCounts) {
         const updateRow = (candidate: OaManualSearchRow) =>
@@ -256,7 +260,11 @@ export default function OaManualSearchImportTable() {
     setError("");
     try {
       const result = await importManualOaRows(selectedImportableRows.map((row) => row.rowId));
-      publishOaImportStatus(90, "刷新搜索结果");
+      publishOaImportStatus(90, "等待数据同步");
+      if (result.operationBarrierTargets.length > 0) {
+        await waitForOperationFreshness(result.operationBarrierTargets);
+      }
+      publishOaImportStatus(95, "刷新搜索结果");
       setRows((current) => mergeUpdatedRows(current, result.rows));
       setSelectedRows((current) => {
         const updatedMap = new Map(result.rows.map((row) => [row.rowId, row]));

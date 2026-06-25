@@ -53,6 +53,29 @@ class OAManualImportApiTests(unittest.TestCase):
             permissions=["finops:access"],
         )
 
+    def _assert_oa_manual_targets(self, payload: dict[str, object], *, month: str) -> None:
+        target_pairs = {
+            (str(target["read_model_key"]), str(target["scope_key"]))
+            for target in payload["operation_barrier_targets"]
+        }
+        expected_pairs = {
+            ("workbench", month),
+            ("workbench_relation", month),
+            ("invoice_lifecycle", month),
+            ("tax_offset", month),
+            ("search", month),
+            ("cost_statistics", f"active:{month}"),
+            ("cost_statistics", f"all:{month}"),
+        }
+        self.assertTrue(
+            expected_pairs.issubset(target_pairs),
+            f"missing targets: {expected_pairs - target_pairs}",
+        )
+        self.assertEqual(payload["freshness_targets"], payload["operation_barrier_targets"])
+        self.assertIn(month, payload["affected_scope_keys"])
+        self.assertIn(f"active:{month}", payload["affected_scope_keys"])
+        self.assertIn(f"all:{month}", payload["read_model_scope_keys"])
+
     def test_search_endpoint_returns_early_rows_ignoring_global_cutoff_and_supports_paging(self) -> None:
         app = self._build_app_with_service(
             adapter=RecordingOAAdapter(
@@ -113,6 +136,7 @@ class OAManualImportApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
         self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
+        self._assert_oa_manual_targets(payload, month="2025-12")
         invalidate.assert_called_once()
         self.assertEqual(set(invalidate.call_args.args[0]), {"all", "2025-12"})
         clear_cache.assert_called_once()
@@ -143,6 +167,7 @@ class OAManualImportApiTests(unittest.TestCase):
         first_payload = json.loads(first.body)
         self.assertEqual(first_payload["imported"], ["oa-exp-1981"])
         self.assertEqual(first_payload["failed"][0]["code"], "not_completed")
+        self._assert_oa_manual_targets(first_payload, month="2025-12")
         self.assertEqual(json.loads(second.body)["already_imported"], ["oa-exp-1981"])
         self.assertEqual(workbench.synced_row_ids, [["oa-exp-1981"], ["oa-exp-1981"]])
 
@@ -165,7 +190,10 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(json.loads(list_response.body)["row_ids"], ["oa-exp-1981"])
         self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body), {"removed": True, "row_id": "oa-exp-1981"})
+        delete_payload = json.loads(delete_response.body)
+        self.assertEqual(delete_payload["removed"], True)
+        self.assertEqual(delete_payload["row_id"], "oa-exp-1981")
+        self._assert_oa_manual_targets(delete_payload, month="2025-12")
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
         self.assertEqual(set(invalidate.call_args.args[0]), {"all", "2025-12"})
         clear_cache.assert_called_once()
