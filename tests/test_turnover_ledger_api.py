@@ -3841,6 +3841,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("affected_months = self._bank_transaction_category_affected_months(normalized_bank_row_ids)", source)
         self.assertNotIn('result["affected_months"] = affected_months', source)
 
+    def test_closure_confirm_handler_delegates_affected_months_boundary_to_request_facade(self) -> None:
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_closure_confirm_route)
+
+        self.assertIn("facade = self._closure_request_boundary_provider()", source)
+        self.assertIn("result = facade.confirm_zero_difference_closure_from_request(", source)
+        self.assertNotIn("rebuild_from_bank_rows(", source)
+        self.assertNotIn("_after_turnover_relation_mutation(", source)
+        self.assertNotIn("_resolve_turnover_relation_affected_months", source)
+
     def test_confirm_request_boundary_facade_owns_affected_months_resolution_and_response_field(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_confirm_request_boundary_facade)
 

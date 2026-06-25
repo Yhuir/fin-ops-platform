@@ -175,6 +175,7 @@ class TurnoverLedgerApiRoutes:
         relation_extra_request_boundary_provider: Callable[[], Any] | None = None,
         relation_extra_tenant_id_provider: Callable[[], str] | None = None,
         confirm_relation_request_boundary_provider: Callable[[], Any] | None = None,
+        closure_request_boundary_provider: Callable[[], Any] | None = None,
         write_precondition_error_payload: Callable[[TurnoverLedgerWritePreconditionError], dict[str, object]] | None = None,
     ) -> None:
         self._ledger_service = ledger_service
@@ -194,6 +195,7 @@ class TurnoverLedgerApiRoutes:
         self._relation_extra_request_boundary_provider = relation_extra_request_boundary_provider
         self._relation_extra_tenant_id_provider = relation_extra_tenant_id_provider
         self._confirm_relation_request_boundary_provider = confirm_relation_request_boundary_provider
+        self._closure_request_boundary_provider = closure_request_boundary_provider
         self._write_precondition_error_payload = write_precondition_error_payload
 
     def route(
@@ -221,6 +223,8 @@ class TurnoverLedgerApiRoutes:
             return self.handle_relation_extra_update_route(relation_id, body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/relations/confirm":
             return self.handle_confirm_relation_route(body, headers)
+        if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
+            return self.handle_closure_confirm_route(body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.handle_relation_extra_route(relation_id)
@@ -366,6 +370,52 @@ class TurnoverLedgerApiRoutes:
         idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
         try:
             result = facade.confirm_relation_from_request(
+                bank_row_ids=bank_row_ids,
+                actor_id=actor,
+                tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
+                expected_versions=expected_versions,
+                idempotency_key=idempotency_key,
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._respond(
+                exc.status_code,
+                self._write_precondition_error_payload(exc),  # type: ignore[misc]
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._respond(HTTPStatus.OK, result)
+
+    def handle_closure_confirm_route(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        self._ensure_closure_write_ports()
+        session_response = self._mutation_session_resolver(headers)  # type: ignore[misc]
+        if self._session_error_detector(session_response):  # type: ignore[misc]
+            return session_response
+        payload, error = self._load_json_body(body)  # type: ignore[misc]
+        if error is not None:
+            return error
+        bank_row_ids = payload.get("bank_row_ids")
+        if not isinstance(bank_row_ids, list):
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_row_ids", "message": "bank_row_ids must be an array."},
+            )
+        identity = session_response.identity
+        actor = identity.username or identity.user_id or "web_finance_user"
+        facade = self._closure_request_boundary_provider()  # type: ignore[misc]
+        expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+        try:
+            result = facade.confirm_zero_difference_closure_from_request(
                 bank_row_ids=bank_row_ids,
                 actor_id=actor,
                 tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
@@ -554,6 +604,19 @@ class TurnoverLedgerApiRoutes:
         ]
         if missing:
             raise RuntimeError(f"turnover ledger confirm write ports are not configured: {', '.join(missing)}")
+
+    def _ensure_closure_write_ports(self) -> None:
+        self._ensure_mutation_route_ports()
+        missing = [
+            name
+            for name, value in {
+                "closure_request_boundary_provider": self._closure_request_boundary_provider,
+                "write_precondition_error_payload": self._write_precondition_error_payload,
+            }.items()
+            if value is None
+        ]
+        if missing:
+            raise RuntimeError(f"turnover ledger closure write ports are not configured: {', '.join(missing)}")
 
     def _ensure_mutation_route_ports(self) -> None:
         missing = [

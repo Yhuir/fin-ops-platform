@@ -1294,6 +1294,7 @@ class Application:
             relation_extra_request_boundary_provider=self._turnover_ledger_relation_extra_request_boundary_facade,
             relation_extra_tenant_id_provider=self._workbench_reconciliation_tenant_id,
             confirm_relation_request_boundary_provider=self._turnover_ledger_confirm_request_boundary_facade,
+            closure_request_boundary_provider=self._turnover_ledger_closure_request_boundary_facade,
             write_precondition_error_payload=self._turnover_write_precondition_error_payload,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
@@ -1966,8 +1967,6 @@ class Application:
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
                 return turnover_ledger_response
-        if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
-            return self._handle_api_turnover_ledger_closure_confirm(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/closures/withdraw":
             return self._handle_api_turnover_ledger_closure_withdraw(body, headers)
         if method == "POST" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/withdraw"):
@@ -9971,50 +9970,6 @@ class Application:
             facade_provider=self._turnover_ledger_relation_extra_write_facade,
             current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
         )
-
-    def _handle_api_turnover_ledger_closure_confirm(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session_response = self._turnover_mutation_session(headers)
-        if isinstance(session_response, Response):
-            return session_response
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        bank_row_ids = payload.get("bank_row_ids")
-        if not isinstance(bank_row_ids, list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_bank_row_ids", "message": "bank_row_ids must be an array."},
-            )
-        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        facade = self._turnover_ledger_closure_request_boundary_facade()
-        expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
-        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
-        try:
-            result = facade.confirm_zero_difference_closure_from_request(
-                bank_row_ids=bank_row_ids,
-                actor_id=actor,
-                tenant_id=tenant_id_for_session(session_response),
-                note=str(payload.get("note")) if payload.get("note") is not None else None,
-                expected_versions=expected_versions,
-                idempotency_key=idempotency_key,
-            )
-        except TurnoverRelationValidationError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc)},
-            )
-        except TurnoverLedgerWritePreconditionError as exc:
-            return self._json_response(
-                exc.status_code,
-                self._turnover_write_precondition_error_payload(exc),
-            )
-        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
-            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
-        return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_turnover_ledger_closure_withdraw(
         self,

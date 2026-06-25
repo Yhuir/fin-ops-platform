@@ -1686,6 +1686,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def handle_bank_row_tags_batch_route(",
             "def handle_relation_extra_update_route(",
             "def handle_confirm_relation_route(",
+            "def handle_closure_confirm_route(",
         ):
             if snippet not in route_source:
                 violations.append(f"TurnoverLedgerApiRoutes is missing read/export route-owner behavior {snippet}")
@@ -1700,11 +1701,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_turnover_ledger_bank_row_tags_batch",
             "_handle_api_turnover_ledger_relation_extra_update",
             "_handle_api_turnover_ledger_confirm",
+            "_handle_api_turnover_ledger_closure_confirm",
         ):
             if _function_source(server_tree, server_source, removed_handler):
                 violations.append(f"server.py still owns turnover ledger migrated route callback {removed_handler}")
         for retained_handler in (
-            "_handle_api_turnover_ledger_closure_confirm",
             "_handle_api_turnover_ledger_closure_withdraw",
             "_handle_api_turnover_ledger_withdraw",
         ):
@@ -1723,6 +1724,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "relation_extra_request_boundary_provider=self._turnover_ledger_relation_extra_request_boundary_facade",
             "relation_extra_tenant_id_provider=self._workbench_reconciliation_tenant_id",
             "confirm_relation_request_boundary_provider=self._turnover_ledger_confirm_request_boundary_facade",
+            "closure_request_boundary_provider=self._turnover_ledger_closure_request_boundary_facade",
             "write_precondition_error_payload=self._turnover_write_precondition_error_payload",
         ):
             if snippet not in server_source:
