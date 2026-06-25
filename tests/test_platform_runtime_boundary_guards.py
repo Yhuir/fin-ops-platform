@@ -5429,6 +5429,74 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_live_payload_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (SERVICES_ROOT / "workbench_live_payload_builder.py").read_text(encoding="utf-8")
+        live_method_source = _function_source(server_tree, server_source, "_build_live_workbench_row_payload")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_live_payload_builder")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-live-payload-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_live_workbench_service.get_workbench(",
+            "_build_oa_workbench_row_payload(",
+            "_merge_live_workbench_with_oa_rows(",
+            "_serialize_value(",
+        ):
+            if forbidden in live_method_source:
+                violations.append(f"Application _build_live_workbench_row_payload still owns live builder step: {forbidden}")
+        if "return self._workbench_live_payload_builder().build(month)" not in live_method_source:
+            violations.append("Application _build_live_workbench_row_payload does not delegate to WorkbenchLivePayloadBuilder")
+        for marker in (
+            "class WorkbenchLivePayloadBuilder",
+            "get_live_workbench",
+            "build_oa_workbench_row_payload",
+            "merge_live_with_oa_rows",
+            "serialize_value",
+            "def build(",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchLivePayloadBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchLivePayloadBuilder(",
+            "get_live_workbench=self._live_workbench_service.get_workbench",
+            "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
+            "merge_live_with_oa_rows=self._merge_live_workbench_with_oa_rows",
+            "serialize_value=self._serialize_value",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application live builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchLivePayloadBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-live-payload-builder-extraction",
+            "WorkbenchLivePayloadBuilder",
+            "_build_oa_workbench_row_payload",
+            "retained all-OA",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench live payload builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

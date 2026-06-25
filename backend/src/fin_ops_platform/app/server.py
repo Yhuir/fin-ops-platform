@@ -447,6 +447,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingScopeRunnerAdapter,
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+from fin_ops_platform.services.workbench_live_payload_builder import WorkbenchLivePayloadBuilder
 from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
@@ -12752,10 +12753,19 @@ class Application:
         return assembler
 
     def _build_live_workbench_row_payload(self, month: str) -> dict[str, object]:
-        live_payload = self._live_workbench_service.get_workbench(month)
-        oa_payload = self._build_oa_workbench_row_payload(month)
-        merged = self._merge_live_workbench_with_oa_rows(live_payload, oa_payload)
-        return self._serialize_value(merged)
+        return self._workbench_live_payload_builder().build(month)
+
+    def _workbench_live_payload_builder(self) -> WorkbenchLivePayloadBuilder:
+        builder = getattr(self, "_workbench_live_payload_builder_instance", None)
+        if builder is None:
+            builder = WorkbenchLivePayloadBuilder(
+                get_live_workbench=self._live_workbench_service.get_workbench,
+                build_oa_workbench_row_payload=self._build_oa_workbench_row_payload,
+                merge_live_with_oa_rows=self._merge_live_workbench_with_oa_rows,
+                serialize_value=self._serialize_value,
+            )
+            self._workbench_live_payload_builder_instance = builder
+        return builder
 
     def _build_oa_workbench_row_payload(self, month: str) -> dict[str, object]:
         if month == "all" and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-raw-payload-assembler-extraction-closed`
+Current state: `workbench-live-payload-builder-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-raw-payload-assembler-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-raw-payload-assembler-extraction-2026-06-25.md`. `WorkbenchRawPayloadAssembler` now owns raw payload source selection/sync/repair/pair/override orchestration; live/OA source helpers, relation repair internals, pair relation application internals and override internals remain deferred. The next local boundary is `server-py:workbench-live-oa-raw-payload-source-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-live-payload-builder-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-live-payload-builder-extraction-2026-06-25.md`. `WorkbenchLivePayloadBuilder` now owns live payload load/OA payload load/merge/serialize orchestration; OA source, retained all-OA behavior and canonical OA attachment promotion remain deferred. The next local boundary is `server-py:workbench-oa-raw-payload-source-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
