@@ -20,3 +20,4 @@
 | `04-master-goal-controller.md` | 单线程主控 Goal Prompt：自动执行 planning preflight -> 当前 pending 边界 -> 状态更新 -> 下一个 prompt；当前下一步是 `planning:commit-backed-state-reconciliation`。不要把它同时喂给多个 thread。 |
 | `05-parallel-thread-prompts.md` | 旧版手动并发 worker prompt/archetype 参考。保留给 T0 动态生成 worker prompt 时参考；不再要求用户手动启动 T1-T9。 |
 | `06-t0-meta-orchestrator-goal.md` | 当前推荐入口：只启动一个 T0 `/goal`。T0 自动创建 worker threads、监控、收回 handoff、审阅、更新状态机、继续分发，直到全局闭环或 hard stop。 |
+| `07-read-model-main-closure-controller.md` | 用户授权的 read model 专项 main 分支主控 prompt：高效率 wave 推进全部页面 read model 模块化边界、I/O、freshness、legacy 退役和生产证据闭环。 |
