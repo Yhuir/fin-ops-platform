@@ -17,7 +17,8 @@ Main branch work is allowed only with the safeguards below:
 - Never rewrite history.
 - Never commit unrelated dirty files.
 - Commit only verified, reviewable wave results.
-- Stop on conflicts, ambiguous ownership, secrets, unbounded production mutation, or failed verification that cannot be repaired in the same wave.
+- Do not stop merely because there is no staging database, no local PGSQL URL, no business inverse restore path for a validation sample, a production rollout is needed, root SSH is needed, or low-risk samples must be selected automatically.
+- Stop only for non-automatable safety/contract conditions: unsafe main sync, unrelated dirty files that cannot be isolated, unavailable secure credential source for public authenticated API proof, unbounded production mutation, missing operation-before snapshot, missing exact restore predicate, failed post-restore verification, ambiguous read model ownership that cannot be inferred from source/docs/tests, or verification failure that cannot be repaired in the same wave.
 
 ## How To Use
 
@@ -32,7 +33,7 @@ Paste the following prompt into one Codex thread as the only starting prompt:
 - 在执行 git、读文件、SSH、生产检查或任何后续操作前，先给用户一个专门的 Admin Token 输入弹窗。
 - 弹窗标题使用 `Admin Token`，说明使用范围为本次 read model closure 生产 API 验证；输入内容必须被视为 secret。
 - token 只能保存在当前 controller 运行时内存或当前进程临时环境中，用于本次生产 API 验证；不得写入 repo、`.planning/`、docs、prompt、普通本地文件、shell history、日志、测试 fixture、截图或 worker prompt。
-- 如果当前 Codex 环境没有不会落入 transcript/tool output/log 的安全弹窗或等价 secure secret input，不要要求用户在普通聊天中粘贴 token；应 hard-stop 在 credential acquisition gate，并说明需要安全 secret input 能力后才能继续生产 API 验证。
+- 如果当前 Codex 环境没有不会落入 transcript/tool output/log 的安全弹窗或等价 secure secret input，不要要求用户在普通聊天中粘贴 token；继续推进所有不依赖 public authenticated Admin Token 的代码、SSH、只读、内部 command、business command 和 read model/worker 证据，但必须把 public authenticated API/SSE/browser proof 标记为 `secure-admin-token-needed`，不能声明该部分闭环。
 - 获取 token 后，后续输出只允许报告 `admin token acquired from secure popup for this session`，不得打印、摘要、截断、编码、hash 或持久化 token。
 
 Objective:
@@ -177,7 +178,7 @@ Objective:
 15. Admin token 和 secret 处理策略:
    - 不得把 admin token、cookie、DSN、SSH key、私钥或任何 secret 写入 repo、`.planning/`、docs、prompt、shell history、日志、测试 fixture、截图或普通本地文件。
    - 运行开始后的第一件事必须通过安全弹窗或等价 secure secret input 获取 Admin Token。不得把 admin token 永久明文保存。若当前运行环境没有安全弹窗，则只能从 operator 预先配置的安全凭据管理器读取，例如 macOS Keychain、1Password、pass、系统级 secret store 或只存在当前 shell 的环境变量。
-   - 推荐安全凭据名为 `fin-ops-platform-admin-token`；安全弹窗和安全凭据管理器都不可用时，不得降级为明文文件、普通 chat 输入或把 token 写入 prompt。应 hard-stop 在 credential acquisition / production API auth gate，报告需要安全 secret input 能力或 operator 在安全凭据管理器中预置 token。
+   - 推荐安全凭据名为 `fin-ops-platform-admin-token`；安全弹窗和安全凭据管理器都不可用时，不得降级为明文文件、普通 chat 输入或把 token 写入 prompt。应继续推进不依赖 public authenticated Admin Token 的其它闭环证据，并把 credential acquisition / production API auth gate 明确标记为 `secure-admin-token-needed`。
    - 可以使用 root SSH 进入服务器执行不打印 secret 的只读/受控验证；如果服务器已有运行时环境变量或受控内部 command 可以代表 admin 身份执行 smoke，应优先使用该入口，仍不得输出 token。
    - 生产写操作验证必须使用业务 API、业务 UI 或已提交的业务 command；禁止直接 DB update canonical facts、readiness、dirty scopes 或 outbox 来完成样本验证或伪造 read model fresh。缺少业务恢复路径时，允许按已预批准的最小 DB 恢复协议恢复样本 canonical facts 到操作前状态，但不得直接更新 readiness/dirty/outbox/cache 来掩盖 read model 问题。
 
@@ -409,15 +410,17 @@ After local implementation closure, perform a production evidence sweep using au
 Do not print env secrets, DSNs, tokens, cookies, private keys, raw sensitive payloads or broad production data.
 Do not perform manual production DB writes outside committed migrations, written bounded runbooks, or the preapproved bounded DB restore protocol for production validation samples that lack a business restore path. If SSH/root or production DB access is unavailable, complete code-level PSCIP-L3, commit migrations/runbooks/tests, and mark PSCIP-L4 evidence as explicitly deferred or hard-stopped.
 
-Hard stop gates:
-Stop and report if:
+Non-automatable stop gates:
+Continue automatically unless one of the following conditions makes safe progress impossible. If a condition affects only public authenticated API/SSE/browser proof, continue all other code, SSH, read-only, internal command, business command, worker/readiness and bounded sample-restore gates, and record that specific proof as `secure-admin-token-needed` or `production-evidence-needed`.
+
+Stop and report only if:
 - main cannot fast-forward sync safely.
 - backup branch cannot be created/pushed.
 - worktree has unrelated dirty files that make safe commit impossible.
-- production operation would require secrets or broad destructive mutation.
+- production operation would require printing/persisting secrets or broad destructive mutation.
 - production closure would require manual DB state edits instead of migration/runbook-backed operations, except for the preapproved bounded DB restore protocol used only to restore validation samples to their operation-before state.
 - production business sample cannot be restored through business logic and also cannot be restored through bounded DB restore because the operation-before snapshot, exact row predicate, transaction safety or post-restore verification cannot be established.
-- secure Admin Token popup or equivalent secure secret input is unavailable, and no secure credential manager/current process env token exists for production API validation; do not ask for token in ordinary chat and do not store a plaintext permanent token.
+- secure Admin Token popup or equivalent secure secret input is unavailable, and no secure credential manager/current process env token exists for production API validation, but only if the selected wave cannot make any meaningful progress without public authenticated API/SSE/browser proof. Otherwise continue and mark only that proof `secure-admin-token-needed`; do not ask for token in ordinary chat and do not store a plaintext permanent token.
 - SSH/root or DB access is unavailable after code-level closure and no equivalent production-safe verification path exists; report PSCIP-L3 complete with exact PSCIP-L4 evidence gap instead of claiming global closure.
 - read model scope contract is ambiguous and cannot be inferred from source/docs/tests.
 - tests fail and cannot be fixed without expanding beyond the selected wave.

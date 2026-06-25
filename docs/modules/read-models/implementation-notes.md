@@ -1399,3 +1399,11 @@
 - 已确认工具：`http_slo_probe` 可采集 authenticated API/page p95 并把 non-fresh/refresh-enqueued 判失败；`sync_slo_baseline` 可只读采集 runtime/PostgreSQL/EXPLAIN 基线；`read_model_slo_smoke` dry-run 只能证明 scope discovery，`--apply` 才能证明 enqueue-to-fresh；`write_operation_slo_audit` 缺真实样本会失败而不是假通过。
 - 剩余：真实 PostgreSQL/worker/App Status/high-row/browser/performance evidence 仍依赖生产只读或受控 smoke；没有本地 `PGSQL_URL`/staging 时不能声明 Go admission 通过。
 - 下一步：`go-hot-path:workbench-compute-performance-baseline-contract`，先定义 `workbench:matching-grouping-check` 的 Python reference IO、性能基线、shadow-run 和 rollback 合同，不直接开始 Go/Fiber/Go Worker 实现。
+
+## 2026-06-26 - main read model production rollout and evidence sweep
+
+- 目标：在用户批准生产 rollout、root SSH、低风险生产样本、样本恢复和无业务恢复路径时的最小 DB 恢复后，验证当前 `main` read model 闭环在生产 runtime 中的 freshness 和 worker 收敛状态。
+- 发布：`./scripts/deploy-oa.sh` 成功发布 `main-18a0509f-20260626063245`，commit `18a0509f3dca0649d1d7661293909c657853e91f`；`fin-ops.service`、dispatcher 和 20 个 worker 均 active，`/health/ready` 显示 release/runtime guard 一致。
+- 生产 read model 证据：scope contract `ok=true`、`violation_count=0`、`current_uncovered_outbox_failure_count=0`；最终聚合为 `job.outbox_events done=204319`、`job.read_model_dirty_scopes done=188090`、`read_model.app_status_readiness fresh=499`、current blocker `0`。critical `read_model_slo_smoke --apply --critical-only --target-ms 5000` 15/15 pass，enqueue-to-fresh p95/max `1958.911ms`。
+- 生产写样本：候选发现覆盖 turnover/workbench/no-OA；本轮最终闭合一个 `workbench_relation_withdraw` 样本，业务路径执行后因无业务 `cancelled -> active` 恢复路径，使用用户批准的 bounded DB restore protocol 按操作前快照和精确 predicate 恢复单条样本 canonical facts，不更新 readiness/outbox/dirty scopes/cache 伪造 fresh。`write_operation_slo_audit --operation workbench_relation_withdraw` pass，p95/max `2157.055ms`。
+- 未闭合：本轮没有拿到 secure Admin Token，不保存、不打印、不持久化 token；因此 public real-authenticated Admin Token HTTP/SSE/browser proof 与完整 public 写操作矩阵仍未闭合。后续必须先通过安全弹窗或安全凭据管理器获取 token，或继续只闭合不依赖 token 的 SSH/internal-command/business-command 证据，不能把 public-auth 部分声明完成。
