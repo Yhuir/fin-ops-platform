@@ -281,31 +281,19 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     assert connection.executed[removed_batches_delete_index][1] == (["retained-batch"],)
 
 
-def test_read_model_bulk_insert_prefers_multi_values_path() -> None:
+def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
     connection = ValuesBulkConnection()
-    repository = PostgresReadModelRepository(connection)
 
-    repository.save_turnover_ledger_rows(
-        {
-            "scope_key": "all",
-            "rows": [
-                {
-                    "relation_id": "turnover-1",
-                    "scope_month": "2026-05",
-                    "family": "business",
-                    "status": "open",
-                    "amount": "10.00",
-                    "source_versions": {"source_version": 7},
-                }
-            ],
-        },
-        scope_key="all",
+    _execute_many(
+        connection,
+        "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
+        [("row-1", {"row_id": "row-1"})],
     )
 
     insert_calls = [
         (sql, params)
         for sql, params in connection.executed_many_values
-        if "insert into read_model.turnover_ledger_rows" in sql
+        if "insert into read_model.search_index_rows" in sql
     ]
     assert len(insert_calls) == 1
     assert len(insert_calls[0][1]) == 1

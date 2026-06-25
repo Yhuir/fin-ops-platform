@@ -75,7 +75,10 @@ def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
 
 def _should_execute_many_values(sql: str) -> bool:
     normalized = " ".join(str(sql or "").lower().split())
-    return "insert into read_model." in normalized
+    return (
+        "insert into read_model.workbench_group_rows" in normalized
+        or "insert into read_model.search_index_rows" in normalized
+    )
 
 
 def _supports_execute_many_values_params(params_seq: list[Any]) -> bool:
