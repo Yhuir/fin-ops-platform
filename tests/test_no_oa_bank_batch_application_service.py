@@ -156,6 +156,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         no_oa_snapshot: dict[str, object] | None = None,
         no_oa_bank_batch_read_model_repository: object | None = None,
         workbench_sql_read_repository: object | None = None,
+        read_model_refresh_producer: object | None = None,
     ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
         categories = no_oa_categories(rows)
         pair_service = pair_relation_service or WorkbenchPairRelationService()
@@ -196,6 +197,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             relation_command_service=command_service,
             no_oa_bank_batch_read_model_repository=no_oa_bank_batch_read_model_repository,
             workbench_sql_read_repository=workbench_sql_read_repository,
+            read_model_refresh_producer=read_model_refresh_producer,
         )
         return service, no_oa_service, command_service
 
@@ -358,6 +360,103 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch["blocked_reason"], "")
         self.assertEqual(batch["can_submit"], False)
         self.assertEqual(batch["can_withdraw"], True)
+
+    def test_month_missing_read_model_refreshes_month_scope(self) -> None:
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> None:
+                self.calls.append(dict(filters))
+                return None
+
+        class RefreshProducer:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def enqueue(self, scope_keys: list[str], *, reason: str, metadata: dict[str, object] | None = None) -> bool:
+                self.calls.append({"scope_keys": list(scope_keys), "reason": reason, "metadata": metadata})
+                return True
+
+        repository = ReadRepository()
+        producer = RefreshProducer()
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee"],
+            no_oa_bank_batch_read_model_repository=repository,
+            read_model_refresh_producer=producer,
+        )
+
+        payload = service.list_batches_payload(
+            {"month": ["2026-06"], "bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]}
+        )
+
+        self.assertEqual(payload["read_model_status"], "missing")
+        self.assertEqual(payload["refresh_reason"], "api_no_oa_read_model_missing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(
+            producer.calls,
+            [{"scope_keys": ["2026-06"], "reason": "api_no_oa_read_model_missing", "metadata": None}],
+        )
+        self.assertEqual(repository.calls[0], {"month": "2026-06", "account_key": ""})
+        self.assertEqual(
+            repository.calls[1],
+            {"month": "2026-06", "type": "", "status": "", "bucket": "unsubmitted", "account_key": ""},
+        )
+
+    def test_month_stale_read_model_refreshes_month_scope(self) -> None:
+        class ReadRepository:
+            def __init__(self, rows: list[dict[str, object]]) -> None:
+                self.rows = rows
+
+            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
+                return deepcopy(self.rows)
+
+        class RefreshProducer:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def enqueue(self, scope_keys: list[str], *, reason: str, metadata: dict[str, object] | None = None) -> bool:
+                self.calls.append({"scope_keys": list(scope_keys), "reason": reason, "metadata": metadata})
+                return True
+
+        producer = RefreshProducer()
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee"],
+            no_oa_bank_batch_read_model_repository=None,
+            read_model_refresh_producer=producer,
+        )
+        stale_versions = dict(service.no_oa_bank_batch_source_versions())
+        stale_versions["no_oa_bank_batch_schema_version"] = "stale"
+        repository = ReadRepository(
+            [
+                {
+                    "batch_id": "batch-draft-fee",
+                    "batch_type": "fee",
+                    "scope_month": "2026-06",
+                    "account_key": "CCB:8106",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "row_count": 1,
+                    "total_amount": "1.00",
+                    "can_submit": True,
+                    "can_withdraw": False,
+                    "version": 1,
+                    "source_versions": stale_versions,
+                }
+            ]
+        )
+        service._no_oa_bank_batch_read_model_repository = repository
+
+        payload = service.list_batches_payload({"month": ["2026-06"], "bucket": ["unsubmitted"]})
+
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["refresh_reason"], "api_no_oa_source_versions_stale")
+        self.assertEqual(
+            producer.calls,
+            [{"scope_keys": ["2026-06"], "reason": "api_no_oa_source_versions_stale", "metadata": None}],
+        )
 
     def test_sql_read_model_exception_batches_are_not_public_payload(self) -> None:
         class ReadRepository:

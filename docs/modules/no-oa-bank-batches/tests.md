@@ -83,6 +83,15 @@ git diff --check
 
 未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；no-OA module/global closure 未声明。
 
+## 2026-06-26 - Month-scoped stale/missing refresh
+
+- 变更类型：narrow implementation slice。
+- 背景：生产 authenticated HTTP SLO 中 `GET /api/no-oa-bank-batches?month=2026-06&bucket=unsubmitted&page=1&page_size=200` 延迟达标但持续返回 `read_model_status=stale` / `refresh_enqueued=true`。数据库证据显示 API stale 分支一直 enqueue `scope_key=all`，而页面查询的是当前月 scope，违反 `all` 仅作为 fan-out/兜底命令的目标边界。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_month_missing_read_model_refreshes_month_scope`、`tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_month_stale_read_model_refreshes_month_scope`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖，因为修正 no-OA API fresh gate 的 enqueue scope；API contract 通过应用层 payload/status 断言和 `docs/dev/api-contracts.md` 记录覆盖；business core/frontend/E2E 不适用，因为没有改变批次生命周期、提交/撤回规则或前端交互。
+- 验证结果：`python -m pytest tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py -q` 通过。
+- 下一边界建议目标测试：生产 deploy 后 rerun authenticated HTTP SLO，目标是 `no_oa_bank_batches` 返回 `read_model_status=fresh` 且 `refresh_enqueued_count=0`。
+
 ## 2026-06-25 - Production API source-version schema alignment
 
 - 变更类型：narrow implementation slice。

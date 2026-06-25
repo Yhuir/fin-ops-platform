@@ -41,7 +41,7 @@
 
 - 候选来源：银行明细有效分类和免 OA 标签准入；未提交候选必须排除已被 Workbench active relation 占用的流水。
 - 标签准入：`GET/PUT /api/no-oa-bank-batches/tag-selection` 只读取银行明细自动标签规则中的可用标签，不保存第三层外部往来分类字段。
-- 读取路径：`GET /api/no-oa-bank-batches` 优先读 `no_oa_bank_batch` SQL read model；missing/stale 时只 enqueue refresh，不在 GET 热路径同步重建批次。
+- 读取路径：`GET /api/no-oa-bank-batches` 优先读 `no_oa_bank_batch` SQL read model；missing/stale 时只 enqueue refresh，不在 GET 热路径同步重建批次。带 `month=YYYY-MM` 的查询必须刷新同一个月 scope；只有未指定有效月份时才使用 `all`。
 - 首屏分页：`GET /api/no-oa-bank-batches` 支持显式 `page/page_size` 或 `pageSize`，`page_size` 上限为 200。前端列表默认以 `page=1&page_size=200` 读取，并渲染分页控件；切换月份、状态 bucket 或页码时必须清空当前选择、详情缓存和详情错误，避免跨 scope 操作旧批次。
 - 提交路径：`submit-selection` 只提交用户当前选择的流水；要求同月、同银行账户、同 `category_code`，且 code 在当前免 OA 标签准入范围内。
 - 提交事实冻结：提交时必须把批次内每条银行流水的有效标签写入 `row_tag_snapshot`，并随 `relation_mode=no_oa_bank_batch` 的 `special_metadata` 一起保存。提交后的 `submitted/withdrawn` 批次详情优先展示提交时标签；银行明细后续改标签只影响新的 `draft` 候选，不得覆盖已提交批次内流水标签。

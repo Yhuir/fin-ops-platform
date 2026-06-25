@@ -150,13 +150,14 @@ class NoOaBankBatchApplicationService:
             "month": filters["month"],
             "account_key": filters["account_key"],
         }
+        refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
         list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
         if callable(list_read_model_batches):
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)
             if summary_read_model_batches is None or read_model_batches is None:
                 refresh_reason = "api_no_oa_read_model_missing"
-                refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
+                refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
                 return {
                     "summary": self.summary([]),
                     "batches": [],
@@ -172,7 +173,7 @@ class NoOaBankBatchApplicationService:
                 read_model_public_batches = self._public_batches(read_model_batches)
                 if stale_reasons:
                     refresh_reason = "api_no_oa_source_versions_stale"
-                    refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
+                    refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
                     return {
                         "summary": self.summary(summary_public_batches),
                         "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
@@ -200,7 +201,7 @@ class NoOaBankBatchApplicationService:
                 "read_model_status": "fresh",
             }
         refresh_reason = "api_no_oa_read_model_unavailable"
-        refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
+        refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
         return {
             "summary": self.summary([]),
             "batches": [],
@@ -504,6 +505,11 @@ class NoOaBankBatchApplicationService:
                 "total": len(items),
             }
         }
+
+    @staticmethod
+    def _refresh_scope_keys_for_filters(filters: dict[str, object]) -> list[str]:
+        month = str(filters.get("month") or "").strip()
+        return [month] if SEARCH_MONTH_RE.match(month) else ["all"]
 
     def refresh_batches(
         self,
