@@ -320,6 +320,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 306 | `deployment:production-browser-smoke-token-broker-runbook` | analysis-closed | not-module-closed | Designed future root-owned in-memory target OA token broker protocol with session scope checks, private token descriptor handoff, sanitized metadata and stop gates. No broker was implemented/installed, no token was output and no production command ran. |
 | 307 | `deployment:production-browser-smoke-runner-runtime-availability-classification` | analysis-closed | not-module-closed | Classified runner runtime availability without installing/downloading browsers or running production smoke. Local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296. |
 | 308 | `planning:global-closure-hard-stop-report` | hard-stop-reported | not-module-closed | Wrote `analysis/global-closure-hard-stop-report-2026-06-25.md`: recorded current commit-backed progress (`307/308` non-pending before this row, `325` commits beyond `origin/main`), completed evidence since reconciliation, precise browser/admin/write-apply blockers, why no further safe owned boundary remains, and the smallest safe external action. No global closure, production browser smoke, token broker, admin probe, write apply or mutation occurred. |
+| 309 | `planning:local-modular-code-closure-reconciliation` | local-closure-reconciled | implementation-gap-open | Wrote `analysis/commit-backed-state-reconciliation-2026-06-25-local-first-refresh.md` and `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`. Reclassified the next phase as local modular code closure before production validation. Live evidence: `server.py` still has `21217` lines and `205` `_handle_api_*` methods; `postgres_repositories/read_models.py` still has `11415` lines and a broad `PostgresReadModelRepository`. Selected ETC/import/reconciliation residual route-owner audit as the next local boundary. |
+| 310 | `server-py:etc-reconciliation-route-owner-residual-audit` | pending | implementation-gap-open | Audit remaining ETC/import/reconciliation handlers still owned by `Application`, compare them with existing `EtcBusinessBatchApiRoutes`, classify one bounded group for route-owner extraction or compat-only guard, and write the first implementation boundary. No production command or mutation. |
 
 ## Status Values
 
@@ -341,6 +343,8 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 - `blocked-by-prerequisite`
 - `needs-human-production-gate`
 - `hard-stop-reported`
+- `local-closure-reconciled`
+- `local-implementation-closed`
 
 ## Module Closure Values
 

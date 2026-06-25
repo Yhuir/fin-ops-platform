@@ -364,14 +364,13 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-None. The latest completed boundary is `planning:global-closure-hard-stop-report`, recorded in `analysis/global-closure-hard-stop-report-2026-06-25.md` as `hard-stop-reported`.
+Start with `server-py:etc-reconciliation-route-owner-residual-audit`.
 
-Current hard stop:
-- Do not claim global/module closure.
-- Browser production evidence requires an approved pinned runner runtime/wrapper and private non-logged token broker handoff.
-- Admin production evidence requires a supported non-secret admin auth seam.
-- Controlled write apply requires explicit approval, reviewed reversible target, rollback/idempotency/audit acceptance and suitable auth.
-- Resume only after one of those external/operational gates is supplied.
+Current local-first state:
+- `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
+- Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
+- Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
+- Continue with bounded local code/test/static-guard boundaries before production validation.
 
 Commit-backed baseline:
 - `planning:commit-backed-state-reconciliation` is complete in `analysis/commit-backed-state-reconciliation-2026-06-25.md`.
