@@ -1891,17 +1891,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("handle_request no longer delegates legacy ETC batch routes to route owner")
         if "EtcLegacyBatchApiRoutes(" not in route_factory:
             violations.append("_etc_legacy_batch_routes does not construct the route owner")
-        for required_callback in (
-            "list_batches=self._handle_api_etc_batches",
-            "detail=self._handle_api_etc_batch_detail",
-            "delete=self._handle_api_etc_batch_delete",
-            "create_draft=self._handle_api_etc_batch_draft",
-            "create_draft_for_batch=self._handle_api_etc_batch_draft_for_batch",
-            "confirm_submitted=self._handle_api_etc_batch_confirm_submitted",
-            "mark_not_submitted=self._handle_api_etc_batch_mark_not_submitted",
+        for required_port in (
+            "json_response=self._json_response",
+            "load_json_body=self._load_json_body",
+            "reconciliation_error_response=self._reconciliation_error_response",
+            "read_facade=self._etc_legacy_batch_read_facade()",
+            "delete_service=self._etc_legacy_batch_delete_service()",
+            "lifecycle_service=self._etc_legacy_batch_lifecycle_service()",
+            "build_oa_client=self._build_etc_oa_client",
+            "legacy_business_delete=self._handle_legacy_etc_batch_business_delete",
+            "refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link",
+            "persist_state=self._persist_state",
         ):
-            if required_callback not in route_factory:
-                violations.append(f"ETC legacy batch route owner lacks explicit callback {required_callback}")
+            if required_port not in route_factory:
+                violations.append(f"ETC legacy batch route owner lacks explicit port {required_port}")
         if "Application" in route_owner_init:
             violations.append("ETC legacy batch route owner accepts the whole Application")
         if "EtcLegacyBatchApiRoutes" not in route_owner_names:
@@ -1932,6 +1935,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in direct_dispatch_markers:
             if marker in handle_request:
                 violations.append(f"server.py reintroduced direct legacy ETC batch route dispatch {marker}")
+            if marker in server_source:
+                violations.append(f"server.py reintroduced legacy ETC batch callback {marker}")
 
         self.assertEqual(violations, [])
 
@@ -1942,8 +1947,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_path = SERVICES_ROOT / "etc_legacy_batch_delete_service.py"
         service_source = service_path.read_text(encoding="utf-8")
         service_tree = _parse(service_path)
+        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
 
-        delete_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_delete")
+        delete_handler = _function_source(route_tree, route_source, "_delete_response")
         service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_delete_service")
         service_imports = _imported_modules(service_tree)
 
@@ -1983,10 +1991,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_path = SERVICES_ROOT / "etc_legacy_batch_lifecycle_service.py"
         service_source = service_path.read_text(encoding="utf-8")
         service_tree = _parse(service_path)
+        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
 
-        draft_helper = _function_source(server_tree, server_source, "_create_etc_batch_draft_from_invoice_ids")
-        confirm_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_confirm_submitted")
-        reopen_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_mark_not_submitted")
+        draft_helper = _function_source(route_tree, route_source, "_create_draft_from_invoice_ids")
+        confirm_handler = _function_source(route_tree, route_source, "_confirm_submitted_response")
+        reopen_handler = _function_source(route_tree, route_source, "_mark_not_submitted_response")
         service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_lifecycle_service")
         service_imports = _imported_modules(service_tree)
 
@@ -2009,6 +2020,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in forbidden_handler_markers:
             if marker in draft_helper or marker in confirm_handler or marker in reopen_handler:
                 violations.append(f"legacy batch lifecycle handler still performs {marker}")
+        for removed_handler in (
+            "_create_etc_batch_draft_from_invoice_ids(",
+            "_handle_api_etc_batch_confirm_submitted(",
+            "_handle_api_etc_batch_mark_not_submitted(",
+        ):
+            if removed_handler in server_source:
+                violations.append(f"server.py reintroduced legacy batch lifecycle callback {removed_handler}")
         forbidden_imports = {
             "fin_ops_platform.app.server",
             "fin_ops_platform.app.auth",
@@ -2029,10 +2047,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         facade_path = SERVICES_ROOT / "etc_legacy_batch_read_facade.py"
         facade_source = facade_path.read_text(encoding="utf-8")
         facade_tree = _parse(facade_path)
+        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
 
-        list_handler = _function_source(server_tree, server_source, "_handle_api_etc_batches")
-        detail_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_detail")
-        draft_for_batch = _function_source(server_tree, server_source, "_handle_api_etc_batch_draft_for_batch")
+        list_handler = _function_source(route_tree, route_source, "_list_batches_response")
+        detail_handler = _function_source(route_tree, route_source, "_detail_response")
+        draft_for_batch = _function_source(route_tree, route_source, "_create_draft_for_batch_response")
         facade_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_read_facade")
         facade_imports = _imported_modules(facade_tree)
 
@@ -2058,6 +2079,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in forbidden_app_helpers:
             if marker in server_source:
                 violations.append(f"server.py still owns legacy batch read helper {marker}")
+        for removed_handler in (
+            "_handle_api_etc_batches(",
+            "_handle_api_etc_batch_detail(",
+            "_handle_api_etc_batch_draft_for_batch(",
+        ):
+            if removed_handler in server_source:
+                violations.append(f"server.py reintroduced legacy batch read callback {removed_handler}")
         forbidden_imports = {
             "fin_ops_platform.app.server",
             "fin_ops_platform.app.auth",

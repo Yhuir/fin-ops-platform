@@ -4853,13 +4853,15 @@ class Application:
             return routes
         routes = EtcLegacyBatchApiRoutes(
             json_response=self._json_response,
-            list_batches=self._handle_api_etc_batches,
-            detail=self._handle_api_etc_batch_detail,
-            delete=self._handle_api_etc_batch_delete,
-            create_draft=self._handle_api_etc_batch_draft,
-            create_draft_for_batch=self._handle_api_etc_batch_draft_for_batch,
-            confirm_submitted=self._handle_api_etc_batch_confirm_submitted,
-            mark_not_submitted=self._handle_api_etc_batch_mark_not_submitted,
+            load_json_body=self._load_json_body,
+            reconciliation_error_response=self._reconciliation_error_response,
+            read_facade=self._etc_legacy_batch_read_facade(),
+            delete_service=self._etc_legacy_batch_delete_service(),
+            lifecycle_service=self._etc_legacy_batch_lifecycle_service(),
+            build_oa_client=self._build_etc_oa_client,
+            legacy_business_delete=self._handle_legacy_etc_batch_business_delete,
+            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+            persist_state=self._persist_state,
         )
         self._etc_legacy_batch_api_routes = routes
         return routes
@@ -6254,46 +6256,7 @@ class Application:
         )
         return payload
 
-    def _handle_api_etc_batches(
-        self,
-        *,
-        status: str | None,
-        month: str | None,
-        plate: str | None,
-        keyword: str | None,
-        page: str | None,
-        page_size: str | None,
-    ) -> Response:
-        try:
-            resolved_page = int(page) if page not in (None, "") else 1
-            resolved_page_size = int(page_size) if page_size not in (None, "") else 50
-        except ValueError:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_batch_request", "message": "page and page_size must be integers."},
-            )
-
-        normalized_status = str(status or "").strip().lower()
-        payload = self._etc_legacy_batch_read_facade().list_payload(
-            status=normalized_status,
-            month=month,
-            plate=plate,
-            keyword=keyword,
-            page=resolved_page,
-            page_size=resolved_page_size,
-        )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_etc_batch_detail(self, batch_id: str) -> Response:
-        detail = self._etc_legacy_batch_read_facade().detail_payload(batch_id)
-        if detail is None:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "etc_batch_not_found", "message": f"ETC batch not found: {batch_id}"},
-            )
-        return self._json_response(HTTPStatus.OK, detail)
-
-    def _handle_api_etc_batch_delete(self, batch_id: str) -> Response:
+    def _handle_legacy_etc_batch_business_delete(self, batch_id: str) -> Response | None:
         if str(batch_id or "").strip().startswith("etc_business_batch_"):
             return self._handle_api_etc_business_batch_delete(
                 batch_id,
@@ -6305,25 +6268,7 @@ class Application:
                 str(getattr(linked_business_batch, "business_batch_id")),
                 json.dumps({"reason": "legacy_etc_batch_delete"}),
             )
-        try:
-            result = self._etc_legacy_batch_delete_service().delete_non_business_batch(batch_id)
-            for refresh_event in result.refresh_events:
-                self._refresh_after_etc_invoice_link(
-                    refresh_event.changed_months,
-                    reason=refresh_event.reason,
-                )
-                if refresh_event.persist_required:
-                    self._persist_state()
-        except EtcBatchNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        except EtcBatchDeleteError as error:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "etc_batch_delete_conflict", "message": str(error)},
-            )
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, result.delete_result)
+        return None
 
     def _handle_api_etc_revoke_submitted(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -6350,66 +6295,6 @@ class Application:
         self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_revoke_submitted")
         return self._json_response(HTTPStatus.OK, result)
 
-    def _handle_api_etc_batch_draft(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        invoice_ids = payload.get("invoiceIds")
-        if not isinstance(invoice_ids, list) or not all(isinstance(item, str) for item in invoice_ids):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": "invoiceIds must be a string array."},
-            )
-        return self._create_etc_batch_draft_from_invoice_ids(invoice_ids, headers)
-
-    def _handle_api_etc_batch_draft_for_batch(self, batch_id: str, headers: dict[str, str] | None = None) -> Response:
-        detail = self._etc_legacy_batch_read_facade().detail_payload(batch_id)
-        if detail is None:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "etc_batch_not_found", "message": f"ETC batch not found: {batch_id}"},
-            )
-        summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
-        if str(summary.get("status") or "") != "unsubmitted":
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": "Only unsubmitted ETC batches can create OA drafts."},
-            )
-        invoice_items = [item for item in list(detail.get("invoiceItems") or []) if isinstance(item, dict)]
-        invoice_ids = [str(item.get("id", "")).strip() for item in invoice_items if str(item.get("id", "")).strip()]
-        return self._create_etc_batch_draft_from_invoice_ids(invoice_ids, headers)
-
-    def _create_etc_batch_draft_from_invoice_ids(
-        self,
-        invoice_ids: list[str],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        try:
-            result = self._etc_legacy_batch_lifecycle_service().create_draft_from_invoice_ids(
-                invoice_ids,
-                oa_client=self._build_etc_oa_client(headers),
-            )
-        except EtcInvoiceNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        except EtcOAClientError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": str(error)},
-            )
-        except EtcDraftRequestError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": str(error)},
-            )
-        for refresh_event in result.refresh_events:
-            self._refresh_after_etc_invoice_link(
-                refresh_event.changed_months,
-                reason=refresh_event.reason,
-            )
-        return self._json_response(HTTPStatus.OK, result.payload)
-
     def _build_etc_oa_client(self, headers: dict[str, str] | None) -> HttpEtcOAClient | None:
         if not isinstance(self._etc_service.oa_client, NotConfiguredEtcOAClient):
             return None
@@ -6417,37 +6302,6 @@ class Application:
         if not token:
             raise EtcOAClientError("OA 登录 token 缺失，请从 OA 内打开本 app 或重新登录 OA 后再创建草稿。")
         return HttpEtcOAClient(token=token)
-
-    def _handle_api_etc_batch_confirm_submitted(self, batch_id: str) -> Response:
-        try:
-            result = self._etc_legacy_batch_lifecycle_service().confirm_submitted(batch_id)
-        except EtcBatchNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        except EtcDraftRequestError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_batch_request", "message": str(error)},
-            )
-        for refresh_event in result.refresh_events:
-            self._refresh_after_etc_invoice_link(
-                refresh_event.changed_months,
-                reason=refresh_event.reason,
-            )
-        return self._json_response(HTTPStatus.OK, result.payload)
-
-    def _handle_api_etc_batch_mark_not_submitted(self, batch_id: str) -> Response:
-        try:
-            result = self._etc_legacy_batch_lifecycle_service().mark_not_submitted(batch_id)
-        except EtcBatchNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
-        for refresh_event in result.refresh_events:
-            self._refresh_after_etc_invoice_link(
-                refresh_event.changed_months,
-                reason=refresh_event.reason,
-            )
-        return self._json_response(HTTPStatus.OK, result.payload)
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
         try:

@@ -127,7 +127,11 @@ Current known state to verify, not blindly trust:
   - `backend/src/fin_ops_platform/app/server.py` is still very large and may retain module-specific route, helper, read model and write-side responsibilities.
   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py` is still very large and may retain multiple module-specific SQL ownership surfaces.
   - Many route owners, services, repository ports, read model gateways, scope policies and static guards already exist. Reuse and extend them rather than creating parallel abstractions.
-- The new first controller boundary should be a fresh local implementation closure reconciliation, not production browser/admin/write validation.
+- Latest local-first progress to verify from `MODULE-QUEUE.md`, `STATE.md`, `JOURNAL.md` and `NEXT-PROMPT.md`:
+  - `planning:local-modular-code-closure-reconciliation` reopened local modular implementation before production validation.
+  - ETC reconciliation task, import and legacy batch route-owner/service/facade slices through `server-py:etc-legacy-batch-route-callback-collapse-audit` are expected to be complete.
+  - The next expected local boundary is `server-py:etc-invoice-route-owner-audit`.
+- The current controller boundary should come from `autonomous/NEXT-PROMPT.md` and the first pending queue row, not production browser/admin/write validation.
 - Verify all facts from git, CodeGraph, current files and `MODULE-QUEUE.md` before acting.
 
 Environment constraints:
