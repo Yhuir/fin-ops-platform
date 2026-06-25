@@ -1,5 +1,16 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-25 - turnover ledger route-owner audit
+
+- 目标：执行 `server-py:turnover-ledger-route-owner-audit`，审计 `/api/turnover-ledger*` 在 `server.py` 的剩余 route ownership。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、turnover-ledger 实施记录；不改变外部往来业务、写入、read model freshness、operation barrier、Workbench relation command 边界、导出或前端行为。
+- 关键决策：read/export/GET callbacks 是围绕 `TurnoverLedgerReadFacade`、`TurnoverLedgerApiRoutes` 和 settings payload 的薄 HTTP wrapper，可先做 route-owner collapse；mutation callbacks 仍承担 session/body/idempotency/stale precondition/error mapping，后续单独审计。
+- 文档影响：新增 modular IO turnover ledger route-owner audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；外部往来状态机定义不变。
+- 测试覆盖：本轮为分析/状态机闭合，未改运行时代码；下一实现边界需覆盖 `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` 和 `tests/test_platform_runtime_boundary_guards.py`。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `turnover-ledger` worker drain、真实闭环/撤回 Browser 样本、admin/write evidence 仍为最终验证范围。
+- 后续事项：执行 `server-py:turnover-ledger-read-export-route-callback-collapse`。
+
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
 ## 当前决策

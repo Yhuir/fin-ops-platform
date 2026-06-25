@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-route-owner-audit-selected`
+Current state: `turnover-ledger-read-export-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:cost-statistics-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-cost-statistics-route-owner-local-closure-audit-2026-06-25.md`. Cost statistics route-owner local support is accounted for: no `_handle_api_cost_statistics*` callbacks remain, and remaining cost statistics `Application` surfaces are explicit composition-root, query/runtime, source-version, persistence, cache, worker, warmup, import-scope or platform adapter ports. T0 selected turnover ledger route-owner audit next.
+Completed `server-py:turnover-ledger-route-owner-audit` as `analysis-closed` in `analysis/server-py-turnover-ledger-route-owner-audit-2026-06-25.md`. Turnover ledger read/export/GET callbacks are thin enough for a bounded route-owner collapse; mutation callbacks remain thicker session/body/idempotency/precondition wrappers for later audits. T0 selected turnover ledger read/export route callback collapse next.
 
 ## Closed Or Deferred Slices
 
