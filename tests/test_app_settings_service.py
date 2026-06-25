@@ -1249,6 +1249,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             {
                 "form_types": ["payment_request"],
                 "statuses": ["completed"],
+                "attachment_invoice_promotion_mode": "link_existing_only",
                 "available_form_types": [
                     {"id": "payment_request", "label": "支付申请"},
                     {"id": "expense_claim", "label": "日常报销"},

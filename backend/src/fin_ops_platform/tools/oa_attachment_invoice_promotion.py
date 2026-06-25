@@ -84,7 +84,6 @@ def audit_oa_attachment_invoice_promotion(
     action_counts: Counter[str] = Counter()
     reason_counts: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = {}
-    created_invoice_ids: set[str] = set()
     created_identity_keys: set[str] = set()
     linked_invoice_ids: set[str] = set()
     affected_invoices: list[Invoice] = []
@@ -123,12 +122,27 @@ def audit_oa_attachment_invoice_promotion(
         action_counts[decision.action] += 1
         reason_counts[decision.reason] += 1
 
+        if decision.action == CREATE_INVOICE_AND_LINK:
+            if decision.identity_key:
+                created_identity_keys.add(decision.identity_key)
+            _append_example(
+                examples,
+                f"{CREATE_INVOICE_AND_LINK}:{decision.reason}",
+                _candidate_example(
+                    candidate,
+                    action=CREATE_INVOICE_AND_LINK,
+                    reason=decision.reason,
+                    identity_key=decision.identity_key,
+                ),
+                example_limit=example_limit,
+            )
+            continue
+
         invoice = import_service.upsert_oa_attachment_invoice(
             candidate.attachment_invoice,
             oa_form_id=candidate.oa_form_id,
             oa_row_id=candidate.oa_row_id,
             source_workbench_row_id=candidate.source_workbench_row_id,
-            allow_create=decision.action == CREATE_INVOICE_AND_LINK,
         )
         if invoice is None:
             reason = "upsert_returned_none"
@@ -147,9 +161,6 @@ def audit_oa_attachment_invoice_promotion(
             linked_invoice_ids.add(invoice.id)
             effective_action = LINK_EXISTING_INVOICE
         else:
-            created_invoice_ids.add(invoice.id)
-            if invoice.source_unique_key:
-                created_identity_keys.add(invoice.source_unique_key)
             effective_action = CREATE_INVOICE_AND_LINK
         _append_example(
             examples,
@@ -175,7 +186,7 @@ def audit_oa_attachment_invoice_promotion(
             "existing_identity_count": len(initial_identity_keys),
             "cache_candidate_count": len(candidates),
             "linked_existing_invoice_count": len(linked_invoice_ids),
-            "created_invoice_count": len(created_invoice_ids),
+            "created_invoice_count": len(created_identity_keys),
             "created_identity_count": len(created_identity_keys),
             "final_in_memory_invoice_count": len(final_invoices),
             "persisted": bool(apply),

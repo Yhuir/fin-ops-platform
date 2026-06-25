@@ -3292,7 +3292,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         checked_sources = {
             method_name: _function_source(tree, source, method_name)
             for method_name in (
-                "_no_oa_bank_batch_source_versions",
+                "_no_oa_bank_batch_workbench_source_versions",
                 "_workbench_read_model_source_versions",
             )
         }
@@ -4857,9 +4857,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Route-owner local closure audit missing marker: {marker}")
-        if "`server-py:workbench-row-detail-route-owner-audit`" not in next_prompt_source:
+        if (
+            "`server-py:workbench-row-detail-route-owner-audit`" not in next_prompt_source
+            and "| 214 | `server-py:workbench-row-detail-route-owner-audit` | analysis-closed" not in queue_source
+        ):
             violations.append("Next prompt no longer points at Workbench row detail route owner audit")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+        if (
+            "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source
+            and "Do not choose Go implementation; Go admission remains blocked." not in next_prompt_source
+        ):
             violations.append("Next prompt no longer forbids Go implementation during the row detail audit")
         if "Modern Workbench action route-owner local closure audit" not in notes_source:
             violations.append("Workbench relations implementation notes missing local closure audit record")
@@ -4903,9 +4909,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench row detail route-owner audit missing marker: {marker}")
-        if "`server-py:workbench-row-detail-route-owner-extraction`" not in next_prompt_source:
+        if (
+            "`server-py:workbench-row-detail-route-owner-extraction`" not in next_prompt_source
+            and "| 215 | `server-py:workbench-row-detail-route-owner-extraction` | implementation-closed"
+            not in queue_source
+        ):
             violations.append("Next prompt no longer points at Workbench row detail route-owner extraction")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+        if (
+            "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source
+            and "Do not choose Go implementation; Go admission remains blocked." not in next_prompt_source
+        ):
             violations.append("Next prompt no longer forbids Go implementation during row detail extraction")
         if "Workbench row detail route-owner audit" not in notes_source:
             violations.append("Workbench relations implementation notes missing row detail route-owner audit record")
@@ -5069,7 +5082,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             violations.append("Workbench group detail route-owner audit is not closed as analysis")
         if (
-            "| 217 | `server-py:workbench-group-detail-route-owner-extraction` | pending"
+            "| 217 | `server-py:workbench-group-detail-route-owner-extraction` | pending" not in queue_source
+            and "| 218 | `server-py:workbench-group-detail-route-owner-extraction` | implementation-closed"
             not in queue_source
         ):
             violations.append("Workbench group detail route-owner audit no longer records extraction follow-up")
@@ -5086,9 +5100,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench group detail route-owner audit missing marker: {marker}")
-        if "`server-py:workbench-group-detail-route-owner-extraction`" not in next_prompt_source:
+        if (
+            "`server-py:workbench-group-detail-route-owner-extraction`" not in next_prompt_source
+            and "| 218 | `server-py:workbench-group-detail-route-owner-extraction` | implementation-closed"
+            not in queue_source
+        ):
             violations.append("Next prompt no longer points at Workbench group detail route-owner extraction")
-        if "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source:
+        if (
+            "Do not implement Go, Go Fiber or Go Worker." not in next_prompt_source
+            and "Do not choose Go implementation; Go admission remains blocked." not in next_prompt_source
+        ):
             violations.append("Next prompt no longer forbids Go implementation during group detail extraction")
         if "Workbench group detail route-owner audit" not in notes_source:
             violations.append("Workbench relations implementation notes missing group detail route-owner audit record")
@@ -5632,7 +5653,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations",
             "repair_active_relations_with_oa_attachment_context=self._repair_active_relations_with_oa_attachment_context",
             "apply_pair_relations_to_payload=self._apply_pair_relations_to_payload",
-            "apply_overrides_to_payload=self._workbench_override_service.apply_to_payload",
+            "apply_overrides_to_payload=lambda payload: self._workbench_override_service.apply_to_payload(payload)",
         ):
             if marker not in assembler_builder_source:
                 violations.append(f"Application raw assembler builder missing explicit dependency: {marker}")

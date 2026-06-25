@@ -761,6 +761,69 @@ class PostgresCoreRepository:
             for invoice in serialized_invoices:
                 self._update_invoice_etc_metadata(connection, invoice)
 
+    def repair_submitted_etc_invoice_overlap(
+        self,
+        *,
+        invoice_id: str,
+        etc_invoice_id: str,
+        etc_batch_id: str | None,
+        reason: str,
+        operator: str,
+    ) -> int:
+        return int(
+            self._connection.execute(
+                """
+                update app.invoices
+                set etc_invoice_id = %s,
+                    workbench_visibility = 'hidden_after_etc_submission',
+                    tags = case
+                        when 'ETC' = any(coalesce(tags, array[]::text[])) then tags
+                        else array_append(coalesce(tags, array[]::text[]), 'ETC')
+                    end,
+                    source_links = coalesce(source_links, '[]'::jsonb) || jsonb_build_array(
+                        jsonb_build_object(
+                            'source_type', 'etc_invoice_import',
+                            'source_id', %s,
+                            'batch_id', coalesce(%s, ''),
+                            'created_at', now()::text,
+                            'repair_reason', %s,
+                            'operator', %s
+                        )
+                    ),
+                    raw_payload = jsonb_set(
+                        jsonb_set(
+                            jsonb_set(
+                                coalesce(raw_payload, '{}'::jsonb),
+                                '{normalized_payload,etc_invoice_id}',
+                                to_jsonb(%s::text),
+                                true
+                            ),
+                            '{normalized_payload,etc_submission_status}',
+                            to_jsonb('submitted'::text),
+                            true
+                        ),
+                        '{normalized_payload,workbench_visibility}',
+                        to_jsonb('hidden_after_etc_submission'::text),
+                        true
+                    ),
+                    updated_at = now()
+                where id::text = %s
+                  and coalesce(workbench_visibility, 'visible') = 'visible'
+                  and nullif(etc_invoice_id, '') is null
+                """,
+                (
+                    self._text(etc_invoice_id),
+                    self._text(etc_invoice_id),
+                    self._text(etc_batch_id),
+                    self._text(reason),
+                    self._text(operator),
+                    self._text(etc_invoice_id),
+                    self._text(invoice_id),
+                ),
+            )
+            or 0
+        )
+
     def load_file_imports(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
             """

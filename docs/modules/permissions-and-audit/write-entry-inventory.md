@@ -19,6 +19,7 @@
 | `保存设置` | settings 普通配置保存 |
 | `保存计划` | tax offset 计划保存 |
 | `保存规则` | pending/OA/input/output 规则保存 |
+| `保存并刷新` | input invoice usage 支付状态规则保存并刷新 read model |
 | `保存外部往来款` | turnover extra save |
 | `保存补充信息` | bank details 人工补分类 |
 | `保存收据编号设置` | output invoice receipt settings |
@@ -95,7 +96,6 @@
 | `确认重开` | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | 销项收款收据重开确认。 |
 | `确认关系` | `web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx` | 销项红蓝票关系确认。 |
 | `创建 OA 草稿` | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 进项发票反提 OA 草稿创建。 |
-| `确认已支付` | `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx` | OA pending 确认已支付写回。 |
 | `关联支出流水` | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending 关联支出流水。 |
 | `关联OA项` | `web/src/pages/BatchAccountingPage.tsx` | 批量账务关联 OA 项与流水。 |
 | `确认闭环` | `web/src/components/workbench/OaBankExceptionModal.tsx` | 关联台异常直接闭环。 |

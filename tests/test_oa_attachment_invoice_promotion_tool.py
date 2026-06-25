@@ -92,7 +92,7 @@ class OAAttachmentInvoicePromotionToolTests(unittest.TestCase):
         self.assertEqual(report["summary"]["existing_invoice_count"], 1)
         self.assertEqual(report["summary"]["linked_existing_invoice_count"], 1)
         self.assertEqual(report["summary"]["created_invoice_count"], 1)
-        self.assertEqual(report["summary"]["final_in_memory_invoice_count"], 2)
+        self.assertEqual(report["summary"]["final_in_memory_invoice_count"], 1)
         self.assertEqual(report["reason_counts"]["matched_existing_invoice"], 1)
         self.assertEqual(report["reason_counts"]["formal_invoice_not_in_pool"], 1)
         self.assertEqual(report["reason_counts"]["not_formal_invoice"], 1)

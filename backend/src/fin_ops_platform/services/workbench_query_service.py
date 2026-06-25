@@ -233,6 +233,7 @@ class WorkbenchQueryService:
     ) -> None:
         with self._records_lock:
             seen_ids: set[str] = set()
+            attachment_invoice_rows_by_id: dict[str, dict[str, Any]] = {}
             normalized_target_months = {
                 str(month).strip()
                 for month in list(target_months or [])
@@ -248,10 +249,14 @@ class WorkbenchQueryService:
                     new_row = self._merge_existing_oa_row(existing, new_row)
                 self._records_by_id[new_row["id"]] = new_row
                 seen_ids.add(new_row["id"])
+                for attachment_row in self._build_oa_attachment_invoice_rows(record, new_row):
+                    attachment_invoice_rows_by_id[str(attachment_row["id"])] = attachment_row
             self._remove_legacy_attachment_invoice_rows(
                 target_months=normalized_target_months if prune_missing else set(),
                 derived_from_oa_ids=seen_ids,
             )
+            for row_id, attachment_row in attachment_invoice_rows_by_id.items():
+                self._records_by_id[row_id] = attachment_row
 
             if not prune_missing:
                 return
@@ -264,6 +269,143 @@ class WorkbenchQueryService:
                     if row["_section"] == "open" and relation["code"] in {"pending_match", "oa_pending_approval"}:
                         del self._records_by_id[row_id]
                     continue
+
+    def _build_oa_attachment_invoice_rows(
+        self,
+        record: OAApplicationRecord | object,
+        oa_row: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        attachment_invoices = self._attachment_invoices(record)
+        if not attachment_invoices:
+            attachment_invoices = [
+                evidence
+                for evidence in self._attachment_evidences(record)
+                if self._attachment_evidence_source_kind(evidence) == OA_ATTACHMENT_INVOICE_SOURCE_KIND
+            ]
+        rows: list[dict[str, Any]] = []
+        oa_row_id = str(oa_row.get("id") or "").strip()
+        if not oa_row_id:
+            return rows
+        for index, attachment_invoice in enumerate(attachment_invoices):
+            source_kind = self._attachment_evidence_source_kind(attachment_invoice)
+            if source_kind != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                continue
+            row_id = OBJECT_IDENTITY_POLICY.oa_attachment_invoice_row_id(oa_row_id, index, attachment_invoice)
+            source_expense_item_id = str(attachment_invoice.get("source_expense_item_id") or "").strip()
+            source_attachment_key = str(attachment_invoice.get("source_attachment_key") or "").strip()
+            source_attachment_name = str(
+                attachment_invoice.get("source_attachment_name")
+                or attachment_invoice.get("attachment_name")
+                or ""
+            ).strip()
+            invoice_no = self._invoice_identity_display_value(attachment_invoice.get("invoice_no"))
+            digital_invoice_no = self._invoice_identity_display_value(attachment_invoice.get("digital_invoice_no"))
+            invoice_code = self._invoice_identity_display_value(attachment_invoice.get("invoice_code"))
+            issue_date = self._invoice_identity_display_value(
+                attachment_invoice.get("issue_date") or attachment_invoice.get("invoice_date")
+            )
+            amount = str(attachment_invoice.get("amount") or attachment_invoice.get("total_with_tax") or "0.00").strip()
+            total_with_tax = str(attachment_invoice.get("total_with_tax") or amount or "0.00").strip()
+            tax_amount = str(attachment_invoice.get("tax_amount") or "0.00").strip()
+            invoice_type = str(attachment_invoice.get("invoice_type") or "进项发票").strip() or "进项发票"
+            seller_name = str(attachment_invoice.get("seller_name") or attachment_invoice.get("merchant_name") or "").strip()
+            buyer_name = str(attachment_invoice.get("buyer_name") or "").strip()
+            tags = ["OA附件"]
+            source_link = {
+                "source_type": OA_ATTACHMENT_INVOICE_SOURCE_KIND,
+                "derived_from_oa_id": oa_row_id,
+                "source_workbench_row_id": row_id,
+                "source_expense_item_id": source_expense_item_id,
+                "source_attachment_key": source_attachment_key,
+                "source_attachment_name": source_attachment_name,
+                "source_expense_row_index": str(attachment_invoice.get("source_expense_row_index") or ""),
+                "source_region_key": str(attachment_invoice.get("source_region_key") or ""),
+                "evidence_type": str(attachment_invoice.get("evidence_type") or ""),
+                "document_kind": str(attachment_invoice.get("document_kind") or ""),
+            }
+            detail_fields = {
+                "序号": row_id,
+                "发票代码": invoice_code,
+                "发票号码": invoice_no,
+                "数电发票号码": digital_invoice_no,
+                "销方识别号": self._invoice_identity_display_value(attachment_invoice.get("seller_tax_no")),
+                "销方名称": seller_name or "—",
+                "购方识别号": self._invoice_identity_display_value(attachment_invoice.get("buyer_tax_no")),
+                "购买方名称": buyer_name or "—",
+                "开票日期": issue_date,
+                "金额": amount,
+                "税率": str(attachment_invoice.get("tax_rate") or "—"),
+                "税额": tax_amount,
+                "价税合计": total_with_tax,
+                "发票类型": invoice_type,
+                "发票来源": "OA附件解析",
+                "发票票种": str(attachment_invoice.get("invoice_kind") or "—"),
+                "备注": str(attachment_invoice.get("remark") or "—"),
+                "标签": "、".join(tags),
+                "来源OA单号": self._oa_display_number_for_attachment_invoice(oa_row),
+                "来源付款项ID": source_expense_item_id or "—",
+                "来源附件Key": source_attachment_key or "—",
+                "附件文件名": source_attachment_name or "—",
+            }
+            rows.append(
+                {
+                    "id": row_id,
+                    "type": "invoice",
+                    "source_kind": OA_ATTACHMENT_INVOICE_SOURCE_KIND,
+                    "status": "open",
+                    "case_id": None,
+                    "seller_tax_no": str(attachment_invoice.get("seller_tax_no") or ""),
+                    "seller_name": seller_name,
+                    "buyer_tax_no": str(attachment_invoice.get("buyer_tax_no") or ""),
+                    "buyer_name": buyer_name,
+                    "invoice_code": invoice_code,
+                    "invoice_no": invoice_no,
+                    "digital_invoice_no": digital_invoice_no,
+                    "issue_date": issue_date,
+                    "counterparty_name": seller_name or buyer_name,
+                    "amount": amount,
+                    "tax_rate": str(attachment_invoice.get("tax_rate") or "—"),
+                    "tax_amount": tax_amount,
+                    "total_with_tax": total_with_tax,
+                    "invoice_type": invoice_type,
+                    "invoice_bank_relation": self.pending_relation("invoice"),
+                    "tags": tags,
+                    "source_links": [source_link],
+                    "derived_from_oa_id": oa_row_id,
+                    "source_workbench_row_id": row_id,
+                    "source_attachment_key": source_attachment_key,
+                    "source_attachment_name": source_attachment_name,
+                    "source_expense_item_id": source_expense_item_id,
+                    "source_expense_row_index": source_link["source_expense_row_index"],
+                    "source_region_key": source_link["source_region_key"],
+                    "evidence_type": source_link["evidence_type"],
+                    "document_kind": source_link["document_kind"],
+                    "source_oa_month": str(getattr(record, "month", "") or oa_row.get("_month") or ""),
+                    "available_actions": self.available_actions("invoice", "open"),
+                    "summary_fields": {
+                        "销方名称": seller_name or "—",
+                        "购买方名称": buyer_name or "—",
+                        "开票日期": issue_date,
+                        "金额": amount,
+                        "税额": tax_amount,
+                        "价税合计": total_with_tax,
+                        "发票类型": invoice_type,
+                        "发票来源": "OA附件解析",
+                    },
+                    "detail_fields": detail_fields,
+                    "_month": str(getattr(record, "month", "") or oa_row.get("_month") or ""),
+                    "_section": str(oa_row.get("_section") or "open"),
+                    "_summary_fields": {
+                        "销方名称": seller_name or "—",
+                        "购买方名称": buyer_name or "—",
+                        "开票日期": issue_date,
+                        "价税合计": total_with_tax,
+                        "发票类型": invoice_type,
+                    },
+                    "_detail_fields": detail_fields,
+                }
+            )
+        return rows
 
     def _remove_legacy_attachment_invoice_rows(
         self,
@@ -605,6 +747,17 @@ class WorkbenchQueryService:
     def _invoice_identity_display_value(value: Any) -> str:
         text = str(value or "").strip()
         return text if text and text not in {"—", "--"} else "—"
+
+    @staticmethod
+    def _oa_display_number_for_attachment_invoice(oa_row: dict[str, Any]) -> str:
+        for fields_key in ("_detail_fields", "detail_fields", "_summary_fields", "summary_fields"):
+            fields = oa_row.get(fields_key)
+            if isinstance(fields, dict):
+                for key in ("OA单号", "单据编号", "申请单号"):
+                    value = str(fields.get(key) or "").strip()
+                    if value:
+                        return value
+        return str(oa_row.get("id") or "—")
 
     @staticmethod
     def _attachment_evidence_source_kind(attachment_evidence: dict[str, Any]) -> str:

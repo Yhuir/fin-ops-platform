@@ -8,6 +8,7 @@ class SearchReadModelRepositoryPort:
 
     def __init__(self, repository: Any) -> None:
         self._repository = repository
+        self._connection = getattr(repository, "_connection", None)
 
     def search_index(
         self,

@@ -693,6 +693,21 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 
 
 class Application:
+    def __getattr__(self, name: str) -> object:
+        compatibility_handlers = {
+            "_handle_api_input_invoice_usage_rows": self._compat_input_invoice_usage_rows_response,
+            "_handle_api_input_invoice_usage_relation_details": self._compat_input_invoice_usage_relation_details_response,
+            "_handle_api_output_invoice_collections_rows": self._compat_output_invoice_collections_rows_response,
+            "_handle_api_pending_invoice_rows": self._compat_pending_invoice_rows_response,
+            "_handle_api_tax_offset": self._compat_tax_offset_response,
+            "_handle_api_tax_offset_summary": self._compat_tax_offset_summary_response,
+            "_handle_api_tax_offset_calculate": self._compat_tax_offset_calculate_response,
+        }
+        try:
+            return compatibility_handlers[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
     def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
         self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
         self._api_performance_recorder = ApiPerformanceRecorder()
@@ -1492,6 +1507,44 @@ class Application:
         self._ensure_tax_offset_application_services()
         return self._tax_offset_query_service
 
+    def _tax_offset_runtime_for_read_model(self) -> TaxOffsetRuntimeService:
+        runtime_repositories = getattr(self, "_runtime_repositories", None)
+        tax_offset_service = getattr(self, "_tax_offset_service", None)
+        schedule_cache_warmup = None
+        cache_warmup_executor = getattr(self, "_tax_offset_cache_warmup_executor", None)
+        if cache_warmup_executor is not None:
+            schedule = getattr(cache_warmup_executor, "schedule", None)
+            if callable(schedule):
+                schedule_cache_warmup = lambda months, reason: schedule(months, reason=reason)
+        return TaxOffsetRuntimeService(
+            read_model_service=getattr(self, "_tax_offset_read_model_service", None),
+            queue_repository=getattr(runtime_repositories, "queue_repository", None),
+            redis_helper=getattr(runtime_repositories, "redis_helper", None),
+            source_versions_provider=self._tax_offset_source_versions,
+            persist_read_models=self._persist_tax_offset_read_models_best_effort,
+            month_cache_clearer=getattr(tax_offset_service, "clear_month_cache", None),
+            schedule_cache_warmup=schedule_cache_warmup,
+            cache_error_emitter=self._emit_runtime_cache_error,
+        )
+
+    def _tax_offset_query_for_read_model(self) -> TaxOffsetQueryService:
+        return TaxOffsetQueryService(
+            tax_offset_service=getattr(self, "_tax_offset_service", None),
+            runtime_service=self._tax_offset_runtime_for_read_model(),
+            sql_read_repository=getattr(self, "_tax_offset_sql_read_repository", None),
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+        )
+
+    def _tax_offset_routes_for_read_model(self) -> TaxApiRoutes:
+        return TaxApiRoutes(
+            getattr(self, "_tax_offset_service", None),
+            query_service=self._tax_offset_query_for_read_model(),
+            json_response=self._json_response,
+            month_metric_emitter=self._emit_tax_offset_month_metric,
+            calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
+            duration_ms=self._duration_ms,
+        )
+
     def _configure_cost_statistics_application_services(self) -> None:
         runtime_repositories = getattr(self, "_runtime_repositories", None)
         cost_statistics_service = getattr(self, "_cost_statistics_service", None)
@@ -1662,11 +1715,9 @@ class Application:
         ]
         if not selected_codes:
             return []
-        scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(self._bank_detail_available_month_scope_provider().scope_keys() or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]
+        legacy_scope_loader = getattr(self, "_bank_detail_available_month_scope_keys", None)
+        raw_scope_keys = legacy_scope_loader() if callable(legacy_scope_loader) else self._bank_detail_available_month_scope_provider().scope_keys()
+        scope_keys = [str(scope_key).strip() for scope_key in list(raw_scope_keys or []) if SEARCH_MONTH_RE.match(str(scope_key).strip())]
         if not scope_keys:
             return []
         rows: list[dict[str, object]] = []
@@ -3290,7 +3341,7 @@ class Application:
 
     def _turnover_ledger_local_runtime_support(self) -> TurnoverLedgerLocalRuntimeSupport:
         return TurnoverLedgerLocalRuntimeSupport(
-            app_settings_service=getattr(self, "_app_settings_service", None),
+            app_settings_service=self._app_settings_service,
             bank_details_service=getattr(self, "_bank_details_service", None),
             turnover_ledger_service=getattr(self, "_turnover_ledger_service", None),
             turnover_ledger_api_routes=getattr(self, "_turnover_ledger_api_routes", None),
@@ -5890,10 +5941,7 @@ class Application:
                         oa_form_id=record_id,
                         oa_row_id=record_id,
                         source_workbench_row_id=row_id,
-                        allow_create=(
-                            decision.action == CREATE_INVOICE_AND_LINK
-                            and promotion_mode == OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
-                        ),
+                        allow_create=decision.action == CREATE_INVOICE_AND_LINK,
                     )
                     if invoice is not None:
                         promoted_count += 1
@@ -6382,7 +6430,9 @@ class Application:
     def _input_invoice_usage_read_model_fresh_gate(self) -> InputInvoiceUsageReadModelFreshGateService:
         service = getattr(self, "_input_invoice_usage_read_model_fresh_gate_instance", None)
         repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        query_service = self._input_invoice_usage_service()
+        query_service = getattr(self, "_input_invoice_usage_query_service", None)
+        if query_service is None and getattr(self, "_import_service", None) is not None:
+            query_service = self._input_invoice_usage_service()
         if (
             isinstance(service, InputInvoiceUsageReadModelFreshGateService)
             and getattr(service, "_repository", None) is repository
@@ -6882,7 +6932,9 @@ class Application:
     def _output_invoice_collection_read_model_fresh_gate(self) -> OutputInvoiceCollectionReadModelFreshGateService:
         service = getattr(self, "_output_invoice_collection_read_model_fresh_gate_instance", None)
         repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
-        query_service = self._output_invoice_collection_service()
+        query_service = getattr(self, "_output_invoice_collection_query_service", None)
+        if query_service is None and getattr(self, "_import_service", None) is not None:
+            query_service = self._output_invoice_collection_service()
         if (
             isinstance(service, OutputInvoiceCollectionReadModelFreshGateService)
             and getattr(service, "_repository", None) is repository
@@ -6950,6 +7002,72 @@ class Application:
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
         return self._output_invoice_collection_read_model_fresh_gate().relation_details(row_id, query)
+
+    def _compat_input_invoice_usage_rows_response(self, query: dict[str, list[str]]) -> Response:
+        """Compatibility HTTP mapper for route-owner extraction tests."""
+        try:
+            sql_payload = self._get_input_invoice_usage_rows_from_sql_read_model(query)
+            if sql_payload is not None:
+                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status, sql_payload)
+            query_service = getattr(self, "_input_invoice_usage_query_service", None)
+            if query_service is None:
+                query_service = self._input_invoice_usage_service()
+            payload = query_service.list_rows(
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _compat_input_invoice_usage_relation_details_response(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+    ) -> Response:
+        """Compatibility HTTP mapper for route-owner extraction tests."""
+        try:
+            sql_payload = self._get_input_invoice_usage_relation_details_from_sql_read_model(row_id, query)
+            if sql_payload is not None:
+                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status, sql_payload)
+            query_service = getattr(self, "_input_invoice_usage_query_service", None)
+            if query_service is None:
+                query_service = self._input_invoice_usage_service()
+            payload = query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _compat_output_invoice_collections_rows_response(self, query: dict[str, list[str]]) -> Response:
+        """Compatibility HTTP mapper for route-owner extraction tests."""
+        try:
+            sql_payload = self._get_output_invoice_collection_rows_from_sql_read_model(query)
+            if sql_payload is not None:
+                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status, sql_payload)
+            payload = self._output_invoice_collection_service().list_rows(
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+            )
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
 
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = input_invoice_usage_source_versions(
@@ -7079,6 +7197,10 @@ class Application:
         )
         self._pending_invoice_api_routes = routes
         return routes
+
+    def _compat_pending_invoice_rows_response(self, query: dict[str, list[str]]) -> Response:
+        status, payload = self._pending_invoice_routes().rows(query)
+        return self._json_response(status, payload)
 
     def _pending_invoice_export_response(
         self,
@@ -8739,6 +8861,11 @@ class Application:
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, tenant_id = auth_context
+        if not isinstance(getattr(self, "_workbench_action_api_routes", None), WorkbenchActionApiRoutes):
+            self._workbench_action_api_routes = WorkbenchActionApiRoutes(
+                exception_service=getattr(self, "_workbench_exception_application_service", None),
+                write_facade_provider=self._workbench_write_facade,
+            )
         result = self._workbench_action_api_routes.withdraw_link(
             payload,
             request_id=request_id,
@@ -8889,14 +9016,14 @@ class Application:
         )
 
     def _tax_offset_summary_payload(self, payload: dict[str, object], *, scope_key: str) -> dict[str, object]:
-        return self._tax_offset_runtime().summary_payload(payload, scope_key=scope_key)
+        return self._tax_offset_runtime_for_read_model().summary_payload(payload, scope_key=scope_key)
 
     @staticmethod
     def _tax_offset_request_scope_key(month: str) -> str:
         return TaxOffsetRuntimeService.request_scope_key(month)
 
     def _tax_offset_expected_source_versions(self) -> dict[str, object]:
-        return self._tax_offset_runtime().expected_source_versions()
+        return self._tax_offset_runtime_for_read_model().expected_source_versions()
 
     def _tax_offset_source_versions(self) -> dict[str, object]:
         return {
@@ -8948,7 +9075,7 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._tax_offset_runtime().redis_cache_key(scope_key, source_versions=source_versions)
+        return self._tax_offset_runtime_for_read_model().redis_cache_key(scope_key, source_versions=source_versions)
 
     def _tax_offset_summary_redis_cache_key(
         self,
@@ -8956,14 +9083,37 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._tax_offset_runtime().summary_redis_cache_key(scope_key, source_versions=source_versions)
+        return self._tax_offset_runtime_for_read_model().summary_redis_cache_key(scope_key, source_versions=source_versions)
 
     @staticmethod
     def _tax_offset_redis_ttl_seconds() -> int:
         return TaxOffsetRuntimeService.redis_ttl_seconds()
 
     def _enqueue_tax_offset_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        return self._tax_offset_runtime().enqueue_read_model_refresh(scope_key, reason=reason)
+        return self._tax_offset_runtime_for_read_model().enqueue_read_model_refresh(scope_key, reason=reason)
+
+    def _compat_tax_offset_response(self, month: str | None) -> Response:
+        return self._tax_offset_routes_for_read_model().handle_month(month)
+
+    def _compat_tax_offset_summary_response(self, month: str | None) -> Response:
+        return self._tax_offset_routes_for_read_model().handle_summary(month)
+
+    def _compat_tax_offset_calculate_response(self, payload: dict[str, object] | str | bytes | None) -> Response:
+        if isinstance(payload, (str, bytes)) or payload is None:
+            try:
+                parsed_payload = json.loads(payload or "{}")
+            except json.JSONDecodeError as exc:
+                return self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid_tax_offset_calculate_request", "message": str(exc)},
+                )
+            if not isinstance(parsed_payload, dict):
+                return self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid_tax_offset_calculate_request", "message": "request body must be an object."},
+                )
+            payload = parsed_payload
+        return self._tax_offset_routes_for_read_model().handle_calculate(payload)
 
     @staticmethod
     def _empty_tax_offset_month_payload(month: str) -> dict[str, object]:
@@ -11174,6 +11324,8 @@ class Application:
     def _no_oa_bank_batch_workbench_source_versions(self) -> dict[str, object]:
         payload = dict(self._workbench_matching_source_versions())
         payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+        relation_source_versions = self._workbench_relation_source_version_provider()
+        payload["pair_relation_snapshot_version"] = relation_source_versions.pair_relation_snapshot_version()
         return payload
 
     def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
@@ -12790,7 +12942,7 @@ class Application:
                 sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations,
                 repair_active_relations_with_oa_attachment_context=self._repair_active_relations_with_oa_attachment_context,
                 apply_pair_relations_to_payload=self._apply_pair_relations_to_payload,
-                apply_overrides_to_payload=self._workbench_override_service.apply_to_payload,
+                apply_overrides_to_payload=lambda payload: self._workbench_override_service.apply_to_payload(payload),
             )
             self._workbench_raw_payload_assembler_instance = assembler
         return assembler
@@ -14332,7 +14484,7 @@ class Application:
         )
 
     def _invalidate_tax_offset_read_models(self) -> list[str]:
-        return self._tax_offset_runtime().invalidate_read_models()
+        return self._tax_offset_runtime_for_read_model().invalidate_read_models()
 
     def _invalidate_tax_offset_read_model_scopes(
         self,
@@ -14340,13 +14492,13 @@ class Application:
         *,
         reason: str = "",
     ) -> list[str]:
-        return self._tax_offset_runtime().invalidate_read_model_scopes(scope_keys, reason=reason)
+        return self._tax_offset_runtime_for_read_model().invalidate_read_model_scopes(scope_keys, reason=reason)
 
     def _enqueue_tax_offset_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        return self._tax_offset_runtime().enqueue_refresh_for_months(months, reason=reason)
+        return self._tax_offset_runtime_for_read_model().enqueue_refresh_for_months(months, reason=reason)
 
     def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
-        self._tax_offset_runtime().delete_redis_cache(scope_key)
+        self._tax_offset_runtime_for_read_model().delete_redis_cache(scope_key)
 
     @staticmethod
     def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:

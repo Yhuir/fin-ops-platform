@@ -2803,33 +2803,35 @@ class EtcApiTests(unittest.TestCase):
     def test_etc_business_batch_detail_returns_invoice_items_without_detection_fields(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-
-            create_response = app.handle_request(
-                "POST",
-                "/api/etc/business-batches",
-                json.dumps({"taskId": "ETC-TASK-DETAIL"}),
-            )
-            created = json.loads(create_response.body)["data"]["businessBatch"]
-            preview_body, preview_headers = multipart(
-                {"invoices.zip": etc_zip(["ETC001"])},
-                {"expectedVersion": str(created["version"])},
-            )
-            preview_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                preview_body,
-                preview_headers,
-            )
-            preview = json.loads(preview_response.body)["data"]
-            confirm_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                json.dumps({
-                    "sessionId": preview["sessionId"],
-                    "expectedVersion": preview["businessBatch"]["version"],
-                }),
-            )
-            detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
+            try:
+                create_response = app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({"taskId": "ETC-TASK-DETAIL"}),
+                )
+                created = json.loads(create_response.body)["data"]["businessBatch"]
+                preview_body, preview_headers = multipart(
+                    {"invoices.zip": etc_zip(["ETC001"])},
+                    {"expectedVersion": str(created["version"])},
+                )
+                preview_response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                    preview_body,
+                    preview_headers,
+                )
+                preview = json.loads(preview_response.body)["data"]
+                confirm_response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                    json.dumps({
+                        "sessionId": preview["sessionId"],
+                        "expectedVersion": preview["businessBatch"]["version"],
+                    }),
+                )
+                detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
+            finally:
+                app.shutdown_background_jobs()
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(preview_response.status_code, 200)

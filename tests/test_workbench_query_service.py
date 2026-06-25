@@ -596,7 +596,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_row["case_id"], "CASE-MANUAL-001")
         self.assertEqual(refreshed_row["oa_bank_relation"]["code"], "fully_linked")
 
-    def test_attachment_invoices_stay_on_oa_detail_without_publishing_invoice_rows(self) -> None:
+    def test_attachment_invoices_publish_invoice_rows_and_stay_on_oa_detail(self) -> None:
         service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -607,7 +607,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("detail_fields", {}).get("来源OA单号") == "OA-ATT-001"
         ]
-        self.assertEqual(attachment_invoice_rows, [])
+        self.assertEqual(len(attachment_invoice_rows), 1)
+        self.assertEqual(attachment_invoice_rows[0]["source_kind"], "oa_attachment_invoice")
+        self.assertEqual(attachment_invoice_rows[0]["invoice_no"], "40512344")
+        self.assertEqual(attachment_invoice_rows[0]["source_links"][0]["derived_from_oa_id"], oa_row["id"])
         self.assertIsNone(oa_row["case_id"])
 
         oa_detail = service.get_row_detail(oa_row["id"])
@@ -627,7 +630,11 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == oa_row["id"]
         ]
-        self.assertEqual(attachment_invoice_rows, [])
+        self.assertEqual(
+            sorted(row["invoice_no"] for row in attachment_invoice_rows),
+            ["40512344", "40512345"],
+        )
+        self.assertTrue(all(row["source_kind"] == "oa_attachment_invoice" for row in attachment_invoice_rows))
         self.assertIsNone(oa_row["case_id"])
         self.assertIn("多明细", oa_row["tags"])
         self.assertIn("金额差异", oa_row["tags"])
@@ -648,7 +655,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(detail_fields["附件发票数量"], "2")
         self.assertIn("40512344", detail_fields["附件发票摘要"])
 
-    def test_source_bound_attachment_invoice_rows_are_not_published_by_oa_query_service(self) -> None:
+    def test_source_bound_attachment_invoice_rows_publish_with_source_context(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -660,7 +667,14 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-248"
         ]
-        self.assertEqual(invoice_rows, [])
+        self.assertEqual(
+            sorted(row["invoice_no"] for row in invoice_rows),
+            ["24800001", "24800002", "24800003"],
+        )
+        first_invoice = next(row for row in invoice_rows if row["invoice_no"] == "24800001")
+        self.assertEqual(first_invoice["source_expense_item_id"], "oa-exp-hurong-248:item:0:maint")
+        self.assertEqual(first_invoice["source_attachment_key"], "oa-exp-hurong-248:item:0:att:a")
+        self.assertEqual(first_invoice["source_attachment_name"], "付款项1-发票A.pdf")
         self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "3")
         self.assertIn("24800003", oa_rows[0]["detail_fields"]["附件发票摘要"])
 
@@ -678,10 +692,13 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-evidence-2035"
         ]
-        self.assertEqual(evidence_rows, [])
+        self.assertEqual(len(evidence_rows), 1)
+        self.assertEqual(evidence_rows[0]["invoice_no"], "53000125")
+        self.assertEqual(evidence_rows[0]["evidence_type"], "machine_invoice")
+        self.assertEqual(evidence_rows[0]["document_kind"], "云南通用机打发票")
         self.assertIn("53000125", oa_row["detail_fields"]["附件发票摘要"])
 
-    def test_single_source_attachment_invoice_is_not_published_from_expense_item_copy(self) -> None:
+    def test_single_source_attachment_invoice_publishes_once_from_expense_item_copy(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -693,7 +710,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-292"
         ]
-        self.assertEqual(invoice_rows, [])
+        self.assertEqual(len(invoice_rows), 1)
+        self.assertEqual(invoice_rows[0]["invoice_no"], "29200001")
+        self.assertEqual(invoice_rows[0]["source_expense_item_id"], "oa-exp-hurong-292:item:0:energy")
+        self.assertEqual(invoice_rows[0]["source_attachment_key"], "oa-exp-hurong-292:item:0:att:only")
         self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "1")
         self.assertIn("29200001", oa_rows[0]["detail_fields"]["附件发票摘要"])
 

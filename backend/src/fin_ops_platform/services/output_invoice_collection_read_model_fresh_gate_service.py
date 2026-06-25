@@ -5,10 +5,7 @@ from typing import Any, Callable
 from fin_ops_platform.services.output_invoice_collection_read_model_detail_service import (
     OutputInvoiceCollectionReadModelDetailService,
 )
-from fin_ops_platform.services.output_invoice_collection_service import (
-    OutputInvoiceCollectionError,
-    OutputInvoiceCollectionQueryService,
-)
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
     source_version_mismatch_reasons,
@@ -20,7 +17,7 @@ class OutputInvoiceCollectionReadModelFreshGateService:
         self,
         *,
         repository: Any | None,
-        query_service: OutputInvoiceCollectionQueryService,
+        query_service: Any | None,
         requires_sql_read_model_runtime: Callable[[], bool],
         enqueue_refresh: Callable[[str, str], bool],
         expected_source_versions: Callable[..., dict[str, object]],
@@ -109,13 +106,13 @@ class OutputInvoiceCollectionReadModelFreshGateService:
         if stale_reasons:
             self._enqueue_refresh(scope_key, "api_source_versions_stale")
             return self.refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
-        parsed_filters = self._query_service._parse_filters(query.get("filters", [None])[0])
-        sort_field, sort_direction = self._query_service._parse_sort(
+        parsed_filters = self._parse_filters(query.get("filters", [None])[0])
+        sort_field, sort_direction = self._parse_sort(
             query.get("sort_field", ["invoice_date"])[0],
             query.get("sort_direction", ["desc"])[0],
         )
         result = dict(payload)
-        result["filterConfig"] = self._query_service._filter_config()
+        result["filterConfig"] = self._filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
         result["sort"] = {"field": sort_field, "direction": sort_direction}
         result["read_model_status"] = "fresh"
@@ -160,6 +157,26 @@ class OutputInvoiceCollectionReadModelFreshGateService:
             if not isinstance(row.get("receipt"), dict):
                 return True
         return False
+
+    def _parse_filters(self, raw_filters: object) -> dict[str, object]:
+        parser = getattr(self._query_service, "_parse_filters", None)
+        if callable(parser):
+            return parser(raw_filters)
+        return {}
+
+    def _parse_sort(self, raw_field: object, raw_direction: object) -> tuple[str, str]:
+        parser = getattr(self._query_service, "_parse_sort", None)
+        if callable(parser):
+            return parser(raw_field, raw_direction)
+        field = str(raw_field or "invoice_date").strip() or "invoice_date"
+        direction = str(raw_direction or "desc").strip().lower()
+        return field, "asc" if direction == "asc" else "desc"
+
+    def _filter_config(self) -> list[dict[str, object]]:
+        loader = getattr(self._query_service, "_filter_config", None)
+        if callable(loader):
+            return loader()
+        return []
 
     @staticmethod
     def scope_key_from_query(query: dict[str, list[str]]) -> str:

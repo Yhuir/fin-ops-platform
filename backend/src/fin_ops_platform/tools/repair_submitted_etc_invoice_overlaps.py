@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
@@ -71,47 +72,6 @@ where invoices.invoice_type = 'input'
         )
   )
 order by invoices.invoice_month nulls last, invoices.invoice_date nulls last, invoices.invoice_no, etc_invoices.etc_invoice_id
-"""
-
-
-APPLY_SQL = """
-update app.invoices
-set etc_invoice_id = %s,
-    workbench_visibility = 'hidden_after_etc_submission',
-    tags = case
-        when 'ETC' = any(coalesce(tags, array[]::text[])) then tags
-        else array_append(coalesce(tags, array[]::text[]), 'ETC')
-    end,
-    source_links = coalesce(source_links, '[]'::jsonb) || jsonb_build_array(
-        jsonb_build_object(
-            'source_type', 'etc_invoice_import',
-            'source_id', %s,
-            'batch_id', coalesce(%s, ''),
-            'created_at', now()::text,
-            'repair_reason', %s,
-            'operator', %s
-        )
-    ),
-    raw_payload = jsonb_set(
-        jsonb_set(
-            jsonb_set(
-                coalesce(raw_payload, '{}'::jsonb),
-                '{normalized_payload,etc_invoice_id}',
-                to_jsonb(%s::text),
-                true
-            ),
-            '{normalized_payload,etc_submission_status}',
-            to_jsonb('submitted'::text),
-            true
-        ),
-        '{normalized_payload,workbench_visibility}',
-        to_jsonb('hidden_after_etc_submission'::text),
-        true
-    ),
-    updated_at = now()
-where id::text = %s
-  and coalesce(workbench_visibility, 'visible') = 'visible'
-  and nullif(etc_invoice_id, '') is null
 """
 
 
@@ -279,22 +239,21 @@ def apply_submitted_etc_invoice_overlap_repair(
 
 
 def _apply_candidates(target: Any, candidates: list[dict[str, Any]], *, reason: str, operator: str) -> int:
+    repository = PostgresCoreRepository(target)
     updated_count = 0
     for candidate in candidates:
         updated_count += int(
-            target.execute(
-                APPLY_SQL,
-                (
-                    candidate["etc_invoice_id"],
-                    candidate["etc_invoice_id"],
-                    candidate.get("etc_batch_id"),
-                    reason,
-                    operator,
-                    candidate["etc_invoice_id"],
-                    candidate["invoice_id"],
+            repository.repair_submitted_etc_invoice_overlap(
+                invoice_id=str(candidate["invoice_id"]),
+                etc_invoice_id=str(candidate["etc_invoice_id"]),
+                etc_batch_id=(
+                    str(candidate.get("etc_batch_id"))
+                    if candidate.get("etc_batch_id") is not None
+                    else None
                 ),
+                reason=reason,
+                operator=operator,
             )
-            or 0
         )
     return updated_count
 

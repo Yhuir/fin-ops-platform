@@ -1,6 +1,10 @@
 # Bank Account Balance E2E Coverage
 
-当前不定义独立 Browser E2E coverage。
+当前不定义独立 Browser E2E coverage；本模块是资源/API read model。
+
+| Spec ID | 状态 | 覆盖 | 说明 |
+| --- | --- | --- | --- |
+| `BANK-BAL-E2E-001` | `covered-api` | `tests/test_bank_account_balance_api.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/api/bank-details/accounts` 账户余额 read model contract、`bank_account_balance:all` scope policy、worker registry、operation barrier 和禁止回退到 bank detail repository port。 |
 
 覆盖归属：
 

@@ -1880,13 +1880,24 @@ class TurnoverLedgerWorkbenchPairPort:
         transaction: Any,
         bank_row_ids: list[str] | None = None,
     ) -> None:
-        _ = transaction
         case_id = self._turnover_case_id(relation_id)
         if not case_id:
             raise TurnoverLedgerWritePreconditionError(
                 error_code="invalid_relation_id",
                 message="relation_id is required.",
             )
+        relation_command_service = self._relation_command_service(transaction)
+        command_relation = self._active_relation_by_case_id_from_command(
+            relation_command_service,
+            case_id,
+        )
+        if command_relation is not None:
+            if not self._is_turnover_manual_closure_withdrawable_from_turnover(command_relation):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_closure_withdraw_requires_workbench",
+                    message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
+                )
+            return
         active_relation = self._active_relation_by_case_id_from_facade(case_id, list(bank_row_ids or []))
         if active_relation is not None:
             if not self._is_turnover_manual_closure_withdrawable_from_turnover(active_relation):
@@ -2207,6 +2218,24 @@ class TurnoverLedgerWorkbenchPairPort:
                 else {},
             }
         return None
+
+    @staticmethod
+    def _active_relation_by_case_id_from_command(
+        relation_command_service: Any,
+        case_id: str,
+    ) -> dict[str, object] | None:
+        if relation_command_service is None or not hasattr(
+            relation_command_service,
+            "get_active_relation_by_case_id",
+        ):
+            return None
+        try:
+            relation = relation_command_service.get_active_relation_by_case_id(case_id)
+        except WorkbenchRelationCommandError as exc:
+            if getattr(exc, "error_code", "") == "workbench_relation_not_found":
+                return None
+            raise
+        return dict(relation) if isinstance(relation, dict) else None
 
     @staticmethod
     def _is_turnover_manual_closure_withdrawable_from_turnover(relation: dict[str, object]) -> bool:
