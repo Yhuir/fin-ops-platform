@@ -1,56 +1,56 @@
 # Next Prompt
 
-Continue after `server-py:input-invoice-usage-export-route-callback-collapse`.
+Continue after `server-py:input-invoice-usage-payment-rules-write-boundary-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:input-invoice-usage-export-route-callback-collapse`.
-- Row351 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`.
-- `InputInvoiceUsageApiRoutes` now owns rows/filter/detail/relation/payment-rules GET plus export preview/download HTTP mapping.
-- `server.py` no longer owns `_handle_api_input_invoice_usage_export_preview(...)` or `_handle_api_input_invoice_usage_export(...)`.
-- `server.py` still owns `PUT /api/input-invoice-usage/payment-status-rules`.
+- Last completed boundary: `server-py:input-invoice-usage-payment-rules-write-boundary-audit`.
+- Row352 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`.
+- `InputInvoiceUsageApiRoutes` owns input usage read/export HTTP mapping.
+- `server.py` still owns `PUT /api/input-invoice-usage/payment-status-rules` as a thin HTTP wrapper.
 
 ## Previous Prompt Completion
 
-`server-py:input-invoice-usage-export-route-callback-collapse` is complete for local implementation:
+`server-py:input-invoice-usage-payment-rules-write-boundary-audit` is complete:
 
-- export preview/download route callbacks were moved into `InputInvoiceUsageApiRoutes`;
-- explicit export/auth/audit/XLSX ports are injected from `Application`;
-- static Guard and targeted API regressions passed;
-- production validation was not run and remains final validation only.
+- settings validation, persistence, audit, version conflict and idempotency conflict live in the settings service/provider;
+- `Application` owns session/body/error mapping and actor fallback;
+- refresh fan-out is already isolated in `_enqueue_input_invoice_usage_payment_rules_refreshes(...)`;
+- the next safe local implementation is route callback collapse with explicit ports.
 
 ## Next Boundary
 
-`server-py:input-invoice-usage-payment-rules-write-boundary-audit`
+`server-py:input-invoice-usage-payment-rules-route-callback-collapse`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`
    - `backend/src/fin_ops_platform/app/routes_input_invoice_usage.py`
    - `backend/src/fin_ops_platform/app/server.py` around `_handle_api_input_invoice_usage_payment_status_rules_update(...)`
-   - settings service code owning `update_input_invoice_usage_payment_status_rules(...)`
-   - read-model refresh fan-out helpers used after payment rules save
-   - `tests/test_input_invoice_usage_api.py`
+   - `backend/src/fin_ops_platform/services/app_settings_service.py`
+   - `tests/test_input_invoice_usage_payment_rules.py`
+   - `tests/test_auth_guard.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Use CodeGraph before implementation-oriented changes.
-4. Audit the payment-status-rules PUT boundary before moving code:
-   - request body and validation ownership;
-   - read-session/auth/mutation permission behavior;
-   - actor fallback and audit behavior;
-   - settings service ownership;
-   - read-model refresh fan-out and persistence side effects;
-   - API response/error shape;
-   - whether the right next slice is route-owner callback collapse, service extraction, or retained compat wrapper with explicit deletion conditions.
-5. Write the analysis file and update state/docs.
-6. If the audit proves a safe narrow implementation slice, generate and execute that next slice immediately.
+3. Use CodeGraph before editing.
+4. Implement callback collapse narrowly:
+   - extend `InputInvoiceUsageApiRoutes.route(...)` to handle `PUT /api/input-invoice-usage/payment-status-rules`;
+   - inject explicit ports for settings service, body parsing, refresh fan-out and payment-rules error mapping;
+   - remove `_handle_api_input_invoice_usage_payment_status_rules_update(...)` from `server.py`;
+   - keep `_enqueue_input_invoice_usage_payment_rules_refreshes(...)` in `Application` as an explicit refresh producer port for this slice.
+5. Update tests:
+   - static Guard must prove the PUT callback is route-owned and removed from `server.py`;
+   - payment rules API test must exercise the public route path, not the removed private handler;
+   - keep permission denial and conflict/validation behavior covered.
+6. Update analysis/state/docs and commit/push if verification passes.
 
 ## Stop Gates
 
-- Do not move payment rules PUT in the same step unless the audit proves the callback is already thin enough and all side effects are explicit ports.
-- Do not change payment rules API response shape, validation messages, permission behavior, audit behavior or read-model refresh semantics.
+- Do not change settings service validation, persistence, audit metadata, idempotency semantics or response payload shape.
+- Do not move read-model enqueue/gateway behavior into the route owner.
+- Do not weaken mutation permission checks.
 - Do not run production validation or perform production mutation.
-- Do not claim input usage module/global closure from Row351 or Row352 alone.
+- Do not claim input usage module/global closure from this route-owner slice alone.

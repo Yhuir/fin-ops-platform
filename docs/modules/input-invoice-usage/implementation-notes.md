@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Payment rules PUT write boundary audit
+
+- 目标：审计 `PUT /api/input-invoice-usage/payment-status-rules` 写边界，决定是否可以迁入 route owner。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：支付状态规则的验证、版本冲突、幂等冲突、持久化和审计已经在 settings service/provider；`Application` callback 只保留 session/body/error/actor mapping 和刷新 fan-out。下一步可将 PUT HTTP mapping 收进 `InputInvoiceUsageApiRoutes`，但刷新 fan-out helper 先作为显式端口保留在 `Application`。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需扩展 static Guard，并把 payment rules 保存测试改走公开 route path。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status、browser/admin/write 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-payment-rules-route-callback-collapse`。
+
 ## 2026-06-25 - Input usage export route callback collapse
 
 - 目标：把进项使用 export preview/download HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。
