@@ -660,3 +660,13 @@
 - 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 payload response shape 回归和 static Guard。
 - 验证命令：只读审计 `server.py`、route owner、source upload service 和 Guard；未运行测试。
 - 未测风险：payload helper 仍在 `Application`，等待 payload facade audit/extraction。
+
+## 2026-06-25 - ETC reconciliation task payload facade审计
+
+- 目标：审计仍在 `Application` 的 reconciliation task payload/read-shaping helper，并选择下一条本地实现边界。
+- 影响范围：task payload、unavailable task payload、import blockers、imported invoice summary、`canConfirm`、source file payload、parse issue payload、route-owner wiring 和 static Guard。
+- 关键决策：这些 helper 不只是通用序列化，而是 ETC reconciliation route-facing response contract；下一步抽出显式 payload facade，由 `server.py` 只负责组装 import-batch lookup 与 serializer dependency，并向 `EtcReconciliationTaskApiRoutes` 注入 facade 方法。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 facade/service 单测、API response-shape 回归和 static Guard。
+- 验证命令：只读审计 `server.py`、route owner、payload tests、Guard 和 CodeGraph；未运行运行时测试。
+- 未测风险：payload helper 仍在 `Application`，等待 facade extraction。

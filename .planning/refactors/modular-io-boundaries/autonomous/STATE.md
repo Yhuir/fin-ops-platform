@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-task-payload-facade-audit-selected`
+Current state: `etc-reconciliation-task-payload-facade-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-route-owner-local-closure-audit-2026-06-25.md`. T0 confirmed no `_handle_api_etc_reconciliation*` callbacks remain in `server.py`, but route payload/read-shaping helpers still live in `Application`; selected task payload facade audit next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-task-payload-facade-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-payload-facade-audit-2026-06-25.md`. T0 confirmed the remaining reconciliation payload helpers in `Application` own route-facing response shape, import blockers, imported invoice summary, source/parse issue shaping and `canConfirm` semantics; selected explicit task payload facade extraction next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`production:read-model-full-user-scope-api-metadata-smoke-after-turnover-fixes`
+`server-py:etc-reconciliation-task-payload-facade-audit`
 
 ## Next Prompt
 
-`planning:post-full-user-api-smoke-browser-admin-write-evidence-selection`
+`server-py:etc-reconciliation-task-payload-facade-extraction`
