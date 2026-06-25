@@ -693,3 +693,14 @@ git diff --check
   - no-OA worker 发布后日志抽样未出现新的 FK violation、dead-letter、PoolTimeout 或 shared-memory 错误。
 - 未执行：没有手工 SQL 更新/删除、没有 mark-done、没有 broad replay、没有 repair `--apply`、没有输出 secret。
 - 剩余风险：历史 obsolete `dead_lettered` rows 仍存在，但当前 `/health/ready` 不再把它们计为 blocker；如需清理，必须另开 bounded maintenance runbook。
+
+## 2026-06-26 - no-OA source-version freshness contract 收敛
+
+- 目标：修复生产受控写后 HTTP SLO 中 no-OA 列表持续返回 `read_model_status=stale` 的问题。
+- 根因：no-OA read model 的 `source_versions` 同时记录了顶层 `workbench_relation_source_versions`、嵌套在 `bank_detail_source_versions` 内的 relation source versions，以及来自旧 in-memory pair relation snapshot 的 `pair_relation_snapshot_version`。工作台业务写入后，relation 事实源已经是 SQL read-side facade，但 no-OA worker 仍可能把旧 snapshot hash 写入 no-OA source versions，导致 API expected-source gate 永久判定 mismatch。
+- 决策：
+  - no-OA 的 relation freshness 只由顶层 `workbench_relation_source_versions` 表达。
+  - `bank_detail_source_versions` 只保留 bank detail 自身和分类相关稳定字段，剥离嵌套 `workbench_relation_source_versions`。
+  - no-OA source versions 不再写 `pair_relation_snapshot_version`，避免旧 worker in-memory snapshot 污染 read model freshness gate。
+- 测试覆盖：更新 `tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_source_versions_include_bank_detail_source_versions_from_tag_facade`，锁定 bank detail 依赖剥离 relation 子版本且 no-OA 不再输出 pair snapshot hash。
+- 验证命令：见本次最终交付说明。

@@ -245,7 +245,12 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                     "scope_key": "2026-04",
                     "source_version": 11,
                     "bank_detail_source_signature": "signature-v1",
-                    "nested": {"source_version": 12, "stable": "kept"},
+                    "workbench_relation_source_versions": {"relation": "old"},
+                    "nested": {
+                        "source_version": 12,
+                        "stable": "kept",
+                        "workbench_relation_source_versions": {"relation": "nested-old"},
+                    },
                 }
             }
 
@@ -277,6 +282,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                 }
             },
         )
+        self.assertNotIn("pair_relation_snapshot_version", source_versions)
 
     def test_facade_non_fresh_error_does_not_save_no_oa_snapshot(self) -> None:
         class ImportService:

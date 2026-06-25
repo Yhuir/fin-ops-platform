@@ -87,7 +87,7 @@ class NoOaPairRelationSnapshotPort:
 def _stable_dependency_source_versions(source_versions: dict[str, object]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in dict(source_versions).items():
-        if key == "source_version":
+        if key in {"source_version", "workbench_relation_source_versions"}:
             continue
         if isinstance(value, dict):
             result[key] = _stable_dependency_source_versions(value)
@@ -933,7 +933,6 @@ class NoOaBankBatchApplicationService:
             "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
             "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "pair_relation_snapshot_version": self._pair_relation_snapshot_port.snapshot_version(),
             "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._bank_transaction_category_service.snapshot()
             ),
