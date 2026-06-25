@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-task-route-owner-facade-extracted`
+Current state: `etc-reconciliation-task-delete-side-effect-audited`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-task-route-owner-facade-extraction` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-task-route-owner-facade-extraction-2026-06-25.md`. T0 added `EtcReconciliationTaskApiRoutes`, delegated `/api/etc/reconciliation-tasks*` from `server.py`, removed unused app-owned root/list/create/ready/detail/subroute helpers, and added static route-owner guard coverage plus targeted ETC API regressions. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-reconciliation-task-delete-side-effect-service-audit`.
+Completed `server-py:etc-reconciliation-task-delete-side-effect-service-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-delete-side-effect-service-audit-2026-06-25.md`. T0 classified task delete/imported-invoice delete callbacks as cleanup-service work, not route-owner work, and selected `server-py:etc-reconciliation-import-cleanup-service-extraction` as the next local implementation boundary. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
