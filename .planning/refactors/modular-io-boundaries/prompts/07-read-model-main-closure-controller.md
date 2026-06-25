@@ -2,7 +2,7 @@
 
 **Status:** User-authorized specialized entrypoint
 **Use with:** `/goal`
-**Purpose:** Run a high-efficiency GSD controller on `main` to complete the Read Model modularization refactor for all page/domain read models. The controller works in waves, generates the next executable prompt from verified state, immediately executes it, and repeats until read model local implementation, tests, docs, legacy retirement and production freshness evidence are closed or a precise hard stop is reached.
+**Purpose:** Run a high-efficiency GSD controller on `main` to complete the end-to-end Read Model closure for all page/domain read models and all page read/write flows. The controller works in waves, generates the next executable prompt from verified state, immediately executes it, and repeats until read APIs, write APIs, dirty scope/outbox, worker projection, readiness/freshness, operation barrier, frontend refresh behavior, tests, docs, legacy retirement and production evidence are closed or a precise hard stop is reached.
 
 ## Important Main Branch Override
 
@@ -28,8 +28,15 @@ Paste the following prompt into one Codex thread as the only starting prompt:
 
 你是 Codex，工作目录是 /Users/yu/Desktop/fin-ops-platform，目标分支是 main。
 
+第一动作，必须先获取 Admin Token:
+- 在执行 git、读文件、SSH、生产检查或任何后续操作前，先给用户一个专门的 Admin Token 输入弹窗。
+- 弹窗标题使用 `Admin Token`，说明使用范围为本次 read model closure 生产 API 验证；输入内容必须被视为 secret。
+- token 只能保存在当前 controller 运行时内存或当前进程临时环境中，用于本次生产 API 验证；不得写入 repo、`.planning/`、docs、prompt、普通本地文件、shell history、日志、测试 fixture、截图或 worker prompt。
+- 如果当前 Codex 环境没有不会落入 transcript/tool output/log 的安全弹窗或等价 secure secret input，不要要求用户在普通聊天中粘贴 token；应 hard-stop 在 credential acquisition gate，并说明需要安全 secret input 能力后才能继续生产 API 验证。
+- 获取 token 后，后续输出只允许报告 `admin token acquired from secure popup for this session`，不得打印、摘要、截断、编码、hash 或持久化 token。
+
 Objective:
-完成全量 Read Model 模块化重构闭环。所有页面/domain read model 必须具备清晰模块边界和 I/O 合同，默认目标态是 Partitioned + Scoped + Incremental Projection。例外必须显式登记、测试和证明。完成后不能存在已知 stale-as-fresh、旧链路污染新链路、未登记 dirty/outbox/readiness 写入、未证明 freshness 的页面数据，不能把不 fresh 的 payload 展示成 fresh。
+完成全量 Read Model 读写闭环和模块化重构闭环。所有页面/domain read model、所有页面读 API、所有会影响页面数据的写 API、页面刷新链路、dirty scope/outbox、worker projection、readiness/freshness、operation barrier、frontend stale/refreshing/fresh 行为和生产级证据必须闭合。所有 read model 必须具备清晰模块边界和 I/O 合同，默认目标态是 Partitioned + Scoped + Incremental Projection。例外必须显式登记、测试和证明。完成后不能存在已知 stale-as-fresh、旧链路污染新链路、写后不返回或不等待 affected scopes/freshness targets、未登记 dirty/outbox/readiness 写入、未证明 freshness 的页面数据，不能把不 fresh 的 payload 展示成 fresh。
 
 重要现实约束:
 - 不要承诺“永远没有 bug”。你必须把目标解释为：零已知 read model bug、零已知 stale-as-fresh、所有合同和验证门禁通过、所有无法本地证明的生产 freshness 证据已实际收集或精确 hard-stop。
@@ -38,7 +45,27 @@ Objective:
 - 不允许无边界大爆炸重构。每个 wave 必须有明确 owner、输入、输出、影响范围、测试和回滚点。
 - 你必须在 main 上直接推进，这是用户授权的例外策略。不要切到 dev，不要把实现提交推到 dev。
 
+此次目标范围:
+- 覆盖所有页面和资源 read model，不只覆盖 manifest 或单个 API。
+- 覆盖所有页面读操作: 首屏、筛选、排序、分页、summary、detail、导出前置数据、搜索、跨页面聚合和 App Status/operation barrier 可见状态。
+- 覆盖所有会影响页面 read model 的写操作: 确认关联、撤回、提交、规则保存、导入确认、状态变更、收款/红冲/收据操作、标签/分类、批量账务、设置重置、OA 相关写入和受控修复/回滚。
+- 每个写操作必须证明 `write success -> affected scopes/freshness targets -> dirty/outbox -> worker -> projection/readiness -> operation barrier or page fresh reload -> frontend fresh display` 的链路闭合。
+- 每个生产验证样本必须通过业务 API/业务 UI/已有业务 command 执行验证操作。恢复优先使用业务撤回/恢复操作；如果某个样本没有业务恢复路径，用户已预批准 controller 通过操作前快照 + 精确 where 条件 + 单事务/可回滚 runbook + 前后校验的最小生产 DB 写恢复到操作前状态。禁止通过 DB 修改来制造样本、伪造 read model fresh、绕过业务验证或修正非样本数据。
+- 旧 read model 逻辑、旧模块、旧 fallback、旧 shared repository 入口和旧页面刷新假设必须从新链路中剔除。默认做法是删除；如果短期不能删除，只能 hard-quarantine 为 normal production path 不可达的 compat-only 代码，并用静态 guard、caller list、删除条件和测试证明不会污染新链路。
+- 如果需要生产 rollout，本次用户已批准生产 rollout；仍必须遵守 backup、deploy、verification、rollback 和 no-secrets 规则。
+
+自动推进和预批准策略:
+- 用户已预批准: main 直接工作、生产 rollout、root SSH 生产验证、低风险生产样本选择、生产业务操作验证、样本恢复、以及当业务恢复路径不存在时的最小 DB 恢复。
+- 不要因为缺少 staging DB、PGSQL_URL、样本业务恢复路径、需要 rollout、需要 SSH、需要低风险样本选择或需要恢复样本而询问用户；controller 必须自行选择安全路径并推进。
+- 只有不可自动化的安全/访问/事实阻断才允许 hard stop，例如无安全 token 输入且生产 API 必须 token、无法访问生产且无等价验证入口、main 无法安全同步、生产写入范围无法界定、无法取得操作前快照、无法构造精确恢复条件、恢复后无法校验、或继续执行会造成无法回滚的财务/权限/安全风险。
+
 最终完成定义:
+0. 每个页面读写操作闭环:
+   - 每个页面读 API 必须有 fresh/stale/refreshing/failed/missing/unavailable 的显式合同，不得把非 fresh 数据当成 fresh rows。
+   - 每个页面写 API 必须返回或暴露 affected read model scopes、freshness targets、operation barrier targets、version/job 或明确的不适用理由。
+   - 前端写后必须等待 operation barrier 或目标 read model fresh reload；不能只凭 POST 200、local optimistic state 或固定延迟展示最终 fresh 数据。
+   - 每个写后刷新链路必须能从业务操作追踪到 dirty scope/outbox、worker event、projection owner、readiness/source/schema proof、API payload 和页面显示。
+   - 每个页面至少有一个 local automated write/read closure proof；生产样本按风险抽样，用业务逻辑执行验证操作，优先业务恢复；无业务恢复路径时用已预批准的最小 DB 恢复协议恢复到操作前状态。
 1. `READ_MODEL_MANIFEST` 覆盖所有页面/domain read model，并与 App Status registry、worker registry、RabbitMQ dispatch、scope policy、docs 和 tests 保持一致。
 2. 每个 read model 都有明确合同:
    - read_model_key
@@ -103,6 +130,7 @@ Objective:
    - worker 成功后没有 readiness/source_versions/schema_version proof。
    - 前端只 refetch 页面但不等待 operation barrier 或 fresh gate。
    - 生产缺 SQL view/repository 时 live rebuild 并返回 fresh。
+   - 旧代码、旧模块、旧 fallback、legacy shared repository 或旧 frontend refresh assumption 仍可被正常生产读写链路调用。
 8. 允许例外，但必须显式证明:
    - `workbench`: 保留 active generation 原子发布，不机械改成普通 projection。
    - `bank_account_balance`: all-only scoped projection。
@@ -123,23 +151,34 @@ Objective:
    - 事务内 writer 必须承担等价 scope contract。
    - 业务 service 不得直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
 12. 所有 legacy path:
-   - 删除，或隔离为 compat-only，或标记 blocked-by-human-gate。
-   - 旧路径不得写 canonical facts、dirty scopes、outbox events、readiness、cache、App Status。
-   - 保留路径必须有 owner、caller list、删除条件、静态 guard 和测试。
+   - 默认必须删除。不能删除的路径必须 hard-quarantine 为 compat-only，并证明 normal production read/write/refresh path 不可达；否则不能声明 closure。
+   - 旧路径不得写 canonical facts、dirty scopes、outbox events、readiness、cache、App Status，不得服务页面 read API，不得触发 frontend final fresh state。
+   - 保留路径必须有 owner、caller list、删除条件、静态 guard、测试和明确到 wave 的删除计划；没有删除计划的 compat-only 等同未完成。
+   - `server.py`、`postgres_repositories/read_models.py`、direct dirty/outbox SQL、legacy/local/live scan fallback、stale-as-fresh default、frontend default fresh assumptions 必须进入旧代码污染清单并逐项删除或 hard-quarantine。
 13. 完成后必须有生产 freshness 证据:
    - App Status 当前 read model scope 不应有未覆盖 blocker。
    - 关键页面 API 不返回 stale-as-fresh。
    - worker/outbox/dirty scope/readiness 事实链一致。
    - 没有 staging/local PGSQL_URL 时，使用已授权的 root SSH 生产受控证据，但不得输出 secret。
+   - 没有 staging 数据库和本地 PGSQL_URL 时，不能因此降低代码闭环标准；先完成代码层 PSCIP-L3，再使用生产只读/受控业务操作证据完成 PSCIP-L4。
+   - 对生产可选样本，用户已授权由 controller 自行选择低风险样本执行验证；样本必须通过业务逻辑执行验证操作，并优先通过业务逻辑恢复到操作前状态。
+   - 如果样本缺少业务恢复路径，controller 必须自动使用最小 DB 恢复协议: 操作前记录目标行主键和必要字段快照，写明精确 where 条件，单事务恢复，仅恢复样本相关 canonical facts，不更新 readiness/outbox/dirty scopes 来伪造 fresh，恢复后通过业务 read API、readiness 和审计/一致性检查证明回到操作前状态。
+   - 生产样本验证必须记录: 样本选择理由、操作前状态摘要、业务操作入口、affected scopes、barrier/freshness 结果、恢复策略、恢复入口或 DB runbook 名称、恢复后状态摘要和未泄露敏感 payload 的证明。
 14. 服务器和数据库操作策略:
    - 默认 code-first。Partitioned、Scoped、Incremental Projection 的边界、I/O、storage owner、builder、worker、gateway、barrier、frontend behavior、tests、docs、migrations 和 runbooks 必须先在代码仓库中完成，不能靠手工进生产库修状态来代替重构。
    - 需要进入服务器/数据库的场景只包括: 应用 migration/schema/index/view/projection table 变更、受控 backfill/repair、读取 App Status/dirty/outbox/readiness/worker health、采集 query plan/latency/performance evidence、执行已写明 scope 的 safe smoke/force refresh。
    - 所有 schema/index/table/view/readiness 结构变化必须以 repo 中的 migration 或等价版本化脚本表达；所有 backfill/repair 必须有 runbook、明确 scopes、前置检查、回滚/清理策略和后置 freshness/performance 检查。
    - 涉及生产 storage/API/worker 切换时，必须使用可回滚 rollout 顺序: expand schema/index/projection storage -> deploy compatible writer/worker -> bounded backfill/repair explicit scopes -> switch read path/fresh gate -> verify App Status/API/performance -> contract/remove legacy。不得在旧 projection 尚未可回退前删除旧链路。
-   - 生产 DB 直接操作默认只读；任何写操作必须是 bounded、idempotent、可审计、按 explicit scope 执行，并且来自已提交或已记录的 migration/runbook。禁止手工 update canonical facts、手工改 readiness/outbox/dirty scopes 来伪造 fresh、truncate/rebuild 全库 projection、无界 force refresh、打印 secrets 或导出敏感业务 payload。
+   - 生产 DB 直接操作默认只读；任何写操作必须是 bounded、idempotent、可审计、按 explicit scope 执行，并且来自已提交或已记录的 migration/runbook。禁止手工 update canonical facts 来改变业务结果、手工改 readiness/outbox/dirty scopes 来伪造 fresh、truncate/rebuild 全库 projection、无界 force refresh、打印 secrets 或导出敏感业务 payload。唯一例外是用户已预批准的生产验证样本最小 DB 恢复: 仅当缺少业务恢复路径时，按操作前快照和精确 where 条件把样本恢复到验证前状态，不得扩大到非样本数据。
    - root SSH 不是实现 PSCIP 的前置条件。如果无法登录 SSH/root，必须先完成代码层 PSCIP-L3: 代码、migration、测试、local/fake/staging verification、性能替代证据和生产验证 runbook。不能因为没有服务器权限而停止代码闭环。
    - PSCIP-L4 仍然要求生产或等价真实 runtime 证据。如果无法登录生产或缺少安全生产验证入口，只能把对应 read model 标为 `local-implementation-closed-production-evidence-needed` 或 hard-stop，不能声明 global closure。
    - 优先使用最小权限生产验证入口，例如只读 DB 用户、App Status API、安全 smoke command 或 systemd/worker health command；只有这些入口不足时才使用 root SSH。
+15. Admin token 和 secret 处理策略:
+   - 不得把 admin token、cookie、DSN、SSH key、私钥或任何 secret 写入 repo、`.planning/`、docs、prompt、shell history、日志、测试 fixture、截图或普通本地文件。
+   - 运行开始后的第一件事必须通过安全弹窗或等价 secure secret input 获取 Admin Token。不得把 admin token 永久明文保存。若当前运行环境没有安全弹窗，则只能从 operator 预先配置的安全凭据管理器读取，例如 macOS Keychain、1Password、pass、系统级 secret store 或只存在当前 shell 的环境变量。
+   - 推荐安全凭据名为 `fin-ops-platform-admin-token`；安全弹窗和安全凭据管理器都不可用时，不得降级为明文文件、普通 chat 输入或把 token 写入 prompt。应 hard-stop 在 credential acquisition / production API auth gate，报告需要安全 secret input 能力或 operator 在安全凭据管理器中预置 token。
+   - 可以使用 root SSH 进入服务器执行不打印 secret 的只读/受控验证；如果服务器已有运行时环境变量或受控内部 command 可以代表 admin 身份执行 smoke，应优先使用该入口，仍不得输出 token。
+   - 生产写操作验证必须使用业务 API、业务 UI 或已提交的业务 command；禁止直接 DB update canonical facts、readiness、dirty scopes 或 outbox 来完成样本验证或伪造 read model fresh。缺少业务恢复路径时，允许按已预批准的最小 DB 恢复协议恢复样本 canonical facts 到操作前状态，但不得直接更新 readiness/dirty/outbox/cache 来掩盖 read model 问题。
 
 主控职责:
 - 你是 T0 controller，不是单个 worker。
@@ -184,10 +223,20 @@ Branch and git rules:
 - `docs/app-architecture/README.md`
 - `docs/app-architecture/pages.md`
 - `docs/app-architecture/runtime-and-ownership.md`
+- `docs/architecture/module-boundaries/README.md`
+- `docs/architecture/module-boundaries/inventory.md`
+- `docs/architecture/module-boundaries/read-model-contracts.md`
+- `docs/architecture/module-boundaries/maintenance.md`
 - `docs/modules/README.md`
 - `docs/modules/read-models/README.md`
+- `docs/modules/read-models/boundary-io.md`
 - `docs/modules/read-models/state-machine.md`
 - `docs/modules/read-models/tests.md`
+- `docs/modules/runtime-workers/boundary-io.md`
+- `docs/modules/domain-events-lifecycle/boundary-io.md`
+- `docs/modules/app-shell-navigation/boundary-io.md`
+- `docs/modules/permissions-and-audit/boundary-io.md`
+- every `docs/modules/<module>/boundary-io.md` for all page/domain modules in `docs/architecture/module-boundaries/inventory.md` during the initial reconciliation; later waves must reread all directly and upstream/downstream affected module `boundary-io.md` files.
 - `docs/operations/runtime-worker-governance.md`
 - `.planning/refactors/README.md`
 - `.planning/refactors/modular-io-boundaries/README.md`
@@ -240,6 +289,11 @@ Initial full read model closure reconciliation:
    - frontend behavior
    - legacy path status
    - production evidence status
+   - page read API closure status
+   - page write API closure status
+   - mutation response targets: affected scopes / freshness targets / barrier targets / job/version
+   - frontend wait/refetch closure status
+   - business-operation sample status
 3. 每个模块分类:
    - `closed`
    - `local-implementation-closed-production-evidence-needed`
@@ -250,6 +304,9 @@ Initial full read model closure reconciliation:
    - `needs-frontend-freshness-closure`
    - `needs-legacy-removal`
    - `needs-worker-readiness-closure`
+   - `needs-write-operation-targets`
+   - `needs-business-sample-validation`
+   - `needs-sample-restore-proof`
    - `blocked`
 4. 旧代码污染清单:
    - `server.py`
@@ -259,23 +316,40 @@ Initial full read model closure reconciliation:
    - legacy/local/live scan fallback
    - stale-as-fresh paths
    - frontend default fresh assumptions
-5. 高效率 wave plan。
+   - old module files/classes/functions still reachable from page read/write/refresh paths
+   - exact deletion, replacement or hard-quarantine action per path
+5. 页面读写操作矩阵:
+   - page/module
+   - read APIs
+   - write APIs
+   - business operation name
+   - source fact owner
+   - expected affected read model scopes
+   - expected worker/readiness path
+   - operation barrier or fresh reload contract
+   - frontend components/pages that must wait/refetch
+   - local tests
+   - production candidate sample availability
+   - restore strategy: business inverse preferred, otherwise preapproved bounded DB restore protocol
+6. 高效率 wave plan。
 
 High-efficiency wave policy:
 - 不要为每个 read model 单独做一个微小提交。
 - 按边界成组推进，每个 wave 可以覆盖多个 read model。
 - 推荐 wave 顺序:
   1. Global contract and guard reconciliation.
-  2. Physical SQL owner split from `postgres_repositories/read_models.py`.
-  3. Refresh producer convergence for every read model.
-  4. Query fresh gate convergence and stale-as-fresh removal.
-  5. Incremental projection builder and parent/all aggregate convergence.
-  6. Operation barrier and write response target convergence.
-  7. Frontend freshness UX convergence for all affected pages.
-  8. Legacy path retirement/quarantine from `server.py` and old services.
-  9. Worker/readiness convergence and production evidence tooling.
-  10. Production freshness/performance evidence sweep.
-  11. Global closure audit.
+  2. All-page read/write operation matrix and mutation target convergence.
+  3. Physical SQL owner split from `postgres_repositories/read_models.py`.
+  4. Refresh producer convergence for every read model.
+  5. Query fresh gate convergence and stale-as-fresh removal.
+  6. Incremental projection builder and parent/all aggregate convergence.
+  7. Operation barrier and write response target convergence.
+  8. Frontend freshness UX convergence for all affected pages.
+  9. Legacy path retirement/quarantine from `server.py` and old services.
+  10. Worker/readiness convergence and production evidence tooling.
+  11. Production business-operation sample validation and restore proof.
+  12. Production freshness/performance evidence sweep.
+  13. Global closure audit.
 - A wave can touch many files if the boundary is coherent and tests are strong.
 - A wave must not mix unrelated boundary types just to reduce commit count.
 - 每个 wave 必须有 clear rollback point and commit.
@@ -290,9 +364,14 @@ Wave acceptance checklist:
 - No hot-path full-table/full-snapshot/live-scan fallback for production page reads.
 - Every touched read model has a stated PSCIP level and a concrete next action to reach L4.
 - Every touched high-row query has an index/query-plan/test/production-sample evidence path.
+- Every touched write API returns or exposes affected scopes/freshness targets/barrier targets/job/version, or has a documented non-applicability proof.
+- Every touched frontend mutation waits for operation barrier or fresh reload before displaying final fresh state.
+- Every touched production sample has a restore plan before any apply operation is attempted: business inverse preferred, otherwise operation-before snapshot + precise predicate + single-transaction bounded DB restore + post-restore verification.
 - No Redis/RabbitMQ freshness truth.
 - No worker dependency on `Application`, HTTP, route modules or auth internals.
 - No frontend defaulting unknown/stale/missing to fresh.
+- No old read model code, old module, old fallback or legacy shared repository path remains reachable from normal production page read/write/refresh flows.
+- Every old path discovered in the wave is deleted or hard-quarantined with static guard, caller list, deletion condition and tests.
 - Existing API response shape preserved unless explicitly documented and tested.
 - Seven test categories evaluated; applicable tests added/updated.
 - Docs impact handled.
@@ -303,8 +382,12 @@ Required baseline after global/shared changes:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_query_gateway tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_scope_contract tests.test_runtime_worker_read_model_refresh_scopes -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit tests.test_write_operation_e2e_smoke tests.test_runtime_sync_closure_gate tests.test_read_model_slo_smoke -v`
 - targeted service/API tests for touched modules
 - targeted frontend tests for touched pages, or explain why frontend unaffected
+- targeted mutation response tests proving affected scopes / freshness targets / operation barrier targets for touched write APIs
+- targeted frontend interaction tests proving write success waits for barrier/fresh reload and does not display stale final state
 - targeted repository/query-plan or fake repository contract tests for touched physical SQL owner splits
 - performance evidence for touched high-row read paths: local `EXPLAIN` when available, fake query contract when DB unavailable, and production sample after local closure
 - `bash scripts/verify.sh docs`
@@ -319,8 +402,11 @@ After local implementation closure, perform a production evidence sweep using au
 - inspect query latency or available query-plan evidence for high-row scoped reads
 - run deployed safe read-only health/smoke commands if available
 - run bounded force refresh / repair only with a written runbook, explicit scopes, rollback/cleanup and post-checks
+- run selected low-risk business write-operation samples through business API/UI/command, never by direct DB mutation for the validation action itself
+- for every selected sample, capture before/after/restore evidence at metadata level only: IDs may be recorded, raw sensitive payloads must not be printed
+- after each production sample, restore through the business inverse operation or documented business recovery operation when available; if unavailable, use the preapproved bounded DB restore protocol to restore the sample to the operation-before snapshot, then re-check affected scopes, page API freshness and canonical state consistency
 Do not print env secrets, DSNs, tokens, cookies, private keys, raw sensitive payloads or broad production data.
-Do not perform manual production DB writes outside committed migrations or written bounded runbooks. If SSH/root or production DB access is unavailable, complete code-level PSCIP-L3, commit migrations/runbooks/tests, and mark PSCIP-L4 evidence as explicitly deferred or hard-stopped.
+Do not perform manual production DB writes outside committed migrations, written bounded runbooks, or the preapproved bounded DB restore protocol for production validation samples that lack a business restore path. If SSH/root or production DB access is unavailable, complete code-level PSCIP-L3, commit migrations/runbooks/tests, and mark PSCIP-L4 evidence as explicitly deferred or hard-stopped.
 
 Hard stop gates:
 Stop and report if:
@@ -328,10 +414,13 @@ Stop and report if:
 - backup branch cannot be created/pushed.
 - worktree has unrelated dirty files that make safe commit impossible.
 - production operation would require secrets or broad destructive mutation.
-- production closure would require manual DB state edits instead of migration/runbook-backed operations.
+- production closure would require manual DB state edits instead of migration/runbook-backed operations, except for the preapproved bounded DB restore protocol used only to restore validation samples to their operation-before state.
+- production business sample cannot be restored through business logic and also cannot be restored through bounded DB restore because the operation-before snapshot, exact row predicate, transaction safety or post-restore verification cannot be established.
+- secure Admin Token popup or equivalent secure secret input is unavailable, and no secure credential manager/current process env token exists for production API validation; do not ask for token in ordinary chat and do not store a plaintext permanent token.
 - SSH/root or DB access is unavailable after code-level closure and no equivalent production-safe verification path exists; report PSCIP-L3 complete with exact PSCIP-L4 evidence gap instead of claiming global closure.
 - read model scope contract is ambiguous and cannot be inferred from source/docs/tests.
 - tests fail and cannot be fixed without expanding beyond the selected wave.
+- old read model code/module/fallback remains reachable from normal production read/write/refresh paths and cannot be safely deleted or hard-quarantined in the selected wave.
 - a change would alter business behavior/API shape without clear requirement and tests.
 - merge conflict touches finance/read model/worker/permission/migration logic.
 
@@ -361,12 +450,14 @@ When complete, report in Chinese:
 - seven test category coverage
 - verification commands
 - production evidence collected
+- production business-operation samples selected, applied and restored; include whether each sample used business inverse restore or bounded DB restore, or the exact non-automatable hard-stop reason
 - PSCIP L4 evidence per read model, or exact hard-stop reason
 - performance evidence and remaining high-row risks
 - whether server/DB access was used; if yes, which read-only checks or bounded migration/runbook operations were executed; if no, which production verification runbook remains
+- whether admin token was acquired from the initial secure popup or another secure credential source; never print or persist its value
 - any exact deferred/hard-stop items
 - why no known stale-as-fresh path remains
 - why old code cannot pollute the new read model chain
 
-Start now with main branch sync, backup branch creation, full read model closure reconciliation, then execute the first high-efficiency wave.
+Start now by first opening the secure Admin Token popup. After the token is acquired for this session, continue with main branch sync, backup branch creation, full read model closure reconciliation, then execute the first high-efficiency wave.
 ```
