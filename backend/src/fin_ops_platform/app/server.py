@@ -4916,11 +4916,6 @@ class Application:
             upload_source=self._handle_api_etc_reconciliation_upload,
             upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload,
             submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts,
-            delete_source_file=self._handle_api_etc_reconciliation_source_file_delete,
-            patch_item=self._handle_api_etc_reconciliation_item_patch,
-            confirm_task=self._handle_api_etc_reconciliation_confirm,
-            reopen_task=self._handle_api_etc_reconciliation_reopen,
-            refresh_matches=self._handle_api_etc_reconciliation_refresh_matches,
         )
         self._etc_reconciliation_task_api_routes = routes
         return routes
@@ -5114,100 +5109,6 @@ class Application:
             return self._reconciliation_storage_error_response(error)
         except ValueError as value_error:
             return self._reconciliation_error_response(value_error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_source_file_delete(
-        self,
-        task_id: str,
-        file_id: str,
-        body: str | bytes | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            task = self._etc_reconciliation_task_service.delete_source_file(
-                task_id=task_id,
-                file_id=file_id,
-                expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
-            )
-        except KeyError as error:
-            code = str(error).strip("'") or "unknown_source_file"
-            status = HTTPStatus.NOT_FOUND if code == "unknown_source_file" else HTTPStatus.NOT_FOUND
-            return self._json_response(status, {"error": code, "message": code})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_item_patch(self, task_id: str, item_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            task = self._etc_reconciliation_task_service.patch_item(
-                task_id=task_id,
-                item_id=item_id,
-                expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
-                payload=payload,
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_confirm(self, task_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            confirmed_ids_payload = payload.get(
-                "confirmedCreditCardItemIds",
-                payload.get("confirmed_credit_card_item_ids"),
-            )
-            if confirmed_ids_payload is not None and not isinstance(confirmed_ids_payload, list):
-                raise ValueError("invalid_confirmed_credit_card_item_ids")
-            task = self._etc_reconciliation_task_service.confirm_task(
-                task_id=task_id,
-                expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
-                approved_delta=payload.get("approvedDelta", payload.get("approved_delta")),
-                approved_delta_note=payload.get("approvedDeltaNote", payload.get("approved_delta_note")),
-                confirmed_credit_card_item_ids=confirmed_ids_payload,
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_reopen(self, task_id: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            expected_version = self._expected_version_from_payload(payload)
-            task = self._etc_reconciliation_task_service.reopen_task(
-                task_id=task_id,
-                expected_version=expected_version,
-                actor=str(payload.get("actor") or "web_finance_user"),
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_refresh_matches(self, task_id: str) -> Response:
-        try:
-            task = self._etc_reconciliation_task_service.refresh_matches(task_id=task_id)
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
 
     def _etc_reconciliation_import_cleanup_service(self) -> EtcReconciliationImportCleanupService:

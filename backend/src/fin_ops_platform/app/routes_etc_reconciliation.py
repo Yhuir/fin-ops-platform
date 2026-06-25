@@ -26,11 +26,6 @@ class EtcReconciliationTaskApiRoutes:
         upload_source: Callable[..., Any],
         upload_supplement_for_card: Callable[..., Any],
         submit_ticket_root_texts: Callable[[str, str | bytes | None], Any],
-        delete_source_file: Callable[[str, str, str | bytes | None], Any],
-        patch_item: Callable[[str, str, str | bytes | None], Any],
-        confirm_task: Callable[[str, str | bytes | None], Any],
-        reopen_task: Callable[[str, str | bytes | None], Any],
-        refresh_matches: Callable[[str], Any],
     ) -> None:
         self._task_service = task_service
         self._json_response = json_response
@@ -45,11 +40,6 @@ class EtcReconciliationTaskApiRoutes:
         self._upload_source = upload_source
         self._upload_supplement_for_card = upload_supplement_for_card
         self._submit_ticket_root_texts = submit_ticket_root_texts
-        self._delete_source_file = delete_source_file
-        self._patch_item = patch_item
-        self._confirm_task = confirm_task
-        self._reopen_task = reopen_task
-        self._refresh_matches = refresh_matches
 
     def route(
         self,
@@ -116,7 +106,7 @@ class EtcReconciliationTaskApiRoutes:
         if method == "DELETE" and len(parts) == 1:
             return self.delete_task(task_id, body)
         if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
-            return self._delete_source_file(task_id, parts[2], body)
+            return self.delete_source_file(task_id, parts[2], body)
         if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
             return self._upload_source(
                 task_id=task_id,
@@ -148,13 +138,13 @@ class EtcReconciliationTaskApiRoutes:
                 headers=headers,
             )
         if method == "PATCH" and len(parts) == 3 and parts[1] == "items":
-            return self._patch_item(task_id, parts[2], body)
+            return self.patch_item(task_id, parts[2], body)
         if method == "POST" and len(parts) == 2 and parts[1] == "confirm":
-            return self._confirm_task(task_id, body)
+            return self.confirm_task(task_id, body)
         if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
-            return self._reopen_task(task_id, body)
+            return self.reopen_task(task_id, body)
         if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
-            return self._refresh_matches(task_id)
+            return self.refresh_matches(task_id)
         if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
             return self.delete_imported_invoices(task_id, body)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
@@ -243,3 +233,91 @@ class EtcReconciliationTaskApiRoutes:
             self._refresh_after_etc_invoice_link(cleanup_result.changed_months, "etc_reconciliation_task_deleted")
             self._persist_state()
         return self._json_response(HTTPStatus.OK, result)
+
+    def delete_source_file(self, task_id: str, file_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._task_service.delete_source_file(
+                task_id=task_id,
+                file_id=file_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError as error:
+            code = str(error).strip("'") or "unknown_source_file"
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": code, "message": code})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def patch_item(self, task_id: str, item_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._task_service.patch_item(
+                task_id=task_id,
+                item_id=item_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+                payload=payload,
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def confirm_task(self, task_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            confirmed_ids_payload = payload.get(
+                "confirmedCreditCardItemIds",
+                payload.get("confirmed_credit_card_item_ids"),
+            )
+            if confirmed_ids_payload is not None and not isinstance(confirmed_ids_payload, list):
+                raise ValueError("invalid_confirmed_credit_card_item_ids")
+            task = self._task_service.confirm_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+                approved_delta=payload.get("approvedDelta", payload.get("approved_delta")),
+                approved_delta_note=payload.get("approvedDeltaNote", payload.get("approved_delta_note")),
+                confirmed_credit_card_item_ids=confirmed_ids_payload,
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def reopen_task(self, task_id: str, body: str | bytes | None) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._task_service.reopen_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def refresh_matches(self, task_id: str) -> Any:
+        try:
+            task = self._task_service.refresh_matches(task_id=task_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))

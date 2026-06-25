@@ -570,3 +570,13 @@
 - 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要静态 Guard 和 targeted ETC reconciliation task API 回归。
 - 验证命令：只读审计 `routes_etc_reconciliation.py`、`server.py` callback 注入和 targeted tests；未运行测试。
 - 未测风险：上传/parser-heavy flows 仍在 `Application` callbacks，等待后续独立边界。
+
+## 2026-06-25 - ETC reconciliation simple mutation callback收敛
+
+- 目标：把 source-file delete、item patch、confirm、reopen、refresh-match 这组薄 HTTP mutation callbacks 从 `Application` 收敛到 `EtcReconciliationTaskApiRoutes`。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`Application._etc_reconciliation_routes(...)`、ETC reconciliation source-file delete/item patch/confirm/reopen/refresh-match API、runtime boundary Guard。
+- 关键决策：本 slice 只搬简单 JSON/expected-version/task-service/error mapping；上传、supplement-for-card 和 ticket-root text 仍保留在 `Application` callback，等待独立 upload/parser-heavy 审计。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：扩展 reconciliation route-owner Guard，禁止 simple mutation callbacks 回流到 `server.py`，同时明确上传/parser callbacks 仍为本轮 stop gate；回归 source-file delete、confirm、stale confirmability 和 refresh-matches API。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_reconciliation_confirm_route_accepts_selected_credit_card_item_ids tests.test_etc_backend.EtcApiTests.test_delete_reconciliation_source_file_route_removes_file_parse_result_and_items tests.test_etc_backend.EtcApiTests.test_delete_reconciliation_source_file_route_requires_version_and_mutable_status tests.test_etc_backend.EtcApiTests.test_reconciliation_task_payload_is_not_confirmable_with_stale_included_etc_resolution -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_refresh_reconciliation_matches_route_recalculates_and_returns_task tests.test_etc_backend.EtcApiTests.test_refresh_reconciliation_matches_route_returns_404_for_unknown_task -v`。
+- 未测风险：曾两次使用旧测试名运行 refresh-matches 失败，随后用 `rg` 查到准确测试名并通过；上传/parser-heavy callbacks 尚未迁移。

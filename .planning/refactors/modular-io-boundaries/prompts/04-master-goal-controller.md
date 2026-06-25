@@ -135,6 +135,7 @@ Current state expected on start:
 - `server-py:etc-legacy-batch-route-callback-collapse-audit` is complete as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-route-callback-collapse-audit-2026-06-25.md`; remaining legacy batch list/detail/delete/draft/confirm/reopen HTTP callbacks moved into `EtcLegacyBatchApiRoutes`.
 - `server-py:etc-invoice-route-owner-audit` is complete as `local-implementation-closed` in `analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`; ETC invoice list/revoke-submitted HTTP mapping moved into `EtcInvoiceApiRoutes`.
 - `server-py:etc-reconciliation-task-mutation-callback-audit` is complete as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-mutation-callback-audit-2026-06-25.md`; selected simple reconciliation task mutation callback collapse.
+- `server-py:etc-reconciliation-simple-mutation-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-simple-mutation-callback-collapse-2026-06-25.md`; simple reconciliation source-file delete/item patch/confirm/reopen/refresh-match HTTP mapping moved into `EtcReconciliationTaskApiRoutes`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -379,7 +380,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-reconciliation-simple-mutation-callback-collapse`.
+Start with `server-py:etc-reconciliation-upload-parser-callback-audit`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -397,7 +398,8 @@ Current local-first state:
 - `server-py:etc-legacy-batch-route-callback-collapse-audit` is complete in `analysis/server-py-etc-legacy-batch-route-callback-collapse-audit-2026-06-25.md`.
 - `server-py:etc-invoice-route-owner-audit` is complete in `analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`.
 - `server-py:etc-reconciliation-task-mutation-callback-audit` is complete in `analysis/server-py-etc-reconciliation-task-mutation-callback-audit-2026-06-25.md`.
-- Row324 is the next local boundary: move simple reconciliation task mutation callbacks into `EtcReconciliationTaskApiRoutes`.
+- `server-py:etc-reconciliation-simple-mutation-callback-collapse` is complete in `analysis/server-py-etc-reconciliation-simple-mutation-callback-collapse-2026-06-25.md`.
+- Row325 is the next local boundary: audit upload/parser-heavy reconciliation callbacks still injected from `server.py`.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.
@@ -407,11 +409,11 @@ Commit-backed baseline:
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/server-py-etc-reconciliation-task-mutation-callback-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Read `analysis/server-py-etc-reconciliation-simple-mutation-callback-collapse-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
 - Use CodeGraph before implementation-oriented changes to `Application`, route-owner classes, auth/session helpers, ETC reconciliation task services, relation side-effect helpers or existing tests.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
-- Implement only the Row324 ETC reconciliation simple mutation callback collapse unless a narrower safe implementation can be completed immediately.
+- Implement only the Row325 ETC reconciliation upload/parser callback audit/selection slice unless a narrower safe implementation can be completed immediately.
 - Keep business-batch v2 route behavior out of Row321.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.

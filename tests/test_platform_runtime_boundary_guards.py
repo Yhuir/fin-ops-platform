@@ -1768,6 +1768,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_owner_route = _function_source(route_tree, route_source, "route")
         route_owner_delete_task = _function_source(route_tree, route_source, "delete_task")
         route_owner_delete_imported_invoices = _function_source(route_tree, route_source, "delete_imported_invoices")
+        route_owner_delete_source_file = _function_source(route_tree, route_source, "delete_source_file")
+        route_owner_patch_item = _function_source(route_tree, route_source, "patch_item")
+        route_owner_confirm_task = _function_source(route_tree, route_source, "confirm_task")
+        route_owner_reopen_task = _function_source(route_tree, route_source, "reopen_task")
+        route_owner_refresh_matches = _function_source(route_tree, route_source, "refresh_matches")
 
         violations: list[str] = []
         if "EtcReconciliationTaskApiRoutes" not in server_source:
@@ -1784,10 +1789,26 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner lacks explicit expected-version parser")
         if "persist_state=self._persist_state" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit persist callback")
+        for upload_callback in (
+            "upload_source=self._handle_api_etc_reconciliation_upload",
+            "upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload",
+            "submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts",
+        ):
+            if upload_callback not in route_factory:
+                violations.append(f"ETC reconciliation route owner lost upload/parser callback {upload_callback}")
         if "_handle_api_etc_reconciliation_task_delete" in server_source:
             violations.append("server.py reintroduced ETC reconciliation task delete HTTP callback")
         if "_handle_api_etc_reconciliation_imported_invoices_delete" in server_source:
             violations.append("server.py reintroduced ETC reconciliation imported-invoices delete HTTP callback")
+        for removed_callback in (
+            "_handle_api_etc_reconciliation_source_file_delete",
+            "_handle_api_etc_reconciliation_item_patch",
+            "_handle_api_etc_reconciliation_confirm",
+            "_handle_api_etc_reconciliation_reopen",
+            "_handle_api_etc_reconciliation_refresh_matches",
+        ):
+            if removed_callback in server_source:
+                violations.append(f"server.py reintroduced ETC reconciliation simple mutation callback {removed_callback}")
         if "Application" in route_owner_init:
             violations.append("ETC reconciliation route owner accepts the whole Application")
         if "EtcReconciliationTaskApiRoutes" not in route_owner_names:
@@ -1800,6 +1821,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner task delete lacks refresh reason")
         if "etc_reconciliation_imported_invoices_removed" not in route_owner_delete_imported_invoices:
             violations.append("ETC reconciliation route owner imported-invoices delete lacks refresh reason")
+        if "delete_source_file(" not in route_owner_delete_source_file:
+            violations.append("ETC reconciliation route owner source-file delete does not delegate to task service")
+        if "patch_item(" not in route_owner_patch_item:
+            violations.append("ETC reconciliation route owner item patch does not delegate to task service")
+        if "confirm_task(" not in route_owner_confirm_task:
+            violations.append("ETC reconciliation route owner confirm does not delegate to task service")
+        if "reopen_task(" not in route_owner_reopen_task:
+            violations.append("ETC reconciliation route owner reopen does not delegate to task service")
+        if "refresh_matches(task_id=task_id)" not in route_owner_refresh_matches:
+            violations.append("ETC reconciliation route owner refresh-matches does not delegate to task service")
         for required_route in (
             'route_path == "/api/etc/reconciliation-tasks"',
             'route_path == "/api/etc/reconciliation-tasks/ready-for-import"',
