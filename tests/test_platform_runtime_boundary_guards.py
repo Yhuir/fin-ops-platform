@@ -5757,6 +5757,83 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_retention_date_parser_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        parser_source = (SERVICES_ROOT / "workbench_oa_retention_date_parser.py").read_text(encoding="utf-8")
+        parse_source = _function_source(server_tree, server_source, "_parse_oa_retention_date")
+        row_candidates_source = _function_source(server_tree, server_source, "_row_date_candidates")
+        row_after_source = _function_source(server_tree, server_source, "_row_is_on_or_after")
+        row_parseable_source = _function_source(server_tree, server_source, "_row_has_parseable_retention_date")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-retention-date-parser-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_parse_oa_retention_date", parse_source),
+            ("_row_date_candidates", row_candidates_source),
+            ("_row_is_on_or_after", row_after_source),
+            ("_row_has_parseable_retention_date", row_parseable_source),
+        ):
+            if "WorkbenchOaRetentionDateParser." not in method_source:
+                violations.append(f"Application {method_name} does not delegate to retention date parser")
+        for forbidden in (
+            "datetime.strptime",
+            "application_date",
+            "trade_time",
+            "申请日期",
+            "交易时间",
+            "ValueError",
+        ):
+            combined_method_source = "\n".join(
+                [parse_source, row_candidates_source, row_after_source, row_parseable_source]
+            )
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns OA retention date parsing detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaRetentionDateParser",
+            "def parse(",
+            "def row_is_on_or_after(",
+            "def row_has_parseable_retention_date(",
+            "def row_date_candidates(",
+            "datetime.strptime(text[:10], \"%Y-%m-%d\")",
+            "application_date",
+            "trade_time",
+            "申请日期",
+            "交易时间",
+        ):
+            if marker not in parser_source:
+                violations.append(f"WorkbenchOaRetentionDateParser missing marker: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in parser_source:
+                violations.append(f"WorkbenchOaRetentionDateParser gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-retention-date-parser-extraction",
+            "WorkbenchOaRetentionDateParser",
+            "row date candidates",
+            "invalid cutoff behavior",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA retention date parser analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

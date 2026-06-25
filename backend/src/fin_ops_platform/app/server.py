@@ -492,6 +492,7 @@ from fin_ops_platform.services.workbench_override_service import WorkbenchOverri
 from fin_ops_platform.services.workbench_oa_attachment_repair_relation_read_port import (
     WorkbenchOaAttachmentRepairRelationReadPort,
 )
+from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13512,49 +13513,19 @@ class Application:
 
     @classmethod
     def _row_is_on_or_after(cls, row: dict[str, object], cutoff_date: datetime, *, row_type: str) -> bool:
-        for value in cls._row_date_candidates(row, row_type=row_type):
-            parsed = cls._parse_oa_retention_date(value)
-            if parsed is not None and parsed >= cutoff_date:
-                return True
-        return False
+        return WorkbenchOaRetentionDateParser.row_is_on_or_after(row, cutoff_date, row_type=row_type)
 
     @classmethod
     def _row_has_parseable_retention_date(cls, row: dict[str, object], *, row_type: str) -> bool:
-        return any(cls._parse_oa_retention_date(value) is not None for value in cls._row_date_candidates(row, row_type=row_type))
+        return WorkbenchOaRetentionDateParser.row_has_parseable_retention_date(row, row_type=row_type)
 
     @staticmethod
     def _row_date_candidates(row: dict[str, object], *, row_type: str) -> list[object]:
-        candidates: list[object] = []
-        if row_type == "oa":
-            candidates.extend([row.get("application_date"), row.get("apply_date")])
-            for fields_key in ("summary_fields", "detail_fields"):
-                fields = row.get(fields_key)
-                if isinstance(fields, dict):
-                    candidates.extend(
-                        fields.get(key)
-                        for key in ("申请日期", "报销日期", "审批完成时间", "单据日期", "日期")
-                    )
-        elif row_type == "bank":
-            candidates.extend([row.get("trade_time"), row.get("pay_receive_time"), row.get("txn_date")])
-            fields = row.get("summary_fields")
-            if isinstance(fields, dict):
-                candidates.extend(fields.get(key) for key in ("交易时间", "支付/收款时间", "记账日期", "日期"))
-            detail_fields = row.get("detail_fields")
-            if isinstance(detail_fields, dict):
-                candidates.extend(detail_fields.get(key) for key in ("交易时间", "支付/收款时间", "记账日期", "日期"))
-        return candidates
+        return WorkbenchOaRetentionDateParser.row_date_candidates(row, row_type=row_type)
 
     @staticmethod
     def _parse_oa_retention_date(value: object) -> datetime | None:
-        if value in (None, ""):
-            return None
-        text = str(value).strip()
-        if len(text) < 10:
-            return None
-        try:
-            return datetime.strptime(text[:10], "%Y-%m-%d")
-        except ValueError:
-            return None
+        return WorkbenchOaRetentionDateParser.parse(value)
 
     @staticmethod
     def _workbench_grouped_summary(payload: dict[str, object]) -> dict[str, int]:
