@@ -520,6 +520,9 @@ from fin_ops_platform.services.workbench_retained_oa_supplemental_relation_read_
 )
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+from fin_ops_platform.services.workbench_selected_scope_raw_oa_payload_builder import (
+    WorkbenchSelectedScopeRawOaPayloadBuilder,
+)
 from fin_ops_platform.services.workbench_supplemental_retained_oa_row_selector import (
     WorkbenchSupplementalRetainedOaRowSelector,
 )
@@ -12901,45 +12904,22 @@ class Application:
         months: set[str],
         supplemental_oa_row_ids: set[str],
     ) -> dict[str, object]:
-        paired: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
-        open_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
-        retained_oa_row_ids = set(supplemental_oa_row_ids) | set(self._manual_retained_oa_row_ids())
+        return self._workbench_selected_scope_raw_oa_payload_builder().build(
+            months=months,
+            supplemental_oa_row_ids=supplemental_oa_row_ids,
+        )
 
-        for row in self._workbench_query_service.list_record_snapshots():
-            row_type = str(row.get("type", "")).strip()
-            row_month = str(row.get("_month", "")).strip()
-            include_row = False
-            if row_type == "oa":
-                include_row = row_month in months or str(row.get("id", "")) in retained_oa_row_ids
-            elif row_type == "invoice" and str(row.get("source_kind", "")) == "oa_attachment_invoice":
-                include_row = row_month in months or str(row.get("derived_from_oa_id", "")) in retained_oa_row_ids
-            if not include_row:
-                continue
-            section_payload = paired if row.get("_section") == "paired" else open_rows
-            section_payload[row_type].append(self._workbench_query_service.serialize_row(row))
-
-        month_rows = [*paired["oa"], *open_rows["oa"], *paired["invoice"], *open_rows["invoice"]]
-        return {
-            "month": "all",
-            "oa_status": self._workbench_query_service.oa_status_payload(),
-            "summary": {
-                "oa_count": len(paired["oa"]) + len(open_rows["oa"]),
-                "bank_count": 0,
-                "invoice_count": len(paired["invoice"]) + len(open_rows["invoice"]),
-                "paired_count": len(paired["oa"]) + len(paired["invoice"]),
-                "open_count": len(open_rows["oa"]) + len(open_rows["invoice"]),
-                "exception_count": sum(
-                    1
-                    for row in month_rows
-                    if str(
-                        row.get("oa_bank_relation", row.get("invoice_bank_relation", {})).get("tone", "")
-                    )
-                    == "danger"
-                ),
-            },
-            "paired": paired,
-            "open": open_rows,
-        }
+    def _workbench_selected_scope_raw_oa_payload_builder(self) -> WorkbenchSelectedScopeRawOaPayloadBuilder:
+        builder = getattr(self, "_workbench_selected_scope_raw_oa_payload_builder_instance", None)
+        if builder is None:
+            builder = WorkbenchSelectedScopeRawOaPayloadBuilder(
+                manual_retained_oa_row_ids=self._manual_retained_oa_row_ids,
+                record_snapshots=lambda: self._workbench_query_service.list_record_snapshots(),
+                serialize_row=self._workbench_query_service.serialize_row,
+                oa_status_payload=self._workbench_query_service.oa_status_payload,
+            )
+            self._workbench_selected_scope_raw_oa_payload_builder_instance = builder
+        return builder
 
     def _append_canonical_oa_attachment_invoice_rows(self, payload: dict[str, object]) -> None:
         oa_rows_by_id: dict[str, dict[str, object]] = {}

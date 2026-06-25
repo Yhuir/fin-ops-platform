@@ -5682,6 +5682,81 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_selected_scope_raw_oa_payload_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (SERVICES_ROOT / "workbench_selected_scope_raw_oa_payload_builder.py").read_text(encoding="utf-8")
+        raw_scope_method_source = _function_source(server_tree, server_source, "_raw_oa_payload_for_selected_scope")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_selected_scope_raw_oa_payload_builder")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-selected-scope-raw-oa-payload-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "list_record_snapshots(",
+            "serialize_row(",
+            "oa_status_payload(",
+            "_manual_retained_oa_row_ids(",
+            "retained_oa_row_ids",
+            "section_payload",
+            "exception_count",
+        ):
+            if forbidden in raw_scope_method_source:
+                violations.append(f"Application _raw_oa_payload_for_selected_scope still owns selected-scope step: {forbidden}")
+        if "return self._workbench_selected_scope_raw_oa_payload_builder().build(" not in raw_scope_method_source:
+            violations.append("Application _raw_oa_payload_for_selected_scope does not delegate to selected-scope builder")
+        for marker in (
+            "class WorkbenchSelectedScopeRawOaPayloadBuilder",
+            "manual_retained_oa_row_ids",
+            "record_snapshots",
+            "serialize_row",
+            "oa_status_payload",
+            "retained_oa_row_ids",
+            "section_payload",
+            "exception_count",
+            "\"month\": \"all\"",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchSelectedScopeRawOaPayloadBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchSelectedScopeRawOaPayloadBuilder(",
+            "manual_retained_oa_row_ids=self._manual_retained_oa_row_ids",
+            "record_snapshots=lambda: self._workbench_query_service.list_record_snapshots()",
+            "serialize_row=self._workbench_query_service.serialize_row",
+            "oa_status_payload=self._workbench_query_service.oa_status_payload",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application selected-scope builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchSelectedScopeRawOaPayloadBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-selected-scope-raw-oa-payload-builder-extraction",
+            "WorkbenchSelectedScopeRawOaPayloadBuilder",
+            "record snapshot filtering",
+            "summary construction",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench selected-scope builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
