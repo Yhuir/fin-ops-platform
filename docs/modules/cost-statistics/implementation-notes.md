@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - cost statistics route callback collapse
+
+- 目标：执行 `server-py:cost-statistics-route-callback-collapse`，把 `/api/cost-statistics*` HTTP dispatch/query parsing 从 `server.py` 迁入 `CostStatisticsApiRoutes.route(...)`。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_cost_statistics.py`、`backend/src/fin_ops_platform/app/server.py`、`tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_platform_runtime_boundary_guards.py` 和 modular IO autonomous state。
+- 关键决策：保留既有 handler/response contract，不改变成本归因、项目范围、read model freshness、parent aggregate、cache、worker、导出或前端行为；导出 flag 的 optional bool parsing 作为显式 route-owner port 注入。
+- 文档影响：新增 modular IO cost statistics route callback collapse analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；成本统计状态机定义不变。
+- 测试覆盖：`tests/test_cost_statistics_api.py` 覆盖 API shape/export/project scope；`tests/test_cost_statistics_sql_runtime.py` 覆盖 route-owner path 下 SQL/Redis/freshness fail-closed；`tests/test_platform_runtime_boundary_guards.py` 新增 Guard 防止 `_handle_api_cost_statistics*` callbacks 回到 `server.py`。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-cost-statistics-route-callback-collapse-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `cost-statistics` worker drain、真实生产高行数、真实浏览器生产样本和 admin/write evidence 仍为最终验证范围。
+- 后续事项：执行 `server-py:cost-statistics-route-owner-local-closure-audit`。
+
 ## 2026-06-25 - cost statistics route-owner audit
 
 - 目标：执行 `server-py:cost-statistics-route-owner-audit`，审计 `/api/cost-statistics*` 在 `server.py` 的剩余 route ownership。

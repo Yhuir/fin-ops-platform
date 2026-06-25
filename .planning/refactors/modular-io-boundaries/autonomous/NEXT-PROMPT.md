@@ -1,50 +1,52 @@
 # Next Prompt
 
-Continue after `server-py:cost-statistics-route-owner-audit`.
+Continue after `server-py:cost-statistics-route-callback-collapse`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:cost-statistics-route-owner-audit`.
-- Row375 status: `analysis-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-cost-statistics-route-owner-audit-2026-06-25.md`.
-- `CostStatisticsApiRoutes` already owns cost statistics response mapping; `server.py` still owns direct `/api/cost-statistics*` dispatch/query parsing and thin `_handle_api_cost_statistics*` callbacks.
+- Last completed boundary: `server-py:cost-statistics-route-callback-collapse`.
+- Row376 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-cost-statistics-route-callback-collapse-2026-06-25.md`.
+- `/api/cost-statistics*` HTTP dispatch/query parsing now lives in `CostStatisticsApiRoutes.route(...)`.
+- App-owned `_handle_api_cost_statistics*` callbacks were removed from `backend/src/fin_ops_platform/app/server.py`.
 - Cost statistics module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
 
 ## Previous Prompt Completion
 
-`server-py:cost-statistics-route-owner-audit` is complete:
+`server-py:cost-statistics-route-callback-collapse` is complete:
 
-- audited `/api/cost-statistics*` dispatch branches and callbacks;
-- confirmed the remaining callbacks are thin delegates to `CostStatisticsApiRoutes`;
-- selected route callback collapse as the next local-first implementation boundary.
+- moved `/api/cost-statistics*` route dispatch/query parsing into `CostStatisticsApiRoutes.route(...)`;
+- injected optional bool parsing as an explicit route-owner port;
+- removed redundant app-owned cost statistics route callbacks;
+- updated API/runtime tests and added a route-owner static Guard.
 
 ## Next Boundary
 
-`server-py:cost-statistics-route-callback-collapse`
+`server-py:cost-statistics-route-owner-local-closure-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-cost-statistics-route-owner-audit-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-cost-statistics-route-callback-collapse-2026-06-25.md`
    - `docs/modules/cost-statistics/README.md`
    - `docs/modules/cost-statistics/state-machine.md`
    - `docs/modules/cost-statistics/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
    - `backend/src/fin_ops_platform/app/routes_cost_statistics.py`
-   - `tests/test_cost_statistics_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Implement the bounded route-owner collapse:
-   - add route-owner dispatch for `/api/cost-statistics*`;
-   - keep query parsing and optional bool parsing explicit;
-   - remove redundant `_handle_api_cost_statistics*` callbacks from `server.py`;
-   - preserve all existing payload/status/error/export contracts.
-4. Add/update Guard coverage preventing cost statistics route callbacks from returning to `Application`.
-5. Run targeted API/Guard/doc verification, then update docs/state and commit/push if verification passes.
+3. Audit remaining cost statistics `Application` surfaces:
+   - route factory/composition;
+   - query/runtime/read-model/cache/warmup providers;
+   - import scope adapters;
+   - worker rebuild and derived lifecycle delegates;
+   - file response and metrics ports.
+4. Decide whether cost statistics local `server.py` route-owner support is accounted for, without claiming module/global production closure.
+5. Update docs/state and commit/push if verification passes.
 
 ## Stop Gates
 
-- Do not change cost attribution, project scope semantics, read model freshness, parent aggregate, cache keys, worker fan-out, export row limits, XLSX generation or production behavior.
 - Do not run production validation or mutation.
-- Do not claim cost statistics module/global closure.
+- Do not claim cost statistics module/global closure unless all local and evidence gates are explicitly satisfied.
+- Do not broaden into unrelated domains.

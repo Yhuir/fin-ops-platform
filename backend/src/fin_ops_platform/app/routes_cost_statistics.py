@@ -4,6 +4,7 @@ from datetime import datetime
 from http import HTTPStatus
 from time import monotonic
 from typing import Any, Callable
+from urllib.parse import unquote
 
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsExportLimitError
 
@@ -20,6 +21,7 @@ class CostStatisticsApiRoutes:
         entry_count: Callable[[dict[str, Any]], int] | None = None,
         duration_ms: Callable[[float], float] | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        optional_bool_parser: Callable[[str | None], bool] | None = None,
     ) -> None:
         self._query_service = query_service
         self._cost_statistics_service = cost_statistics_service
@@ -29,6 +31,55 @@ class CostStatisticsApiRoutes:
         self._entry_count = entry_count or _explorer_entry_count
         self._duration_ms = duration_ms or (lambda started_at: (monotonic() - started_at) * 1000)
         self._now_provider = now_provider or datetime.now
+        self._optional_bool_parser = optional_bool_parser or _parse_optional_bool_default_true
+
+    def route(self, method: str, route_path: str, query: dict[str, list[str]]) -> Any | None:
+        if method == "GET" and route_path == "/api/cost-statistics":
+            return self.handle_month(query.get("month", [None])[0], query.get("project_scope", [None])[0])
+        if method == "GET" and route_path == "/api/cost-statistics/explorer":
+            return self.handle_explorer(query.get("month", [None])[0], query.get("project_scope", [None])[0])
+        if method == "GET" and route_path == "/api/cost-statistics/export-preview":
+            return self.handle_export_preview(
+                month=query.get("month", [None])[0],
+                view=query.get("view", [None])[0],
+                project_names=query.get("project_name", []),
+                expense_types=query.get("expense_type", []),
+                start_month=query.get("start_month", [None])[0],
+                end_month=query.get("end_month", [None])[0],
+                start_date=query.get("start_date", [None])[0],
+                end_date=query.get("end_date", [None])[0],
+                aggregate_by=query.get("aggregate_by", [None])[0],
+                project_scope=query.get("project_scope", [None])[0],
+            )
+        if method == "GET" and route_path == "/api/cost-statistics/export":
+            return self.handle_export(
+                month=query.get("month", [None])[0],
+                view=query.get("view", [None])[0],
+                project_names=query.get("project_name", []),
+                expense_types=query.get("expense_type", []),
+                transaction_id=query.get("transaction_id", [None])[0],
+                start_month=query.get("start_month", [None])[0],
+                end_month=query.get("end_month", [None])[0],
+                start_date=query.get("start_date", [None])[0],
+                end_date=query.get("end_date", [None])[0],
+                aggregate_by=query.get("aggregate_by", [None])[0],
+                include_oa_details=self._optional_bool_parser(query.get("include_oa_details", [None])[0]),
+                include_invoice_details=self._optional_bool_parser(query.get("include_invoice_details", [None])[0]),
+                include_exception_rows=self._optional_bool_parser(query.get("include_exception_rows", [None])[0]),
+                include_ignored_rows=self._optional_bool_parser(query.get("include_ignored_rows", [None])[0]),
+                include_expense_content_summary=self._optional_bool_parser(
+                    query.get("include_expense_content_summary", [None])[0]
+                ),
+                sort_by=query.get("sort_by", [None])[0],
+                project_scope=query.get("project_scope", [None])[0],
+            )
+        if method == "GET" and route_path.startswith("/api/cost-statistics/projects/"):
+            project_name = unquote(route_path.rsplit("/", 1)[-1])
+            return self.handle_project(query.get("month", [None])[0], project_name, query.get("project_scope", [None])[0])
+        if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
+            transaction_id = route_path.rsplit("/", 1)[-1]
+            return self.handle_transaction(transaction_id, query.get("project_scope", [None])[0])
+        return None
 
     def handle_month(self, month: str | None, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
@@ -240,3 +291,14 @@ def _explorer_entry_count(payload: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def _parse_optional_bool_default_true(value: str | None) -> bool:
+    if value is None:
+        return True
+    normalized = str(value).strip().lower()
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    return True

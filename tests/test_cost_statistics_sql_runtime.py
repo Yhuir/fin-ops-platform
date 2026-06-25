@@ -503,7 +503,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API miss must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -530,7 +534,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API miss must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -554,7 +562,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("production API must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -582,7 +594,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_month_statistics": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API miss must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -635,7 +651,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_month_statistics": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API SQL hit must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -709,7 +729,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API SQL hit must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -753,7 +777,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("malformed SQL payload must not sync rebuild"))},
         )()
 
-        response = app._handle_api_cost_statistics_explorer("2026-05", "active")
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))

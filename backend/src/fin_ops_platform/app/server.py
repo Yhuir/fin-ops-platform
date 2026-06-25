@@ -1453,6 +1453,7 @@ class Application:
             metric_emitter=self._emit_cost_statistics_explorer_metric,
             entry_count=CostStatisticsQueryService.explorer_entry_count,
             duration_ms=self._duration_ms,
+            optional_bool_parser=lambda value: self._parse_optional_bool(value, default=True),
         )
         self._cost_statistics_dependency_key = self._cost_statistics_current_dependency_key()
 
@@ -2146,86 +2147,10 @@ class Application:
             tax_offset_response = self._tax_offset_routes().route(method, route_path, query, body, headers)
             if tax_offset_response is not None:
                 return tax_offset_response
-        if method == "GET" and route_path == "/api/cost-statistics":
-            month = query.get("month", [None])[0]
-            project_scope = query.get("project_scope", [None])[0]
-            return self._handle_api_cost_statistics(month, project_scope)
-        if method == "GET" and route_path == "/api/cost-statistics/explorer":
-            month = query.get("month", [None])[0]
-            project_scope = query.get("project_scope", [None])[0]
-            return self._handle_api_cost_statistics_explorer(month, project_scope)
-        if method == "GET" and route_path == "/api/cost-statistics/export-preview":
-            month = query.get("month", [None])[0]
-            view = query.get("view", [None])[0]
-            project_names = query.get("project_name", [])
-            expense_types = query.get("expense_type", [])
-            start_month = query.get("start_month", [None])[0]
-            end_month = query.get("end_month", [None])[0]
-            start_date = query.get("start_date", [None])[0]
-            end_date = query.get("end_date", [None])[0]
-            aggregate_by = query.get("aggregate_by", [None])[0]
-            project_scope = query.get("project_scope", [None])[0]
-            return self._handle_api_cost_statistics_export_preview(
-                month=month,
-                view=view,
-                project_names=project_names,
-                expense_types=expense_types,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
-                project_scope=project_scope,
-            )
-        if method == "GET" and route_path == "/api/cost-statistics/export":
-            month = query.get("month", [None])[0]
-            view = query.get("view", [None])[0]
-            project_names = query.get("project_name", [])
-            expense_types = query.get("expense_type", [])
-            transaction_id = query.get("transaction_id", [None])[0]
-            start_month = query.get("start_month", [None])[0]
-            end_month = query.get("end_month", [None])[0]
-            start_date = query.get("start_date", [None])[0]
-            end_date = query.get("end_date", [None])[0]
-            aggregate_by = query.get("aggregate_by", [None])[0]
-            project_scope = query.get("project_scope", [None])[0]
-            include_oa_details = self._parse_optional_bool(query.get("include_oa_details", [None])[0], default=True)
-            include_invoice_details = self._parse_optional_bool(query.get("include_invoice_details", [None])[0], default=True)
-            include_exception_rows = self._parse_optional_bool(query.get("include_exception_rows", [None])[0], default=True)
-            include_ignored_rows = self._parse_optional_bool(query.get("include_ignored_rows", [None])[0], default=True)
-            include_expense_content_summary = self._parse_optional_bool(
-                query.get("include_expense_content_summary", [None])[0],
-                default=True,
-            )
-            sort_by = query.get("sort_by", [None])[0]
-            return self._handle_api_cost_statistics_export(
-                month=month,
-                view=view,
-                project_names=project_names,
-                expense_types=expense_types,
-                transaction_id=transaction_id,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
-                include_oa_details=include_oa_details,
-                include_invoice_details=include_invoice_details,
-                include_exception_rows=include_exception_rows,
-                include_ignored_rows=include_ignored_rows,
-                include_expense_content_summary=include_expense_content_summary,
-                sort_by=sort_by,
-                project_scope=project_scope,
-            )
-        if method == "GET" and route_path.startswith("/api/cost-statistics/projects/"):
-            month = query.get("month", [None])[0]
-            project_scope = query.get("project_scope", [None])[0]
-            project_name = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_cost_statistics_project(month, project_name, project_scope)
-        if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
-            transaction_id = route_path.rsplit("/", 1)[-1]
-            project_scope = query.get("project_scope", [None])[0]
-            return self._handle_api_cost_statistics_transaction(transaction_id, project_scope)
+        if route_path == "/api/cost-statistics" or route_path.startswith("/api/cost-statistics/"):
+            cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query)
+            if cost_statistics_response is not None:
+                return cost_statistics_response
         if method == "GET" and route_path == "/workbench/prototype":
             return self._handle_workbench_prototype()
         if method == "GET" and route_path == "/workbench":
@@ -8736,12 +8661,6 @@ class Application:
         looks_like = getattr(query_service, "_looks_like_oa_row_id", None)
         return bool(callable(looks_like) and looks_like(row_id))
 
-    def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
-        return self._cost_statistics_routes().handle_month(month, project_scope)
-
-    def _handle_api_cost_statistics_explorer(self, month: str | None, project_scope: str | None) -> Response:
-        return self._cost_statistics_routes().handle_explorer(month, project_scope)
-
     def _get_or_build_cost_statistics_explorer(
         self,
         month: str,
@@ -8912,98 +8831,6 @@ class Application:
                 ensure_ascii=False,
             ),
             flush=True,
-        )
-
-    def _handle_api_cost_statistics_project(
-        self,
-        month: str | None,
-        project_name: str,
-        project_scope: str | None,
-    ) -> Response:
-        return self._cost_statistics_routes().handle_project(month, project_name, project_scope)
-
-    def _handle_api_cost_statistics_export(
-        self,
-        *,
-        month: str | None,
-        view: str | None,
-        project_names: list[str] | None,
-        expense_types: list[str] | None,
-        transaction_id: str | None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        aggregate_by: str | None = None,
-        include_oa_details: bool = True,
-        include_invoice_details: bool = True,
-        include_exception_rows: bool = True,
-        include_ignored_rows: bool = True,
-        include_expense_content_summary: bool = True,
-        sort_by: str | None = None,
-        project_scope: str | None = None,
-    ) -> Response:
-        return self._cost_statistics_routes().handle_export(
-            month=month,
-            view=view,
-            project_names=project_names,
-            expense_types=expense_types,
-            transaction_id=transaction_id,
-            start_month=start_month,
-            end_month=end_month,
-            start_date=start_date,
-            end_date=end_date,
-            aggregate_by=aggregate_by,
-            include_oa_details=include_oa_details,
-            include_invoice_details=include_invoice_details,
-            include_exception_rows=include_exception_rows,
-            include_ignored_rows=include_ignored_rows,
-            include_expense_content_summary=include_expense_content_summary,
-            sort_by=sort_by,
-            project_scope=project_scope,
-        )
-
-    def _handle_api_cost_statistics_export_preview(
-        self,
-        *,
-        month: str | None,
-        view: str | None,
-        project_names: list[str] | None,
-        expense_types: list[str] | None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        aggregate_by: str | None = None,
-        project_scope: str | None = None,
-    ) -> Response:
-        return self._cost_statistics_routes().handle_export_preview(
-            month=month,
-            view=view,
-            project_names=project_names,
-            expense_types=expense_types,
-            start_month=start_month,
-            end_month=end_month,
-            start_date=start_date,
-            end_date=end_date,
-            aggregate_by=aggregate_by,
-            project_scope=project_scope,
-        )
-
-    def _handle_api_cost_statistics_transaction(
-        self,
-        transaction_id: str,
-        project_scope: str | None,
-    ) -> Response:
-        return self._cost_statistics_routes().handle_transaction(transaction_id, project_scope)
-
-    def _cost_statistics_project_scope_error_response(self, error: ValueError) -> Response:
-        return self._json_response(
-            HTTPStatus.BAD_REQUEST,
-            {
-                "error": "invalid_cost_statistics_project_scope",
-                "message": str(error),
-            },
         )
 
     def _cost_statistics_file_response(self, filename: str, content: bytes) -> Response:

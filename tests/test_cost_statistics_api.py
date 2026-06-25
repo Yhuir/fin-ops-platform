@@ -196,7 +196,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["time_rows"][0]["transaction_id"], "cached-sentinel")
 
-    def test_cost_statistics_route_facade_delegates_month_and_explorer_to_query_service(self) -> None:
+    def test_cost_statistics_route_owner_delegates_month_and_explorer_to_query_service(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
         from fin_ops_platform.app.server import Response
 
@@ -228,8 +228,16 @@ class CostStatisticsApiTests(unittest.TestCase):
             file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
 
-        month_response = routes.handle_month("2026-03", "active")
-        explorer_response = routes.handle_explorer("2026-04", "all")
+        month_response = routes.route(
+            "GET",
+            "/api/cost-statistics",
+            {"month": ["2026-03"], "project_scope": ["active"]},
+        )
+        explorer_response = routes.route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-04"], "project_scope": ["all"]},
+        )
 
         self.assertEqual(month_response.status_code, 200)
         self.assertEqual(explorer_response.status_code, 200)

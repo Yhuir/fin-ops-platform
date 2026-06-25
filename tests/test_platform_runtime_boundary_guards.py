@@ -1624,6 +1624,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_cost_statistics_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        route_path = APP_ROOT / "routes_cost_statistics.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_source = route_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        violations: list[str] = []
+
+        if "def route(" not in route_source:
+            violations.append("CostStatisticsApiRoutes does not own route dispatch")
+        for snippet in (
+            'route_path == "/api/cost-statistics"',
+            'route_path == "/api/cost-statistics/explorer"',
+            'route_path == "/api/cost-statistics/export-preview"',
+            'route_path == "/api/cost-statistics/export"',
+            'route_path.startswith("/api/cost-statistics/projects/")',
+            'route_path.startswith("/api/cost-statistics/transactions/")',
+            "self._optional_bool_parser(",
+        ):
+            if snippet not in route_source:
+                violations.append(f"CostStatisticsApiRoutes is missing route-owner behavior {snippet}")
+        for removed_handler in (
+            "_handle_api_cost_statistics",
+            "_handle_api_cost_statistics_explorer",
+            "_handle_api_cost_statistics_project",
+            "_handle_api_cost_statistics_export",
+            "_handle_api_cost_statistics_export_preview",
+            "_handle_api_cost_statistics_transaction",
+        ):
+            if _function_source(server_tree, server_source, removed_handler):
+                violations.append(f"server.py still owns cost statistics route callback {removed_handler}")
+        if "self._cost_statistics_routes().route(method, route_path, query)" not in server_source:
+            violations.append("server.py does not delegate cost statistics routing to the route owner")
+
+        self.assertEqual(violations, [])
+
     def test_tax_offset_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
