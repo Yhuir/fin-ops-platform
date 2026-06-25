@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - auto-tag write route-owner collapse
+
+- 目标：执行 `server-py:bank-details-auto-tag-write-route-callback-collapse`，把银行明细 auto-tag PUT/reapply/file-replacement HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
+- 影响范围：`PUT /api/bank-details/auto-tag-rules`、`POST /api/bank-details/auto-tag-rules/reapply`、`POST /api/bank-details/auto-tag-rules/file-replacement` 的 route-owner 和测试；不改变自动标签业务规则、read model refresh/dirty/outbox/lifecycle owner、category 写入口、前端行为或生产数据。
+- 关键决策：`BankDetailsApiRoutes` 注入 JSON body loader 和 default bundled rules source provider；route owner 在解析 body 前保持权限 precheck；file replacement 空 body 继续使用 bundled normalized rules。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期事实源不变。
+- 测试覆盖：新增 auto-tag write route-owner port 测试；完整 `tests.test_bank_auto_tag_rules_api` 改用 public request 边界；更新 platform Guard 防止 auto-tag write callbacks 回流。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner -v`。
+- 未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:bank-details-category-write-route-callback-collapse`。
+
 ## 2026-06-25 - write route callback audit
 
 - 目标：执行 `server-py:bank-details-write-route-callback-audit`，审计 read/export route-owner 收口后剩余银行明细写入 callbacks。

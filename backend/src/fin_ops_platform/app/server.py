@@ -1866,12 +1866,6 @@ class Application:
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
                 return bank_detail_response
-        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/reapply":
-            return self._handle_api_bank_details_auto_tag_rules_reapply(headers)
-        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/file-replacement":
-            return self._handle_api_bank_details_auto_tag_rules_file_replacement(body, headers)
-        if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
-            return self._handle_api_bank_details_auto_tag_rules_update(body, headers)
         bank_detail_confirmation_prefix = "/api/bank-details/transactions/"
         bank_detail_confirmation_suffix = "/category-confirmation"
         bank_detail_assignment_suffix = "/category-assignment"
@@ -9155,65 +9149,6 @@ class Application:
     def _tax_offset_month_entry_count(self, payload: dict[str, object]) -> int:
         return TaxOffsetRuntimeService.month_entry_count(payload)
 
-    def _handle_api_bank_details_auto_tag_rules_update(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存自动标签规则权限。"},
-            )
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status, result = self._bank_details_routes().update_auto_tag_rules(payload, session=session)
-        return self._json_response(status, result)
-
-    def _handle_api_bank_details_auto_tag_rules_reapply(
-        self,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有重新应用自动标签规则权限。"},
-            )
-
-        status, payload = self._bank_details_routes().reapply_auto_tag_rules(session=session)
-        return self._json_response(status, payload)
-
-    def _handle_api_bank_details_auto_tag_rules_file_replacement(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有替换自动标签规则权限。"},
-            )
-        source: object
-        if body not in (None, b"", ""):
-            payload, error = self._load_json_body(body)
-            if error is not None:
-                return error
-            source = payload.get("source") if isinstance(payload, dict) and "source" in payload else payload
-        else:
-            source = self._default_bank_auto_tag_rules_file_source()
-        status, result = self._bank_details_routes().replace_auto_tag_rules_from_file_source(source, session=session)
-        return self._json_response(status, result)
-
     @staticmethod
     def _default_bank_auto_tag_rules_file_source() -> dict[str, object]:
         fixture_path = (
@@ -9559,6 +9494,8 @@ class Application:
             resolve_read_session=self._resolve_bank_details_read_session,
             json_response=self._json_response,
             export_response=self._bank_details_export_response,
+            load_json_body=self._load_json_body,
+            default_auto_tag_rules_source_provider=self._default_bank_auto_tag_rules_file_source,
         )
 
     def _bank_detail_read_model_refresh_producer(self) -> BankDetailReadModelRefreshProducer:

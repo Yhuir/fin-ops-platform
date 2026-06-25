@@ -2,6 +2,29 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - auto-tag write route-owner collapse test note
+
+`server-py:bank-details-auto-tag-write-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改自动标签匹配规则本身。
+- Service-layer tests：适用；完整 `tests.test_bank_auto_tag_rules_api` 继续覆盖 lifecycle、dirty/outbox、audit、settings persistence、permission 和 validation。
+- API contract tests：适用；`tests/test_bank_details_routes.py` 新增 auto-tag write route-owner HTTP mapping/port 测试，`tests/test_bank_auto_tag_rules_api.py` 改用 public request 边界验证 PUT/reapply/file-replacement。
+- Read model/cache/background job tests：间接适用；auto-tag API 回归继续覆盖 bank detail refresh enqueue 和 no duplicate refreshing behavior。
+- Frontend component and interaction tests：不适用；前端代码未改。
+- End-to-end business-flow integration tests：不适用；本 slice 只移动后端 HTTP mapping，不改业务流。
+- Existing feature regression tests：适用；platform Guard 防止 auto-tag write callbacks 回流到 `server.py`，并确认 category callbacks 未提前移动。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner -v
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；category confirmation/assignment callbacks 仍待后续迁移。
+
 ## 2026-06-25 - write route callback audit test note
 
 `server-py:bank-details-write-route-callback-audit` 已完成为 analysis-only：

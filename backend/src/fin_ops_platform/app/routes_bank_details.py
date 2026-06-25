@@ -20,6 +20,8 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 JsonResponse = Callable[[HTTPStatus, object], Any]
 ExportResponse = Callable[[HTTPStatus, Any], Any]
+JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
+DefaultAutoTagRulesSourceProvider = Callable[[], object]
 
 
 class BankDetailsApiRoutes:
@@ -30,11 +32,15 @@ class BankDetailsApiRoutes:
         resolve_read_session: ReadSessionResolver | None = None,
         json_response: JsonResponse | None = None,
         export_response: ExportResponse | None = None,
+        load_json_body: JsonBodyLoader | None = None,
+        default_auto_tag_rules_source_provider: DefaultAutoTagRulesSourceProvider | None = None,
     ) -> None:
         self._application_service = application_service
         self._resolve_read_session = resolve_read_session
         self._json_response = json_response
         self._export_response = export_response
+        self._load_json_body = load_json_body
+        self._default_auto_tag_rules_source_provider = default_auto_tag_rules_source_provider
 
     def route(
         self,
@@ -44,9 +50,23 @@ class BankDetailsApiRoutes:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Any | None:
-        del body
         if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
             return self._json_read(headers, lambda session: self.auto_tag_rules(session=session))
+        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/reapply":
+            return self._json_write_without_body(
+                headers,
+                "当前账户没有重新应用自动标签规则权限。",
+                lambda session: self.reapply_auto_tag_rules(session=session),
+            )
+        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/file-replacement":
+            return self._replace_auto_tag_rules_from_file_route(body, headers)
+        if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
+            return self._json_write_body(
+                body,
+                headers,
+                "当前账户没有保存自动标签规则权限。",
+                lambda payload, session: self.update_auto_tag_rules(payload, session=session),
+            )
         if method == "GET" and route_path == "/api/bank-details/accounts":
             return self._json_response_for(
                 *self.accounts(
@@ -314,6 +334,53 @@ class BankDetailsApiRoutes:
             return auth_error
         return self._json_response_for(*handler(session))
 
+    def _json_write_body(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        permission_message: str,
+        handler: Callable[[dict[str, Any], OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]],
+    ) -> Any:
+        session, auth_error = self._resolve_read(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._permission_response(permission_message)
+        payload, error = self._load_body(body)
+        if error is not None:
+            return error
+        return self._json_response_for(*handler(payload, session))
+
+    def _json_write_without_body(
+        self,
+        headers: dict[str, str] | None,
+        permission_message: str,
+        handler: Callable[[OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]],
+    ) -> Any:
+        session, auth_error = self._resolve_read(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._permission_response(permission_message)
+        return self._json_response_for(*handler(session))
+
+    def _replace_auto_tag_rules_from_file_route(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_read(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._permission_response("当前账户没有替换自动标签规则权限。")
+        if body not in (None, b"", ""):
+            payload, error = self._load_body(body)
+            if error is not None:
+                return error
+            source: object = payload.get("source") if isinstance(payload, dict) and "source" in payload else payload
+        else:
+            if self._default_auto_tag_rules_source_provider is None:
+                raise RuntimeError("bank_details_default_auto_tag_rules_source_port_missing")
+            source = self._default_auto_tag_rules_source_provider()
+        return self._json_response_for(*self.replace_auto_tag_rules_from_file_source(source, session=session))
+
     def _export_read(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read(headers)
         if auth_error is not None:
@@ -350,7 +417,15 @@ class BankDetailsApiRoutes:
             return None, None
         return self._resolve_read_session(headers)
 
+    def _load_body(self, body: str | bytes | None) -> tuple[dict[str, Any], Any | None]:
+        if self._load_json_body is None:
+            raise RuntimeError("bank_details_json_body_loader_port_missing")
+        return self._load_json_body(body)
+
     def _json_response_for(self, status: HTTPStatus, payload: object) -> Any:
         if self._json_response is None:
             return status, payload
         return self._json_response(status, payload)
+
+    def _permission_response(self, message: str) -> Any:
+        return self._json_response_for(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": message})

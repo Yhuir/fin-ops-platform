@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `bank-details-auto-tag-write-route-callback-collapse-selected`
+Current state: `bank-details-category-write-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:bank-details-write-route-callback-audit` as `analysis-closed` in `analysis/server-py-bank-details-write-route-callback-audit-2026-06-25.md`. T0 split remaining bank details write callbacks into auto-tag PUT/reapply/file-replacement and category confirmation/assignment groups, then selected `server-py:bank-details-auto-tag-write-route-callback-collapse` as the next bounded implementation slice.
+Completed `server-py:bank-details-auto-tag-write-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-bank-details-auto-tag-write-route-callback-collapse-2026-06-25.md`. Bank details auto-tag PUT, reapply and file-replacement HTTP mapping now live in `BankDetailsApiRoutes.route(...)` with explicit session/json-body/default-source/json-response ports; migrated app callbacks were removed and category confirmation/assignment callbacks remain for the next slice.
 
 ## Closed Or Deferred Slices
 

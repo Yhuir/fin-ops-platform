@@ -114,6 +114,12 @@ class _BankDetailStatusRepository:
 
 
 class BankAutoTagRulesApiTests(unittest.TestCase):
+    def _update_auto_tag_rules_response(self, app, body: str | bytes | None, headers: dict[str, str] | None = None):
+        return app.handle_request("PUT", "/api/bank-details/auto-tag-rules", body, headers=headers)
+
+    def _file_replacement_response(self, app, body: str | bytes | None, headers: dict[str, str] | None = None):
+        return app.handle_request("POST", "/api/bank-details/auto-tag-rules/file-replacement", body, headers=headers)
+
     def _bank_detail_transactions_payload(
         self,
         app,
@@ -181,7 +187,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_file_replacement(None, {})
+            response = self._file_replacement_response(app, None, {})
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
@@ -613,7 +619,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 "_execute_derived_data_lifecycle_event",
                 side_effect=lambda event, **kwargs: lifecycle_calls.append((event, kwargs)) or {"event": event},
             ):
-                response = app._handle_api_bank_details_auto_tag_rules_update(
+                response = self._update_auto_tag_rules_response(app,
                     json.dumps(
                         {
                             "expected_version": current["version"],
@@ -666,7 +672,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         ]
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -860,7 +866,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             active.append(next_rule)
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -1007,7 +1013,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         ]
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -1056,7 +1062,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         ]
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -1386,7 +1392,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
             for request_payload, expected_status, expected_error in cases:
                 with self.subTest(expected_error=expected_error):
-                    response = app._handle_api_bank_details_auto_tag_rules_update(
+                    response = self._update_auto_tag_rules_response(app,
                         json.dumps(request_payload, ensure_ascii=False),
                         {},
                     )
@@ -1406,7 +1412,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
             for priority in cases:
                 with self.subTest(priority=priority):
-                    response = app._handle_api_bank_details_auto_tag_rules_update(
+                    response = self._update_auto_tag_rules_response(app,
                         json.dumps(
                             {
                                 "expected_version": current["version"],
@@ -1432,7 +1438,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         archived_fee_without_code.pop("code")
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -1509,7 +1515,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             target = next(rule for rule in current["active_rules"] if rule["code"] == "custom_online_cert_fee_new")
 
             with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-                response = app._handle_api_bank_details_auto_tag_rules_update(
+                response = self._update_auto_tag_rules_response(app,
                     json.dumps(
                         {
                             "expected_version": current["version"],
@@ -1562,7 +1568,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
+            response = self._update_auto_tag_rules_response(app,
                 json.dumps(
                     {
                         "expected_version": current["version"],
@@ -1597,7 +1603,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app = build_application()
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(can_mutate_data=False), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update("{}", {})
+            response = self._update_auto_tag_rules_response(app, "{}", {})
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)

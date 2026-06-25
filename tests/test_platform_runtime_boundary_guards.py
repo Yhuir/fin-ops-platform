@@ -1320,10 +1320,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
         app_settings_source = (SERVICES_ROOT / "app_settings_service.py").read_text(encoding="utf-8")
 
-        handler_delegates = {
-            "_handle_api_bank_details_auto_tag_rules_update": "update_auto_tag_rules",
-            "_handle_api_bank_details_auto_tag_rules_file_replacement": "replace_auto_tag_rules_from_file_source",
-            "_handle_api_bank_details_auto_tag_rules_reapply": "reapply_auto_tag_rules",
+        category_handler_delegates = {
             "_handle_api_bank_detail_category_confirmation": "confirm_category",
             "_handle_api_bank_detail_category_confirmation_delete": "revoke_category_confirmation",
             "_handle_api_bank_detail_category_assignment": "assign_category",
@@ -1338,7 +1335,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if forbidden in server_source:
                 violations.append(f"server.py still owns legacy bank auto-tag write helper {forbidden}")
 
-        for handler_name, route_method in handler_delegates.items():
+        for handler_name, route_method in category_handler_delegates.items():
             handler_source = _function_source(server_tree, server_source, handler_name)
             if f"_bank_details_routes().{route_method}" not in handler_source:
                 violations.append(f"{handler_name} does not delegate to BankDetailsApiRoutes.{route_method}")
@@ -1354,6 +1351,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             ):
                 if forbidden in handler_source:
                     violations.append(f"{handler_name} keeps application/write-side logic {forbidden}")
+
+        for removed_handler in (
+            "_handle_api_bank_details_auto_tag_rules_update",
+            "_handle_api_bank_details_auto_tag_rules_file_replacement",
+            "_handle_api_bank_details_auto_tag_rules_reapply",
+        ):
+            if f"def {removed_handler}(" in server_source:
+                violations.append(f"server.py still defines migrated bank details auto-tag write handler {removed_handler}")
+
+        for route_marker in (
+            'route_path == "/api/bank-details/auto-tag-rules"',
+            'route_path == "/api/bank-details/auto-tag-rules/reapply"',
+            'route_path == "/api/bank-details/auto-tag-rules/file-replacement"',
+            "load_json_body=",
+            "default_auto_tag_rules_source_provider=",
+            "update_auto_tag_rules(payload, session=session)",
+            "reapply_auto_tag_rules(session=session)",
+            "replace_auto_tag_rules_from_file_source(source, session=session)",
+        ):
+            if route_marker not in server_source + routes_source:
+                violations.append(f"bank details auto-tag route owner is missing marker {route_marker}")
 
         for forbidden in (
             "update_bank_auto_tag_rules(",
@@ -1424,9 +1442,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"bank details route owner is missing marker {marker}")
 
         for retained_handler in (
-            "_handle_api_bank_details_auto_tag_rules_update",
-            "_handle_api_bank_details_auto_tag_rules_reapply",
-            "_handle_api_bank_details_auto_tag_rules_file_replacement",
             "_handle_api_bank_detail_category_confirmation",
             "_handle_api_bank_detail_category_confirmation_delete",
             "_handle_api_bank_detail_category_assignment",

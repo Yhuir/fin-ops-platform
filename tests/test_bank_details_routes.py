@@ -46,6 +46,14 @@ class FakeBankDetailsApplicationService:
         self.calls.append(("update_auto_tag_rules", {"payload": payload, "actor_id": actor_id}))
         return {"version": 2}
 
+    def replace_auto_tag_rules_from_file_source(self, source: object, *, actor_id: str) -> dict[str, object]:
+        self.calls.append(("replace_auto_tag_rules", {"source": source, "actor_id": actor_id}))
+        return {"version": 3}
+
+    def reapply_auto_tag_rules(self, *, actor_id: str, can_save: bool) -> dict[str, object]:
+        self.calls.append(("reapply_auto_tag_rules", {"actor_id": actor_id, "can_save": can_save}))
+        return {"version": 4, "read_model_status": "refreshing"}
+
     def confirm_category(self, transaction_id: str, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
         self.calls.append(("confirm_category", {"transaction_id": transaction_id, "payload": payload, "actor_id": actor_id}))
         if self.confirm_category_error is not None:
@@ -170,6 +178,34 @@ class BankDetailsRoutesTests(unittest.TestCase):
         self.assertEqual(service.calls[0][0], "transactions")
         self.assertEqual(service.calls[0][1]["page"], 2)
         self.assertEqual(service.calls[0][1]["page_size"], 50)
+
+    def test_route_owner_handles_auto_tag_write_mapping_with_body_and_default_source_ports(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        responses: list[tuple[HTTPStatus, object]] = []
+        session = self._session(username="writer")
+        routes = BankDetailsApiRoutes(
+            application_service=service,
+            resolve_read_session=lambda _headers: (session, None),
+            json_response=lambda status, payload: responses.append((status, payload)) or {"status": status, "payload": payload},
+            load_json_body=lambda body: ({"version": 1, "body": body}, None),
+            default_auto_tag_rules_source_provider=lambda: {"source": "bundled"},
+        )
+
+        put_response = routes.route("PUT", "/api/bank-details/auto-tag-rules", {}, "{}", {})
+        reapply_response = routes.route("POST", "/api/bank-details/auto-tag-rules/reapply", {}, "not-json", {})
+        replacement_response = routes.route("POST", "/api/bank-details/auto-tag-rules/file-replacement", {}, None, {})
+
+        self.assertEqual(put_response["status"], HTTPStatus.OK)
+        self.assertEqual(reapply_response["status"], HTTPStatus.ACCEPTED)
+        self.assertEqual(replacement_response["status"], HTTPStatus.OK)
+        self.assertEqual(
+            service.calls,
+            [
+                ("update_auto_tag_rules", {"payload": {"version": 1, "body": "{}"}, "actor_id": "writer"}),
+                ("reapply_auto_tag_rules", {"actor_id": "writer", "can_save": True}),
+                ("replace_auto_tag_rules", {"source": {"source": "bundled"}, "actor_id": "writer"}),
+            ],
+        )
 
     def test_routes_facade_delegates_mutations_with_default_actor(self) -> None:
         service = FakeBankDetailsApplicationService()
