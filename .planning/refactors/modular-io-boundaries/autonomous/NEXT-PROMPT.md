@@ -5,16 +5,28 @@ Continue the user-authorized `main-read-model-closure` run.
 ## Current State
 
 - Branch: `main`.
+- Current main commit: `2c7a9eac64c1758e5f7e6bf0de1a6667b3b50f1b`.
 - Backup branch: `codex/backup-main-before-read-model-closure-20260625-230543`.
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
-- Latest completed boundary: `main-read-model-closure:local-owner-split-closure-audit-and-production-evidence-gate`.
+- Latest completed boundary: `main-read-model-closure:production-or-equivalent-freshness-performance-evidence`.
+- Evidence gap report: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`.
 - Local closure audit: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`.
-- Reconciliation file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-25.md`.
-- Wave 3 analysis file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-3-remaining-read-model-owner-split-2026-06-25.md`.
 - Local PSCIP-L3 owner split is complete for all known non-Workbench App Status read models.
 - Workbench remains the documented active-generation exception and must not be mechanically converted.
-- No production/server/DB access was used. No secret, production DB mutation, queue mutation, readiness mutation or worker replay occurred.
-- No PSCIP-L4 global closure is claimed.
+- PSCIP-L4 is not proven.
+
+## Evidence Summary
+
+- Production is reachable read-only through `finops-prod-root`.
+- Production service is running release commit `67271c7f67291a2fcf393f1fa0ad33be9e84f413`, not current `main`.
+- Current `main` includes owner split commits after that release, so existing production evidence cannot prove current-main PSCIP-L4.
+- A current-code/local-backend probe over SSH-tunneled production dependencies showed:
+  - `bank_details`, `no_oa_bank_batch`, and `workbench` sampled endpoints were fresh.
+  - `search` was `stale`.
+  - `cost_statistics` and `tax_offset` were `refreshing`.
+  - Fresh gates did not report sampled stale/mismatched payloads as fresh.
+- Local SSH-tunnel latency is not acceptable as production performance evidence.
+- No production DB write, deploy, queue mutation, readiness mutation, worker replay, service restart or secret output occurred.
 
 ## Required First Steps On Resume
 
@@ -22,41 +34,38 @@ Continue the user-authorized `main-read-model-closure` run.
 2. Confirm `main` is fast-forward synced with `origin/main`.
 3. Read:
    - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/production-read-model-production-evidence-matrix-read-only-sweep-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/production-post-convergence-readiness-worker-db-aggregate-evidence-sweep-2026-06-25.md`
-4. Use CodeGraph before code edits. If the boundary is evidence-only, no code edit is expected.
+   - `deploy/oa/README.md`
+   - `scripts/deploy-oa.sh`
+   - `scripts/deploy_oa.py`
+   - `docs/operations/runtime-worker-governance.md`
+4. Use CodeGraph before code edits. If the boundary is deployment/evidence-only, code edits are not expected.
 
 ## Next Boundary
 
-`main-read-model-closure:production-or-equivalent-freshness-performance-evidence`
+`main-read-model-closure:controlled-main-deploy-and-post-deploy-read-model-evidence-runbook`
 
 Goal:
-- Collect production or equivalent runtime evidence required for PSCIP-L4.
-- Prove all pages/read models return fresh data or correctly expose refreshing/stale status, never stale-as-fresh.
-- Prove worker/queue convergence from PostgreSQL durable queue facts.
-- Prove hot-path performance is acceptable for high-row pages.
-
-Access strategy:
-- If SSH/production DB credentials are available, first run read-only checks only.
-- Do not mutate production DB, queue, readiness flags, worker state, or app state without an explicit runbook and approval.
-- If SSH/production DB access is unavailable, use an equivalent staging/local Postgres evidence harness if present; otherwise write a hard-stop evidence gap report.
-
-Minimum evidence:
-- App Status read model readiness/status sweep for all manifest entries.
-- PostgreSQL durable queue dirty-scope/outbox convergence sweep.
-- API or browser smoke covering Workbench, search, bank detail, pending invoice, invoice lifecycle, input invoice usage, output invoice collection, OA pending payment, cost statistics, tax offset, no-OA bank batch, turnover ledger, and bank account balance.
-- Performance evidence for Workbench active generation, search, bank detail, no-OA bank batch, turnover ledger, cost statistics, and tax offset.
-- Evidence that Redis/RabbitMQ are not freshness truth and stale cache is gated behind fresh status.
+- Prepare the minimal safe path to deploy current `main` and collect post-deploy PSCIP-L4 evidence.
+- Do not deploy until the runbook is explicit and the operator has approved production deploy/restart operations.
 
 Acceptance:
-- PSCIP-L4 may be claimed only if evidence proves freshness/status correctness, queue convergence, and acceptable performance.
-- If evidence cannot be collected, do not claim closure; write an analysis hard-stop report with exact missing access/evidence.
-- If evidence finds stale/fresh bugs or performance regressions, fix locally with tests first, then rerun evidence.
+- If deployment is approved, deploy current `main` using the repository production entrypoint and collect post-deploy evidence:
+  - release identity equals current `main`;
+  - `/health` and `/health/ready` are ready;
+  - App Status readiness is fresh for all manifest read models;
+  - dirty scopes/outbox/dead-letter facts converge;
+  - required workers are current and healthy;
+  - sampled API/browser endpoints return fresh or correct stale/refreshing status;
+  - hot-path/high-row query plan or latency evidence is collected for Workbench, search, bank detail, no-OA bank batch, turnover ledger, cost statistics, and tax offset.
+- If deployment is not approved or cannot be performed safely, do not claim PSCIP-L4. Write a precise deploy/evidence hard-stop report and keep the goal active or blocked only after the strict blocked-audit threshold is met.
+- No production DB write, queue mutation, readiness mutation, worker replay, force refresh, or repair unless a committed/recorded explicit-scope runbook is approved.
+- Do not implement Go, Go Fiber or Go Worker.
+- This boundary is deploy/evidence only; any Go hot-path work remains separately admission-gated by performance evidence, rollback proof, and an explicit implementation prompt.
 - Update this `NEXT-PROMPT.md` and `autonomous/JOURNAL.md` at the end of the boundary.
 
-Suggested local verification before any evidence report:
+Suggested local verification before any deploy/evidence action:
 
 ```bash
 PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
@@ -66,4 +75,4 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
-Do not claim global closure without production/equivalent freshness and performance evidence.
+Do not claim global closure without production/equivalent freshness and performance evidence from the current main implementation.
