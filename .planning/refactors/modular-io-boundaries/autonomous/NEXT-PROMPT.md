@@ -1,38 +1,32 @@
 # Next Prompt
 
-Continue after `deployment:production-browser-smoke-token-broker-runbook`.
+Continue after `deployment:production-browser-smoke-runner-runtime-availability-classification`.
 
 ## Current State
 
 - Branch: `dev`.
-- Row306 designed a future root-owned in-memory target OA token broker protocol.
-- No broker was implemented or installed, no token was output, no browser smoke ran and no production command ran.
-- Browser production evidence remains deferred until runner runtime, broker implementation and production execution are complete.
+- Row307 classified runner runtime availability without installing/downloading browsers or running production smoke.
+- Local Playwright exists, but it is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists.
+- Production app host remains unavailable as a browser runner from Row294/296.
+- Browser production evidence remains blocked by approved runner runtime/wrapper availability.
 - Admin evidence remains deferred because no admin HTTP SLO token/cookie seam exists and target OA applicant sessions are full-access non-admin.
 - Write apply remains blocked pending explicit approval, reviewed reversible business object, rollback/idempotency/audit acceptance, convergence expectations and suitable auth.
 - Global/module closure remains open.
 
 ## Next Boundary
 
-`deployment:production-browser-smoke-runner-runtime-availability-classification`
+`planning:global-closure-hard-stop-report`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify any dirty files.
-2. Commit/push Row306 analysis evidence if it is not already committed.
-3. Classify whether an existing controlled runner environment can execute the production browser smoke bundle without:
-   - installing/downloading browsers;
-   - running production browser smoke;
-   - receiving token bytes through logs;
-   - mutating the production app host;
-   - changing normal app release packaging.
-
-## Allowed Evidence
-
-- Local repository files and package metadata.
-- Existing script/test contracts.
-- Non-secret checks for local Playwright availability only if they do not install/download anything.
-- Documentation and environment classification.
+2. Commit/push Row307 analysis evidence if it is not already committed.
+3. Produce a hard-stop report under `.planning/refactors/modular-io-boundaries/analysis/` that includes:
+   - commit-backed progress references;
+   - completed evidence classes;
+   - precise remaining blockers for browser/admin/write apply;
+   - why no further safe owned boundary remains without external/operational input;
+   - smallest safe next action.
 
 ## Required Verification
 
@@ -41,8 +35,8 @@ Continue after `deployment:production-browser-smoke-token-broker-runbook`.
 
 ## Stop Gates
 
+- Do not claim global closure.
 - Do not run production browser smoke.
 - Do not run token broker or token-producing commands.
-- Do not install or download packages/browsers.
-- Do not mutate production.
-- Do not claim browser evidence or global closure from runtime availability classification alone.
+- Do not execute production writes.
+- Do not ask for or print secrets.

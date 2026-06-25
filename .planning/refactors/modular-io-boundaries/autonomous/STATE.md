@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-browser-runner-runtime-classification-selected`
+Current state: `global-closure-hard-stop-report-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `deployment:production-browser-smoke-token-broker-runbook` as `analysis-closed` in `analysis/deployment-production-browser-smoke-token-broker-runbook-2026-06-25.md`. T0 designed a future root-owned in-memory target OA token broker protocol with session scope checks, non-logged token descriptor handoff, sanitized metadata, and stop gates. No broker was implemented/installed, no token was output and no production command ran. Next boundary is `deployment:production-browser-smoke-runner-runtime-availability-classification`.
+Completed `deployment:production-browser-smoke-runner-runtime-availability-classification` as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-runtime-availability-classification-2026-06-25.md`. T0 classified runner runtime availability without installing/downloading browsers or running production smoke. Local Playwright exists but is not an approved production evidence runner because no private token broker/wrapper or pinned ops runtime exists; production app host remains unavailable from Row294/296. Browser, admin and write-apply gates are now external/operational hard-stop gates. Next boundary is `planning:global-closure-hard-stop-report`.
 
 ## Closed Or Deferred Slices
 
