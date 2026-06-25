@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-oa-raw-payload-signal-month-helper-extraction-closed`
+Current state: `workbench-live-oa-merge-helper-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-oa-raw-payload-signal-month-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-raw-payload-signal-month-helper-extraction-2026-06-25.md`. `WorkbenchOaRawPayloadSignalMonthHelper` now owns OA row month extraction, raw payload OA month collection and OA attachment signal detection; live/OA merge helper extraction remains deferred. The next local boundary is `server-py:workbench-live-oa-merge-helper-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-live-oa-merge-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-live-oa-merge-helper-extraction-2026-06-25.md`. `WorkbenchLiveOaMergeHelper` now owns OA status merge, OA row replacement, OA attachment invoice append and row-id dedupe; group row payload helper extraction remains deferred. The next local boundary is `server-py:workbench-group-row-payload-helper-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

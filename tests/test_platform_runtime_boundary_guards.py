@@ -6204,6 +6204,78 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_live_oa_merge_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_live_oa_merge_helper.py").read_text(encoding="utf-8")
+        merge_rows_source = _function_source(server_tree, server_source, "_merge_live_workbench_with_oa_rows")
+        dedupe_source = _function_source(server_tree, server_source, "_dedupe_workbench_rows_by_id_preferring_last")
+        grouped_merge_source = _function_source(server_tree, server_source, "_merge_live_workbench_with_oa")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-live-oa-merge-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_merge_live_workbench_with_oa_rows", merge_rows_source),
+            ("_dedupe_workbench_rows_by_id_preferring_last", dedupe_source),
+        ):
+            if "WorkbenchLiveOaMergeHelper" not in method_source:
+                violations.append(f"Application {method_name} does not delegate to live/OA merge helper")
+        for forbidden in (
+            "source_kind",
+            "oa_attachment_invoice",
+            "row_ids_in_order",
+            "passthrough_rows",
+            "rows_by_id:",
+            "merged[\"paired\"][\"oa\"]",
+        ):
+            combined_method_source = "\n".join([merge_rows_source, dedupe_source])
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns live/OA merge detail: {forbidden}")
+        if "_group_row_payload(Application._merge_live_workbench_with_oa_rows(live_payload, oa_payload))" not in grouped_merge_source:
+            violations.append("Application grouped live/OA merge no longer preserves group-row compatibility path")
+        for marker in (
+            "class WorkbenchLiveOaMergeHelper",
+            "def merge_rows(",
+            "def dedupe_rows_by_id_preferring_last(",
+            "source_kind",
+            "oa_attachment_invoice",
+            "row_ids_in_order",
+            "passthrough_rows",
+            "serialize_value",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchLiveOaMergeHelper missing marker: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchLiveOaMergeHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-live-oa-merge-helper-extraction",
+            "WorkbenchLiveOaMergeHelper",
+            "grouped merge boundaries",
+            "group row payload",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench live/OA merge helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

@@ -457,7 +457,9 @@ Do not select Go hot-path candidates while any prior `pending` implementation/fo
 | 443 | `server-py:workbench-raw-payload-mutation-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchRawPayloadMutationHelper`, moved raw payload row replacement, row-id dedupe and summary recomputation out of `Application` compatibility helper bodies. |
 | 444 | `server-py:workbench-oa-raw-payload-signal-month-helper-audit` | analysis-closed | implementation-gap-open | Audited OA raw payload signal/month extraction; selected signal/month helper extraction while deferring live/OA merge helper extraction. |
 | 445 | `server-py:workbench-oa-raw-payload-signal-month-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchOaRawPayloadSignalMonthHelper`, moved OA row month extraction, raw payload OA month collection and OA attachment signal detection out of `Application` helper bodies. |
-| 446 | `server-py:workbench-live-oa-merge-helper-audit` | pending | implementation-gap-open | Audit `_merge_live_workbench_with_oa_rows(...)`, `_merge_live_workbench_with_oa(...)`, `_dedupe_workbench_rows_by_id_preferring_last(...)` and grouped merge boundaries; select the next narrow local implementation or guard boundary. |
+| 446 | `server-py:workbench-live-oa-merge-helper-audit` | analysis-closed | implementation-gap-open | Audited live/OA row merge and row-id dedupe; selected merge helper extraction while deferring group row payload helper extraction. |
+| 447 | `server-py:workbench-live-oa-merge-helper-extraction` | local-implementation-closed | implementation-gap-open | Added `WorkbenchLiveOaMergeHelper`, moved OA status merge, OA row replacement, OA attachment invoice append and row-id dedupe out of `Application` helper bodies. |
+| 448 | `server-py:workbench-group-row-payload-helper-audit` | pending | implementation-gap-open | Audit `_group_row_payload(...)`, grouping service ownership, ignored-row filtering and grouped merge compatibility; select the next narrow local implementation or guard boundary. |
 
 ## Status Values
 

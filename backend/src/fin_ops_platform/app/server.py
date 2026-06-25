@@ -505,6 +505,7 @@ from fin_ops_platform.services.workbench_oa_attachment_source_link_resolver impo
 from fin_ops_platform.services.workbench_oa_raw_payload_signal_month_helper import (
     WorkbenchOaRawPayloadSignalMonthHelper,
 )
+from fin_ops_platform.services.workbench_live_oa_merge_helper import WorkbenchLiveOaMergeHelper
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13038,45 +13039,13 @@ class Application:
         live_payload: dict[str, object],
         oa_payload: dict[str, object],
     ) -> dict[str, object]:
-        merged = Application._serialize_value(live_payload)
-        merged["oa_status"] = Application._serialize_value(oa_payload.get("oa_status") or {"code": "ready", "message": "OA 已同步"})
-        merged["paired"]["oa"] = Application._serialize_value(oa_payload["paired"]["oa"])
-        merged["open"]["oa"] = Application._serialize_value(oa_payload["open"]["oa"])
-        merged["paired"]["invoice"] = Application._dedupe_workbench_rows_by_id_preferring_last([
-            *Application._serialize_value(merged["paired"].get("invoice", [])),
-            *[
-                row
-                for row in Application._serialize_value(oa_payload["paired"].get("invoice", []))
-                if str(row.get("source_kind", "")) == "oa_attachment_invoice"
-            ],
-        ])
-        merged["open"]["invoice"] = Application._dedupe_workbench_rows_by_id_preferring_last([
-            *Application._serialize_value(merged["open"].get("invoice", [])),
-            *[
-                row
-                for row in Application._serialize_value(oa_payload["open"].get("invoice", []))
-                if str(row.get("source_kind", "")) == "oa_attachment_invoice"
-            ],
-        ])
-        return merged
+        return WorkbenchLiveOaMergeHelper(
+            serialize_value=Application._serialize_value,
+        ).merge_rows(live_payload, oa_payload)
 
     @staticmethod
     def _dedupe_workbench_rows_by_id_preferring_last(rows: list[object]) -> list[object]:
-        row_ids_in_order: list[str] = []
-        rows_by_id: dict[str, object] = {}
-        passthrough_rows: list[object] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                passthrough_rows.append(row)
-                continue
-            row_id = str(row.get("id", "")).strip()
-            if not row_id:
-                passthrough_rows.append(row)
-                continue
-            if row_id not in rows_by_id:
-                row_ids_in_order.append(row_id)
-            rows_by_id[row_id] = row
-        return [rows_by_id[row_id] for row_id in row_ids_in_order] + passthrough_rows
+        return WorkbenchLiveOaMergeHelper.dedupe_rows_by_id_preferring_last(rows)
 
     @staticmethod
     def _merge_live_workbench_with_oa(
