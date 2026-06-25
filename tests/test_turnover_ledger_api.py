@@ -4345,16 +4345,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(facade.withdraw_calls[0]["expected_versions"], {f"relation:{relation_id}": 1})
 
     def test_withdraw_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_withdraw)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_withdraw_relation_route)
 
         self.assertNotIn("if facade is not None", source)
         self.assertNotIn("self._turnover_ledger_api_routes.withdraw_relation", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
 
     def test_withdraw_handler_delegates_precheck_expected_versions_and_affected_months_to_request_facade(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_withdraw)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_withdraw_relation_route)
 
-        self.assertIn("facade = self._turnover_ledger_withdraw_request_boundary_facade()", source)
+        self.assertIn("facade = self._withdraw_request_boundary_provider()", source)
         self.assertIn("result = facade.withdraw_relation_from_request(", source)
         self.assertIn("except TurnoverLedgerWithdrawRequestBoundaryError as exc:", source)
         self.assertNotIn("detail = self._turnover_ledger_api_routes.get_relation(relation_id)", source)

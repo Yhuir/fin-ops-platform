@@ -1688,6 +1688,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def handle_confirm_relation_route(",
             "def handle_closure_confirm_route(",
             "def handle_closure_withdraw_route(",
+            "def handle_withdraw_relation_route(",
         ):
             if snippet not in route_source:
                 violations.append(f"TurnoverLedgerApiRoutes is missing read/export route-owner behavior {snippet}")
@@ -1704,14 +1705,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_turnover_ledger_confirm",
             "_handle_api_turnover_ledger_closure_confirm",
             "_handle_api_turnover_ledger_closure_withdraw",
+            "_handle_api_turnover_ledger_withdraw",
         ):
             if _function_source(server_tree, server_source, removed_handler):
                 violations.append(f"server.py still owns turnover ledger migrated route callback {removed_handler}")
-        for retained_handler in (
-            "_handle_api_turnover_ledger_withdraw",
-        ):
-            if not _function_source(server_tree, server_source, retained_handler):
-                violations.append(f"server.py no longer owns turnover ledger mutation callback {retained_handler}")
         if "self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)" not in server_source:
             violations.append("server.py does not delegate turnover ledger routing to the route owner")
         for snippet in (
@@ -1726,6 +1723,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "relation_extra_tenant_id_provider=self._workbench_reconciliation_tenant_id",
             "confirm_relation_request_boundary_provider=self._turnover_ledger_confirm_request_boundary_facade",
             "closure_request_boundary_provider=lambda: self._turnover_ledger_closure_request_boundary_facade()",
+            "withdraw_request_boundary_provider=self._turnover_ledger_withdraw_request_boundary_facade",
             "write_precondition_error_payload=self._turnover_write_precondition_error_payload",
         ):
             if snippet not in server_source:

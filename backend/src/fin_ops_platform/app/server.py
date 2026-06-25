@@ -409,7 +409,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
     TurnoverLedgerWritePreconditionError,
-    TurnoverLedgerWithdrawRequestBoundaryError,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
@@ -1295,6 +1294,7 @@ class Application:
             relation_extra_tenant_id_provider=self._workbench_reconciliation_tenant_id,
             confirm_relation_request_boundary_provider=self._turnover_ledger_confirm_request_boundary_facade,
             closure_request_boundary_provider=lambda: self._turnover_ledger_closure_request_boundary_facade(),
+            withdraw_request_boundary_provider=self._turnover_ledger_withdraw_request_boundary_facade,
             write_precondition_error_payload=self._turnover_write_precondition_error_payload,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
@@ -1967,9 +1967,6 @@ class Application:
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
                 return turnover_ledger_response
-        if method == "POST" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/withdraw"):
-            relation_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_turnover_ledger_withdraw(relation_id, body, headers)
         if method == "GET" and route_path == "/api/oa-sync/status":
             return self._handle_api_oa_sync_status()
         if method == "GET" and route_path == "/api/app-health/stream":
@@ -9968,53 +9965,6 @@ class Application:
             facade_provider=self._turnover_ledger_relation_extra_write_facade,
             current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
         )
-
-    def _handle_api_turnover_ledger_withdraw(
-        self,
-        relation_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session_response = self._turnover_mutation_session(headers)
-        if isinstance(session_response, Response):
-            return session_response
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
-        try:
-            facade = self._turnover_ledger_withdraw_request_boundary_facade()
-            result = facade.withdraw_relation_from_request(
-                relation_id=relation_id,
-                actor_id=actor,
-                tenant_id=tenant_id_for_session(session_response),
-                note=str(payload.get("note")) if payload.get("note") is not None else None,
-                idempotency_key=idempotency_key,
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
-            )
-        except TurnoverLedgerWithdrawRequestBoundaryError as exc:
-            return self._json_response(
-                exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
-            )
-        except TurnoverLedgerWritePreconditionError as exc:
-            return self._json_response(
-                exc.status_code,
-                self._turnover_write_precondition_error_payload(exc),
-            )
-        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
-            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except TurnoverRelationValidationError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, result)
 
     @staticmethod
     def _turnover_write_precondition_error_payload(exc: TurnoverLedgerWritePreconditionError) -> dict[str, object]:

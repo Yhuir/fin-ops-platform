@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-relation-withdraw-route-callback-collapse-selected`
+Current state: `turnover-ledger-route-owner-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-closure-withdraw-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-closure-withdraw-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/closures/withdraw` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit closure request-boundary port preserving dynamic override semantics, and the app callback was removed. T0 selected relation withdraw route callback collapse next.
+Completed `server-py:turnover-ledger-relation-withdraw-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-relation-withdraw-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/relations/{relation_id}/withdraw` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit withdraw request-boundary port, and the last app-owned turnover ledger route callback was removed. T0 selected turnover ledger route-owner local closure audit next.
 
 ## Closed Or Deferred Slices
 
