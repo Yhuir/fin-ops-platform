@@ -1,5 +1,16 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-25 - route-owner local closure audit
+
+- 目标：执行 `server-py:turnover-ledger-route-owner-local-closure-audit`，确认所有 `/api/turnover-ledger*` route callbacks 已从 `server.py` 迁出。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变外部往来业务、写入、read model freshness、operation barrier、Workbench relation command 边界、导出或前端行为。
+- 关键决策：`server.py` 不再定义任何 `_handle_api_turnover_ledger*` route callback；剩余 turnover ledger app surfaces 分类为 composition-root、write facade/request-boundary provider、local runtime support、read model/source-version/platform adapter、legacy fallback invalidation/persistence adapter 和 Workbench source-version provider。它们不是 route-owner gap，但后续可作为独立 cleanup candidate。
+- 文档影响：新增 modular IO route-owner local closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录；外部往来状态机定义不变。
+- 测试覆盖：本轮为 analysis-only；复用 platform Guard 证明 removed handler list 不回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；本结论不等于外部往来模块全局 closed。
+- 后续事项：执行 `planning:post-turnover-ledger-route-owner-next-boundary-selection`。
+
 ## 2026-06-25 - relation withdraw route-owner collapse
 
 - 目标：执行 `server-py:turnover-ledger-relation-withdraw-route-callback-collapse`，把 `POST /api/turnover-ledger/relations/{relation_id}/withdraw` HTTP mapping 从 `server.py` 收到 `TurnoverLedgerApiRoutes.route(...)`。

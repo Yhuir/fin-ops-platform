@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-route-owner-local-closure-audit-selected`
+Current state: `post-turnover-ledger-route-owner-next-boundary-selection-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-relation-withdraw-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-relation-withdraw-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/relations/{relation_id}/withdraw` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit withdraw request-boundary port, and the last app-owned turnover ledger route callback was removed. T0 selected turnover ledger route-owner local closure audit next.
+Completed `server-py:turnover-ledger-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-turnover-ledger-route-owner-local-closure-audit-2026-06-25.md`. No `_handle_api_turnover_ledger*` callbacks remain in `server.py`; remaining turnover ledger app surfaces are composition-root/provider/platform/source-version/read-model/local-runtime/legacy fallback support candidates, not route callbacks. T0 selected post-turnover next-boundary selection next.
 
 ## Closed Or Deferred Slices
 

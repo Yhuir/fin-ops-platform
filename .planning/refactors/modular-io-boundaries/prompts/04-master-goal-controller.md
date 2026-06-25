@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:turnover-ledger-route-owner-local-closure-audit-selected` after turnover ledger relation withdraw route callback collapse.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `planning:post-turnover-ledger-route-owner-next-boundary-selection-selected` after turnover ledger route-owner local closure audit.
 
 ```text
 $gsd-autonomous --auto

@@ -62,6 +62,28 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-25 - route-owner local closure audit test note
+
+`server-py:turnover-ledger-route-owner-local-closure-audit` 已完成为 analysis-only：
+
+- Business core unit tests：不适用；本轮不改外部往来业务规则。
+- Service-layer tests：不适用；本轮不改 services/facades/repositories。
+- API contract tests：间接适用；本轮复用上一个 implementation slice 的完整 `tests.test_turnover_ledger_api` 证据，本 audit 未改 API。
+- Read model/cache/background job tests：不适用；本轮不改 read model、dirty/outbox、worker 或 cache。
+- Frontend component and interaction tests：不适用；本轮不改前端。
+- End-to-end business-flow integration tests：不适用；本轮不改业务流。
+- Existing feature regression tests：适用；复跑 platform Guard，证明 `server.py` 不再拥有 `_handle_api_turnover_ledger*` route callbacks，且 route owner inventory 仍注册。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
+bash scripts/verify.sh docs
+git diff --check
+```
+
+未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；本 audit 不能声明模块全局 closed。
+
 ## 2026-06-25 - relation withdraw route-owner collapse test note
 
 `server-py:turnover-ledger-relation-withdraw-route-callback-collapse` 已完成：
