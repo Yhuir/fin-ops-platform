@@ -104,7 +104,6 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankAutoTagRulesValidationError,
-    BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
     BankTransactionCategoryValidationError,
 )
@@ -1293,6 +1292,7 @@ class Application:
             load_json_body=self._load_json_body,
             tenant_id_provider=tenant_id_for_session,
             tag_selection_write_boundary_provider=self._turnover_ledger_tag_selection_request_boundary_facade,
+            bank_row_tags_request_boundary_provider=self._turnover_ledger_bank_row_tags_request_boundary_facade,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
             routes=self._turnover_ledger_api_routes,
@@ -1964,8 +1964,6 @@ class Application:
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
                 return turnover_ledger_response
-        if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
-            return self._handle_api_turnover_ledger_bank_row_tags_batch(body, headers)
         if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_turnover_ledger_relation_extra_update(relation_id, body, headers)
@@ -9912,58 +9910,6 @@ class Application:
         return TurnoverLedgerTagSelectionRequestBoundaryFacade(
             facade_provider=self._turnover_ledger_tag_selection_write_facade,
         )
-
-    def _handle_api_turnover_ledger_bank_row_tags_batch(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session_response = self._turnover_mutation_session(headers)
-        if isinstance(session_response, Response):
-            return session_response
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        if not isinstance(payload, dict) or not isinstance(payload.get("updates"), list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_bank_row_tag_update", "message": "updates must be an array."},
-            )
-        updates = [dict(update) for update in payload.get("updates") if isinstance(update, dict)]
-        if len(updates) != len(payload.get("updates")):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_bank_row_tag_update", "message": "each update must be an object."},
-            )
-        try:
-            actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-            facade = self._turnover_ledger_bank_row_tags_request_boundary_facade()
-            idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
-            result = facade.update_bank_row_tags_batch_from_request(
-                updates=updates,
-                actor_id=actor,
-                tenant_id=tenant_id_for_session(session_response),
-                idempotency_key=idempotency_key,
-            )
-        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
-            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except BankTransactionCategoryConflictError as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                    "transaction_id": exc.transaction_id,
-                    "expected_version": exc.expected_version,
-                    "actual_version": exc.actual_version,
-                },
-            )
-        except BankTransactionCategoryValidationError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
-            )
-        return self._json_response(HTTPStatus.OK, result)
 
     def _turnover_ledger_bank_row_tags_request_boundary_facade(self) -> TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         return TurnoverLedgerBankRowTagsRequestBoundaryFacade(

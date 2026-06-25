@@ -62,6 +62,29 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-25 - bank-row-tags route-owner collapse test note
+
+`server-py:turnover-ledger-bank-row-tags-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改外部往来标签规则或分类业务规则。
+- Service-layer tests：适用但未新增；既有 bank-row-tags request boundary/write facade 回归继续覆盖 target validation、affected months、idempotency、legacy fallback、category update 和 refresh side effects。
+- API contract tests：适用；复跑 bank-row-tags targeted regressions 和完整 `tests.test_turnover_ledger_api` 140 个用例，证明 POST status/error/response shape、非 turnover row 拒绝、idempotency replay/conflict 和 category/refresh 行为保持。
+- Read model/cache/background job tests：间接适用；bank-row-tags 成功后的 bank detail/workbench/turnover refresh 由既有 API tests 覆盖，本 slice 未改 worker、dirty/outbox 或 read model writer。
+- Frontend component and interaction tests：不适用；未改前端 API mapper、页面交互或 operation overlay。
+- End-to-end business-flow integration tests：不适用；未改 confirm/withdraw/closure flow。
+- Existing feature regression tests：适用；更新 platform Guard，防止 `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 回到 `server.py`，并确认 relation-extra/confirm/closure/withdraw callbacks 仍保留。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_bank_row_tags_handler_delegates_validation_affected_months_and_flags_to_request_facade tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_rejects_non_turnover_rows_without_refresh_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；relation-extra/confirm/closure/withdraw callbacks 是后续边界。
+
 ## 2026-06-25 - tag-selection write route-owner collapse test note
 
 `server-py:turnover-ledger-tag-selection-write-route-callback-collapse` 已完成：

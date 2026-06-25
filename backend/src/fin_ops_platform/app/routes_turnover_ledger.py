@@ -14,6 +14,10 @@ from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedg
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryConflictError,
+    BankTransactionCategoryValidationError,
+)
 from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
@@ -160,6 +164,7 @@ class TurnoverLedgerApiRoutes:
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, object], Any | None]] | None = None,
         tenant_id_provider: Callable[[Any], str] | None = None,
         tag_selection_write_boundary_provider: Callable[[], Any] | None = None,
+        bank_row_tags_request_boundary_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._ledger_service = ledger_service
         self._relation_service = relation_service
@@ -174,6 +179,7 @@ class TurnoverLedgerApiRoutes:
         self._load_json_body = load_json_body
         self._tenant_id_provider = tenant_id_provider
         self._tag_selection_write_boundary_provider = tag_selection_write_boundary_provider
+        self._bank_row_tags_request_boundary_provider = bank_row_tags_request_boundary_provider
 
     def route(
         self,
@@ -193,6 +199,8 @@ class TurnoverLedgerApiRoutes:
             return self.handle_list_route(query)
         if method == "PUT" and route_path == "/api/turnover-ledger/tag-selection":
             return self.handle_tag_selection_update_route(body, headers)
+        if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
+            return self.handle_bank_row_tags_batch_route(body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.handle_relation_extra_route(relation_id)
@@ -261,6 +269,60 @@ class TurnoverLedgerApiRoutes:
             return self._respond(status, {"error": exc.error_code, "message": str(exc)})
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._respond(HTTPStatus.OK, result)
+
+    def handle_bank_row_tags_batch_route(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        self._ensure_bank_row_tags_write_ports()
+        session_response = self._mutation_session_resolver(headers)  # type: ignore[misc]
+        if self._session_error_detector(session_response):  # type: ignore[misc]
+            return session_response
+        payload, error = self._load_json_body(body)  # type: ignore[misc]
+        if error is not None:
+            return error
+        if not isinstance(payload, dict) or not isinstance(payload.get("updates"), list):
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_bank_row_tag_update", "message": "updates must be an array."},
+            )
+        updates = [dict(update) for update in payload.get("updates") if isinstance(update, dict)]
+        if len(updates) != len(payload.get("updates")):
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_bank_row_tag_update", "message": "each update must be an object."},
+            )
+        try:
+            identity = session_response.identity
+            actor = identity.username or identity.user_id or "web_finance_user"
+            facade = self._bank_row_tags_request_boundary_provider()  # type: ignore[misc]
+            idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+            result = facade.update_bank_row_tags_batch_from_request(
+                updates=updates,
+                actor_id=actor,
+                tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
+                idempotency_key=idempotency_key,
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except BankTransactionCategoryConflictError as exc:
+            return self._respond(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                    "transaction_id": exc.transaction_id,
+                    "expected_version": exc.expected_version,
+                    "actual_version": exc.actual_version,
+                },
+            )
+        except BankTransactionCategoryValidationError as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
         return self._respond(HTTPStatus.OK, result)
 
     def handle_export_preview_route(self, query: dict[str, list[str]]) -> Any:
@@ -341,6 +403,16 @@ class TurnoverLedgerApiRoutes:
         return self._json_response(status, payload)
 
     def _ensure_tag_selection_write_ports(self) -> None:
+        self._ensure_mutation_route_ports()
+        if self._tag_selection_write_boundary_provider is None:
+            raise RuntimeError("turnover ledger tag selection write port is not configured")
+
+    def _ensure_bank_row_tags_write_ports(self) -> None:
+        self._ensure_mutation_route_ports()
+        if self._bank_row_tags_request_boundary_provider is None:
+            raise RuntimeError("turnover ledger bank row tags write port is not configured")
+
+    def _ensure_mutation_route_ports(self) -> None:
         missing = [
             name
             for name, value in {
@@ -348,12 +420,11 @@ class TurnoverLedgerApiRoutes:
                 "session_error_detector": self._session_error_detector,
                 "load_json_body": self._load_json_body,
                 "tenant_id_provider": self._tenant_id_provider,
-                "tag_selection_write_boundary_provider": self._tag_selection_write_boundary_provider,
             }.items()
             if value is None
         ]
         if missing:
-            raise RuntimeError(f"turnover ledger tag selection write ports are not configured: {', '.join(missing)}")
+            raise RuntimeError(f"turnover ledger mutation route ports are not configured: {', '.join(missing)}")
 
     def list_ledger(
         self,

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-bank-row-tags-route-callback-collapse-selected`
+Current state: `turnover-ledger-relation-extra-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-tag-selection-write-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-tag-selection-write-route-callback-collapse-2026-06-25.md`. `PUT /api/turnover-ledger/tag-selection` now lives in `TurnoverLedgerApiRoutes.route(...)` with explicit session/body/tenant/request-boundary ports, and the app callback was removed. T0 selected bank-row-tags batch route callback collapse next.
+Completed `server-py:turnover-ledger-bank-row-tags-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-bank-row-tags-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/bank-row-tags/batch` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit bank-row-tags request-boundary port, and the app callback was removed. T0 selected relation-extra route callback collapse next.
 
 ## Closed Or Deferred Slices
 

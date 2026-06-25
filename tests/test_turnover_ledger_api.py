@@ -2400,7 +2400,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_bank_row_tags_batch_route)
 
         self.assertNotIn("apply_turnover_updates(", source)
         self.assertNotIn("save_bank_transaction_categories(", source)
@@ -2408,9 +2408,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_after_turnover_relation_mutation(", source)
 
     def test_bank_row_tags_handler_delegates_validation_affected_months_and_flags_to_request_facade(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_bank_row_tags_batch_route)
 
-        self.assertIn("facade = self._turnover_ledger_bank_row_tags_request_boundary_facade()", source)
+        self.assertIn("facade = self._bank_row_tags_request_boundary_provider()", source)
         self.assertIn("result = facade.update_bank_row_tags_batch_from_request(", source)
         self.assertNotIn("_ensure_turnover_bank_row_tag_targets(transaction_ids)", source)
         self.assertNotIn("affected_months = self._bank_transaction_category_affected_months(transaction_ids)", source)
