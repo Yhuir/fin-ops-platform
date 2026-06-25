@@ -620,3 +620,13 @@
 - 测试覆盖：新增 source upload service 层 TXT 票根导入测试；新增任务级 supplement evidence API 回归；扩展 static Guard，禁止 parser/source-mode 细节回到 `server.py`；重跑票根 TXT/GB18030/存储错误/wrong-slot/source-mode conflict 和信用卡上传存储错误回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_etc_reconciliation.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_reconciliation_service.EtcReconciliationServiceTests.test_source_upload_service_imports_ticket_root_text_file -v`；targeted ETC source upload API 回归共 11 条通过。
 - 未测风险：两条依赖本地真实票根样例的 conflict 回归因样例缺失按既有逻辑 skipped；ticket-root text callback 仍在 `Application`，等待下一边界审计。
+
+## 2026-06-25 - ETC reconciliation ticket-root text callback审计
+
+- 目标：审计剩余 `Application._handle_api_etc_reconciliation_ticket_root_texts(...)`，选择下一条最小安全实现边界。
+- 影响范围：ticket-root text JSON entries、source-mode conflict、source-file persistence、source name、`TicketRootClipboardTextParser` dispatch、parse-result apply 和 storage error mapping。
+- 关键决策：ticket-root text 仍包含 source-file persistence 和 parser 编排，不应长期留在 `Application`；下一步扩展 `EtcReconciliationSourceUploadService`，避免创建第二个平行上传 service。Malformed JSON/entry 的 HTTP 400 映射可以继续由 `Application` 或 route owner 负责。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 service 层测试、API 回归和静态 Guard。
+- 验证命令：只读审计 `server.py` callback、source upload service、task service 和 ticket-root text tests；未运行测试。
+- 未测风险：ticket-root text callback 仍在 `Application`，等待 service extraction。

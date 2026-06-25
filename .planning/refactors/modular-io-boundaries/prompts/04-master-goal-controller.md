@@ -140,6 +140,7 @@ Current state expected on start:
 - `server-py:etc-reconciliation-supplement-for-card-upload-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-supplement-for-card-upload-callback-collapse-2026-06-25.md`; selected generic source upload parser/source-mode audit.
 - `server-py:etc-reconciliation-source-upload-parser-boundary-audit` is complete as `analysis-closed` in `analysis/server-py-etc-reconciliation-source-upload-parser-boundary-audit-2026-06-25.md`; selected source upload service extraction.
 - `server-py:etc-reconciliation-source-upload-service-extraction` is complete as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-source-upload-service-extraction-2026-06-25.md`; selected ticket-root text callback audit.
+- `server-py:etc-reconciliation-ticket-root-text-callback-audit` is complete as `analysis-closed` in `analysis/server-py-etc-reconciliation-ticket-root-text-callback-audit-2026-06-25.md`; selected ticket-root text service extraction.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -384,7 +385,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-reconciliation-ticket-root-text-callback-audit`.
+Start with `server-py:etc-reconciliation-ticket-root-text-service-extraction`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -407,7 +408,8 @@ Current local-first state:
 - `server-py:etc-reconciliation-supplement-for-card-upload-callback-collapse` is complete in `analysis/server-py-etc-reconciliation-supplement-for-card-upload-callback-collapse-2026-06-25.md`.
 - `server-py:etc-reconciliation-source-upload-parser-boundary-audit` is complete in `analysis/server-py-etc-reconciliation-source-upload-parser-boundary-audit-2026-06-25.md`.
 - `server-py:etc-reconciliation-source-upload-service-extraction` is complete in `analysis/server-py-etc-reconciliation-source-upload-service-extraction-2026-06-25.md`.
-- Row329 is the next local boundary: audit remaining ticket-root text callback ownership.
+- `server-py:etc-reconciliation-ticket-root-text-callback-audit` is complete in `analysis/server-py-etc-reconciliation-ticket-root-text-callback-audit-2026-06-25.md`.
+- Row330 is the next local boundary: extract ticket-root text submission into the source upload service boundary.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.
@@ -417,11 +419,11 @@ Commit-backed baseline:
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/server-py-etc-reconciliation-source-upload-service-extraction-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Read `analysis/server-py-etc-reconciliation-ticket-root-text-callback-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
 - Use CodeGraph before implementation-oriented changes to `Application`, route-owner classes, auth/session helpers, ETC reconciliation task services, relation side-effect helpers or existing tests.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
-- Execute only the Row329 ETC reconciliation ticket-root text callback audit unless a narrower safe analysis step is required first.
+- Implement only the Row330 ETC reconciliation ticket-root text service extraction unless a narrower safe implementation step is required first.
 - Keep business-batch v2 route behavior out of Row321.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.

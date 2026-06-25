@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-ticket-root-text-callback-audit-selected`
+Current state: `etc-reconciliation-ticket-root-text-service-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-source-upload-service-extraction` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-source-upload-service-extraction-2026-06-25.md`. T0 added `EtcReconciliationSourceUploadService` and moved generic source upload store+parse+apply orchestration plus ticket-root wrong-slot/source-mode/content-type policy out of `Application`. The remaining ticket-root text callback is selected for audit next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-ticket-root-text-callback-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-ticket-root-text-callback-audit-2026-06-25.md`. T0 selected `server-py:etc-reconciliation-ticket-root-text-service-extraction` to move ticket-root text source-file persistence, source naming, clipboard parser dispatch and parse-result application into `EtcReconciliationSourceUploadService`. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
