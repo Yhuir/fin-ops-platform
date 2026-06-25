@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Mutation route callback collapse
+
+- 目标：把销项发票收款情况剩余 receipt preview/settings、收款状态、提醒、红蓝票和收据 create/void/reissue HTTP mapping 从 `Application` 移入 `OutputInvoiceCollectionApiRoutes`。
+- 影响范围：`routes_output_invoice_collections.py` 扩展 `route(...)` 并注入 `load_json_body` port；`server.py` 删除所有 `_handle_api_output_invoice_collections*` callbacks 和 `_output_invoice_collection_mutation(...)`；更新 runtime boundary Guard。未改 SQL fresh-gate helper。
+- 关键决策：route owner 负责 body/session/error/JSON mapping，保留 `x-request-id` trace id 和 `Idempotency-Key` / `idempotency-key` 传递；业务规则继续留在 route owner、lifecycle service 和 receipt service。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：扩展 runtime boundary Guard，禁止 output collection callbacks 回到 `server.py`；复跑完整 `tests.test_output_invoice_collection_api` 覆盖 lifecycle writes、receipt create/history、权限、结构化错误和 read/export 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_output_invoice_collection_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-25 - Mutation route callback audit
 
 - 目标：审计 read/export route callback collapse 后剩余的 receipt preview/settings、收款状态、提醒、红蓝票和收据 create/void/reissue callbacks。

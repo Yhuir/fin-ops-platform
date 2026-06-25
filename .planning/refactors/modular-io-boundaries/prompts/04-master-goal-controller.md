@@ -452,7 +452,8 @@ Current local-first state:
 - Row357 is complete in `analysis/server-py-output-invoice-collection-route-owner-audit-2026-06-25.md`: output collection read/export/status/history callbacks are thin enough for a bounded route-owner collapse, while mutation callbacks and fresh-gate extraction remain separate work.
 - Row358 is complete in `analysis/server-py-output-invoice-collection-read-export-route-callback-collapse-2026-06-25.md`: output collection read/export/status/history/detail HTTP mapping now lives in `OutputInvoiceCollectionApiRoutes`.
 - Row359 is complete in `analysis/server-py-output-invoice-collection-mutation-route-callback-audit-2026-06-25.md`: remaining output collection mutation/receipt callbacks are thin HTTP wrappers around route-owner methods.
-- Row360 is the next local boundary: collapse remaining output collection mutation/receipt route callbacks into `OutputInvoiceCollectionApiRoutes`.
+- Row360 is complete in `analysis/server-py-output-invoice-collection-mutation-route-callback-collapse-2026-06-25.md`: all output collection HTTP mapping now lives in `OutputInvoiceCollectionApiRoutes`.
+- Row361 is the next local boundary: extract output collection SQL read-model fresh gate/source-version/schema stale/all-rows/detail helper logic out of `Application`.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

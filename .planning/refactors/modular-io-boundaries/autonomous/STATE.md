@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `output-invoice-collection-mutation-route-callback-collapse-selected`
+Current state: `output-invoice-collection-read-model-fresh-gate-service-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:output-invoice-collection-mutation-route-callback-audit` as `analysis-closed` in `analysis/server-py-output-invoice-collection-mutation-route-callback-audit-2026-06-25.md`. Remaining output collection receipt preview/settings and lifecycle/receipt/red-relation callbacks are thin body/session/error/trace/idempotency wrappers around route-owner service methods. T0 selected mutation route callback collapse next; SQL fresh-gate helper extraction remains separate work.
+Completed `server-py:output-invoice-collection-mutation-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-output-invoice-collection-mutation-route-callback-collapse-2026-06-25.md`. Output collection route ownership is now locally accounted for: all read/export/status/history/detail and mutation/receipt HTTP mapping lives in `OutputInvoiceCollectionApiRoutes`. SQL read-model fresh gate/source-version/schema stale/all-rows/detail helper logic remains app-owned in `Application`, so T0 selected fresh-gate service extraction next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:output-invoice-collection-mutation-route-callback-audit`
+`server-py:output-invoice-collection-mutation-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:output-invoice-collection-mutation-route-callback-collapse`
+`server-py:output-invoice-collection-read-model-fresh-gate-service-extraction`

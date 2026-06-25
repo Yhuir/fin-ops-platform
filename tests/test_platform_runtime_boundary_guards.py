@@ -1557,11 +1557,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/output-invoice-collections/export",
             "/api/output-invoice-collections/status-rules",
             "/api/output-invoice-collections/receipts/history",
+            "/api/output-invoice-collections/receipt-preview",
+            "/api/output-invoice-collections/receipt-settings",
+            "/api/output-invoice-collections/receipts/",
+            "/api/output-invoice-collections/red-invoice-relations/",
             "/api/output-invoice-collections/invoices/",
             "/api/output-invoice-collections/bank-transactions/",
             "/api/output-invoice-collections/rows/",
+            "/collection-status",
+            "/collection-reminder",
+            "/red-invoice-relations",
+            "/receipts",
             "def _json_read(",
+            "def _json_body_mutation(",
+            "def _json_session(",
             "def _relation_details_response(",
+            "_idempotency_key(headers)",
+            "_trace_id(headers)",
         ):
             if required not in route_class:
                 violations.append(f"Output collection route owner is missing {required}")
@@ -1579,9 +1591,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_output_invoice_collections_relation_details",
             "_handle_api_output_invoice_collections_status_rules",
             "_handle_api_output_invoice_collections_receipt_history",
+            "_handle_api_output_invoice_collections_receipt_preview",
+            "_handle_api_output_invoice_collections_collection_status",
+            "_handle_api_output_invoice_collections_collection_reminder",
+            "_handle_api_output_invoice_collections_collection_reminder_delete",
+            "_handle_api_output_invoice_collections_red_relation_create",
+            "_handle_api_output_invoice_collections_red_relation_delete",
+            "_handle_api_output_invoice_collections_receipt_create",
+            "_handle_api_output_invoice_collections_receipt_void",
+            "_handle_api_output_invoice_collections_receipt_reissue",
+            "_handle_api_output_invoice_collections_receipt_settings",
+            "_handle_api_output_invoice_collections_receipt_settings_update",
+            "_output_invoice_collection_mutation",
         ):
             if _function_source(server_tree, server_source, removed_handler):
-                violations.append(f"server.py still owns output collection read/export callback {removed_handler}")
+                violations.append(f"server.py still owns output collection route callback {removed_handler}")
 
         self.assertEqual(violations, [])
 
