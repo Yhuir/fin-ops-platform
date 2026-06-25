@@ -472,6 +472,7 @@ from fin_ops_platform.services.workbench_reconciliation_dirty_queue import Workb
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 from fin_ops_platform.services.workbench_raw_payload_assembler import WorkbenchRawPayloadAssembler
+from fin_ops_platform.services.workbench_retained_all_oa_payload_builder import WorkbenchRetainedAllOaPayloadBuilder
 from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
 from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
     WorkbenchRefreshStatusPayloadProvider,
@@ -12788,41 +12789,39 @@ class Application:
         return builder
 
     def _build_retained_all_oa_row_payload(self) -> dict[str, object]:
-        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
-        if cutoff_date is None:
-            payload = self._serialize_value(self._workbench_api_routes.get_workbench("all"))
-            if self._raw_payload_has_oa_attachment_invoice_signal(payload):
-                self._promote_oa_attachment_invoices_to_canonical(self._oa_months_from_raw_workbench_payload(payload))
-            return payload
+        return self._workbench_retained_all_oa_payload_builder().build()
 
-        scoped_months = self._retained_oa_months_for_all_scope(cutoff_date)
-        supplemental_oa_row_ids = self._supplemental_retained_oa_row_ids(cutoff_date)
-        oa_adapter = self._workbench_query_service._oa_adapter
-        suppress_attachment_parse = getattr(oa_adapter, "suppress_attachment_invoice_background_parse", None)
-        parse_context = suppress_attachment_parse() if callable(suppress_attachment_parse) else nullcontext()
-        with parse_context:
-            for scoped_month in scoped_months:
-                self._workbench_query_service._sync_oa_rows(scoped_month)
-            if supplemental_oa_row_ids:
-                self._workbench_query_service.sync_oa_row_ids(supplemental_oa_row_ids)
-        promotion_scopes = set(scoped_months)
-        if supplemental_oa_row_ids:
-            promotion_scopes.update(
-                str(row.get("_month", "")).strip()
-                for row in self._workbench_query_service.list_record_snapshots()
-                if str(row.get("id", "")).strip() in supplemental_oa_row_ids
+    def _workbench_retained_all_oa_payload_builder(self) -> WorkbenchRetainedAllOaPayloadBuilder:
+        builder = getattr(self, "_workbench_retained_all_oa_payload_builder_instance", None)
+        if builder is None:
+            builder = WorkbenchRetainedAllOaPayloadBuilder(
+                retention_cutoff_date=lambda: self._parse_oa_retention_date(
+                    self._app_settings_service.get_oa_retention_cutoff_date()
+                ),
+                get_all_workbench_payload=lambda: self._workbench_api_routes.get_workbench("all"),
+                serialize_value=self._serialize_value,
+                raw_payload_has_oa_attachment_invoice_signal=self._raw_payload_has_oa_attachment_invoice_signal,
+                oa_months_from_raw_workbench_payload=self._oa_months_from_raw_workbench_payload,
+                promote_oa_attachment_invoices_to_canonical=self._promote_oa_attachment_invoices_to_canonical,
+                retained_oa_months_for_all_scope=self._retained_oa_months_for_all_scope,
+                supplemental_retained_oa_row_ids=self._supplemental_retained_oa_row_ids,
+                suppress_attachment_invoice_background_parse=self._workbench_suppress_attachment_invoice_background_parse,
+                sync_oa_rows=lambda scoped_month: self._workbench_query_service._sync_oa_rows(scoped_month),
+                sync_oa_row_ids=lambda row_ids: self._workbench_query_service.sync_oa_row_ids(row_ids),
+                record_snapshots=lambda: self._workbench_query_service.list_record_snapshots(),
+                raw_oa_payload_for_selected_scope=self._raw_oa_payload_for_selected_scope,
+                is_month_scope=lambda scope_key: bool(SEARCH_MONTH_RE.match(scope_key)),
             )
-        payload = self._serialize_value(
-            self._raw_oa_payload_for_selected_scope(
-                months=set(scoped_months),
-                supplemental_oa_row_ids=set(supplemental_oa_row_ids),
-            )
+            self._workbench_retained_all_oa_payload_builder_instance = builder
+        return builder
+
+    def _workbench_suppress_attachment_invoice_background_parse(self):
+        suppress_attachment_parse = getattr(
+            self._workbench_query_service._oa_adapter,
+            "suppress_attachment_invoice_background_parse",
+            None,
         )
-        if self._raw_payload_has_oa_attachment_invoice_signal(payload):
-            self._promote_oa_attachment_invoices_to_canonical(
-                {scope_key for scope_key in promotion_scopes if SEARCH_MONTH_RE.match(scope_key)}
-            )
-        return payload
+        return suppress_attachment_parse() if callable(suppress_attachment_parse) else nullcontext()
 
     def _retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
         cutoff_month = cutoff_date.strftime("%Y-%m")

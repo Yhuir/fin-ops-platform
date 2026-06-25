@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-oa-payload-builder-extraction-closed`
+Current state: `workbench-retained-all-oa-payload-builder-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-oa-payload-builder-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-payload-builder-extraction-2026-06-25.md`. `WorkbenchOaPayloadBuilder` now owns retained-all path choice, normal OA load/serialize, month promotion trigger and canonical append orchestration; retained all-OA internals remain deferred. The next local boundary is `server-py:workbench-retained-all-oa-payload-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-retained-all-oa-payload-builder-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-retained-all-oa-payload-builder-extraction-2026-06-25.md`. `WorkbenchRetainedAllOaPayloadBuilder` now owns retained all-OA payload orchestration; supplemental retained OA row selection and selected-scope raw OA payload internals remain deferred. The next local boundary is `server-py:workbench-supplemental-retained-oa-row-selection-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

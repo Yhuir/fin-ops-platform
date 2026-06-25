@@ -5574,6 +5574,86 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_retained_all_oa_payload_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (SERVICES_ROOT / "workbench_retained_all_oa_payload_builder.py").read_text(encoding="utf-8")
+        retained_method_source = _function_source(server_tree, server_source, "_build_retained_all_oa_row_payload")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_retained_all_oa_payload_builder")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-retained-all-oa-payload-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_parse_oa_retention_date(",
+            "_workbench_api_routes.get_workbench(\"all\")",
+            "_promote_oa_attachment_invoices_to_canonical(",
+            "_retained_oa_months_for_all_scope(",
+            "_supplemental_retained_oa_row_ids(",
+            "_sync_oa_rows(",
+            "sync_oa_row_ids(",
+            "_raw_oa_payload_for_selected_scope(",
+        ):
+            if forbidden in retained_method_source:
+                violations.append(f"Application _build_retained_all_oa_row_payload still owns retained-all step: {forbidden}")
+        if "return self._workbench_retained_all_oa_payload_builder().build()" not in retained_method_source:
+            violations.append("Application _build_retained_all_oa_row_payload does not delegate to retained all-OA builder")
+        for marker in (
+            "class WorkbenchRetainedAllOaPayloadBuilder",
+            "retention_cutoff_date",
+            "get_all_workbench_payload",
+            "raw_payload_has_oa_attachment_invoice_signal",
+            "oa_months_from_raw_workbench_payload",
+            "retained_oa_months_for_all_scope",
+            "supplemental_retained_oa_row_ids",
+            "raw_oa_payload_for_selected_scope",
+            "is_month_scope",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchRetainedAllOaPayloadBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchRetainedAllOaPayloadBuilder(",
+            "retention_cutoff_date=lambda: self._parse_oa_retention_date(",
+            "get_all_workbench_payload=lambda: self._workbench_api_routes.get_workbench(\"all\")",
+            "serialize_value=self._serialize_value",
+            "retained_oa_months_for_all_scope=self._retained_oa_months_for_all_scope",
+            "supplemental_retained_oa_row_ids=self._supplemental_retained_oa_row_ids",
+            "suppress_attachment_invoice_background_parse=self._workbench_suppress_attachment_invoice_background_parse",
+            "raw_oa_payload_for_selected_scope=self._raw_oa_payload_for_selected_scope",
+            "is_month_scope=lambda scope_key: bool(SEARCH_MONTH_RE.match(scope_key))",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application retained all-OA builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchRetainedAllOaPayloadBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-retained-all-oa-payload-builder-extraction",
+            "WorkbenchRetainedAllOaPayloadBuilder",
+            "supplemental retained OA row selection",
+            "selected-scope raw OA payload",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench retained all-OA builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
