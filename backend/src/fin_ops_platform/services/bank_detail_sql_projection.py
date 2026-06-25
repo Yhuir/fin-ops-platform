@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -68,16 +70,35 @@ class BankDetailSqlProjectionBuilder:
             normalized_scope_key
         )
         self._configure_auto_category_service_from_app_settings()
+        manual_categories = self._load_manual_categories(transaction_rows) if transaction_rows else {}
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        source_versions = self._source_versions(
+            source_version=source_version,
+            row_count=len(transaction_rows),
+            relation_source_versions=relation_source_versions,
+            source_signature=self._source_signature(
+                scope_key=normalized_scope_key,
+                transaction_rows=transaction_rows,
+                auto_category_context_rows=auto_category_context_rows,
+                manual_categories=manual_categories,
+            ),
+        )
+        unchanged = self._unchanged_scope_result(
+            scope_key=normalized_scope_key,
+            row_count=len(transaction_rows),
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         if not transaction_rows:
             self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=[])
             self._read_model_repository.mark_bank_detail_scope(
                 scope_key=normalized_scope_key,
                 row_count=0,
-                source_versions=self._source_versions(source_version=source_version, row_count=0),
+                source_versions=source_versions,
             )
-            return {"scope_key": normalized_scope_key, "row_count": 0}
+            return {"scope_key": normalized_scope_key, "row_count": 0, "source_versions": source_versions}
         transaction_ids = [str(row["id"]) for row in transaction_rows]
-        manual_categories = self._load_manual_categories(transaction_rows)
         relations = self._load_relation_tags(scope_key=normalized_scope_key, transaction_ids=transaction_ids)
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         auto_category_context_by_id = {
@@ -86,7 +107,6 @@ class BankDetailSqlProjectionBuilder:
             if str(row.get("id") or "").strip()
         }
         generated_at = datetime.now(UTC).isoformat()
-        source_versions = self._source_versions(source_version=source_version, row_count=len(transaction_rows))
         rows = [
             self._project_row(
                 row,
@@ -102,6 +122,45 @@ class BankDetailSqlProjectionBuilder:
         ]
         self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=rows)
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "generated_at": generated_at}
+
+    def _unchanged_scope_result(
+        self,
+        *,
+        scope_key: str,
+        row_count: int,
+        source_versions: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        scope_summary_loader = getattr(self._read_model_repository, "bank_detail_scope_summary", None)
+        if not callable(scope_summary_loader):
+            return None
+        scope_summary = scope_summary_loader(scope_keys=[scope_key])
+        if not isinstance(scope_summary, dict):
+            return None
+        signatures = scope_summary.get("read_model_scope_signatures")
+        if not isinstance(signatures, dict):
+            return None
+        signature = signatures.get(scope_key)
+        if not isinstance(signature, dict):
+            return None
+        existing_source_versions = signature.get("source_versions")
+        if not isinstance(existing_source_versions, dict):
+            return None
+        if int_value(signature.get("row_count"), -1) != row_count:
+            return None
+        if _stable_source_versions(existing_source_versions) != _stable_source_versions(source_versions):
+            return None
+        self._read_model_repository.mark_bank_detail_scope(
+            scope_key=scope_key,
+            row_count=row_count,
+            source_versions=source_versions,
+        )
+        return {
+            "scope_key": scope_key,
+            "row_count": row_count,
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
 
     def _load_transaction_rows_with_auto_category_context(self, scope_key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         start_date, end_date = _bank_detail_auto_category_context_bounds(scope_key)
@@ -560,14 +619,55 @@ class BankDetailSqlProjectionBuilder:
             "raw_payload": {"source": row.get("raw_payload") or {}, "normalized_payload": payload},
         }
 
-    def _source_versions(self, *, source_version: int | None, row_count: int) -> dict[str, Any]:
+    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, Any]:
+        source_versions_loader = getattr(self._read_model_repository, "workbench_relation_source_versions", None)
+        if callable(source_versions_loader):
+            source_versions = source_versions_loader(scope_key=scope_key)
+            if isinstance(source_versions, dict) and source_versions:
+                return dict(source_versions)
+        return dict(self._workbench_relation_read_facade.last_source_versions)
+
+    @staticmethod
+    def _source_signature(
+        *,
+        scope_key: str,
+        transaction_rows: list[dict[str, Any]],
+        auto_category_context_rows: list[dict[str, Any]],
+        manual_categories: dict[str, dict[str, Any]],
+    ) -> str:
+        payload = {
+            "scope_key": scope_key,
+            "transaction_rows": transaction_rows,
+            "auto_category_context_rows": auto_category_context_rows,
+            "manual_categories": manual_categories,
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _source_versions(
+        self,
+        *,
+        source_version: int | None,
+        row_count: int,
+        relation_source_versions: dict[str, Any] | None = None,
+        source_signature: str = "",
+    ) -> dict[str, Any]:
         return {
             "source_version": source_version,
             "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": self._bank_auto_tag_rules_version,
-            "workbench_relation_source_versions": self._workbench_relation_read_facade.last_source_versions,
+            "workbench_relation_source_versions": dict(
+                relation_source_versions
+                if isinstance(relation_source_versions, dict)
+                else self._workbench_relation_read_facade.last_source_versions
+            ),
+            "bank_detail_source_signature": source_signature,
             "row_count": row_count,
         }
+
+
+def _stable_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in dict(source_versions).items() if key != "source_version"}
 
 
 def _is_month_scope(scope_key: str) -> bool:

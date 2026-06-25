@@ -2,6 +2,26 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-26 - bank detail unchanged scope projection skip test note
+
+`read-model:bank-detail-unchanged-scope-fast-path` 已完成：
+
+- Business core unit tests：不适用；本轮不改分类规则、金额、状态机或业务判断。
+- Service-layer tests：适用；`tests/test_bank_details_sql_runtime.py` 新增 projection 用例，覆盖相同 stable source versions 时只推进 `bank_detail_scopes.source_version`，不重写 projected rows。
+- API contract tests：不适用；HTTP shape、状态码和权限未变。
+- Read model/cache/background job tests：适用；新增用例覆盖 `bank_detail_source_signature`、workbench relation source versions、row count 与 source version advance，防止 unchanged scope 被误判为需要全量重建或错误 fresh。
+- Frontend component and interaction tests：不适用；前端页面、组件和交互未变。
+- End-to-end business-flow integration tests：生产 SLO 验证适用；需在发布后用真实 PostgreSQL/worker 跑 bank_detail 单 scope 和全量 read model SLO。
+- Existing feature regression tests：适用；保留完整 `tests/test_bank_details_sql_runtime.py`，防止银行明细列表、账户、关系标签、分类投影和 refresh worker 行为回退。
+
+验证命令：
+
+```bash
+python -m pytest tests/test_bank_details_sql_runtime.py -q
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实生产 mutating write-operation closure 需要在本次 rollout 继续完成；生产 SLO 结果以发布后 `/tmp/finops-*` probe 输出为准。
+
 ## 2026-06-25 - route-owner local closure audit retry test note
 
 `server-py:bank-details-route-owner-local-closure-audit-retry` 已完成为 analysis-only：

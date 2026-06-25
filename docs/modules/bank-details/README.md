@@ -23,6 +23,8 @@
 
 银行明细 read model 的 `bank_detail:all` 是 refresh fan-out 控制 scope，用于枚举月份 shard；页面无界查询不能等待 `bank_detail:all` parent proof。无日期筛选的交易列表和账户列表必须解析为当前已存在的月份 scope 集合，并用这些 month shards 的 freshness/source versions 证明页面数据 fresh；只有没有任何月份 shard 时才保留 `all` 作为 empty/missing 判断入口。
 
+`bank_detail:<YYYY-MM>` 投影以月份为 partition。每次 refresh 必须先计算稳定 source signature：银行流水规范化行、自动分类上下文行、人工分类/确认，以及 workbench relation read model source versions。若 row count 与除 `source_version` 外的 source versions 完全一致，projection 只推进 scope source version 并跳过重写 `read_model.bank_detail_rows` 与自动分类重算；若任一输入变化，必须完整重投影该月份并重新发布 fresh scope。该跳过路径只允许在已有 scope signature 可证明一致时使用，不能把 missing/schema mismatch/stale 伪装成 fresh。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

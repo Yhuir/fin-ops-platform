@@ -1724,6 +1724,107 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
 
 class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
+    def test_rebuild_skips_unchanged_scope_and_advances_source_version(self) -> None:
+        raw_row = {
+            "id": "txn-unchanged",
+            "transaction_id": "uuid-unchanged",
+            "account_no": "6222000011116386",
+            "account_name": "云南溯源科技有限公司",
+            "txn_direction": "expense",
+            "counterparty_name_raw": "供应商",
+            "amount": "100.00",
+            "signed_amount": "-100.00",
+            "balance": "2138.00",
+            "currency": "CNY",
+            "txn_date": "2026-05-03",
+            "trade_time": "2026-05-03 10:00:00",
+            "summary": "普通付款",
+            "remark": "",
+            "bank_text_fields": [{"label": "摘要", "value": "普通付款"}],
+            "raw_payload": {
+                "normalized_payload": {
+                    "imported_bank_name": "工商银行",
+                    "imported_bank_last4": "6386",
+                }
+            },
+        }
+        probe_builder = BankDetailSqlProjectionBuilder(
+            connection=FakeConnection(),
+            read_model_repository=CaptureBankDetailReadModelRepository(),
+        )
+        normalized_row = probe_builder._normalize_transaction_row(raw_row)  # noqa: SLF001
+        relation_source_versions = {"scope_key": "2026-05", "source_version": 5}
+        source_signature = BankDetailSqlProjectionBuilder._source_signature(  # noqa: SLF001
+            scope_key="2026-05",
+            transaction_rows=[normalized_row],
+            auto_category_context_rows=[normalized_row],
+            manual_categories={},
+        )
+        existing_source_versions = {
+            "source_version": 8,
+            "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": 1,
+            "workbench_relation_source_versions": relation_source_versions,
+            "bank_detail_source_signature": source_signature,
+            "row_count": 1,
+        }
+
+        class Repository(CaptureBankDetailReadModelRepository):
+            def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+                self.summary_scope_keys = list(scope_keys)
+                return {
+                    "read_model_scope_signatures": {
+                        "2026-05": {
+                            "row_count": 1,
+                            "source_versions": existing_source_versions,
+                        }
+                    }
+                }
+
+            def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
+                self.relation_source_scope_key = scope_key
+                return relation_source_versions
+
+            def save_bank_detail_rows(
+                self,
+                *,
+                scope_key: str,
+                rows: list[dict[str, object]],
+                tenant_id: str = "default",
+            ) -> None:
+                raise AssertionError("unchanged bank detail scope must not rewrite projected rows")
+
+        class RaisingAutoCategoryService:
+            def configure_tag_dictionary(self, _payload: dict[str, object]) -> None:
+                self.configured = True
+
+            def suggestions_by_transaction_id(self, _rows: list[dict[str, object]]) -> dict[str, object]:
+                raise AssertionError("unchanged bank detail scope must not recompute auto categories")
+
+        repository = Repository()
+        auto_category_service = RaisingAutoCategoryService()
+        connection = FakeConnection(rows=[[raw_row]])
+        builder = BankDetailSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+            auto_category_service=auto_category_service,
+        )
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-05", source_version=9)
+
+        self.assertEqual(result["row_count"], 1)
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertEqual(repository.summary_scope_keys, ["2026-05"])
+        self.assertEqual(repository.relation_source_scope_key, "2026-05")
+        self.assertEqual(len(repository.marked_scopes), 1)
+        self.assertEqual(repository.marked_scopes[0]["scope_key"], "2026-05")
+        self.assertEqual(repository.marked_scopes[0]["row_count"], 1)
+        marked_source_versions = repository.marked_scopes[0]["source_versions"]
+        self.assertEqual(marked_source_versions["source_version"], 9)
+        self.assertEqual(marked_source_versions["bank_detail_source_signature"], source_signature)
+        self.assertEqual(marked_source_versions["workbench_relation_source_versions"], relation_source_versions)
+
     def test_rebuild_loads_custom_auto_tag_rules_from_app_settings(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
         connection = FakeConnection(
