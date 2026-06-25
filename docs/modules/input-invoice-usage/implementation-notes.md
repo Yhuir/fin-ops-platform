@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - OA reverse route owner local closure audit
+
+- 目标：审计 OA reverse route owner 在本地模块化层面是否已经 accounted。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：`InputInvoiceUsageOaReverseApiRoutes` 已拥有全部 `/api/input-invoice-usage/oa-reverse*` HTTP mapping；`server.py` 不再保留 `_handle_api_input_invoice_usage_oa_reverse_*` route handler。剩余 OA reverse `Application` 方法是 service factory、audit/read-model invalidation、OA provider/client、mutation actor、error mapper 等显式平台端口。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；依赖 Row346 的 static Guard/API 回归证据。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-route-owner-local-closure-audit-2026-06-25.md`。
+- 未测风险：真实 OA 登录、目标申请人凭据、生产 browser/admin/write 和 worker drain 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-core-route-owner-audit`。
+
 ## 2026-06-25 - OA reverse draft mutation route callback collapse
 
 - 目标：把 OA reverse 剩余草稿创建、撤回、状态刷新和人工状态 HTTP mapping 从 `server.py` 迁入 `InputInvoiceUsageOaReverseApiRoutes`。

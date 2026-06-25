@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-oa-reverse-route-owner-local-closure-audit-selected`
+Current state: `input-invoice-usage-core-route-owner-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse-2026-06-25.md`. T0 moved one-step draft, batch draft, draft revoke, status refresh and manual status HTTP mapping into `InputInvoiceUsageOaReverseApiRoutes`, removed the remaining OA reverse route handlers from `server.py`, and added static/API regression evidence. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-local-closure-audit-2026-06-25.md`. T0 confirmed all `/api/input-invoice-usage/oa-reverse*` HTTP mapping is route-owned and remaining OA reverse `Application` methods are explicit dependency/platform/helper ports. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse`
+`server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-core-route-owner-audit`
