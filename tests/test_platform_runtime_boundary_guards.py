@@ -405,6 +405,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "InputInvoiceUsageOaReverseApiRoutes",
                 "server_markers": ("def _input_invoice_usage_oa_reverse_routes", "_input_invoice_usage_oa_reverse_routes().route("),
             },
+            "routes_input_invoice_usage.py": {
+                "module": "fin_ops_platform.app.routes_input_invoice_usage",
+                "class": "InputInvoiceUsageApiRoutes",
+                "server_markers": ("def _input_invoice_usage_routes", "_input_invoice_usage_routes().route("),
+            },
             "routes_legacy_workbench_actions.py": {
                 "module": "fin_ops_platform.app.routes_legacy_workbench_actions",
                 "class": "LegacyWorkbenchActionRoutes",
@@ -2478,6 +2483,76 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if removed_handler in server_source:
                 violations.append(f"server.py still owns removed OA reverse handler {removed_handler}")
+
+        self.assertEqual(violations, [])
+
+    def test_input_invoice_usage_read_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_input_invoice_usage.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        route_class = _class_source(route_tree, route_source, "InputInvoiceUsageApiRoutes")
+        factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_routes")
+
+        violations: list[str] = []
+        if not route_class:
+            violations.append("InputInvoiceUsageApiRoutes is missing")
+        for forbidden in (
+            "Application",
+            "_handle_api_input_invoice_usage_rows",
+            "_handle_api_input_invoice_usage_filter_options",
+            "_handle_api_input_invoice_usage_invoice_detail",
+            "_handle_api_input_invoice_usage_bank_transaction_detail",
+            "_handle_api_input_invoice_usage_oa_detail",
+            "_handle_api_input_invoice_usage_relation_details",
+            "_handle_api_input_invoice_usage_payment_status_rules",
+        ):
+            if forbidden in route_source:
+                violations.append(f"Input usage route owner leaks legacy/application ownership marker {forbidden}")
+        for required in (
+            "query_service=query_service",
+            "rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model",
+            "all_rows_from_sql_read_model=self._get_input_invoice_usage_all_rows_from_sql_read_model",
+            "relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model",
+            "json_response=self._json_response",
+            "input_usage_error_response=self._input_invoice_usage_error_response",
+        ):
+            if required not in factory_source:
+                violations.append(f"Application input usage route factory is missing explicit port {required}")
+        for required in (
+            "/api/input-invoice-usage/rows",
+            "/api/input-invoice-usage/filter-options",
+            "/api/input-invoice-usage/payment-status-rules",
+            "/api/input-invoice-usage/invoices/",
+            "/api/input-invoice-usage/bank-transactions/",
+            "/api/input-invoice-usage/oa/",
+            "/api/input-invoice-usage/rows/",
+            "relation_details",
+        ):
+            if required not in route_class:
+                violations.append(f"Input usage route owner is missing route/method marker {required}")
+        if "_input_invoice_usage_routes().route(method, route_path, query)" not in server_source:
+            violations.append("Application does not dispatch input usage read routes through route owner")
+        for removed_handler in (
+            "def _handle_api_input_invoice_usage_rows(",
+            "def _handle_api_input_invoice_usage_filter_options(",
+            "def _handle_api_input_invoice_usage_invoice_detail(",
+            "def _handle_api_input_invoice_usage_bank_transaction_detail(",
+            "def _handle_api_input_invoice_usage_oa_detail(",
+            "def _handle_api_input_invoice_usage_relation_details(",
+            "def _handle_api_input_invoice_usage_payment_status_rules(",
+        ):
+            if removed_handler in server_source:
+                violations.append(f"server.py still owns removed input usage read handler {removed_handler}")
+        for retained_handler in (
+            "def _handle_api_input_invoice_usage_export_preview",
+            "def _handle_api_input_invoice_usage_export",
+            "def _handle_api_input_invoice_usage_payment_status_rules_update",
+        ):
+            if retained_handler not in server_source:
+                violations.append(f"server.py lost retained out-of-scope handler {retained_handler}")
 
         self.assertEqual(violations, [])
 

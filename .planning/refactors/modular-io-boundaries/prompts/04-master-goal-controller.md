@@ -154,6 +154,7 @@ Current state expected on start:
 - `server-py:input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse` is complete as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse-2026-06-25.md`; all `/api/input-invoice-usage/oa-reverse*` HTTP mapping now lives in `InputInvoiceUsageOaReverseApiRoutes`.
 - `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit` is complete as `analysis-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-local-closure-audit-2026-06-25.md`; OA reverse route-owner local support is accounted for without claiming whole input-invoice-usage/global closure.
 - `server-py:input-invoice-usage-core-route-owner-audit` is complete as `analysis-closed` in `analysis/server-py-input-invoice-usage-core-route-owner-audit-2026-06-25.md`; selected read route-owner facade extraction for rows/filter/detail/relation-detail/payment GET while deferring export and payment PUT.
+- `server-py:input-invoice-usage-read-route-owner-facade-extraction` is complete as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-read-route-owner-facade-extraction-2026-06-25.md`; read HTTP mapping now lives in `InputInvoiceUsageApiRoutes`, while export and payment PUT remain in `Application`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -398,7 +399,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:input-invoice-usage-read-route-owner-facade-extraction`.
+Start with `server-py:input-invoice-usage-export-route-owner-audit`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -435,7 +436,8 @@ Current local-first state:
 - `server-py:input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse` is complete in `analysis/server-py-input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse-2026-06-25.md`.
 - `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit` is complete in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-local-closure-audit-2026-06-25.md`.
 - `server-py:input-invoice-usage-core-route-owner-audit` is complete in `analysis/server-py-input-invoice-usage-core-route-owner-audit-2026-06-25.md`.
-- Row349 is the next local boundary: extract input-invoice usage read route-owner facade for rows/filter/detail/relation-detail/payment GET.
+- `server-py:input-invoice-usage-read-route-owner-facade-extraction` is complete in `analysis/server-py-input-invoice-usage-read-route-owner-facade-extraction-2026-06-25.md`.
+- Row350 is the next local boundary: audit input-invoice usage export route ownership.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.

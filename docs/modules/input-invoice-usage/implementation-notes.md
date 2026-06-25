@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Input usage read route owner facade extraction
+
+- 目标：把非 OA reverse 的进项使用读路径 HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。
+- 影响范围：`routes_input_invoice_usage.py`、`server.py` read route dispatch/factory、静态 Guard 和 input usage API 回归；export 和 payment rules PUT 不变。
+- 关键决策：route owner 通过显式 read/fresh-gate 端口复用现有 SQL/read model fresh gate helper，不改 freshness 语义；export preview/download 因 XLSX bytes/header/audit 另拆；payment rules PUT 因 settings 写入和 refresh fan-out 另拆。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 route-owner inventory/static ownership Guard，回归 rows/filter/detail/relation-details/payment rules GET/export/OA reverse API 路径。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-read-route-owner-facade-extraction-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status、生产 browser/admin/write、导出性能和真实 XLSX 完整解析仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-export-route-owner-audit`。
+
 ## 2026-06-25 - Core input usage route owner audit
 
 - 目标：审计非 OA reverse 的进项发票使用情况 route handler，选择下一步本地模块化边界。
