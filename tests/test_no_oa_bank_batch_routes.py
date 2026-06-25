@@ -4,8 +4,10 @@ import unittest
 from http import HTTPStatus
 from types import SimpleNamespace
 
+from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchRelationMutationError
 
 
@@ -50,6 +52,23 @@ class FakeNoOaApplicationService:
             "affected_months": ["2026-05"],
         }
 
+    def withdraw_batch(self, batch_id, *, actor, expected_version, reason):
+        self.calls.append(
+            (
+                "withdraw_batch",
+                {
+                    "batch_id": batch_id,
+                    "actor": actor,
+                    "expected_version": expected_version,
+                    "reason": reason,
+                },
+            )
+        )
+        return {
+            "batch": {"batch_id": batch_id, "version": 3},
+            "affected_months": ["2026-05"],
+        }
+
     def after_mutation(self, affected_months, *, changed_case_ids, persist=True):
         self.calls.append(
             (
@@ -66,6 +85,24 @@ class FakeNoOaApplicationService:
 
 def fake_session(username: str = "alice"):
     return SimpleNamespace(identity=SimpleNamespace(username=username, user_id="oa-001"))
+
+
+def oa_session(username: str = "alice") -> OARequestSession:
+    return OARequestSession(
+        token="test-token",
+        identity=OAUserIdentity(
+            user_id="oa-001",
+            username=username,
+            display_name=username,
+            nickname=username,
+            roles=("finance",),
+        ),
+        allowed=True,
+        access_tier="full_access",
+        can_access_app=True,
+        can_mutate_data=True,
+        can_admin_access=False,
+    )
 
 
 class NoOaBankBatchRoutesTests(unittest.TestCase):
@@ -87,6 +124,81 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
                 ("tag_selection", None),
             ],
         )
+
+    def test_route_owner_handles_http_mapping_with_platform_ports(self) -> None:
+        service = FakeNoOaApplicationService()
+        session = oa_session("route-user")
+        routes = NoOaBankBatchApiRoutes(
+            application_service=service,
+            resolve_mutation_session=lambda _headers: session,
+            load_json_body=lambda body: ({"expected_version": "5", "note": " ok ", "body": body}, None),
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+        )
+
+        list_response = routes.route("GET", "/api/no-oa-bank-batches", {"bucket": ["unsubmitted"]}, None, {})
+        tag_response = routes.route("GET", "/api/no-oa-bank-batches/tag-selection", {}, None, {})
+        submit_response = routes.route("POST", "/api/no-oa-bank-batches/batch%2F001/submit", {}, "{}", {})
+        withdraw_response = routes.route("POST", "/api/no-oa-bank-batches/batch%2F001/withdraw", {}, "{}", {})
+
+        self.assertEqual(list_response["status"], HTTPStatus.OK)
+        self.assertEqual(tag_response["payload"]["version"], 1)
+        self.assertEqual(submit_response["status"], HTTPStatus.OK)
+        self.assertEqual(withdraw_response["status"], HTTPStatus.OK)
+        self.assertEqual(withdraw_response["payload"]["batch"]["version"], 3)
+        self.assertEqual(
+            service.calls[:4],
+            [
+                ("list", {"bucket": ["unsubmitted"]}),
+                ("tag_selection", None),
+                (
+                    "submit_batch",
+                    {
+                        "batch_id": "batch/001",
+                        "actor": "route-user",
+                        "expected_version": 5,
+                        "note": "ok",
+                        "persist": True,
+                    },
+                ),
+                (
+                    "withdraw_batch",
+                    {
+                        "batch_id": "batch/001",
+                        "actor": "route-user",
+                        "expected_version": 5,
+                        "reason": "ok",
+                    },
+                ),
+            ],
+        )
+
+    def test_route_owner_returns_session_or_body_errors_before_service_call(self) -> None:
+        service = FakeNoOaApplicationService()
+        load_calls: list[object] = []
+        routes = NoOaBankBatchApiRoutes(
+            application_service=service,
+            resolve_mutation_session=lambda _headers: {"status": HTTPStatus.FORBIDDEN, "payload": {"error": "permission_denied"}},
+            load_json_body=lambda body: load_calls.append(body) or ({}, {"status": HTTPStatus.BAD_REQUEST}),
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+        )
+
+        forbidden_response = routes.route("PUT", "/api/no-oa-bank-batches/tag-selection", {}, "{}", {})
+
+        self.assertEqual(forbidden_response["status"], HTTPStatus.FORBIDDEN)
+        self.assertEqual(load_calls, [])
+        self.assertEqual(service.calls, [])
+
+        routes = NoOaBankBatchApiRoutes(
+            application_service=service,
+            resolve_mutation_session=lambda _headers: oa_session(),
+            load_json_body=lambda body: ({}, {"status": HTTPStatus.BAD_REQUEST, "payload": {"error": "invalid_json"}}),
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+        )
+
+        body_error_response = routes.route("PUT", "/api/no-oa-bank-batches/tag-selection", {}, "{", {})
+
+        self.assertEqual(body_error_response["status"], HTTPStatus.BAD_REQUEST)
+        self.assertEqual(service.calls, [])
 
     def test_list_batches_invalid_paging_returns_structured_400(self) -> None:
         class InvalidPagingService(FakeNoOaApplicationService):

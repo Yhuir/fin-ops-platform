@@ -18,6 +18,29 @@
 
 ## 现有测试入口
 
+## 2026-06-25 - route callback collapse test note
+
+`server-py:no-oa-bank-batch-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改 no-OA 批次生命周期、标签准入或 relation 业务规则。
+- Service-layer tests：不适用；本 slice 不改 application service、read model repository、refresh service 或 persistence boundary。
+- API contract tests：适用；`tests/test_no_oa_bank_batch_routes.py` 新增 route-owner HTTP mapping/port 和 session/body short-circuit 覆盖，`tests/test_no_oa_bank_batch_api.py` 复跑 public API dispatch/response 回归。
+- Read model/cache/background job tests：不适用；本 slice 不改 read model/worker/cache。
+- Frontend component and interaction tests：不适用；前端代码未改。
+- End-to-end business-flow integration tests：不适用；本 slice 只移动后端 HTTP mapping，不改业务流。
+- Existing feature regression tests：适用；platform Guard 防止 no-OA route callbacks 回流到 `server.py`，并确认 route owner 不拥有 persistence/queue side effects。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py backend/src/fin_ops_platform/app/server.py tests/test_no_oa_bank_batch_routes.py tests/test_no_oa_bank_batch_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_routes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_api -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_no_oa_bank_batch_routes_delegate_to_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；no-OA route-owner closure 仍需 audit 后才能局部闭合。
+
 ## 2026-06-25 - route-owner callback audit test note
 
 `server-py:no-oa-bank-batch-route-owner-audit` 已完成为 analysis-only：

@@ -3993,6 +3993,56 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_no_oa_bank_batch_routes_delegate_to_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_path = APP_ROOT / "routes_no_oa_bank_batches.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "NoOaBankBatchApiRoutes")
+        for marker in (
+            "def route(",
+            "/api/no-oa-bank-batches",
+            "/api/no-oa-bank-batches/tag-selection",
+            "/submit-selection",
+            "/withdraw",
+            "resolve_mutation_session",
+            "load_json_body",
+            "json_response",
+            "bulk_submit(payload, session=session)",
+            "submit_selection(payload, session=session)",
+        ):
+            if marker not in route_class:
+                violations.append(f"no-OA bank batch route owner is missing marker {marker}")
+
+        if "_no_oa_bank_batch_routes().route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("server.py does not delegate no-OA bank batch dispatch to the route owner")
+        for removed_handler in (
+            "_handle_api_no_oa_bank_batches",
+            "_handle_api_no_oa_bank_batch_tag_selection",
+            "_handle_api_no_oa_bank_batch_tag_selection_update",
+            "_handle_api_no_oa_bank_batch_detail",
+            "_handle_api_no_oa_bank_batch_submit",
+            "_handle_api_no_oa_bank_batch_withdraw",
+            "_handle_api_no_oa_bank_batches_bulk_submit",
+            "_handle_api_no_oa_bank_batches_submit_selection",
+        ):
+            if f"def {removed_handler}(" in server_source:
+                violations.append(f"server.py still defines migrated no-OA route callback {removed_handler}")
+
+        for forbidden in (
+            "save_no_oa_bank_batch_mutation",
+            "enqueue_many(",
+            "job.outbox_events",
+            "job.read_model_dirty_scopes",
+        ):
+            if forbidden in route_source:
+                violations.append(f"no-OA route owner owns side effect boundary {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_search_rebuild_helpers_stay_out_of_application(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

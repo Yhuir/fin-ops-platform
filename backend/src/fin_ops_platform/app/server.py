@@ -1892,16 +1892,10 @@ class Application:
             output_collection_response = self._output_invoice_collection_routes().route(method, route_path, query, body, headers)
             if output_collection_response is not None:
                 return output_collection_response
-        if method == "GET" and route_path == "/api/no-oa-bank-batches":
-            return self._handle_api_no_oa_bank_batches(query)
-        if method == "GET" and route_path == "/api/no-oa-bank-batches/tag-selection":
-            return self._handle_api_no_oa_bank_batch_tag_selection()
-        if method == "PUT" and route_path == "/api/no-oa-bank-batches/tag-selection":
-            return self._handle_api_no_oa_bank_batch_tag_selection_update(body, headers)
-        if method == "POST" and route_path == "/api/no-oa-bank-batches/submit":
-            return self._handle_api_no_oa_bank_batches_bulk_submit(body, headers)
-        if method == "POST" and route_path == "/api/no-oa-bank-batches/submit-selection":
-            return self._handle_api_no_oa_bank_batches_submit_selection(body, headers)
+        if route_path == "/api/no-oa-bank-batches" or route_path.startswith("/api/no-oa-bank-batches/"):
+            no_oa_bank_batch_response = self._no_oa_bank_batch_routes().route(method, route_path, query, body, headers)
+            if no_oa_bank_batch_response is not None:
+                return no_oa_bank_batch_response
         if method == "GET" and route_path == "/api/batch-accounting":
             return self._handle_api_batch_accounting(query)
         if method == "POST" and route_path == "/api/batch-accounting/submit":
@@ -1909,15 +1903,6 @@ class Application:
         if method == "POST" and route_path.startswith("/api/batch-accounting/") and route_path.endswith("/withdraw"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_batch_accounting_withdraw(relation_id, body, headers)
-        if method == "GET" and route_path.startswith("/api/no-oa-bank-batches/"):
-            batch_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_no_oa_bank_batch_detail(batch_id)
-        if method == "POST" and route_path.startswith("/api/no-oa-bank-batches/") and route_path.endswith("/submit"):
-            batch_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_no_oa_bank_batch_submit(batch_id, body, headers)
-        if method == "POST" and route_path.startswith("/api/no-oa-bank-batches/") and route_path.endswith("/withdraw"):
-            batch_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_no_oa_bank_batch_withdraw(batch_id, body, headers)
         if route_path == "/api/turnover-ledger" or route_path.startswith("/api/turnover-ledger/"):
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
@@ -9321,7 +9306,12 @@ class Application:
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
-        return NoOaBankBatchApiRoutes(self._no_oa_bank_batch_application_service())
+        return NoOaBankBatchApiRoutes(
+            self._no_oa_bank_batch_application_service(),
+            resolve_mutation_session=self._no_oa_bank_batch_mutation_session,
+            load_json_body=self._load_json_body,
+            json_response=self._json_response,
+        )
 
     def _bank_details_application_service(self) -> BankDetailsApplicationService:
         suggestion_provider = self.__dict__.get("_bank_detail_auto_category_suggestion_provider")
@@ -9411,62 +9401,6 @@ class Application:
             import_service=self._import_service,
             serialize_value=self._serialize_value,
         )
-
-    def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
-        status_code, payload = self._no_oa_bank_batch_routes().list_batches(query)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_no_oa_bank_batch_tag_selection(self) -> Response:
-        status_code, payload = self._no_oa_bank_batch_routes().tag_selection()
-        return self._json_response(status_code, payload)
-
-    def _handle_api_no_oa_bank_batch_tag_selection_update(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session = self._no_oa_bank_batch_mutation_session(headers)
-        if isinstance(session, Response):
-            return session
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status_code, result = self._no_oa_bank_batch_routes().update_tag_selection(payload, session=session)
-        return self._json_response(status_code, result)
-
-    def _handle_api_no_oa_bank_batch_detail(self, batch_id: str) -> Response:
-        status_code, payload = self._no_oa_bank_batch_routes().detail(batch_id)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_no_oa_bank_batch_submit(
-        self,
-        batch_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session = self._no_oa_bank_batch_mutation_session(headers)
-        if isinstance(session, Response):
-            return session
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status_code, result = self._no_oa_bank_batch_routes().submit_batch(batch_id, payload, session=session)
-        return self._json_response(status_code, result)
-
-    def _handle_api_no_oa_bank_batch_withdraw(
-        self,
-        batch_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session = self._no_oa_bank_batch_mutation_session(headers)
-        if isinstance(session, Response):
-            return session
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status_code, result = self._no_oa_bank_batch_routes().withdraw_batch(batch_id, payload, session=session)
-        return self._json_response(status_code, result)
 
     def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
         batch_workbench_loader = None
@@ -9559,34 +9493,6 @@ class Application:
         payload: dict[str, object] = {"error": exc.code, "message": str(exc)}
         payload.update(exc.payload)
         return self._json_response(status, payload)
-
-    def _handle_api_no_oa_bank_batches_bulk_submit(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session = self._no_oa_bank_batch_mutation_session(headers)
-        if isinstance(session, Response):
-            return session
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status_code, result = self._no_oa_bank_batch_routes().bulk_submit(payload, session=session)
-        return self._json_response(status_code, result)
-
-    def _handle_api_no_oa_bank_batches_submit_selection(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session = self._no_oa_bank_batch_mutation_session(headers)
-        if isinstance(session, Response):
-            return session
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status_code, result = self._no_oa_bank_batch_routes().submit_selection(payload, session=session)
-        return self._json_response(status_code, result)
 
     def _bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()
