@@ -165,6 +165,7 @@ from fin_ops_platform.services.etc_document_parsers import (
     TicketRootDocumentParser,
 )
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, ParseIssue, ParseIssueSeverity, SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     EtcZipFilterPreview,
@@ -5198,7 +5199,7 @@ class Application:
         try:
             expected_version = self._expected_version_from_payload(payload)
             task = self._etc_reconciliation_task_service.get_task(task_id)
-            updated_task, delete_result, canonical_deleted, changed_months = self._remove_reconciliation_task_imported_invoices(
+            cleanup_result = self._etc_reconciliation_import_cleanup_service().remove_imported_invoices(
                 task=task,
                 expected_version=expected_version,
                 actor=str(payload.get("actor") or "web_finance_user"),
@@ -5214,20 +5215,18 @@ class Application:
             )
         except ValueError as error:
             return self._reconciliation_error_response(error)
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_reconciliation_imported_invoices_removed")
+        self._refresh_after_etc_invoice_link(cleanup_result.changed_months, reason="etc_reconciliation_imported_invoices_removed")
         self._persist_state()
-        response_payload = self._etc_reconciliation_task_payload(updated_task)
-        response_payload["removedImportBatch"] = delete_result
-        response_payload["removedCanonicalInvoiceCount"] = canonical_deleted
+        response_payload = self._etc_reconciliation_task_payload(cleanup_result.updated_task)
+        response_payload["removedImportBatch"] = cleanup_result.delete_result
+        response_payload["removedCanonicalInvoiceCount"] = cleanup_result.canonical_deleted
         return self._json_response(HTTPStatus.OK, response_payload)
 
     def _handle_api_etc_reconciliation_task_delete(self, task_id: str, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        removed_import_batch: dict[str, object] | None = None
-        removed_submission_batch: dict[str, object] | None = None
-        changed_months: list[str] = []
+        cleanup_result = None
         try:
             expected_version = self._expected_version_from_payload(payload)
             actor = str(payload.get("actor") or "web_finance_user")
@@ -5235,23 +5234,22 @@ class Application:
             if int(getattr(task, "version", 0) or 0) != expected_version:
                 raise ValueError("task_version_conflict")
             if str(getattr(task, "import_batch_id", "") or "").strip():
-                if self._reconciliation_task_business_batch_for_import(task) is None:
-                    task, removed_submission_batch, submission_changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
-                        task=task,
-                        actor=actor,
-                    )
-                    changed_months.extend(submission_changed_months)
-                (
-                    removed_import_batch,
-                    _removed_canonical_invoice_count,
-                    import_changed_months,
-                ) = self._delete_reconciliation_task_import_batch_sources(task)
-                changed_months.extend(import_changed_months)
+                cleanup_result = self._etc_reconciliation_import_cleanup_service().cleanup_task_import_sources(
+                    task=task,
+                    actor=actor,
+                )
+                task = cleanup_result.task
             result = self._etc_reconciliation_task_service.delete_task(
                 task_id=task_id,
                 expected_version=int(getattr(task, "version", expected_version) or expected_version),
                 actor=actor,
-                import_cleanup_confirmed=removed_import_batch is not None or removed_submission_batch is not None,
+                import_cleanup_confirmed=(
+                    cleanup_result is not None
+                    and (
+                        cleanup_result.removed_import_batch is not None
+                        or cleanup_result.removed_submission_batch is not None
+                    )
+                ),
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
@@ -5264,204 +5262,28 @@ class Application:
             )
         except ValueError as error:
             return self._reconciliation_error_response(error)
-        if removed_import_batch is not None:
-            self._refresh_after_etc_invoice_link(changed_months, reason="etc_reconciliation_task_deleted")
+        if cleanup_result is not None and cleanup_result.removed_import_batch is not None:
+            self._refresh_after_etc_invoice_link(cleanup_result.changed_months, reason="etc_reconciliation_task_deleted")
             self._persist_state()
         return self._json_response(HTTPStatus.OK, result)
 
-    def _remove_reconciliation_task_imported_invoices(
-        self,
-        *,
-        task: object,
-        expected_version: int,
-        actor: str,
-    ) -> tuple[object, dict[str, object], int, list[str]]:
-        if int(getattr(task, "version", 0) or 0) != expected_version:
-            raise ValueError("task_version_conflict")
-        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
-        if not import_batch_id:
-            raise ValueError("reconciliation_task_import_batch_required")
-        task, _removed_submission_batch, submission_changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
-            task=task,
-            actor=actor,
+    def _etc_reconciliation_import_cleanup_service(self) -> EtcReconciliationImportCleanupService:
+        service = getattr(self, "_etc_reconciliation_import_cleanup", None)
+        if isinstance(service, EtcReconciliationImportCleanupService):
+            return service
+        service = EtcReconciliationImportCleanupService(
+            etc_service=self._etc_service,
+            import_service=self._import_service,
+            reconciliation_task_service=self._etc_reconciliation_task_service,
+            existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
+            etc_invoice_changed_months=self._etc_invoice_changed_months,
+            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
+            etc_import_batch_by_id=self._etc_import_batch_by_id,
+            assert_etc_summary_relation_write_precondition_for_batch=self._assert_etc_summary_relation_write_precondition_for_batch,
+            cancel_etc_summary_relations_for_batch=self._cancel_etc_summary_relations_for_batch,
         )
-        if (
-            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
-            or str(getattr(task, "etc_batch_id", "") or "").strip()
-            or getattr(task, "submitted_confirmed_at", None) is not None
-        ):
-            raise ValueError("reconciliation_task_has_submission_link")
-        delete_result, canonical_deleted, changed_months = self._delete_reconciliation_task_import_batch_sources(task)
-        changed_months = [*submission_changed_months, *changed_months]
-        updated_task = self._etc_reconciliation_task_service.remove_imported_invoices(
-            task_id=str(getattr(task, "task_id", "")),
-            expected_version=int(getattr(task, "version", expected_version) or expected_version),
-            import_batch_id=import_batch_id,
-            actor=actor,
-        )
-        return updated_task, delete_result, canonical_deleted, changed_months
-
-    def _delete_reconciliation_task_unsubmitted_submission_batch(
-        self,
-        *,
-        task: object,
-        actor: str,
-    ) -> tuple[object, dict[str, object] | None, list[str]]:
-        oa_draft_batch_id = str(getattr(task, "oa_draft_batch_id", "") or "").strip()
-        etc_batch_id = str(getattr(task, "etc_batch_id", "") or "").strip()
-        if not oa_draft_batch_id and not etc_batch_id:
-            return task, None, []
-
-        delete_batch_id = oa_draft_batch_id or etc_batch_id
-        try:
-            batch = self._etc_service.get_batch(delete_batch_id)
-        except EtcBatchNotFoundError:
-            refreshed_invoices = self._etc_service.release_missing_submission_batch_link(delete_batch_id)
-            changed_months = self._etc_invoice_changed_months(refreshed_invoices)
-            if refreshed_invoices:
-                link_changed_months = self._link_etc_invoices_to_existing_invoices(refreshed_invoices)
-                changed_months.extend(link_changed_months)
-            task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
-                task_id=str(getattr(task, "task_id", "")),
-                oa_draft_batch_id=oa_draft_batch_id or delete_batch_id,
-                etc_batch_id=etc_batch_id,
-                actor=actor,
-            )
-            return task, {"deleted": True, "batchId": delete_batch_id, "kind": "missing_submission_batch"}, sorted(set(changed_months))
-        invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
-        changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
-        delete_result = self._etc_service.delete_batch(delete_batch_id)
-        refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
-        changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
-        if refreshed_invoices:
-            link_changed_months = self._link_etc_invoices_to_existing_invoices(refreshed_invoices)
-            changed_months.extend(link_changed_months)
-        if delete_result.get("kind") == "submission_batch":
-            task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
-                task_id=str(getattr(task, "task_id", "")),
-                oa_draft_batch_id=str(getattr(batch, "id", "") or delete_batch_id),
-                etc_batch_id=str(getattr(batch, "etc_batch_id", "") or etc_batch_id),
-                actor=actor,
-            )
-        return task, delete_result, sorted(set(changed_months))
-
-    def _delete_reconciliation_task_import_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]]:
-        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
-        if not import_batch_id:
-            raise ValueError("reconciliation_task_import_batch_required")
-        business_delete_result = self._delete_reconciliation_task_business_batch_sources(task)
-        if business_delete_result is not None:
-            return business_delete_result
-        return self._delete_etc_import_batch_sources(import_batch_id)
-
-    def _reconciliation_task_business_batch_for_import(self, task: object):
-        task_id = str(getattr(task, "task_id", "") or "").strip()
-        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
-        candidate_batches = self._etc_service.list_business_batches(task_id=task_id) if task_id else []
-        if candidate_batches:
-            if not import_batch_id:
-                return candidate_batches[0]
-            matched_batch = next(
-                (
-                    batch
-                    for batch in candidate_batches
-                    if import_batch_id in {str(value) for value in list(getattr(batch, "import_batch_ids", []) or [])}
-                ),
-                None,
-            )
-            if matched_batch is not None:
-                return matched_batch
-        linked_ids = [
-            import_batch_id,
-            str(getattr(task, "oa_draft_batch_id", "") or "").strip(),
-            str(getattr(task, "etc_batch_id", "") or "").strip(),
-        ]
-        for linked_id in linked_ids:
-            linked_batch = self._etc_service.find_business_batch_by_linked_batch_id(linked_id)
-            if linked_batch is not None:
-                return linked_batch
-        return None
-
-    def _delete_reconciliation_task_business_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]] | None:
-        business_batch = self._reconciliation_task_business_batch_for_import(task)
-        if business_batch is None:
-            return None
-        import_batch_ids = [
-            str(value).strip()
-            for value in list(getattr(business_batch, "import_batch_ids", []) or [])
-            if str(value).strip()
-        ]
-        invoice_ids = [str(value) for value in list(getattr(business_batch, "invoice_ids", []) or [])]
-        changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
-        canonical_deleted = 0
-        for linked_import_batch_id in import_batch_ids:
-            canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(linked_import_batch_id)
-        if str(getattr(business_batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
-            self._assert_etc_summary_relation_write_precondition_for_batch(business_batch)
-        delete_result = self._etc_service.delete_business_batch(
-            str(getattr(business_batch, "business_batch_id", "")),
-            expected_version=int(getattr(business_batch, "version", 0) or 0),
-            reason="reconciliation_task_import_removed",
-        )
-        if delete_result.get("kind") == "submitted_business_batch_reset":
-            changed_months.extend(self._cancel_etc_summary_relations_for_batch(business_batch))
-            refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
-            changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
-            if refreshed_invoices:
-                changed_months.extend(self._link_etc_invoices_to_existing_invoices(refreshed_invoices))
-        if delete_result.get("kind") != "submitted_business_batch_reset":
-            for linked_import_batch_id in import_batch_ids:
-                if self._etc_service.list_invoices_by_import_batch_id(linked_import_batch_id):
-                    self._etc_service.delete_import_batch_sources(linked_import_batch_id)
-        return delete_result, canonical_deleted, sorted(set(changed_months))
-
-    def _delete_etc_import_batch_sources(self, import_batch_id: str) -> tuple[dict[str, object], int, list[str]]:
-        import_batch = self._etc_import_batch_by_id(import_batch_id)
-        if import_batch is not None:
-            etc_invoices = self._existing_etc_invoices_by_ids(
-                [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
-            )
-        else:
-            etc_invoices = self._etc_service.list_invoices_by_import_batch_id(import_batch_id)
-        changed_months = self._etc_invoice_changed_months(etc_invoices)
-        delete_result = self._etc_service.delete_import_batch_sources(import_batch_id)
-        canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
-        return delete_result, canonical_deleted, changed_months
-
-    def _clear_reconciliation_task_import_after_batch_delete(self, task: object | None, import_batch_id: str) -> object | None:
-        if task is None:
-            return None
-        normalized_import_batch_id = str(import_batch_id or "").strip()
-        if not normalized_import_batch_id or str(getattr(task, "import_batch_id", "") or "").strip() != normalized_import_batch_id:
-            return task
-        if (
-            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
-            or str(getattr(task, "etc_batch_id", "") or "").strip()
-            or getattr(task, "submitted_confirmed_at", None) is not None
-        ):
-            return task
-        return self._etc_reconciliation_task_service.remove_imported_invoices(
-            task_id=str(getattr(task, "task_id", "")),
-            expected_version=int(getattr(task, "version", 0) or 0),
-            import_batch_id=normalized_import_batch_id,
-            actor="system",
-        )
-
-    def _delete_reconciliation_task_after_business_batch_delete(self, task: object | None) -> dict[str, object] | None:
-        if task is None:
-            return None
-        task_id = str(getattr(task, "task_id", "") or "").strip()
-        if not task_id:
-            return None
-        try:
-            return self._etc_reconciliation_task_service.delete_task(
-                task_id=task_id,
-                expected_version=int(getattr(task, "version", 0) or 0),
-                actor="system",
-                import_cleanup_confirmed=True,
-            )
-        except KeyError:
-            return None
+        self._etc_reconciliation_import_cleanup = service
+        return service
 
     def _etc_business_batch_summary_row_ids(self, batch: object) -> list[str]:
         external_ids = {
@@ -6480,7 +6302,7 @@ class Application:
                 refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
                 changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
                 changed_months.extend(self._link_etc_invoices_to_existing_invoices(refreshed_invoices))
-                self._delete_reconciliation_task_after_business_batch_delete(task)
+                self._etc_reconciliation_import_cleanup_service().delete_reconciliation_task_after_business_batch_delete(task)
                 if changed_months:
                     self._refresh_after_etc_invoice_link(
                         sorted(set(changed_months)),
@@ -6491,7 +6313,7 @@ class Application:
             canonical_deleted = 0
             for import_batch_id in import_batch_ids:
                 canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
-            self._delete_reconciliation_task_after_business_batch_delete(task)
+            self._etc_reconciliation_import_cleanup_service().delete_reconciliation_task_after_business_batch_delete(task)
             if canonical_deleted or changed_months:
                 self._refresh_after_etc_invoice_link(changed_months, reason="etc_business_batch_deleted")
                 self._persist_state()
@@ -6758,9 +6580,9 @@ class Application:
             if result.get("kind") == "submission_batch" and submission_import_batch_ids:
                 changed_months = []
                 for import_batch_id in submission_import_batch_ids:
-                    _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
-                    changed_months.extend(import_changed_months)
-                    task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
+                    import_cleanup = self._etc_reconciliation_import_cleanup_service().delete_etc_import_batch_sources(import_batch_id)
+                    changed_months.extend(import_cleanup.changed_months)
+                    task = self._etc_reconciliation_import_cleanup_service().clear_task_import_after_batch_delete(task, import_batch_id)
                 self._refresh_after_etc_invoice_link(changed_months, reason="etc_submission_batch_contents_deleted")
                 self._persist_state()
             if result.get("kind") == "submission_batch" and submission_invoice_ids and not submission_import_batch_ids:
@@ -6770,25 +6592,31 @@ class Application:
                     self._refresh_after_etc_invoice_link(changed_months, reason="etc_oa_draft_deleted")
             if result.get("kind") == "import_batch":
                 canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(str(result.get("batchId") or batch_id))
-                task = self._clear_reconciliation_task_import_after_batch_delete(task, str(result.get("batchId") or batch_id))
+                task = self._etc_reconciliation_import_cleanup_service().clear_task_import_after_batch_delete(
+                    task,
+                    str(result.get("batchId") or batch_id),
+                )
                 if canonical_deleted or import_batch_changed_months:
                     self._refresh_after_etc_invoice_link(import_batch_changed_months, reason="etc_import_batch_deleted")
                     self._persist_state()
         except EtcBatchNotFoundError as error:
             if task is not None:
                 try:
-                    task, result, changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
+                    submission_cleanup = self._etc_reconciliation_import_cleanup_service().delete_unsubmitted_submission_batch(
                         task=task,
                         actor="system",
                     )
+                    task = submission_cleanup.task
+                    result = submission_cleanup.delete_result
+                    changed_months = submission_cleanup.changed_months
                 except EtcBatchNotFoundError:
                     return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
                 if result is not None:
                     import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
                     if import_batch_id:
-                        _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
-                        changed_months.extend(import_changed_months)
-                        task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
+                        import_cleanup = self._etc_reconciliation_import_cleanup_service().delete_etc_import_batch_sources(import_batch_id)
+                        changed_months.extend(import_cleanup.changed_months)
+                        task = self._etc_reconciliation_import_cleanup_service().clear_task_import_after_batch_delete(task, import_batch_id)
                     self._refresh_after_etc_invoice_link(changed_months, reason="etc_missing_oa_draft_link_repaired")
                     self._persist_state()
                     return self._json_response(HTTPStatus.OK, result)

@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC reconciliation import cleanup service
+
+- 目标：把 ETC reconciliation task 删除和 imported-invoice 删除共用的 import/submission/business-batch cleanup 逻辑从 `Application` 抽到显式 service，继续收窄 `server.py` 业务副作用。
+- 影响范围：新增 `EtcReconciliationImportCleanupService`；`server.py` 保留 HTTP body/error/response、refresh 和 persist sequencing，但不再拥有 `_remove_reconciliation_task_imported_invoices`、`_delete_reconciliation_task_*`、`_delete_etc_import_batch_sources` 等 cleanup helper。
+- 关键决策：cleanup service 只接收 `etc_service`、`import_service`、`reconciliation_task_service` 和明确 callback，不接收整个 `Application`；submitted business-batch cleanup 仍必须先走 Workbench relation write precondition。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `tests/test_etc_reconciliation_import_cleanup_service.py` service-layer 测试，更新 platform boundary guard，并回归 targeted imported-invoice/task delete API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-reconciliation-import-cleanup-service-extraction-2026-06-25.md`。
+- 未测风险：delete/imported-invoice HTTP callback 仍在 `Application`；`/api/etc/import/*` 和 legacy `/api/etc/batches*` 仍未抽 route owner；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计 delete/imported-invoice HTTP callback 是否可迁入 `EtcReconciliationTaskApiRoutes`，或是否需要先抽 refresh/persist operation-result 边界。
+
 ## 2026-06-25 - ETC reconciliation task route owner facade
 
 - 目标：把 `/api/etc/reconciliation-tasks*` 的根路由、ready-for-import、detail 和子路由分发从 `Application` 中抽到显式 route owner，继续推进 `server.py` 模块化。

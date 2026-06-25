@@ -1662,9 +1662,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
+        cleanup_path = SERVICES_ROOT / "etc_reconciliation_import_cleanup_service.py"
+        cleanup_source = cleanup_path.read_text(encoding="utf-8")
+        cleanup_tree = _parse(cleanup_path)
         cancel_method = _function_source(tree, source, "_cancel_etc_summary_relations_for_batch")
         delete_method = _function_source(tree, source, "_handle_api_etc_business_batch_delete")
-        task_delete_method = _function_source(tree, source, "_delete_reconciliation_task_business_batch_sources")
+        task_delete_method = _function_source(cleanup_tree, cleanup_source, "delete_reconciliation_task_business_batch_sources")
 
         violations: list[str] = []
         if "cancel_relations_for_row_ids" not in cancel_method:
@@ -1677,6 +1680,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC business batch API delete lacks relation freshness preflight before local mutation")
         if "_assert_etc_summary_relation_write_precondition_for_batch(business_batch)" not in task_delete_method:
             violations.append("ETC reconciliation task delete lacks relation freshness preflight before local mutation")
+        if "_delete_reconciliation_task_business_batch_sources" in source:
+            violations.append("server.py reintroduced ETC reconciliation business-batch cleanup ownership")
 
         self.assertEqual(violations, [])
 

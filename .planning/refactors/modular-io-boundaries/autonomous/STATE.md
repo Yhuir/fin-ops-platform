@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-task-delete-side-effect-audited`
+Current state: `etc-reconciliation-import-cleanup-service-extracted`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-task-delete-side-effect-service-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-delete-side-effect-service-audit-2026-06-25.md`. T0 classified task delete/imported-invoice delete callbacks as cleanup-service work, not route-owner work, and selected `server-py:etc-reconciliation-import-cleanup-service-extraction` as the next local implementation boundary. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-import-cleanup-service-extraction` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-import-cleanup-service-extraction-2026-06-25.md`. T0 added `EtcReconciliationImportCleanupService`, moved imported-invoice/task import cleanup helpers out of `server.py`, kept HTTP response/error mapping in `Application`, and added service-layer coverage plus platform boundary guard updates. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-reconciliation-delete-route-callback-audit`.
 
 ## Closed Or Deferred Slices
 
