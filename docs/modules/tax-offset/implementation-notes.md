@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - 税金抵扣 route-owner 本地闭环审计
+
+- 目标：执行 `server-py:tax-route-owner-local-closure-audit`，确认税金抵扣 HTTP route callback 迁移后，`server.py` 剩余 tax surface 是否仍有本地实现缺口。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、tax-offset 实施记录；不改变税额计算、计划保存、已认证导入、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：`server.py` 已无 `_handle_api_tax*` callback；`TaxApiRoutes.route(...)` 拥有 month/summary/calculate/plan-save/import-job/list/preview/confirm HTTP mapping。剩余 tax 方法被归类为组合根、auth/session、body/import job、runtime/query/read-model/cache/worker/source-version 或 scope adapter 端口。
+- 文档影响：新增 modular IO tax route-owner local closure audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt；税金抵扣状态机定义不变。
+- 测试覆盖：本轮为分析/状态机闭合，未改运行时代码；沿用 Row372/Row373 的 `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py` 和 `tests/test_platform_runtime_boundary_guards.py` route-owner Guard。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain、真实税局认证 XLSX 大样本、真实 OA/ETC 数据、高行数性能和浏览器生产样本 evidence 仍为最终验证范围。
+- 后续事项：执行 `server-py:cost-statistics-route-owner-audit`。
+
 ## 2026-06-25 - certified import route callback collapse
 
 - 目标：把已认证发票导入 preview/confirm 的 HTTP mapping 从 `server.py` 迁入 `TaxApiRoutes.route(...)`，完成税金抵扣 API route-owner callback 收敛。
