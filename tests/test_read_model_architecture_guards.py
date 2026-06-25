@@ -25,20 +25,25 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "read_model_status=fresh",
     ): (1, "filter options are derived only after PendingInvoiceReadModelService.filter_options returned fresh."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._handle_api_input_invoice_usage_filter_options",
+        "backend/src/fin_ops_platform/app/routes_input_invoice_usage.py",
+        "InputInvoiceUsageApiRoutes.filter_options",
         "read_model_status=fresh",
-    ): (1, "legacy route derives filter options only from all-rows SQL payload that rejects non-fresh read models."),
+    ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
     (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._get_invoice_relation_all_rows_from_sql_read_model",
+        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
+        "InputInvoiceUsageReadModelFreshGateService.all_rows",
         "dict read_model_status=fresh",
     ): (1, "all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
     (
         "backend/src/fin_ops_platform/app/server.py",
-        "Application._get_input_invoice_usage_rows_from_sql_read_model",
+        "Application._get_invoice_relation_all_rows_from_sql_read_model",
+        "dict read_model_status=fresh",
+    ): (1, "shared output-collection all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
+    (
+        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
+        "InputInvoiceUsageReadModelFreshGateService.rows",
         "read_model_status=fresh",
-    ): (1, "legacy query path performs schema/status/source-version checks before marking the SQL payload fresh."),
+    ): (1, "input usage service performs schema/status/source-version checks before marking the SQL payload fresh."),
     (
         "backend/src/fin_ops_platform/app/server.py",
         "Application._get_output_invoice_collection_rows_from_sql_read_model",

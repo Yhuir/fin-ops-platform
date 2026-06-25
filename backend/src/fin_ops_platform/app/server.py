@@ -209,7 +209,9 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
-from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import InputInvoiceUsageReadModelDetailService
+from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service import (
+    InputInvoiceUsageReadModelFreshGateService,
+)
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
@@ -6819,8 +6821,31 @@ class Application:
         service = getattr(self, "_input_invoice_usage_export_service_instance", None)
         if isinstance(service, InputInvoiceUsageExportService):
             return service
-        service = InputInvoiceUsageExportService(row_page_loader=self._load_input_invoice_usage_export_page)
+        service = InputInvoiceUsageExportService(row_page_loader=self._input_invoice_usage_read_model_fresh_gate().export_page)
         self._input_invoice_usage_export_service_instance = service
+        return service
+
+    def _input_invoice_usage_read_model_fresh_gate(self) -> InputInvoiceUsageReadModelFreshGateService:
+        service = getattr(self, "_input_invoice_usage_read_model_fresh_gate_instance", None)
+        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
+        query_service = self._input_invoice_usage_service()
+        if (
+            isinstance(service, InputInvoiceUsageReadModelFreshGateService)
+            and getattr(service, "_repository", None) is repository
+            and getattr(service, "_query_service", None) is query_service
+        ):
+            return service
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            query_service=query_service,
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+            enqueue_refresh=lambda scope_key, reason: self._enqueue_input_invoice_usage_read_model_refresh(
+                scope_key,
+                reason=reason,
+            ),
+            expected_source_versions=self._input_invoice_usage_expected_source_versions,
+        )
+        self._input_invoice_usage_read_model_fresh_gate_instance = service
         return service
 
     def _input_invoice_usage_routes(self) -> InputInvoiceUsageApiRoutes:
@@ -6848,32 +6873,6 @@ class Application:
         )
         self._input_invoice_usage_api_routes = routes
         return routes
-
-    def _load_input_invoice_usage_export_page(self, **kwargs: object) -> dict[str, object] | None:
-        query = self._input_invoice_usage_export_query_from_kwargs(kwargs)
-        sql_payload = self._get_input_invoice_usage_rows_from_sql_read_model(query)
-        if sql_payload is not None:
-            return sql_payload
-        return self._input_invoice_usage_service().list_rows(
-            page=kwargs.get("page") or 1,
-            page_size=kwargs.get("page_size") or 50,
-            keyword=kwargs.get("keyword"),
-            invoice_date_from=kwargs.get("invoice_date_from"),
-            invoice_date_to=kwargs.get("invoice_date_to"),
-            month=kwargs.get("month"),
-            filters=kwargs.get("filters"),
-            sort_field=kwargs.get("sort_field") or "invoice_date",
-            sort_direction=kwargs.get("sort_direction") or "desc",
-        )
-
-    @staticmethod
-    def _input_invoice_usage_export_query_from_kwargs(kwargs: dict[str, object]) -> dict[str, list[str]]:
-        query: dict[str, list[str]] = {}
-        for key in ("month", "keyword", "invoice_date_from", "invoice_date_to", "filters", "sort_field", "sort_direction", "page", "page_size"):
-            value = kwargs.get(key)
-            if value not in (None, ""):
-                query[key] = [str(value)]
-        return query
 
     def _input_invoice_usage_payment_rules_provider(self) -> AppSettingsInputInvoiceUsagePaymentRulesProvider:
         provider = getattr(self, "_input_invoice_usage_payment_rules_provider_instance", None)
@@ -7049,27 +7048,7 @@ class Application:
         row_id: str,
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
-        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        if not callable(getattr(repository, "get_input_invoice_usage_row_by_row_id", None)):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_input_invoice_usage_read_model_refresh(
-                    "all",
-                    reason="api_detail_sql_repository_unavailable",
-                )
-                return InputInvoiceUsageReadModelDetailService.refreshing_payload(
-                    kind=query.get("kind", [""])[0],
-                    scope_key="all",
-                )
-            return None
-        service = InputInvoiceUsageReadModelDetailService(
-            repository=repository,
-            enqueue_refresh=lambda scope_key, reason: self._enqueue_input_invoice_usage_read_model_refresh(
-                scope_key,
-                reason=reason,
-            ),
-            source_versions_provider=self._input_invoice_usage_expected_source_versions,
-        )
-        return service.relation_details(row_id, kind=query.get("kind", [""])[0])
+        return self._input_invoice_usage_read_model_fresh_gate().relation_details(row_id, query)
 
     def _enqueue_input_invoice_usage_payment_rules_refreshes(self, event: dict[str, object]) -> None:
         scope_key = str(event.get("scope_key") or "all")
@@ -7833,11 +7812,8 @@ class Application:
     def _get_input_invoice_usage_all_rows_from_sql_read_model(
         self,
         query: dict[str, list[str]],
-    ) -> dict[str, object] | Response | None:
-        return self._get_invoice_relation_all_rows_from_sql_read_model(
-            query,
-            row_getter=self._get_input_invoice_usage_rows_from_sql_read_model,
-        )
+    ) -> dict[str, object] | None:
+        return self._input_invoice_usage_read_model_fresh_gate().all_rows(query)
 
     def _get_output_invoice_collection_all_rows_from_sql_read_model(
         self,
@@ -7892,61 +7868,7 @@ class Application:
         }
 
     def _get_input_invoice_usage_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        list_rows = getattr(repository, "list_input_invoice_usage_rows", None)
-        scope_key = self._invoice_relation_scope_key_from_query(query)
-        if not callable(list_rows):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
-                return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-            return None
-        try:
-            payload = list_rows(
-                month=query.get("month", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["invoice_date"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
-        except ValueError as exc:
-            raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
-        if not isinstance(payload, dict):
-            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_miss")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        if self._input_invoice_usage_sql_payload_requires_schema_refresh(payload):
-            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_schema_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if refresh_status != "fresh":
-            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        stale_reasons = source_version_mismatch_reasons(
-            expected=require_expected_source_versions(
-                self._input_invoice_usage_expected_source_versions(scope_key=scope_key),
-                context="input_invoice_usage_read_model",
-            ),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_source_versions_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
-        parsed_filters = self._input_invoice_usage_service()._parse_filters(query.get("filters", [None])[0])
-        sort_field, sort_direction = self._input_invoice_usage_service()._parse_sort(
-            query.get("sort_field", ["invoice_date"])[0],
-            query.get("sort_direction", ["desc"])[0],
-        )
-        result = dict(payload)
-        result["filterConfig"] = self._input_invoice_usage_service()._filter_config()
-        result["appliedFilters"] = {"filters": parsed_filters}
-        result["sort"] = {"field": sort_field, "direction": sort_direction}
-        result["read_model_status"] = "fresh"
-        result["read_model_scope_key"] = scope_key
-        result.pop("refresh_status", None)
-        return result
+        return self._input_invoice_usage_read_model_fresh_gate().rows(query)
 
     def _get_output_invoice_collection_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
@@ -8039,21 +7961,6 @@ class Application:
             source_versions_provider=self._output_invoice_collection_expected_source_versions,
         )
         return service.relation_details(row_id, kind=query.get("kind", [""])[0])
-
-    @staticmethod
-    def _input_invoice_usage_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
-        for row in list(payload.get("rows") or []):
-            if not isinstance(row, dict):
-                return True
-            if not isinstance(row.get("invoice"), dict):
-                return True
-            if not isinstance(row.get("paymentStatus"), dict):
-                return True
-            if not isinstance(row.get("oa"), dict):
-                return True
-            if not isinstance(row.get("bankTransactions"), dict):
-                return True
-        return False
 
     @staticmethod
     def _output_invoice_collection_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:

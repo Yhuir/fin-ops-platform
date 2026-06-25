@@ -114,6 +114,8 @@ class InputInvoiceUsageApiRoutes:
             if _is_response(sql_rows_payload):
                 return sql_rows_payload
             if isinstance(sql_rows_payload, dict):
+                if sql_rows_payload.get("read_model_status") == "refreshing":
+                    return self._json_response(HTTPStatus.ACCEPTED, sql_rows_payload)
                 payload = self._query_service.filter_options_for_rows(
                     rows=list(sql_rows_payload.get("rows") or []),
                     keyword=query.get("keyword", [None])[0],

@@ -2494,6 +2494,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "InputInvoiceUsageApiRoutes")
+        fresh_gate_source = (SERVICES_ROOT / "input_invoice_usage_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
         factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_routes")
 
         violations: list[str] = []
@@ -2550,6 +2551,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Input usage route owner is missing route/method marker {required}")
         if "_input_invoice_usage_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch input usage read routes through route owner")
+        for forbidden in (
+            "def _load_input_invoice_usage_export_page(",
+            "def _input_invoice_usage_export_query_from_kwargs(",
+            "def _input_invoice_usage_sql_payload_requires_schema_refresh(",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns input usage fresh-gate implementation {forbidden}")
+        for required in (
+            "class InputInvoiceUsageReadModelFreshGateService",
+            "source_version_mismatch_reasons",
+            "require_expected_source_versions",
+            "payload_requires_schema_refresh",
+            "def export_page(",
+            "def all_rows(",
+            "def relation_details(",
+        ):
+            if required not in fresh_gate_source:
+                violations.append(f"Input usage fresh-gate service is missing {required}")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_rows(",
             "def _handle_api_input_invoice_usage_filter_options(",

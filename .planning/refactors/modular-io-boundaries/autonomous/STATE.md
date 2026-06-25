@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-read-model-fresh-gate-service-extraction-selected`
+Current state: `input-invoice-usage-post-fresh-gate-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`. Input usage route ownership is locally accounted for after route callback collapse, but `server.py` still owns input usage SQL read-model fresh gate/source-version/export row-page helper logic, so T0 selected read-model fresh gate service extraction next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-read-model-fresh-gate-service-extraction` as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-read-model-fresh-gate-service-extraction-2026-06-25.md`. Input usage route ownership is locally accounted for and SQL read-model fresh gate/source-version/schema stale/all-rows/detail/export row-page logic now lives behind `InputInvoiceUsageReadModelFreshGateService`. T0 selected a post-fresh-gate local closure audit next to inspect remaining input usage app-owned surfaces before any production validation.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`
+`server-py:input-invoice-usage-post-fresh-gate-local-closure-audit`

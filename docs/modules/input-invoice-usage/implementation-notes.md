@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Read model fresh gate service extraction
+
+- 目标：把进项发票使用页 SQL read model fresh gate、schema stale 检查、source-version 检查、all-rows 聚合、relation detail fail-closed 和 export row-page loading 从 `Application` 抽到显式 service 边界。
+- 影响范围：新增 `InputInvoiceUsageReadModelFreshGateService`；`server.py` 的 input usage rows/all-rows/relation-detail/export row-page helper 改为委托；`InputInvoiceUsageApiRoutes.filter_options(...)` 处理 service 返回的 refreshing payload；静态 Guard 更新为禁止旧 app-owned fresh-gate helper 回流。
+- 关键决策：service 接收 repository、query service、SQL runtime requirement、refresh enqueue 和 expected source-version provider 作为显式依赖；service 不构造 HTTP response、不读取 header/cookie、不 import `app.auth`。Output invoice collection 保持原路径，单独用 targeted regression 证明未改变。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：新增 `tests/test_input_invoice_usage_read_model_fresh_gate_service.py` 覆盖 schema stale 和 source-version stale；更新 runtime boundary Guard 和 read model architecture Guard；复跑 input usage API/export 和 output collection export regression。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_read_model_fresh_gate_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api.InputInvoiceUsageApiTests.test_export_preview_and_download_use_current_input_invoice_usage_filters tests.test_input_invoice_usage_api.InputInvoiceUsageApiTests.test_export_returns_refreshing_when_sql_read_model_is_not_fresh tests.test_input_invoice_usage_api.InputInvoiceUsageApiTests.test_rows_route_returns_aggregated_rows_with_filters_sort_and_pagination tests.test_input_invoice_usage_api.InputInvoiceUsageApiTests.test_filter_options_payment_rules_details_and_relation_routes tests.test_input_invoice_usage_api.InputInvoiceUsageApiTests.test_oa_reverse_preview_batch_and_missing_client_draft_routes_are_formal_workflow -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_api.OutputInvoiceCollectionApiTests.test_export_preview_and_download_use_current_filter_without_pagination -v`。
+- 未测风险：本 slice 只证明本地 service/API/static boundary；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段。
+
 ## 2026-06-25 - Input usage route owner local closure audit
 
 - 目标：审计 route callback collapse 后 `server.py` 中剩余 input usage helper/port surface。
