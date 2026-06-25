@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-oa-retention-date-parser-extraction-closed`
+Current state: `workbench-canonical-oa-attachment-raw-payload-repairer-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-oa-retention-date-parser-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-retention-date-parser-extraction-2026-06-25.md`. `WorkbenchOaRetentionDateParser` now owns ISO date-prefix parsing, invalid cutoff behavior, OA/bank row date candidates and row predicate helpers; canonical OA attachment invoice append/replace/dedupe/summary repair remains deferred. The next local boundary is `server-py:workbench-canonical-oa-attachment-raw-payload-repair-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-canonical-oa-attachment-raw-payload-repairer-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-canonical-oa-attachment-raw-payload-repairer-extraction-2026-06-25.md`. `WorkbenchCanonicalOaAttachmentRawPayloadRepairer` now owns payload OA scan/imported invoice iteration/append-vs-replace/dedupe-summary orchestration; source-link parsing, canonical row construction and raw payload helper extraction remain deferred. The next local boundary is `server-py:workbench-oa-attachment-source-link-resolver-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

@@ -5834,6 +5834,84 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_canonical_oa_attachment_raw_payload_repairer_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        repairer_source = (SERVICES_ROOT / "workbench_canonical_oa_attachment_raw_payload_repairer.py").read_text(encoding="utf-8")
+        append_source = _function_source(server_tree, server_source, "_append_canonical_oa_attachment_invoice_rows")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_canonical_oa_attachment_raw_payload_repairer")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-raw-payload-repairer-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "oa_rows_by_id",
+            "existing_invoice_row_ids",
+            "list_invoices(",
+            "_replace_raw_workbench_row(",
+            "_dedupe_raw_workbench_rows_by_id(",
+            "_refresh_raw_workbench_payload_summary(",
+        ):
+            if forbidden in append_source:
+                violations.append(f"Application _append_canonical_oa_attachment_invoice_rows still owns repair step: {forbidden}")
+        if "self._workbench_canonical_oa_attachment_raw_payload_repairer().repair(payload)" not in append_source:
+            violations.append("Application _append_canonical_oa_attachment_invoice_rows does not delegate to repairer")
+        for marker in (
+            "class WorkbenchCanonicalOaAttachmentRawPayloadRepairer",
+            "def repair(",
+            "oa_rows_by_id",
+            "existing_invoice_row_ids",
+            "source_link_for_invoice",
+            "source_oa_id_for_attachment_link",
+            "canonical_oa_attachment_invoice_row",
+            "replace_raw_workbench_row",
+            "dedupe_raw_workbench_rows_by_id",
+            "refresh_raw_workbench_payload_summary",
+        ):
+            if marker not in repairer_source:
+                violations.append(f"WorkbenchCanonicalOaAttachmentRawPayloadRepairer missing marker: {marker}")
+        for marker in (
+            "WorkbenchCanonicalOaAttachmentRawPayloadRepairer(",
+            "list_invoices=lambda: self._import_service.list_invoices()",
+            "source_link_for_invoice=self._oa_attachment_source_link_for_invoice",
+            "source_oa_id_for_attachment_link=self._source_oa_id_for_attachment_link",
+            "canonical_oa_attachment_invoice_row=self._canonical_oa_attachment_invoice_workbench_row",
+            "replace_raw_workbench_row=self._replace_raw_workbench_row",
+            "dedupe_raw_workbench_rows_by_id=self._dedupe_raw_workbench_rows_by_id",
+            "refresh_raw_workbench_payload_summary=self._refresh_raw_workbench_payload_summary",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application canonical OA attachment repairer missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in repairer_source:
+                violations.append(f"WorkbenchCanonicalOaAttachmentRawPayloadRepairer gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-canonical-oa-attachment-raw-payload-repairer-extraction",
+            "WorkbenchCanonicalOaAttachmentRawPayloadRepairer",
+            "payload repair orchestration",
+            "canonical row construction",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench canonical OA attachment repairer analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
