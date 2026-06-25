@@ -1,58 +1,54 @@
 # Next Prompt
 
-Continue after `server-py:no-oa-bank-batch-refresh-producer-extraction`.
+Continue after `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:no-oa-bank-batch-refresh-producer-extraction`.
-- Row400 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-refresh-producer-extraction-2026-06-25.md`.
-- `NoOaBankBatchReadModelRefreshProducer` owns no-OA scope normalization and gateway enqueue.
-- `server.py` no longer defines `_enqueue_no_oa_bank_batch_read_model_refreshes(...)`.
-- `server.py` no longer directly calls `enqueue_many("no_oa_bank_batch", ...)`.
-- No-OA module/global closure is not claimed because remaining `Application` no-OA surfaces still need a post-producer local closure audit and real production evidence remains deferred.
+- Last completed boundary: `server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`.
+- Row401 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-refresh-producer-local-closure-audit-2026-06-25.md`.
+- no-OA route dispatch, refresh producer, application service factory, mutation session, source-version provider and derived lifecycle assembly are accounted for locally.
+- Remaining local implementation gap: no-OA Workbench relation payload decoration still lives in `Application`.
+- No-OA module/global closure is not claimed and production evidence remains deferred.
 
 ## Previous Prompt Completion
 
-`server-py:no-oa-bank-batch-refresh-producer-extraction` is complete as a local implementation slice:
+`server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit` is complete as analysis-only:
 
-- added `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh_producer.py`;
-- moved accepted-scope filtering, invalid-scope fallback and durable queue enqueue ownership out of `Application`;
-- wired tag selection, `NoOaBankBatchApplicationService` and `NoOaBankBatchDerivedLifecycleExecutor` through the producer;
-- removed `Application._enqueue_no_oa_bank_batch_read_model_refreshes(...)`;
-- added producer/service/static Guard tests;
-- avoided production validation and avoided module/global closure claims.
+- confirmed no `_handle_api_no_oa_bank_batch*` callbacks remain in `server.py`;
+- confirmed no `_enqueue_no_oa_bank_batch_read_model_refreshes(...)` helper or direct `enqueue_many("no_oa_bank_batch", ...)` bypass remains in `server.py`;
+- classified route/factory/session/source-version/derived-lifecycle surfaces as accounted local ports;
+- identified no-OA Workbench payload decoration as a remaining app-owned implementation gap;
+- avoided runtime code changes and avoided production validation.
 
 ## Next Boundary
 
-`server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit`
+`server-py:no-oa-bank-batch-workbench-payload-decorator-extraction`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-refresh-producer-extraction-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-route-owner-local-closure-audit-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-no-oa-bank-batch-post-refresh-producer-local-closure-audit-2026-06-25.md`
    - `docs/modules/no-oa-bank-batches/README.md`
    - `docs/modules/no-oa-bank-batches/implementation-notes.md`
    - `docs/modules/no-oa-bank-batches/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
-   - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
-   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_refresh_producer.py`
-   - relevant no-OA read model refresh tests and platform Guards
-3. Audit remaining no-OA `Application` surfaces:
-   - identify all methods/fields containing `no_oa_bank_batch` or no-OA relation ownership;
-   - classify each as composition-root, platform adapter, provider port, compat-only support, or implementation gap;
-   - verify no route callbacks and no direct no-OA refresh enqueue helper remain;
-   - verify old paths cannot write canonical facts, dirty scopes, outbox, readiness, cache or App Status outside explicit boundaries.
-4. Write an analysis file and update queue/state/journal/next prompt.
-5. If the audit finds a concrete remaining implementation gap, select the next narrow local boundary. If it finds no local gap, record local support as accounted but production evidence deferred.
+   - `backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+   - Workbench payload/relation tests that cover no-OA tags/actions if present
+3. Implement only the no-OA Workbench payload decorator extraction:
+   - introduce a focused service/provider for no-OA Workbench relation payload decoration;
+   - move `_relation_with_no_oa_bank_batch_metadata(...)`, `_apply_no_oa_bank_batch_pair_metadata(...)` and `_apply_no_oa_bank_batch_available_actions(...)` behavior out of `Application`;
+   - keep `Application._apply_pair_relation_to_row(...)` as generic Workbench row decoration and delegate no-OA-specific behavior;
+   - preserve tags, display_tags, `special_metadata`, `cost_excluded`, summary/detail fields and `withdraw_no_oa_batch` action semantics;
+   - add focused unit tests and static Guard coverage.
+4. Update analysis/state/queue/journal/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not change no-OA business behavior, API response shape, read model schema, dirty/outbox semantics, frontend behavior or production data during the audit.
-- Do not claim no-OA module/global closure from local code audit alone.
-- If the audit becomes broader than no-OA `server.py` support, stop with the smallest next boundary instead of expanding scope.
+- Do not change no-OA business behavior, API response shape, Workbench row response shape, read model schema, dirty/outbox semantics, frontend behavior or production data.
+- Do not refactor unrelated Workbench relation modes in this slice.
+- Do not claim no-OA module/global closure.

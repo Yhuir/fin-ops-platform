@@ -216,6 +216,15 @@ git diff --check
 - 保留回归：`test_enqueue_background_refresh_uses_durable_queue_boundary` 继续覆盖非生产/旧本地构造 fallback。
 - 未新增 Business core、API contract、frontend interaction 或 E2E 测试，因为本 slice 不改变 no-OA 提交/撤回规则、HTTP shape、权限、页面 operation barrier 或用户流程。
 
+## 2026-06-25 - Modular IO post-refresh-producer closure audit test note
+
+`server-py:no-oa-bank-batch-post-refresh-producer-local-closure-audit` 已完成为 analysis-only。
+
+- 本轮未新增运行时测试：没有代码、业务状态机、HTTP contract、read model schema、worker event、权限、审计或前端行为变化。
+- 下一实现 slice `server-py:no-oa-bank-batch-workbench-payload-decorator-extraction` 必须新增 focused unit tests，覆盖 no-OA relation `special_metadata` enrichment、tag/display_tags 注入、`cost_excluded` 和 summary/detail fields、`withdraw_no_oa_batch` action 保留。
+- 下一实现 slice 必须新增或扩展 static Guard，防止 `_relation_with_no_oa_bank_batch_metadata(...)`、`_apply_no_oa_bank_batch_pair_metadata(...)` 和 `_apply_no_oa_bank_batch_available_actions(...)` 作为 app-owned helper 回到 `Application`。
+- Business core、API contract、frontend interaction 和 E2E 是否需要新增测试由下一实现 diff 决定；若只抽出 decorator 且 Workbench row payload shape 不变，优先用 service unit + existing feature regression + static Guard 保护。
+
 ## 场景覆盖清单
 
 | 场景 | 代表测试 |
