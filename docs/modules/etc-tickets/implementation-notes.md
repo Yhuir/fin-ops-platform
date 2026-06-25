@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC legacy batch read facade
+
+- 目标：把 legacy `/api/etc/batches` list/detail/count/filter payload composition 从 `Application` 抽到显式 read facade。
+- 影响范围：新增 `EtcLegacyBatchReadFacade`；`server.py` 只保留 page/page_size 解析、404/400 HTTP 映射和 response construction；draft-for-batch 也复用 read facade detail payload。
+- 关键决策：facade 通过显式 serialization ports 处理 `serialize_value` 和 ETC invoice serialization，不接收整个 `Application`；保持 business/submission/import unified view、counts、reconciliation import 排除、supplement metadata 和 attachment detail 语义。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `tests/test_etc_legacy_batch_read_facade.py`，新增 `test_etc_legacy_batch_read_payload_uses_facade_boundary` 静态 guard，并回归 targeted legacy list/detail/query API tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-read-facade-extraction-2026-06-25.md`。
+- 未测风险：`EtcLegacyBatchApiRoutes` 仍通过 callbacks 调用 list/detail/delete/draft/confirm/reopen；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计 legacy batch route callback 是否可进一步 collapse 到 route owner。
+
 ## 2026-06-25 - ETC legacy batch read payload facade audit
 
 - 目标：审计 legacy `/api/etc/batches` list/detail/count/filter payload ownership，为下一步 read facade extraction 定界。

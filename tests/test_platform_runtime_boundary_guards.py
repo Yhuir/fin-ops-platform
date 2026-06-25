@@ -2022,6 +2022,55 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_legacy_batch_read_payload_uses_facade_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        facade_path = SERVICES_ROOT / "etc_legacy_batch_read_facade.py"
+        facade_source = facade_path.read_text(encoding="utf-8")
+        facade_tree = _parse(facade_path)
+
+        list_handler = _function_source(server_tree, server_source, "_handle_api_etc_batches")
+        detail_handler = _function_source(server_tree, server_source, "_handle_api_etc_batch_detail")
+        draft_for_batch = _function_source(server_tree, server_source, "_handle_api_etc_batch_draft_for_batch")
+        facade_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_read_facade")
+        facade_imports = _imported_modules(facade_tree)
+
+        violations: list[str] = []
+        if "EtcLegacyBatchReadFacade(" not in facade_factory:
+            violations.append("server.py does not construct EtcLegacyBatchReadFacade")
+        if "list_payload(" not in list_handler:
+            violations.append("legacy batch list handler does not delegate payload composition to facade")
+        if "detail_payload(batch_id)" not in detail_handler:
+            violations.append("legacy batch detail handler does not delegate payload composition to facade")
+        if "detail_payload(batch_id)" not in draft_for_batch:
+            violations.append("legacy batch draft-for-batch does not reuse read facade detail payload")
+        forbidden_app_helpers = (
+            "def _etc_batch_counts",
+            "def _etc_batch_list_items",
+            "def _etc_batch_detail_payload",
+            "def _etc_business_batch_summary_payload",
+            "def _etc_submission_batch_summary_payload",
+            "def _etc_import_batch_summary_payload",
+            "def _etc_batch_summary_matches_filters",
+            "def _etc_batch_detail_filtered_for_query",
+        )
+        for marker in forbidden_app_helpers:
+            if marker in server_source:
+                violations.append(f"server.py still owns legacy batch read helper {marker}")
+        forbidden_imports = {
+            "fin_ops_platform.app.server",
+            "fin_ops_platform.app.auth",
+            "http.cookies",
+        }
+        leaked_imports = sorted(forbidden_imports.intersection(facade_imports))
+        if leaked_imports:
+            violations.append(f"legacy batch read facade imports forbidden modules: {leaked_imports}")
+        if "Response" in facade_source or "_json_response" in facade_source:
+            violations.append("legacy batch read facade constructs HTTP response details")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {

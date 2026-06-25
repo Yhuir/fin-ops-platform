@@ -131,6 +131,7 @@ Current state expected on start:
 - `server-py:etc-legacy-batch-delete-side-effect-service-audit` is complete as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`; non-business legacy batch DELETE side effects moved into `EtcLegacyBatchDeleteService`.
 - `server-py:etc-legacy-batch-draft-confirm-callback-audit` is complete as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`; legacy OA draft/confirm/reopen lifecycle side effects moved into `EtcLegacyBatchLifecycleService`.
 - `server-py:etc-legacy-batch-read-payload-facade-audit` is complete as `analysis-closed` in `analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`; it selected `server-py:etc-legacy-batch-read-facade-extraction`.
+- `server-py:etc-legacy-batch-read-facade-extraction` is complete as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-read-facade-extraction-2026-06-25.md`; legacy list/detail/count/filter payload ownership moved into `EtcLegacyBatchReadFacade`.
 - Future progress reports must continue using the commit-backed reconciliation baseline, not memory or raw state-file row counts.
 - bank_detail local implementation support is accounted for through the collaborator audit, but bank_detail is not full module closed; real PostgreSQL/worker/App Status/high-row/browser evidence remains unavailable and deferred.
 - workbench_relation local implementation support surfaces are accounted for, but workbench_relation is not globally closed; real PostgreSQL relation/history, worker dirty/outbox/readiness, App Status, high-row performance and browser smoke evidence remain unavailable and deferred.
@@ -375,7 +376,7 @@ Autonomous loop:
 10. Continue immediately to the next safe boundary unless a hard stop gate is hit.
 
 Immediate next boundary:
-Start with `server-py:etc-legacy-batch-read-facade-extraction`.
+Start with `server-py:etc-legacy-batch-route-callback-collapse-audit`.
 
 Current local-first state:
 - `planning:local-modular-code-closure-reconciliation` is complete in `analysis/local-modular-code-closure-reconciliation-2026-06-25.md`.
@@ -389,7 +390,8 @@ Current local-first state:
 - `server-py:etc-legacy-batch-delete-side-effect-service-audit` is complete in `analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`.
 - `server-py:etc-legacy-batch-draft-confirm-callback-audit` is complete in `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`.
 - `server-py:etc-legacy-batch-read-payload-facade-audit` is complete in `analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`.
-- Row320 is the next local boundary: extract legacy batch list/detail/count/filter payload composition into `EtcLegacyBatchReadFacade`.
+- `server-py:etc-legacy-batch-read-facade-extraction` is complete in `analysis/server-py-etc-legacy-batch-read-facade-extraction-2026-06-25.md`.
+- Row321 is the next local boundary: audit whether `EtcLegacyBatchApiRoutes` can own remaining legacy batch HTTP callbacks directly.
 - Production browser/admin/write gates remain final validation gates only; do not run them while local implementation gaps remain.
 - Local modular implementation closure is not proven because `server.py` and `postgres_repositories/read_models.py` still retain large module-specific residual ownership surfaces.
 - Continue with bounded local code/test/static-guard boundaries before production validation.
@@ -399,12 +401,12 @@ Commit-backed baseline:
 - Use that report as the current progress baseline before assigning workers.
 - Do not claim module/global/production/Go closure from raw queue counts; the report currently proves no product module has `Module Closure = closed`, production evidence closure is 0/17 and Go admission is 0/5.
 
-- Read `analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`, `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`, `analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
+- Read `analysis/server-py-etc-legacy-batch-read-facade-extraction-2026-06-25.md`, `analysis/server-py-etc-legacy-batch-draft-confirm-callback-audit-2026-06-25.md`, `analysis/server-py-etc-legacy-batch-delete-side-effect-service-audit-2026-06-25.md`, `STATE.md`, `MODULE-QUEUE.md`, `JOURNAL.md`, `NEXT-PROMPT.md`, and `12-PARALLEL-ORCHESTRATION.md`.
 - Use CodeGraph before implementation-oriented changes to `Application`, route-owner classes, auth/session helpers, ETC reconciliation task services, relation side-effect helpers or existing tests.
 - Do not introduce a Flask test client; this backend uses `Application`, route-owner classes and `ThreadingHTTPServer` / `BaseHTTPRequestHandler`.
 - Do not add broad payload snapshots or fixture data just to force every route through one harness.
-- Implement only the Row320 read facade extraction slice unless the audit proves a narrower safe implementation is required first.
-- Keep business-batch v2 route behavior out of Row320.
+- Implement only the Row321 callback collapse audit/selection slice unless a narrower safe implementation can be completed immediately.
+- Keep business-batch v2 route behavior out of Row321.
 - Do not select payload rows, full row data, secrets, env values, DSNs, tokens or cookies.
 - Do not run production `--apply`, deploy, restart, requeue, repair, replay workers or mutate runtime state.
 - Do not claim module/global closure from row245, row246, row248 or worker handoffs alone.

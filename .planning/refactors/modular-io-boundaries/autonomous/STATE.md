@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-legacy-batch-read-facade-selected`
+Current state: `etc-legacy-batch-read-facade-owned`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-legacy-batch-read-payload-facade-audit` as `analysis-closed` in `analysis/server-py-etc-legacy-batch-read-payload-facade-audit-2026-06-25.md`. T0 audited legacy batch list/detail/count/filter payload ownership, rejected direct route-owner migration as too broad, and selected `server-py:etc-legacy-batch-read-facade-extraction` as the next local implementation boundary. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-legacy-batch-read-facade-extraction` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-read-facade-extraction-2026-06-25.md`. T0 added `EtcLegacyBatchReadFacade`, moved legacy batch list/detail/count/filter payload composition out of `Application`, and preserved unified business/submission/import view regressions. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-route-callback-collapse-audit`.
 
 ## Closed Or Deferred Slices
 
