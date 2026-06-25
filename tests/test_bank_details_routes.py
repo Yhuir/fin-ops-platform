@@ -60,6 +60,18 @@ class FakeBankDetailsApplicationService:
             raise self.confirm_category_error
         return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
 
+    def revoke_category_confirmation(self, transaction_id: str, *, actor_id: str) -> dict[str, object]:
+        self.calls.append(("revoke_category", {"transaction_id": transaction_id, "actor_id": actor_id}))
+        return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
+
+    def assign_manual_category(self, transaction_id: str, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
+        self.calls.append(("assign_category", {"transaction_id": transaction_id, "payload": payload, "actor_id": actor_id}))
+        return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
+
+    def clear_manual_category(self, transaction_id: str, *, actor_id: str) -> dict[str, object]:
+        self.calls.append(("clear_category", {"transaction_id": transaction_id, "actor_id": actor_id}))
+        return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
+
     def export_transactions(self, **kwargs) -> FakeBankDetailsExportResult:
         self.calls.append(("export_transactions", dict(kwargs)))
         return FakeBankDetailsExportResult(sheet_names=["银行明细"])
@@ -230,6 +242,73 @@ class BankDetailsRoutesTests(unittest.TestCase):
                         "actor_id": "bank_category_confirmation",
                     },
                 ),
+            ],
+        )
+
+    def test_route_owner_handles_category_write_mapping_with_transaction_id_and_body_ports(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        session = self._session(username="category-writer")
+        routes = BankDetailsApiRoutes(
+            application_service=service,
+            resolve_read_session=lambda _headers: (session, None),
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+            load_json_body=lambda body: ({"category_code": "fee", "body": body}, None),
+        )
+
+        confirm_response = routes.route(
+            "POST",
+            "/api/bank-details/transactions/txn%2F001/category-confirmation",
+            {},
+            "{}",
+            {},
+        )
+        revoke_response = routes.route(
+            "DELETE",
+            "/api/bank-details/transactions/txn%2F001/category-confirmation",
+            {},
+            None,
+            {},
+        )
+        assign_response = routes.route(
+            "POST",
+            "/api/bank-details/transactions/txn%2F001/category-assignment",
+            {},
+            "{}",
+            {},
+        )
+        clear_response = routes.route(
+            "DELETE",
+            "/api/bank-details/transactions/txn%2F001/category-assignment",
+            {},
+            None,
+            {},
+        )
+
+        self.assertEqual(confirm_response["status"], HTTPStatus.OK)
+        self.assertEqual(revoke_response["status"], HTTPStatus.OK)
+        self.assertEqual(assign_response["status"], HTTPStatus.OK)
+        self.assertEqual(clear_response["status"], HTTPStatus.OK)
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "confirm_category",
+                    {
+                        "transaction_id": "txn/001",
+                        "payload": {"category_code": "fee", "body": "{}"},
+                        "actor_id": "category-writer",
+                    },
+                ),
+                ("revoke_category", {"transaction_id": "txn/001", "actor_id": "category-writer"}),
+                (
+                    "assign_category",
+                    {
+                        "transaction_id": "txn/001",
+                        "payload": {"category_code": "fee", "body": "{}"},
+                        "actor_id": "category-writer",
+                    },
+                ),
+                ("clear_category", {"transaction_id": "txn/001", "actor_id": "category-writer"}),
             ],
         )
 

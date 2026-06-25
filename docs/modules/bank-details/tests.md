@@ -2,6 +2,29 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - category write route-owner collapse test note
+
+`server-py:bank-details-category-write-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改分类业务规则本身。
+- Service-layer tests：适用；完整 `tests.test_bank_auto_tag_rules_api` 继续覆盖 category confirmation/assignment validation、side-effect port、dirty/outbox 和 permission。
+- API contract tests：适用；`tests/test_bank_details_routes.py` 新增 category write route-owner HTTP mapping/port 测试，`tests/test_bank_auto_tag_rules_api.py` 改用 public request 边界验证 confirmation API。
+- Read model/cache/background job tests：间接适用；auto-tag API 回归继续覆盖 category mutation side-effect refresh enqueue。
+- Frontend component and interaction tests：不适用；前端代码未改。
+- End-to-end business-flow integration tests：不适用；本 slice 只移动后端 HTTP mapping，不改业务流。
+- Existing feature regression tests：适用；platform Guard 防止所有 bank-details route callbacks 回流到 `server.py`。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；bank-details route-owner closure 仍需 audit 后才能局部闭合。
+
 ## 2026-06-25 - auto-tag write route-owner collapse test note
 
 `server-py:bank-details-auto-tag-write-route-callback-collapse` 已完成：

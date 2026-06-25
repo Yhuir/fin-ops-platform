@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import Any, Callable
+from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import (
@@ -91,6 +92,39 @@ class BankDetailsApiRoutes:
                     page_size=query.get("page_size", [None])[0],
                 )
             )
+        category_prefix = "/api/bank-details/transactions/"
+        confirmation_suffix = "/category-confirmation"
+        assignment_suffix = "/category-assignment"
+        if route_path.startswith(category_prefix) and route_path.endswith(assignment_suffix):
+            transaction_id = unquote(route_path[len(category_prefix):-len(assignment_suffix)])
+            if method == "POST":
+                return self._json_write_body(
+                    body,
+                    headers,
+                    "当前账户没有设置银行明细标签权限。",
+                    lambda payload, session: self.assign_category(transaction_id, payload, session=session),
+                )
+            if method == "DELETE":
+                return self._json_write_without_body(
+                    headers,
+                    "当前账户没有撤销银行明细人工标签权限。",
+                    lambda session: self.clear_category_assignment(transaction_id, session=session),
+                )
+        if route_path.startswith(category_prefix) and route_path.endswith(confirmation_suffix):
+            transaction_id = unquote(route_path[len(category_prefix):-len(confirmation_suffix)])
+            if method == "POST":
+                return self._json_write_body(
+                    body,
+                    headers,
+                    "当前账户没有确认银行明细标签权限。",
+                    lambda payload, session: self.confirm_category(transaction_id, payload, session=session),
+                )
+            if method == "DELETE":
+                return self._json_write_without_body(
+                    headers,
+                    "当前账户没有撤销银行明细标签确认权限。",
+                    lambda session: self.revoke_category_confirmation(transaction_id, session=session),
+                )
         return None
 
     def accounts(self, *, date_from: str | None, date_to: str | None) -> tuple[HTTPStatus, dict[str, Any]]:

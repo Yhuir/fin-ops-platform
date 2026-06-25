@@ -120,6 +120,20 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
     def _file_replacement_response(self, app, body: str | bytes | None, headers: dict[str, str] | None = None):
         return app.handle_request("POST", "/api/bank-details/auto-tag-rules/file-replacement", body, headers=headers)
 
+    def _confirm_category_response(
+        self,
+        app,
+        transaction_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ):
+        return app.handle_request(
+            "POST",
+            f"/api/bank-details/transactions/{transaction_id}/category-confirmation",
+            body,
+            headers=headers,
+        )
+
     def _bank_detail_transactions_payload(
         self,
         app,
@@ -280,7 +294,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._bank_transaction_category_service.confirm_auto_category = confirm_stub
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_detail_category_confirmation(
+            response = self._confirm_category_response(app,
                 "txn-1",
                 json.dumps({"category_code": "fee"}),
                 {},
@@ -307,7 +321,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id, suggestion=suggestion: suggestion
 
             with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-                response = app._handle_api_bank_detail_category_confirmation(
+                response = self._confirm_category_response(app,
                     "txn-unmatched",
                     json.dumps({"category_code": "fee"}),
                     {},
@@ -337,7 +351,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_detail_category_confirmation(
+            response = self._confirm_category_response(app,
                 "txn-candidate",
                 json.dumps({"category_code": "salary"}),
                 {},
@@ -390,7 +404,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_detail_category_confirmation(
+            response = self._confirm_category_response(app,
                 "txn-candidate",
                 json.dumps(
                     {
@@ -431,7 +445,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_detail_category_confirmation(
+            response = self._confirm_category_response(app,
                 "txn-candidate",
                 json.dumps({"category_code": "borrow_in_bank_pending_repayment"}),
                 {},

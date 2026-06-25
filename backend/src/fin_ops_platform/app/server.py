@@ -1866,25 +1866,6 @@ class Application:
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
                 return bank_detail_response
-        bank_detail_confirmation_prefix = "/api/bank-details/transactions/"
-        bank_detail_confirmation_suffix = "/category-confirmation"
-        bank_detail_assignment_suffix = "/category-assignment"
-        if route_path.startswith(bank_detail_confirmation_prefix) and route_path.endswith(bank_detail_assignment_suffix):
-            transaction_id = unquote(
-                route_path[len(bank_detail_confirmation_prefix):-len(bank_detail_assignment_suffix)]
-            )
-            if method == "POST":
-                return self._handle_api_bank_detail_category_assignment(transaction_id, body, headers)
-            if method == "DELETE":
-                return self._handle_api_bank_detail_category_assignment_delete(transaction_id, headers)
-        if route_path.startswith(bank_detail_confirmation_prefix) and route_path.endswith(bank_detail_confirmation_suffix):
-            transaction_id = unquote(
-                route_path[len(bank_detail_confirmation_prefix):-len(bank_detail_confirmation_suffix)]
-            )
-            if method == "POST":
-                return self._handle_api_bank_detail_category_confirmation(transaction_id, body, headers)
-            if method == "DELETE":
-                return self._handle_api_bank_detail_category_confirmation_delete(transaction_id, headers)
         if method == "GET" and route_path == "/api/import-facts/invoices":
             return self._handle_api_import_fact_invoices(query)
         if method == "GET" and route_path == "/api/import-facts/batches":
@@ -9158,78 +9139,6 @@ class Application:
             / "bank_flow_tag_rules_ui2.normalized.json"
         )
         return json.loads(fixture_path.read_text(encoding="utf-8"))
-
-    def _handle_api_bank_detail_category_confirmation(
-        self,
-        transaction_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有确认银行明细标签权限。"},
-            )
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status, result = self._bank_details_routes().confirm_category(transaction_id, payload, session=session)
-        return self._json_response(status, result)
-
-    def _handle_api_bank_detail_category_confirmation_delete(
-        self,
-        transaction_id: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有撤销银行明细标签确认权限。"},
-            )
-        status, result = self._bank_details_routes().revoke_category_confirmation(transaction_id, session=session)
-        return self._json_response(status, result)
-
-    def _handle_api_bank_detail_category_assignment(
-        self,
-        transaction_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有设置银行明细标签权限。"},
-            )
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        status, result = self._bank_details_routes().assign_category(transaction_id, payload, session=session)
-        return self._json_response(status, result)
-
-    def _handle_api_bank_detail_category_assignment_delete(
-        self,
-        transaction_id: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_bank_details_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有撤销银行明细人工标签权限。"},
-            )
-        status, result = self._bank_details_routes().clear_category_assignment(transaction_id, session=session)
-        return self._json_response(status, result)
 
     def _bank_details_export_response(self, status: HTTPStatus, result: object) -> Response:
         content = getattr(result, "content")

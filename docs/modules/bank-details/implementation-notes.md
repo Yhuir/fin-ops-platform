@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - category write route-owner collapse
+
+- 目标：执行 `server-py:bank-details-category-write-route-callback-collapse`，把银行明细 category confirmation/assignment POST/DELETE HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
+- 影响范围：`/api/bank-details/transactions/{transaction_id}/category-confirmation` 和 `/category-assignment` 的 POST/DELETE route-owner 和测试；不改变银行明细业务规则、read model refresh/dirty/outbox/lifecycle owner、前端行为或生产数据。
+- 关键决策：route owner 负责 transaction id extraction 和 `unquote(...)`；POST 继续通过 JSON body port 解析 payload，DELETE 不解析 body；权限 precheck 仍早于 body parsing。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期事实源不变。
+- 测试覆盖：新增 category write route-owner port 测试；`tests.test_bank_auto_tag_rules_api` category confirmation 测试改用 public request 边界；更新 platform Guard 防止所有 bank-details route callbacks 回流。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_bank_auto_tag_rules_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`。
+- 未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:bank-details-route-owner-local-closure-audit`。
+
 ## 2026-06-25 - auto-tag write route-owner collapse
 
 - 目标：执行 `server-py:bank-details-auto-tag-write-route-callback-collapse`，把银行明细 auto-tag PUT/reapply/file-replacement HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
