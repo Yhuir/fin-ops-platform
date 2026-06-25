@@ -3467,12 +3467,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         checked_sources = {
             method_name: _function_source(tree, source, method_name)
             for method_name in (
-                "_sync_oa_invoice_offset_auto_pair_relations",
                 "_repair_active_relations_with_oa_attachment_context",
             )
         }
+        sync_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
+        sync_executor_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_sync_executor.py").read_text(
+            encoding="utf-8"
+        )
 
         violations: list[str] = []
+        if "_workbench_oa_invoice_offset_sync_executor().sync(" not in sync_source:
+            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not delegate to sync executor")
+        for marker in ("confirm_relation(", "cancel_relation("):
+            if marker not in sync_executor_source:
+                violations.append(f"WorkbenchOaInvoiceOffsetSyncExecutor does not delegate through command service {marker}")
         for method_name, method_source in checked_sources.items():
             if "confirm_relation" not in method_source:
                 violations.append(f"{method_name} does not delegate relation creation/repair to command service")
@@ -3491,6 +3499,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         method_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
+        factory_source = _function_source(tree, source, "_workbench_oa_invoice_offset_sync_executor")
+        executor_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_sync_executor.py").read_text(encoding="utf-8")
         port_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_relation_read_port.py").read_text(encoding="utf-8")
 
         violations: list[str] = []
@@ -3500,10 +3510,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("WorkbenchOaInvoiceOffsetRelationReadPort does not expose active_relations_for_mode")
         if "_workbench_pair_relation_service.list_active_relations" in method_source:
             violations.append("_sync_oa_invoice_offset_auto_pair_relations still reads broad pair service directly")
-        if "_workbench_oa_invoice_offset_relation_read_port()" not in method_source:
-            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not use OA invoice offset relation read port")
-        if "active_relations_for_mode(OA_INVOICE_OFFSET_AUTO_MATCH_MODE)" not in method_source:
-            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not constrain reads to OA invoice offset mode")
+        if "_workbench_oa_invoice_offset_sync_executor().sync(" not in method_source:
+            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not delegate to sync executor")
+        if "_workbench_oa_invoice_offset_relation_read_port().active_relations_for_mode" not in factory_source:
+            violations.append("OA invoice offset sync executor factory does not use relation read port")
+        if "relation_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE" not in factory_source:
+            violations.append("OA invoice offset sync executor factory does not constrain relation mode")
+        if "active_relations_for_mode(self._relation_mode)" not in executor_source:
+            violations.append("WorkbenchOaInvoiceOffsetSyncExecutor does not constrain active relation reads by mode")
 
         self.assertEqual(violations, [])
 

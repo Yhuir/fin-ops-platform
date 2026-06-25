@@ -514,6 +514,9 @@ from fin_ops_platform.services.workbench_oa_invoice_offset_rebuild_helper import
 from fin_ops_platform.services.workbench_oa_invoice_offset_desired_relation_builder import (
     WorkbenchOaInvoiceOffsetDesiredRelationBuilder,
 )
+from fin_ops_platform.services.workbench_oa_invoice_offset_sync_executor import (
+    WorkbenchOaInvoiceOffsetSyncExecutor,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13575,74 +13578,22 @@ class Application:
         }
 
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
-        desired_relations = self._oa_invoice_offset_desired_relations(payload)
-        scanned_row_ids = self._raw_workbench_payload_row_ids(payload)
-        relation_read_port = self._workbench_oa_invoice_offset_relation_read_port()
-        active_auto_relations = {
-            str(relation.get("case_id")): relation
-            for relation in relation_read_port.active_relations_for_mode(OA_INVOICE_OFFSET_AUTO_MATCH_MODE)
-        }
-        changed = False
-        changed_case_ids: list[str] = []
-        changed_scope_keys: set[str] = {"all"}
-        command_service = self._workbench_relation_command_service(require_fresh_relations=False)
+        self._workbench_oa_invoice_offset_sync_executor().sync(payload)
 
-        for case_id, desired_relation in desired_relations.items():
-            existing_relation = active_auto_relations.get(case_id)
-            if (
-                isinstance(existing_relation, dict)
-                and list(existing_relation.get("row_ids") or []) == desired_relation["row_ids"]
-                and str(existing_relation.get("relation_mode")) == OA_INVOICE_OFFSET_AUTO_MATCH_MODE
-                and str(existing_relation.get("month_scope")) == str(desired_relation["month_scope"])
-                and str(existing_relation.get("status")) == "active"
-            ):
-                continue
-            command_result = command_service.confirm_relation(
-                case_id=case_id,
-                row_ids=list(desired_relation["row_ids"]),
-                row_types=list(desired_relation["row_types"]),
+    def _workbench_oa_invoice_offset_sync_executor(self) -> WorkbenchOaInvoiceOffsetSyncExecutor:
+        executor = getattr(self, "_workbench_oa_invoice_offset_sync_executor_instance", None)
+        if executor is None:
+            executor = WorkbenchOaInvoiceOffsetSyncExecutor(
+                desired_relations_builder=self._oa_invoice_offset_desired_relations,
+                raw_payload_row_ids=self._raw_workbench_payload_row_ids,
+                active_relations_for_mode=self._workbench_oa_invoice_offset_relation_read_port().active_relations_for_mode,
+                command_service_provider=lambda: self._workbench_relation_command_service(require_fresh_relations=False),
+                persist_pair_relations=self._persist_workbench_pair_relations,
+                execute_lifecycle_event=self._execute_derived_data_lifecycle_event,
                 relation_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
-                actor_id="system_auto_match",
-                month_scope=str(desired_relation["month_scope"]),
-                history_operation_type="oa_invoice_offset_auto_pair",
             )
-            changed = True
-            changed_case_ids.extend(
-                str(changed_case_id)
-                for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
-                if str(changed_case_id).strip()
-            )
-            if str(desired_relation["month_scope"]) != "all":
-                changed_scope_keys.add(str(desired_relation["month_scope"]))
-
-        for case_id in sorted(set(active_auto_relations).difference(desired_relations)):
-            relation_row_ids = {str(row_id) for row_id in list(active_auto_relations[case_id].get("row_ids") or [])}
-            if not scanned_row_ids or not relation_row_ids.intersection(scanned_row_ids):
-                continue
-            command_result = command_service.cancel_relation(
-                case_id=case_id,
-                actor_id="system_auto_match",
-                reason="OA 发票冲抵自动关系已不在当前工作台 payload 中。",
-                history_operation_type="oa_invoice_offset_auto_pair_removed",
-            )
-            changed = True
-            changed_case_ids.extend(
-                str(changed_case_id)
-                for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
-                if str(changed_case_id).strip()
-            )
-            month_scope = str(active_auto_relations[case_id].get("month_scope", ""))
-            if month_scope and month_scope != "all":
-                changed_scope_keys.add(month_scope)
-
-        if not changed:
-            return
-        self._persist_workbench_pair_relations(changed_case_ids=sorted(set(changed_case_ids)))
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=list(changed_scope_keys),
-            metadata={"source": "repair_active_relations_for_removed_rows"},
-        )
+            self._workbench_oa_invoice_offset_sync_executor_instance = executor
+        return executor
 
     def _repair_active_relations_with_oa_attachment_context(self, payload: dict[str, object]) -> None:
         rows_by_id = self._raw_workbench_payload_rows_by_id(payload)

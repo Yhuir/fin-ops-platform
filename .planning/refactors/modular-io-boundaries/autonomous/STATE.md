@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-oa-invoice-offset-desired-relation-builder-extraction-closed`
+Current state: `workbench-oa-invoice-offset-sync-executor-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-oa-invoice-offset-desired-relation-builder-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-invoice-offset-desired-relation-builder-extraction-2026-06-25.md`. `WorkbenchOaInvoiceOffsetDesiredRelationBuilder` now owns desired relation construction; OA invoice offset sync side effects remain deferred. The next local boundary is `server-py:workbench-oa-invoice-offset-sync-executor-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-oa-invoice-offset-sync-executor-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-invoice-offset-sync-executor-extraction-2026-06-25.md`. `WorkbenchOaInvoiceOffsetSyncExecutor` now owns auto-pair confirm/cancel/persist/lifecycle orchestration; OA attachment repair context remains deferred. The next local boundary is `server-py:workbench-oa-attachment-repair-context-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
