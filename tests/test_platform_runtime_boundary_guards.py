@@ -2406,7 +2406,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_input_invoice_oa_reverse_lightweight_routes_use_route_owner(self) -> None:
+    def test_input_invoice_oa_reverse_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -2426,6 +2426,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_input_invoice_usage_oa_reverse_submitted_history",
             "_handle_api_input_invoice_usage_oa_reverse_staged_drafts",
             "_handle_api_input_invoice_usage_oa_reverse_batch_get",
+            "_handle_api_input_invoice_usage_oa_reverse_one_step_draft_create",
+            "_handle_api_input_invoice_usage_oa_reverse_draft_create",
+            "_handle_api_input_invoice_usage_oa_reverse_draft_revoke",
+            "_handle_api_input_invoice_usage_oa_reverse_status_refresh",
+            "_handle_api_input_invoice_usage_oa_reverse_manual_status",
         ):
             if forbidden in route_source:
                 violations.append(f"OA reverse route owner leaks legacy/application ownership marker {forbidden}")
@@ -2437,29 +2442,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "json_response=self._json_response",
             "input_usage_error_response=self._input_invoice_usage_error_response",
             "oa_reverse_error_response=self._input_invoice_usage_oa_reverse_error_response",
+            "target_oa_applicant_token_provider=self._target_oa_applicant_token_provider",
+            "oa_draft_client_for_batch=self._input_invoice_usage_oa_draft_client_for_batch",
+            "int_or_none=self._int_or_none",
         ):
             if required not in factory_source:
                 violations.append(f"Application OA reverse route factory is missing explicit port {required}")
+        for required in (
+            "/api/input-invoice-usage/oa-reverse/preview",
+            "/api/input-invoice-usage/oa-reverse/staged-drafts",
+            "/api/input-invoice-usage/oa-reverse/submitted-history",
+            "/api/input-invoice-usage/oa-reverse/batches",
+            "/api/input-invoice-usage/oa-reverse/oa-draft",
+            "create_oa_draft_from_selection",
+            "create_oa_draft",
+            "revoke_oa_draft",
+            "refresh_oa_status",
+            "manual_oa_status",
+        ):
+            if required not in route_class:
+                violations.append(f"OA reverse route owner is missing route/method marker {required}")
         if "_input_invoice_usage_oa_reverse_routes().route(method, route_path, query, body, headers)" not in server_source:
-            violations.append("Application does not dispatch lightweight OA reverse routes through route owner")
+            violations.append("Application does not dispatch OA reverse routes through route owner")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_oa_reverse_preview",
             "def _handle_api_input_invoice_usage_oa_reverse_batch_create",
             "def _handle_api_input_invoice_usage_oa_reverse_submitted_history",
             "def _handle_api_input_invoice_usage_oa_reverse_staged_drafts",
             "def _handle_api_input_invoice_usage_oa_reverse_batch_get",
-        ):
-            if removed_handler in server_source:
-                violations.append(f"server.py still owns removed OA reverse lightweight handler {removed_handler}")
-        for retained_handler in (
             "def _handle_api_input_invoice_usage_oa_reverse_one_step_draft_create",
             "def _handle_api_input_invoice_usage_oa_reverse_draft_create",
             "def _handle_api_input_invoice_usage_oa_reverse_draft_revoke",
             "def _handle_api_input_invoice_usage_oa_reverse_status_refresh",
             "def _handle_api_input_invoice_usage_oa_reverse_manual_status",
         ):
-            if retained_handler not in server_source:
-                violations.append(f"server.py lost retained OA reverse mutation handler {retained_handler}")
+            if removed_handler in server_source:
+                violations.append(f"server.py still owns removed OA reverse handler {removed_handler}")
 
         self.assertEqual(violations, [])
 

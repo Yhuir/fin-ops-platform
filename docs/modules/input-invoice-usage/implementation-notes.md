@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - OA reverse draft mutation route callback collapse
+
+- 目标：把 OA reverse 剩余草稿创建、撤回、状态刷新和人工状态 HTTP mapping 从 `server.py` 迁入 `InputInvoiceUsageOaReverseApiRoutes`。
+- 影响范围：`routes_input_invoice_usage_oa_reverse.py`、`server.py` OA reverse route factory、静态 Guard 和 OA reverse API 回归；rows/filter-options/export/read-model fresh gate 不变。
+- 关键决策：route owner 通过显式 `target_oa_applicant_token_provider`、`oa_draft_client_for_batch`、`int_or_none` 端口获得运行时能力，不接收 `Application`；业务状态机仍由 `InputInvoiceUsageOaReverseService` 承担。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：扩展 route-owner inventory/static ownership Guard，回归 OA reverse preview/batch/get/history/staged/one-step draft/batch draft/revoke/manual/status refresh API 路径。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-oa-reverse-draft-mutation-route-callback-collapse-2026-06-25.md`。
+- 未测风险：真实 OA 登录、目标申请人凭据、生产 browser/admin/write 和 worker drain 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit`。
+
 ## 2026-06-25 - OA reverse draft mutation callback audit
 
 - 目标：审计 OA reverse 剩余草稿创建、撤回、状态刷新和人工状态 callback，判断是否可以继续收进 route owner。
