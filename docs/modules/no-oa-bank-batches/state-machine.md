@@ -52,6 +52,12 @@
 | `stale` | 历史内部异常或源流水缺失诊断状态 | 有 active no-OA relation 时投影为 `submitted` 并允许撤回；无 active relation 时从公开 snapshot 清理。普通银行明细标签变化不得把 submitted batch 转成 stale |
 | `superseded` | 历史单行批次被合并替代 | 从公开 snapshot 清理 |
 
+历史兼容归一规则：
+
+- 已保存为 `submitted` 但对应 `relation_mode=no_oa_bank_batch` 的 Workbench relation 已经 `cancelled` 时，公开投影必须转为 `withdrawn`，并关闭 `can_withdraw`。
+- 该归一不重新创建 relation，也不恢复源流水候选；如果源流水仍 current，后续由正常候选生成链路重新生成 draft。
+- 生产修复只能通过 no-OA lifecycle repair 工具和 `PostgresStateStore.save_no_oa_bank_batches` 保存公开 snapshot，不能直接改数据库表。
+
 候选生成规则：
 
 - 未提交候选只来自当前 tag selection 中的 tag code。
@@ -229,3 +235,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-17 | relation-backed stale 用户可见状态收敛 | SQL read model 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchPage.test.tsx` |
 | 2026-06-23 | read-side manifest 合同守卫 | 仅锁定 `no_oa_bank_batch` 的 self-managed freshness、`scoped_incremental`、fan-out `all`、`no-oa-bank-batch` worker、query/permission owner 和 repository port；不改变业务/UI/read model/worker 状态定义 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts` |
 | 2026-06-26 | unchanged source_versions worker fast-path | worker 从 state_store 注入 no-OA SQL read repository，先读取 Bankdetail tag 与 Workbench relation metadata source_versions，再比较现有 SQL source_versions summary；一致时只 complete dirty scope，不 rebuild、不保存 snapshot、不加载完整 relation rows/batch payload rows | `tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save` |
+| 2026-06-26 | submitted + cancelled relation 历史归一 | 历史 `submitted` 批次若其 no-OA Workbench relation 已取消，public snapshot 归一为 `withdrawn` 且不可撤回，避免页面把已撤回历史误当可撤回样本 | `tests/test_no_oa_bank_batch_lifecycle_repair.py::test_public_lifecycle_repair_normalizes_cancelled_submitted_relation_to_withdrawn` |

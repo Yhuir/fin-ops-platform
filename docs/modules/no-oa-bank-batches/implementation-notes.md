@@ -23,6 +23,16 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-26 - submitted/cancelled relation lifecycle repair
+
+- 目标：修复生产历史 no-OA 批次中 `submitted` 状态与已取消 no-OA Workbench relation 不一致的问题，避免页面把已取消关系误显示为可撤回的已提交批次。
+- 影响范围：`NoOaBankBatchLifecycleRepair` public snapshot 归一逻辑、lifecycle repair 测试和 no-OA 模块文档；不改变 no-OA API shape、dirty/outbox schema、readiness 事实源、权限、审计或前端交互。
+- 关键决策：如果 batch 仍是 `submitted`，但 `relation_case_id` 对应的 Workbench relation 状态是 `cancelled` 且 relation mode 为 `no_oa_bank_batch`，公开 snapshot 归一为 `withdrawn`，继承 relation 的 `withdrawn_at/withdrawn_by`，并关闭 `can_withdraw`。
+- 数据修复边界：生产 apply 必须使用 `fin_ops_platform.tools.repair_no_oa_bank_batch_lifecycle --apply`，通过 `PostgresStateStore.save_no_oa_bank_batches` 保存公开 snapshot；不直接 SQL 写业务表。
+- 测试覆盖：新增 lifecycle repair service test，覆盖 `submitted -> withdrawn`、`can_withdraw=false` 和 report `normalized_status_counts`。
+- 验证命令：`PYTHONPATH=backend/src pytest -q tests/test_no_oa_bank_batch_lifecycle_repair.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_no_oa_bank_batch_application_service.py`；`PYTHONPATH=backend/src pytest -q tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_read_model_refresh_does_not_run_relation_repairs tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback tests/test_read_model_architecture_guards.py tests/test_read_model_manifest.py`；`bash scripts/verify.sh backend`；`git diff --check`。
+- 未测风险：提交前本地验证不证明生产历史行已修复；需要部署后执行 repair apply、只读一致性查询和 no-OA read model SLO。
+
 ## 2026-06-26 - scoped persistence SLO optimization
 
 - 目标：修复 no-OA 月度 read model refresh 在生产 SLO smoke 中因持久化全量 snapshot 而超时的问题，保持目标月份 scoped incremental projection。

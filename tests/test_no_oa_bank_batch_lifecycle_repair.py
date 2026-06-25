@@ -111,6 +111,53 @@ def test_public_lifecycle_repair_keeps_relation_backed_stale_as_submitted() -> N
     assert report["normalized_status_counts"] == {"stale->submitted": 1}
 
 
+def test_public_lifecycle_repair_normalizes_cancelled_submitted_relation_to_withdrawn() -> None:
+    snapshot = {
+        "batches": {
+            "batch-submitted-cancelled": {
+                "batch_id": "batch-submitted-cancelled",
+                "batch_type": "internal_transfer",
+                "status": "submitted",
+                "status_bucket": "submitted",
+                "relation_case_id": "batch-submitted-cancelled",
+                "row_ids": ["bank-1", "bank-2"],
+                "row_count": 2,
+                "total_amount": "500.00",
+                "version": 2,
+            }
+        }
+    }
+    pair_relation_snapshot = {
+        "pair_relations": {
+            "batch-submitted-cancelled": {
+                "case_id": "batch-submitted-cancelled",
+                "row_ids": ["bank-1", "bank-2"],
+                "row_types": ["bank", "bank"],
+                "status": "cancelled",
+                "relation_mode": "no_oa_bank_batch",
+                "month_scope": "2026-02",
+                "updated_at": "2026-06-14T04:02:40+00:00",
+                "withdrawn_at": "2026-06-14T04:02:40+00:00",
+                "withdrawn_by": "system:workbench-relation-integrity-repair",
+            }
+        }
+    }
+
+    public_snapshot, report = build_public_no_oa_bank_batch_snapshot(
+        snapshot,
+        pair_relation_snapshot=pair_relation_snapshot,
+    )
+
+    public_batch = public_snapshot["batches"]["batch-submitted-cancelled"]
+    assert public_batch["status"] == "withdrawn"
+    assert public_batch["status_bucket"] == "withdrawn"
+    assert public_batch["can_withdraw"] is False
+    assert public_batch["withdrawn_by"] == "system:workbench-relation-integrity-repair"
+    assert public_batch["withdrawn_at"] == "2026-06-14T04:02:40+00:00"
+    assert report["removed_count"] == 0
+    assert report["normalized_status_counts"] == {"submitted->withdrawn": 1}
+
+
 def test_public_lifecycle_repair_normalizes_legacy_unsubmitted_to_draft() -> None:
     snapshot = {
         "batches": {

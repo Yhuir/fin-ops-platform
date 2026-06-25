@@ -18,6 +18,14 @@
 
 ## 现有测试入口
 
+## 2026-06-26 - Cancelled relation lifecycle normalization
+
+- 变更类型：narrow production repair slice。
+- 背景：生产发现历史 no-OA batch 仍为 `submitted`，但对应 `relation_mode=no_oa_bank_batch` 的 Workbench relation 已被 integrity repair 取消；这些批次不再是合法撤回样本，继续在公开状态中保持 `submitted` 会让页面读到错误生命周期。
+- 新增/更新测试：`tests/test_no_oa_bank_batch_lifecycle_repair.py::test_public_lifecycle_repair_normalizes_cancelled_submitted_relation_to_withdrawn`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；Business core 通过 public lifecycle 纯函数合同覆盖；API/frontend/E2E 不新增，因为 HTTP shape、前端交互和操作入口不变，本轮修复目标是生产历史 snapshot 归一。
+- 验证结果：`PYTHONPATH=backend/src pytest -q tests/test_no_oa_bank_batch_lifecycle_repair.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_no_oa_bank_batch_application_service.py`、platform/read-model guard 集合和 `bash scripts/verify.sh backend` 已通过；部署后仍需执行生产 repair apply 与 no-OA read model SLO。
+
 ## 2026-06-26 - Worker unchanged source_versions fast-path
 
 - 变更类型：narrow implementation slice。

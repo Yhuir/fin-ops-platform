@@ -54,6 +54,7 @@
 - 自动决策清理：submitted no-OA batch 的 `bank_transaction_ids` 是历史 cleanup 的闭环占用证据。即使对应 Workbench relation snapshot 已取消或暂时缺失，`oa_bank_exact_sum` repair dry-run 也必须把这些银行流水视为已闭环，避免旧自动 decision 重新污染关联台。
 - 用户可见状态：页面主状态只呈现 `draft` 未提交、`submitted` 已提交、`withdrawn` 历史。`conflict/stale/superseded` 是内部兼容/诊断状态，不得进入主列表、summary 或分页 total；read model 自身的 `read_model_status=stale` 仍保留为新鲜度状态，不等同于批次业务状态。
 - 历史兼容：旧 SQL/read model `status=unsubmitted,status_bucket=unsubmitted` 必须在 API/修复工具中归一为 `draft` 且可提交。relation-backed 的旧 `stale/category drift` 批次（`status_bucket=submitted` 或 `can_withdraw=true`，或通过 active no-OA relation 识别）必须投影为 `submitted` 并保留撤回入口；无 active relation 的旧 `stale` 和不可提交 `conflict` 必须从公开 snapshot 清理，不在未提交区显示。
+- 取消关系兼容：历史批次若仍保存为 `submitted`，但对应 `relation_mode=no_oa_bank_batch` 的 Workbench relation 已经是 `cancelled`，公开 lifecycle 必须归一为 `withdrawn`，且 `can_withdraw=false`。这种批次不能再作为撤回验证样本；修复工具应通过 `PostgresStateStore.save_no_oa_bank_batches` 保存公开 snapshot，不直接 SQL 改表。
 - 数据修复：生产历史数据可用 `PYTHONPATH=backend/src python -m fin_ops_platform.tools.repair_no_oa_bank_batch_lifecycle` 先 dry-run 输出待删除/归一批次；确认后加 `--apply`，通过 `PostgresStateStore.save_no_oa_bank_batches` 同步清理 `app.no_oa_bank_batches` 和 `read_model.no_oa_bank_batch_rows`。
 - 前端操作能力：普通行级选择、内部往来整批提交、撤回可用性由 `web/src/features/noOaBankBatches/policy.ts` 统一判断。普通 draft 批次显示右侧行级 checkbox，`internal_transfer` draft 走整批提交按钮；未提交区域中出现的批次必须都可提交。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回通过 relation command service 取消 Workbench active relation，并使流水回到可匹配状态。
