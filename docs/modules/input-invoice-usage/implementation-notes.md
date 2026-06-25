@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Payment rules PUT route callback collapse
+
+- 目标：把 `PUT /api/input-invoice-usage/payment-status-rules` HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。
+- 影响范围：`routes_input_invoice_usage.py`、`server.py` route dispatch/factory、payment rules 保存测试、权限测试和静态 Guard。
+- 关键决策：settings service/provider 继续拥有验证、持久化、审计、版本冲突和幂等冲突；route owner 只通过显式 settings/body/error/refresh 端口做 HTTP mapping。刷新 fan-out helper 先保留为 `Application` 的显式 read-model producer port。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实、响应 payload、错误码、权限和刷新 fan-out 语义不变。
+- 测试覆盖：扩展 route-owner static Guard，payment rules 保存测试改走公开 route path，回归只读导出用户不可保存 payment rules。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status、browser/admin/write 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-route-owner-local-closure-audit`。
+
 ## 2026-06-25 - Payment rules PUT write boundary audit
 
 - 目标：审计 `PUT /api/input-invoice-usage/payment-status-rules` 写边界，决定是否可以迁入 route owner。

@@ -4,6 +4,7 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
+from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
@@ -28,6 +29,10 @@ class InputInvoiceUsageApiRoutes:
         export_error_response: Callable[[InputInvoiceUsageExportError], Any],
         record_export_download: Callable[[Any | None, str, dict[str, list[str]]], None],
         xlsx_response: Callable[[str, bytes], Any],
+        app_settings_service: Any,
+        load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
+        payment_rules_refreshes: Callable[[dict[str, object]], None],
+        payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
     ) -> None:
@@ -41,6 +46,10 @@ class InputInvoiceUsageApiRoutes:
         self._export_error_response = export_error_response
         self._record_export_download = record_export_download
         self._xlsx_response = xlsx_response
+        self._app_settings_service = app_settings_service
+        self._load_json_body = load_json_body
+        self._payment_rules_refreshes = payment_rules_refreshes
+        self._payment_rules_error_response = payment_rules_error_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
 
@@ -49,6 +58,7 @@ class InputInvoiceUsageApiRoutes:
         method: str,
         route_path: str,
         query: dict[str, list[str]],
+        body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/input-invoice-usage/rows":
@@ -61,6 +71,8 @@ class InputInvoiceUsageApiRoutes:
             return self.export(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/payment-status-rules":
             return self.payment_status_rules()
+        if method == "PUT" and route_path == "/api/input-invoice-usage/payment-status-rules":
+            return self.update_payment_status_rules(body, headers)
         if method == "GET" and route_path.startswith("/api/input-invoice-usage/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.invoice_detail(invoice_id)
@@ -161,6 +173,36 @@ class InputInvoiceUsageApiRoutes:
 
     def payment_status_rules(self) -> Any:
         return self._json_response(HTTPStatus.OK, self._query_service.payment_status_rules())
+
+    def update_payment_status_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票使用情况页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存进项发票支付状态规则权限。"},
+            )
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "input_invoice_usage_payment_rules"
+        )
+        try:
+            updated = self._app_settings_service.update_input_invoice_usage_payment_status_rules(
+                payload,
+                actor_id=str(actor_id or "input_invoice_usage_payment_rules"),
+                after_input_invoice_usage_payment_rules_saved=self._payment_rules_refreshes,
+            )
+        except AppSettingsValidationError as exc:
+            return self._payment_rules_error_response(exc)
+        return self._json_response(HTTPStatus.OK, updated)
 
     def export_preview(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
         _session, auth_error = self._resolve_read_session(

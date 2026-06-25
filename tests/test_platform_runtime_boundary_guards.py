@@ -2522,6 +2522,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "export_error_response=self._input_invoice_usage_export_error_response",
             "record_export_download=self._record_input_invoice_usage_export_download",
             "xlsx_response=self._input_invoice_usage_xlsx_response",
+            "app_settings_service=self._app_settings_service",
+            "load_json_body=self._load_json_body",
+            "payment_rules_refreshes=self._enqueue_input_invoice_usage_payment_rules_refreshes",
+            "payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response",
             "json_response=self._json_response",
             "input_usage_error_response=self._input_invoice_usage_error_response",
         ):
@@ -2533,6 +2537,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/input-invoice-usage/export-preview",
             "/api/input-invoice-usage/export",
             "/api/input-invoice-usage/payment-status-rules",
+            "update_payment_status_rules",
             "/api/input-invoice-usage/invoices/",
             "/api/input-invoice-usage/bank-transactions/",
             "/api/input-invoice-usage/oa/",
@@ -2543,13 +2548,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required not in route_class:
                 violations.append(f"Input usage route owner is missing route/method marker {required}")
-        if "_input_invoice_usage_routes().route(method, route_path, query, headers)" not in server_source:
+        if "_input_invoice_usage_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch input usage read routes through route owner")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_rows(",
             "def _handle_api_input_invoice_usage_filter_options(",
             "def _handle_api_input_invoice_usage_export_preview(",
             "def _handle_api_input_invoice_usage_export(",
+            "def _handle_api_input_invoice_usage_payment_status_rules_update(",
             "def _handle_api_input_invoice_usage_invoice_detail(",
             "def _handle_api_input_invoice_usage_bank_transaction_detail(",
             "def _handle_api_input_invoice_usage_oa_detail(",
@@ -2558,11 +2564,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if removed_handler in server_source:
                 violations.append(f"server.py still owns removed input usage read handler {removed_handler}")
-        for retained_handler in (
-            "def _handle_api_input_invoice_usage_payment_status_rules_update",
-        ):
-            if retained_handler not in server_source:
-                violations.append(f"server.py lost retained out-of-scope handler {retained_handler}")
 
         self.assertEqual(violations, [])
 

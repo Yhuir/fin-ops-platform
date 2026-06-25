@@ -1924,15 +1924,13 @@ class Application:
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_pending_invoice_oa_detail(oa_id, headers)
         if route_path.startswith("/api/input-invoice-usage"):
-            input_usage_response = self._input_invoice_usage_routes().route(method, route_path, query, headers)
+            input_usage_response = self._input_invoice_usage_routes().route(method, route_path, query, body, headers)
             if input_usage_response is not None:
                 return input_usage_response
         if route_path.startswith("/api/input-invoice-usage/oa-reverse"):
             oa_reverse_response = self._input_invoice_usage_oa_reverse_routes().route(method, route_path, query, body, headers)
             if oa_reverse_response is not None:
                 return oa_reverse_response
-        if method == "PUT" and route_path == "/api/input-invoice-usage/payment-status-rules":
-            return self._handle_api_input_invoice_usage_payment_status_rules_update(body, headers)
         if method == "GET" and route_path == "/api/oa-pending-payments/rows":
             return self._handle_api_oa_pending_payments_rows(query, headers)
         if method == "GET" and route_path == "/api/oa-pending-payments/filter-options":
@@ -6841,6 +6839,10 @@ class Application:
             export_error_response=self._input_invoice_usage_export_error_response,
             record_export_download=self._record_input_invoice_usage_export_download,
             xlsx_response=self._input_invoice_usage_xlsx_response,
+            app_settings_service=self._app_settings_service,
+            load_json_body=self._load_json_body,
+            payment_rules_refreshes=self._enqueue_input_invoice_usage_payment_rules_refreshes,
+            payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
         )
@@ -7069,54 +7071,23 @@ class Application:
         )
         return service.relation_details(row_id, kind=query.get("kind", [""])[0])
 
-    def _handle_api_input_invoice_usage_payment_status_rules_update(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票使用情况页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存进项发票支付状态规则权限。"},
-            )
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "input_invoice_usage_payment_rules"
-        )
-        try:
-            updated = self._app_settings_service.update_input_invoice_usage_payment_status_rules(
-                payload,
-                actor_id=str(actor_id or "input_invoice_usage_payment_rules"),
-                after_input_invoice_usage_payment_rules_saved=self._enqueue_input_invoice_usage_payment_rules_refreshes,
-            )
-        except AppSettingsValidationError as exc:
-            status = (
-                HTTPStatus.CONFLICT
-                if exc.error_code
-                in {
-                    "input_invoice_usage_payment_rules_version_conflict",
-                    "input_invoice_usage_payment_rules_idempotency_conflict",
-                }
-                else HTTPStatus.BAD_REQUEST
-            )
-            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        return self._json_response(HTTPStatus.OK, updated)
-
     def _enqueue_input_invoice_usage_payment_rules_refreshes(self, event: dict[str, object]) -> None:
         scope_key = str(event.get("scope_key") or "all")
         reason = str(event.get("reason") or "payment_status_rules_updated")
         self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason)
         self._enqueue_generic_read_model_refreshes("invoice_lifecycle", [scope_key], reason=reason)
+
+    def _input_invoice_usage_payment_rules_error_response(self, exc: AppSettingsValidationError) -> Response:
+        status = (
+            HTTPStatus.CONFLICT
+            if exc.error_code
+            in {
+                "input_invoice_usage_payment_rules_version_conflict",
+                "input_invoice_usage_payment_rules_idempotency_conflict",
+            }
+            else HTTPStatus.BAD_REQUEST
+        )
+        return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
 
     def _input_invoice_usage_oa_reverse_error_response(
         self,

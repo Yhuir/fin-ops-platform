@@ -64,8 +64,10 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             next_rules = [dict(rule) for rule in current["rules"]]
             next_rules[1]["label"] = "已支付"
 
-            response = app._handle_api_input_invoice_usage_payment_status_rules_update(
-                json.dumps(
+            response = app.handle_request(
+                "PUT",
+                "/api/input-invoice-usage/payment-status-rules",
+                body=json.dumps(
                     {
                         "expectedVersion": current["version"],
                         "idempotencyKey": "rules-save-api",
@@ -73,7 +75,6 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
                         "pendingDirections": current["pendingDirections"],
                     }
                 ),
-                None,
             )
 
         self.assertEqual(response.status_code, 200)

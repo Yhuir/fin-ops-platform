@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-payment-rules-route-callback-collapse-selected`
+Current state: `input-invoice-usage-route-owner-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-payment-rules-write-boundary-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-payment-rules-write-boundary-audit-2026-06-25.md`. The PUT callback is a thin HTTP/session/body/error wrapper around settings service validation/persistence/audit and gateway-backed input-usage/invoice-lifecycle refresh fan-out, so T0 selected payment-rules route callback collapse with explicit ports. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-payment-rules-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-payment-rules-route-callback-collapse-2026-06-25.md`. Payment-status-rules PUT HTTP mapping now lives in `InputInvoiceUsageApiRoutes` with explicit settings/body/error/refresh ports, and the app-owned PUT handler was removed. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-payment-rules-write-boundary-audit`
+`server-py:input-invoice-usage-payment-rules-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-payment-rules-route-callback-collapse`
+`server-py:input-invoice-usage-route-owner-local-closure-audit`
