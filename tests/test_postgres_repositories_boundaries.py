@@ -358,6 +358,36 @@ def test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated() -> Non
     assert any("insert into read_model.invoice_lifecycle_scopes" in sql for sql in executed_sql)
 
 
+def test_pending_invoice_rows_save_updates_scope_inside_transaction() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_pending_invoice_rows(
+        scope_key="expense:all:2026-04",
+        rows=[
+            {
+                "id": "pending-1",
+                "bank_transaction": {
+                    "trade_time": "2026-04-03",
+                    "counterparty_name": "counterparty",
+                    "amount": "12.34",
+                },
+                "status": {"code": "missing_invoice"},
+                "invoices": [],
+                "can_create_invoice": True,
+            }
+        ],
+        source_versions={"pending_invoice_read_model_schema_version": 1},
+    )
+
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert any("delete from read_model.pending_invoice_rows" in sql for sql in executed_sql)
+    assert any("insert into read_model.pending_invoice_rows" in sql for sql in executed_sql)
+    assert any("insert into read_model.pending_invoice_scopes" in sql for sql in executed_sql)
+
+
 def test_cost_statistics_rows_are_saved_in_batch() -> None:
     connection = RecordingConnection()
     repository = PostgresReadModelRepository(connection)

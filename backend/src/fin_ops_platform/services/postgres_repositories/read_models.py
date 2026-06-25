@@ -2642,6 +2642,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
 
 
     def _upsert_invoice_lifecycle_scope(
+        self,
         connection: Any,
         *,
         tenant_id: str,
@@ -2873,6 +2874,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
 
 
     def _upsert_pending_invoice_scope(
+        self,
         connection: Any,
         *,
         scope_key: str,
