@@ -267,7 +267,10 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             pair_relation_service=app._workbench_pair_relation_service,
             workbench_read_model_service=app._workbench_read_model_service,
             state_store=app._state_store,
-            workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
+            workbench_matching_source_versions_provider=lambda: {
+                **app._workbench_matching_source_versions(),
+                "pair_relation_snapshot_version": "stale-in-memory-hash",
+            },
         )
 
         source_versions = service._application_service.no_oa_bank_batch_source_versions()
