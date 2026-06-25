@@ -105,6 +105,20 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        source_versions = input_invoice_usage_source_versions(
+            payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
+        )
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        unchanged = self._unchanged_scope_result(
+            self._input_invoice_usage_read_model_repository,
+            "list_input_invoice_usage_rows",
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         service = self._input_service()
         context = service._query_context(month_hint=normalized_scope_key)
         rows = service._filtered_sorted_rows(
@@ -117,12 +131,6 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             sort_field="invoice_date",
             sort_direction="desc",
         )
-        source_versions = input_invoice_usage_source_versions(
-            payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
-        )
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
-        if relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._input_invoice_usage_read_model_repository.save_input_invoice_usage_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -132,6 +140,18 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_output_invoice_collection_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        source_versions = output_invoice_collection_source_versions()
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        unchanged = self._unchanged_scope_result(
+            self._output_invoice_collection_read_model_repository,
+            "list_output_invoice_collection_rows",
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         service = self._output_service()
         context = service._query_context(month_hint=normalized_scope_key)
         rows = service._filtered_sorted_rows(
@@ -144,10 +164,6 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             sort_field="invoice_date",
             sort_direction="desc",
         )
-        source_versions = output_invoice_collection_source_versions()
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
-        if relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._output_invoice_collection_read_model_repository.save_output_invoice_collection_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -157,6 +173,18 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_oa_pending_payment_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        source_versions = oa_pending_payment_source_versions()
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = relation_source_versions
+        unchanged = self._unchanged_scope_result(
+            self._oa_pending_payment_read_model_repository,
+            "list_oa_pending_payment_rows",
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         service = self._oa_pending_payment_service()
         context = service._query_context(month_hint=normalized_scope_key)
         completed_rows = service._filtered_sorted_rows(
@@ -186,10 +214,6 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             admitted_oa_row_ids=_oa_pending_payment_row_oa_ids(in_progress_rows),
         )
         rows = [*completed_rows, *in_progress_rows]
-        source_versions = oa_pending_payment_source_versions()
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
-        if relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = relation_source_versions
         self._oa_pending_payment_read_model_repository.save_oa_pending_payment_rows(
             scope_key=normalized_scope_key,
             rows=rows,
@@ -224,6 +248,32 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             row_count=0,
             source_versions=oa_pending_payment_source_versions(),
         )
+
+    @staticmethod
+    def _unchanged_scope_result(
+        repository: Any,
+        list_method_name: str,
+        *,
+        scope_key: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, object] | None:
+        list_rows = getattr(repository, list_method_name, None)
+        if not callable(list_rows):
+            return None
+        payload = list_rows(month=scope_key, page=1, page_size=1)
+        if not isinstance(payload, dict):
+            return None
+        existing_source_versions = payload.get("source_versions")
+        if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        return {
+            "scope_key": scope_key,
+            "row_count": int(pagination.get("total") or len(list(payload.get("rows") or []))),
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
 
     def _input_service(self) -> InputInvoiceUsageQueryService:
         return InputInvoiceUsageQueryService(

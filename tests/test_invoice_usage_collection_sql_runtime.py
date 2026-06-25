@@ -523,6 +523,32 @@ class RecordingInvoiceRelationReadRepository:
         self.pruned_output: list[str] | None = None
         self.pruned_oa: list[str] | None = None
         self.workbench_relation_versions_by_scope: dict[str, dict[str, object]] = {}
+        self.existing_source_versions_by_method: dict[str, dict[str, object]] = {}
+        self.existing_row_count_by_method: dict[str, int] = {}
+
+    def _existing_payload(self, method_name: str) -> dict[str, object] | None:
+        source_versions = self.existing_source_versions_by_method.get(method_name)
+        if source_versions is None:
+            return None
+        return {
+            "rows": [{"row_id": "existing-row"}],
+            "pagination": {
+                "page": 1,
+                "pageSize": 1,
+                "total": self.existing_row_count_by_method.get(method_name, 1),
+            },
+            "source_versions": dict(source_versions),
+            "refresh_status": "refreshing",
+        }
+
+    def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object] | None:
+        return self._existing_payload("list_input_invoice_usage_rows")
+
+    def list_output_invoice_collection_rows(self, **_kwargs: object) -> dict[str, object] | None:
+        return self._existing_payload("list_output_invoice_collection_rows")
+
+    def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object] | None:
+        return self._existing_payload("list_oa_pending_payment_rows")
 
     def save_input_invoice_usage_rows(
         self,
@@ -1834,6 +1860,28 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(input_result["row_count"], 1)
         self.assertEqual(output_result["row_count"], 1)
         self.assertEqual(oa_result["row_count"], 0)
+
+    def test_projection_builder_skips_unchanged_input_scope_without_resaving_rows(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        expected_source_versions = input_invoice_usage_source_versions()
+        read_repository.existing_source_versions_by_method["list_input_invoice_usage_rows"] = expected_source_versions
+        read_repository.existing_row_count_by_method["list_input_invoice_usage_rows"] = 154
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+        )
+        builder._core_repository = ProjectionCoreRepository(
+            invoices=[self._invoice("input-invoice-1", InvoiceType.INPUT)],
+        )
+        builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
+
+        result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
+
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertEqual(result["row_count"], 154)
+        self.assertEqual(result["source_versions"], expected_source_versions)
+        self.assertIsNone(read_repository.saved_input)
 
     def test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

@@ -31,6 +31,12 @@ class FakeTurnoverReadRepository:
     def __init__(self) -> None:
         self.saved_payload: dict[str, object] | None = None
         self.saved_scope_key: str | None = None
+        self.existing_payload: dict[str, object] | None = None
+        self.list_calls: list[dict[str, object]] = []
+
+    def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object] | None:
+        self.list_calls.append(dict(kwargs))
+        return self.existing_payload
 
     def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
         self.saved_payload = payload
@@ -159,6 +165,14 @@ class FakeTwoFlowGroupedLedgerService:
 class NonFreshLedgerService:
     def list_grouped_ledger(self, **_kwargs: object) -> dict[str, object]:
         raise RuntimeError("bank_detail_read_model_not_fresh")
+
+
+class FailIfCalledLedgerService:
+    def list_grouped_ledger(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("ledger service should not be called for unchanged source versions")
+
+    def list_ledger(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("ledger service should not be called for unchanged source versions")
 
 
 class MutatingGroupedLedgerService:
@@ -326,6 +340,67 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertTrue(flow["cash_closure_linked"])
         self.assertEqual(flow["cash_closure_case_id"], "case-turnover-001")
         self.assertNotIn("__workbench_relation_details", flow)
+
+    def test_projection_skips_unchanged_scope_after_fresh_relation_version_check(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        relation_source_versions = {"workbench_relation_schema_version": "test"}
+        existing_source_versions = {
+            "turnover_ledger_schema_version": "test",
+            "workbench_relation_source_versions": relation_source_versions,
+        }
+        repository.existing_payload = {
+            "rows": [
+                {
+                    "relation_id": "rel-existing",
+                    "first_transaction_at": "2026-05-18",
+                    "flow_rows": [{"source_bank_row_id": "txn-existing"}],
+                }
+            ],
+            "pagination": {"page": 1, "page_size": 200, "total": 83},
+            "source_versions": existing_source_versions,
+            "read_model_status": "refreshing",
+        }
+        relation_facade = FakeWorkbenchRelationFacade(
+            {
+                "status": "fresh",
+                "rows": [],
+                "groups": [],
+                "source_versions": relation_source_versions,
+                "read_model_scope_keys": ["2026-05"],
+            }
+        )
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=15)
+
+        self.assertEqual(
+            result,
+            {
+                "scope_key": "all",
+                "row_count": 83,
+                "source_versions": existing_source_versions,
+                "skipped": True,
+                "skip_reason": "source_versions_unchanged",
+            },
+        )
+        self.assertEqual(repository.list_calls, [{"scope_key": "all", "page": 1, "page_size": 200}])
+        self.assertIsNone(repository.saved_payload)
+        self.assertEqual(
+            relation_facade.calls,
+            [
+                {
+                    "row_ids": ["txn-existing"],
+                    "require_fresh": True,
+                    "reason": "turnover_ledger_sql_projection_unchanged_check",
+                    "scope_keys_hint": ["2026-05"],
+                }
+            ],
+        )
 
     def test_projection_marks_workbench_bank_pair_as_cash_closure_when_group_zeroes_out(self) -> None:
         repository = FakeTurnoverReadRepository()

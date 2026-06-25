@@ -56,6 +56,14 @@ class TurnoverLedgerSqlProjectionBuilder:
             workbench_relation_read_facade = workbench_relation_read_facade or built.get("workbench_relation_read_facade")
 
         source_versions = dict(source_versions_provider())
+        unchanged = self._unchanged_scope_result(
+            read_repository=read_repository,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         rows = self._collect_rows(ledger_service)
         if normalized_scope_key != "all":
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
@@ -76,6 +84,55 @@ class TurnoverLedgerSqlProjectionBuilder:
             raise RuntimeError("Turnover ledger SQL projection requires save_turnover_ledger_rows.")
         save_rows(payload, scope_key=normalized_scope_key)
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_version": source_version}
+
+    @classmethod
+    def _unchanged_scope_result(
+        cls,
+        *,
+        read_repository: Any,
+        workbench_relation_read_facade: Any | None,
+        scope_key: str,
+        source_versions: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        list_view = getattr(read_repository, "list_turnover_ledger_view", None)
+        if not callable(list_view):
+            return None
+        payload = list_view(scope_key=scope_key, page=1, page_size=200)
+        if not isinstance(payload, dict):
+            return None
+        existing_source_versions = payload.get("source_versions")
+        if not isinstance(existing_source_versions, dict):
+            return None
+        current_source_versions = dict(source_versions)
+        rows = [dict(row) for row in list(payload.get("rows") or []) if isinstance(row, dict)]
+        if workbench_relation_read_facade is not None:
+            row_ids = _dedupe_preserve_order(row_id for row in rows for row_id in cls._bank_row_ids(row))
+            if row_ids:
+                scope_keys = _dedupe_preserve_order(cls._row_scope_key(row) for row in rows)
+                relation_payload = workbench_relation_read_facade.get_by_row_ids(
+                    row_ids,
+                    require_fresh=True,
+                    reason="turnover_ledger_sql_projection_unchanged_check",
+                    scope_keys_hint=scope_keys,
+                )
+                if (
+                    not isinstance(relation_payload, dict)
+                    or str(relation_payload.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS
+                ):
+                    return None
+                relation_source_versions = relation_payload.get("source_versions")
+                if isinstance(relation_source_versions, dict):
+                    current_source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
+        if existing_source_versions != current_source_versions:
+            return None
+        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        return {
+            "scope_key": scope_key,
+            "row_count": int(pagination.get("total") or len(rows)),
+            "source_versions": current_source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
 
     @staticmethod
     def _collect_rows(ledger_service: TurnoverLedgerService) -> list[dict[str, Any]]:
