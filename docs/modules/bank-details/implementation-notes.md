@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - write route callback audit
+
+- 目标：执行 `server-py:bank-details-write-route-callback-audit`，审计 read/export route-owner 收口后剩余银行明细写入 callbacks。
+- 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
+- 关键决策：剩余写入 callbacks 拆为 auto-tag PUT/reapply/file replacement 和 category confirmation/assignment 两组；下一实现选择 auto-tag write route callback collapse，category 写入后续单独处理。
+- 文档影响：新增 modular IO write route callback audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录；长期事实源不变。
+- 测试覆盖：本轮 analysis-only，不新增运行时测试；下一实现 slice 必须增加 API/Guard 回归。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Browser、admin/write evidence 和生产写入闭环仍未执行；category confirmation/assignment callbacks 未迁移。
+- 后续事项：执行 `server-py:bank-details-auto-tag-write-route-callback-collapse`。
+
 ## 2026-06-25 - read/export route-owner collapse
 
 - 目标：执行 `server-py:bank-details-read-export-route-callback-collapse`，把银行明细 read/export HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
