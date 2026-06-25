@@ -62,6 +62,29 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-25 - tag-selection write route-owner collapse test note
+
+`server-py:turnover-ledger-tag-selection-write-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改外部往来标签准入业务规则。
+- Service-layer tests：适用但未新增；既有 tag-selection write facade/request-boundary 回归继续覆盖 settings persistence、idempotency、refresh enqueue 和 rollback。
+- API contract tests：适用；复跑 tag-selection targeted regressions 和完整 `tests.test_turnover_ledger_api` 140 个用例，证明 PUT status/error/response shape、版本冲突、idempotency replay/conflict 和 queue failure rollback 行为保持。
+- Read model/cache/background job tests：间接适用；tag-selection 成功后的 `turnover_ledger:all` refresh/rollback 由既有 API tests 覆盖，本 slice 未改 worker、dirty/outbox 或 read model writer。
+- Frontend component and interaction tests：不适用；未改前端 API mapper、页面交互或 operation overlay。
+- End-to-end business-flow integration tests：不适用；未改 confirm/withdraw/closure flow。
+- Existing feature regression tests：适用；更新 platform Guard，防止 `_handle_api_turnover_ledger_tag_selection_update(...)` 回到 `server.py`，并确认其他 turnover ledger mutation callbacks 仍保留。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_ledger_tag_selection_handler_does_not_inline_legacy_fallback_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_ledger_tag_selection_get_put_and_version_conflict tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_tag_selection_idempotency_key_conflict_rejects_different_payload tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_tag_selection_idempotency_key_replays_without_duplicate_settings_save_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；bank-row-tags、relation-extra、confirm、closure、withdraw callbacks 是后续边界。
+
 ## 2026-06-25 - read/export GET route-owner collapse test note
 
 `server-py:turnover-ledger-read-export-route-callback-collapse` 已完成：

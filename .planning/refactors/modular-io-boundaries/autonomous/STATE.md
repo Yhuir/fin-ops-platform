@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-tag-selection-write-route-callback-collapse-selected`
+Current state: `turnover-ledger-bank-row-tags-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-write-route-callback-audit` as `analysis-closed` in `analysis/server-py-turnover-ledger-write-route-callback-audit-2026-06-25.md`. The audit selected `PUT /api/turnover-ledger/tag-selection` as the smallest next route callback collapse. Bank-row-tags, relation-extra, confirm, closure and withdraw callbacks remain deferred for later write-boundary slices.
+Completed `server-py:turnover-ledger-tag-selection-write-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-tag-selection-write-route-callback-collapse-2026-06-25.md`. `PUT /api/turnover-ledger/tag-selection` now lives in `TurnoverLedgerApiRoutes.route(...)` with explicit session/body/tenant/request-boundary ports, and the app callback was removed. T0 selected bank-row-tags batch route callback collapse next.
 
 ## Closed Or Deferred Slices
 

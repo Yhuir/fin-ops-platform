@@ -13,6 +13,12 @@ from fin_ops_platform.services.turnover_ledger_export_service import (
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
+from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyFailed,
+    WorkbenchIdempotencyInProgress,
+    WorkbenchIdempotencyKeyConflict,
+)
 
 
 VALID_EXTRA_RATE_TYPES = {"annual", "monthly", "none"}
@@ -149,6 +155,11 @@ class TurnoverLedgerApiRoutes:
         json_response: Callable[[HTTPStatus, dict[str, object]], Any] | None = None,
         export_response: Callable[[str, bytes], Any] | None = None,
         tag_selection_provider: Callable[[], dict[str, object]] | None = None,
+        mutation_session_resolver: Callable[[dict[str, str] | None], Any] | None = None,
+        session_error_detector: Callable[[Any], bool] | None = None,
+        load_json_body: Callable[[str | bytes | None], tuple[dict[str, object], Any | None]] | None = None,
+        tenant_id_provider: Callable[[Any], str] | None = None,
+        tag_selection_write_boundary_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._ledger_service = ledger_service
         self._relation_service = relation_service
@@ -158,12 +169,19 @@ class TurnoverLedgerApiRoutes:
         self._json_response = json_response
         self._export_response = export_response
         self._tag_selection_provider = tag_selection_provider
+        self._mutation_session_resolver = mutation_session_resolver
+        self._session_error_detector = session_error_detector
+        self._load_json_body = load_json_body
+        self._tenant_id_provider = tenant_id_provider
+        self._tag_selection_write_boundary_provider = tag_selection_write_boundary_provider
 
     def route(
         self,
         method: str,
         route_path: str,
         query: dict[str, list[str]],
+        body: str | bytes | None = None,
+        headers: dict[str, str] | None = None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
             return self.handle_export_preview_route(query)
@@ -173,6 +191,8 @@ class TurnoverLedgerApiRoutes:
             return self.handle_tag_selection_route()
         if method == "GET" and route_path == "/api/turnover-ledger":
             return self.handle_list_route(query)
+        if method == "PUT" and route_path == "/api/turnover-ledger/tag-selection":
+            return self.handle_tag_selection_update_route(body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.handle_relation_extra_route(relation_id)
@@ -208,6 +228,40 @@ class TurnoverLedgerApiRoutes:
         if self._tag_selection_provider is None:
             raise RuntimeError("turnover ledger tag selection provider is not configured")
         return self._respond(HTTPStatus.OK, self._tag_selection_provider())
+
+    def handle_tag_selection_update_route(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        self._ensure_tag_selection_write_ports()
+        session_response = self._mutation_session_resolver(headers)  # type: ignore[misc]
+        if self._session_error_detector(session_response):  # type: ignore[misc]
+            return session_response
+        payload, error = self._load_json_body(body)  # type: ignore[misc]
+        if error is not None:
+            return error
+        identity = session_response.identity
+        actor = identity.username or identity.user_id or "web_finance_user"
+        facade = self._tag_selection_write_boundary_provider()  # type: ignore[misc]
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+        try:
+            result = facade.update_tag_selection_from_request(
+                payload=payload,
+                actor_id=actor,
+                tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
+                idempotency_key=idempotency_key,
+            )
+        except AppSettingsValidationError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.error_code == "turnover_ledger_tag_selection_version_conflict"
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self._respond(status, {"error": exc.error_code, "message": str(exc)})
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._respond(HTTPStatus.OK, result)
 
     def handle_export_preview_route(self, query: dict[str, list[str]]) -> Any:
         try:
@@ -285,6 +339,21 @@ class TurnoverLedgerApiRoutes:
         if self._json_response is None:
             raise RuntimeError("turnover ledger JSON response port is not configured")
         return self._json_response(status, payload)
+
+    def _ensure_tag_selection_write_ports(self) -> None:
+        missing = [
+            name
+            for name, value in {
+                "mutation_session_resolver": self._mutation_session_resolver,
+                "session_error_detector": self._session_error_detector,
+                "load_json_body": self._load_json_body,
+                "tenant_id_provider": self._tenant_id_provider,
+                "tag_selection_write_boundary_provider": self._tag_selection_write_boundary_provider,
+            }.items()
+            if value is None
+        ]
+        if missing:
+            raise RuntimeError(f"turnover ledger tag selection write ports are not configured: {', '.join(missing)}")
 
     def list_ledger(
         self,

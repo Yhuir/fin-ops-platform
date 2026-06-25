@@ -1232,12 +1232,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_turnover_ledger_tag_selection_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_tag_selection_update)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_tag_selection_update_route)
 
         self.assertNotIn("update_turnover_ledger_tag_selection(", source)
         self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
         self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
-        self.assertIn("facade = self._turnover_ledger_tag_selection_request_boundary_facade()", source)
+        self.assertIn("facade = self._tag_selection_write_boundary_provider()", source)
         self.assertIn("result = facade.update_tag_selection_from_request(", source)
         self.assertNotIn('scope_keys=["all"]', source)
 

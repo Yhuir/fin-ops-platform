@@ -1682,6 +1682,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def handle_relation_route(",
             "def handle_relation_extra_route(",
             "def handle_tag_selection_route(",
+            "def handle_tag_selection_update_route(",
         ):
             if snippet not in route_source:
                 violations.append(f"TurnoverLedgerApiRoutes is missing read/export route-owner behavior {snippet}")
@@ -1692,11 +1693,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_turnover_ledger_relation",
             "_handle_api_turnover_ledger_relation_extra",
             "_handle_api_turnover_ledger_tag_selection",
+            "_handle_api_turnover_ledger_tag_selection_update",
         ):
             if _function_source(server_tree, server_source, removed_handler):
-                violations.append(f"server.py still owns turnover ledger read/export route callback {removed_handler}")
+                violations.append(f"server.py still owns turnover ledger migrated route callback {removed_handler}")
         for retained_handler in (
-            "_handle_api_turnover_ledger_tag_selection_update",
             "_handle_api_turnover_ledger_bank_row_tags_batch",
             "_handle_api_turnover_ledger_relation_extra_update",
             "_handle_api_turnover_ledger_confirm",
@@ -1706,12 +1707,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if not _function_source(server_tree, server_source, retained_handler):
                 violations.append(f"server.py no longer owns turnover ledger mutation callback {retained_handler}")
-        if "self._turnover_ledger_api_routes.route(method, route_path, query)" not in server_source:
-            violations.append("server.py does not delegate turnover ledger read/export routing to the route owner")
+        if "self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("server.py does not delegate turnover ledger routing to the route owner")
         for snippet in (
             "json_response=self._json_response",
             "export_response=self._turnover_ledger_export_response",
             "tag_selection_provider=self._app_settings_service.get_turnover_ledger_tag_selection_payload",
+            "mutation_session_resolver=self._turnover_mutation_session",
+            "tenant_id_provider=tenant_id_for_session",
+            "tag_selection_write_boundary_provider=self._turnover_ledger_tag_selection_request_boundary_facade",
         ):
             if snippet not in server_source:
                 violations.append(f"server.py does not inject turnover ledger route port {snippet}")

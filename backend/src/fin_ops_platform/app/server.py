@@ -1288,6 +1288,11 @@ class Application:
             json_response=self._json_response,
             export_response=self._turnover_ledger_export_response,
             tag_selection_provider=self._app_settings_service.get_turnover_ledger_tag_selection_payload,
+            mutation_session_resolver=self._turnover_mutation_session,
+            session_error_detector=lambda value: isinstance(value, Response),
+            load_json_body=self._load_json_body,
+            tenant_id_provider=tenant_id_for_session,
+            tag_selection_write_boundary_provider=self._turnover_ledger_tag_selection_request_boundary_facade,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
             routes=self._turnover_ledger_api_routes,
@@ -1956,11 +1961,9 @@ class Application:
             batch_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_no_oa_bank_batch_withdraw(batch_id, body, headers)
         if route_path == "/api/turnover-ledger" or route_path.startswith("/api/turnover-ledger/"):
-            turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query)
+            turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
                 return turnover_ledger_response
-        if method == "PUT" and route_path == "/api/turnover-ledger/tag-selection":
-            return self._handle_api_turnover_ledger_tag_selection_update(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
             return self._handle_api_turnover_ledger_bank_row_tags_batch(body, headers)
         if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
@@ -9904,38 +9907,6 @@ class Application:
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
-
-    def _handle_api_turnover_ledger_tag_selection_update(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session_response = self._turnover_mutation_session(headers)
-        if isinstance(session_response, Response):
-            return session_response
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        facade = self._turnover_ledger_tag_selection_request_boundary_facade()
-        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
-        try:
-            result = facade.update_tag_selection_from_request(
-                payload=payload,
-                actor_id=actor,
-                tenant_id=tenant_id_for_session(session_response),
-                idempotency_key=idempotency_key,
-            )
-        except AppSettingsValidationError as exc:
-            status = (
-                HTTPStatus.CONFLICT
-                if exc.error_code == "turnover_ledger_tag_selection_version_conflict"
-                else HTTPStatus.BAD_REQUEST
-            )
-            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
-            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
-        return self._json_response(HTTPStatus.OK, result)
 
     def _turnover_ledger_tag_selection_request_boundary_facade(self) -> TurnoverLedgerTagSelectionRequestBoundaryFacade:
         return TurnoverLedgerTagSelectionRequestBoundaryFacade(
