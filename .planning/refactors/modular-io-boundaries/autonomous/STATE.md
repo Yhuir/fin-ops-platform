@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-read-route-owner-post-stream-registry-audit-selected`
+Current state: `workbench-refresh-status-payload-normalizer-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-events-active-stream-registry-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-events-active-stream-registry-extraction-2026-06-25.md`. `WorkbenchEventsActiveStreamRegistry` now owns Workbench SSE active stream count/lock management; `Application` keeps composition-root wiring plus refresh-status payload/App Health/legacy payload support. The next local boundary is `server-py:workbench-read-route-owner-post-stream-registry-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-read-route-owner-post-stream-registry-audit` as `analysis-closed` in `analysis/server-py-workbench-read-route-owner-post-stream-registry-audit-2026-06-25.md`. The next local implementation boundary is `server-py:workbench-refresh-status-payload-normalizer-extraction`; repository status lookup and legacy `/api/workbench` SQL fallback/payload behavior remain deferred. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
