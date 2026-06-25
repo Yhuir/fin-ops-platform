@@ -353,7 +353,7 @@ from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap,
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
-from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.tax_offset_cache_warmup_executor import TaxOffsetCacheWarmupExecutor
 from fin_ops_platform.services.tax_offset_derived_lifecycle_executor import TaxOffsetDerivedLifecycleExecutor
 from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
@@ -1334,8 +1334,14 @@ class Application:
             resolve_read_session=self._resolve_tax_offset_read_session,
             resolve_mutation_session=self._resolve_tax_offset_mutation_session,
             load_json_body=self._load_json_body,
+            load_multipart_body=self._load_multipart_body,
             actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
+            certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
+            import_job_processing_enabled=self._import_job_processing_enabled,
+            enqueue_import_job=self._enqueue_import_process_job,
+            serialize_import_job=self._serialize_import_job,
+            execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm,
             month_metric_emitter=self._emit_tax_offset_month_metric,
             calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
             duration_ms=self._duration_ms,
@@ -1399,8 +1405,14 @@ class Application:
             resolve_read_session=self._resolve_tax_offset_read_session,
             resolve_mutation_session=self._resolve_tax_offset_mutation_session,
             load_json_body=self._load_json_body,
+            load_multipart_body=self._load_multipart_body,
             actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
+            certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
+            import_job_processing_enabled=self._import_job_processing_enabled,
+            enqueue_import_job=self._enqueue_import_process_job,
+            serialize_import_job=self._serialize_import_job,
+            execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm,
         )
 
     def _tax_offset_runtime(self) -> TaxOffsetRuntimeService:
@@ -2134,10 +2146,6 @@ class Application:
             tax_offset_response = self._tax_offset_routes().route(method, route_path, query, body, headers)
             if tax_offset_response is not None:
                 return tax_offset_response
-        if method == "POST" and route_path == "/api/tax-offset/certified-import/preview":
-            return self._handle_api_tax_certified_import_preview(body, headers)
-        if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
-            return self._handle_api_tax_certified_import_confirm(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics":
             month = query.get("month", [None])[0]
             project_scope = query.get("project_scope", [None])[0]
@@ -10682,90 +10690,6 @@ class Application:
                 "affected_groups": list(event.get("affected_groups") or []),
             },
         )
-
-    def _handle_api_tax_certified_import_preview(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        fields, files, error = self._load_multipart_body(body, headers)
-        if error is not None:
-            return error
-        imported_by = actor_id_for_session(session) if session is not None else (fields.get("imported_by") or ["system"])[0]
-        if not files:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_tax_certified_import_request",
-                    "message": "至少上传一个已认证发票文件。",
-                },
-            )
-        payload = self._tax_certified_import_application_service.preview_payload(
-            imported_by=imported_by,
-            uploads=[
-                UploadedCertifiedImportFile(file_name=file.file_name, content=file.content)
-                for file in files
-            ],
-        )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_tax_certified_import_confirm(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        session_id = payload.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_tax_certified_import_confirm_request",
-                    "message": "session_id is required.",
-                },
-            )
-        if self._import_job_processing_enabled():
-            try:
-                import_job, event = self._enqueue_import_process_job(
-                    import_type="tax_certified_import.confirm",
-                    import_session_id=session_id,
-                    idempotency_key=f"tax_certified_import.confirm:{session_id}",
-                    payload={"session_id": session_id},
-                    created_by=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or payload.get("imported_by") or "tax_certified_api"),
-                    reason="tax_certified_import_confirm",
-                )
-            except RuntimeError as exc:
-                return self._json_response(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc)},
-                )
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "import_job": self._serialize_import_job(import_job),
-                    "event_id": getattr(event, "event_id", None),
-                },
-            )
-        try:
-            result = self._execute_tax_certified_import_confirm(session_id)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "tax_certified_import_session_not_found", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
-        return self._import_processing_service.execute_tax_certified_import_confirm(session_id)
 
     def _handle_workbench(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")

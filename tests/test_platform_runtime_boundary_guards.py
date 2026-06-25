@@ -653,12 +653,51 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in server_source:
                 violations.append(f"server.py still owns migrated tax callback {forbidden}")
-        for deferred in (
+        self.assertEqual(violations, [])
+
+    def test_tax_certified_import_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_path = APP_ROOT / "routes_tax.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "TaxApiRoutes")
+        for marker in (
+            "/api/tax-offset/certified-import/preview",
+            "/api/tax-offset/certified-import/confirm",
+            "UploadedCertifiedImportFile",
+            "load_multipart_body",
+            "certified_import_preview_provider",
+            "enqueue_import_job",
+            "serialize_import_job",
+            "execute_tax_certified_import_confirm",
+            'idempotency_key=f"tax_certified_import.confirm:{session_id}"',
+        ):
+            if marker not in route_class:
+                violations.append(f"tax certified import route owner is missing marker {marker}")
+
+        route_factory = _function_source(_parse(server_path), server_source, "_configure_tax_offset_application_services")
+        for marker in (
+            "load_multipart_body=self._load_multipart_body",
+            "certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload",
+            "import_job_processing_enabled=self._import_job_processing_enabled",
+            "enqueue_import_job=self._enqueue_import_process_job",
+            "serialize_import_job=self._serialize_import_job",
+            "execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm",
+        ):
+            if marker not in route_factory:
+                violations.append(f"tax route factory is missing certified import port {marker}")
+
+        for forbidden in (
             "def _handle_api_tax_certified_import_preview",
             "def _handle_api_tax_certified_import_confirm",
+            "def _execute_tax_certified_import_confirm",
+            "UploadedCertifiedImportFile",
         ):
-            if deferred not in server_source:
-                violations.append(f"server.py no longer preserves deferred tax callback {deferred}")
+            if forbidden in server_source:
+                violations.append(f"server.py still owns migrated tax certified import surface {forbidden}")
 
         self.assertEqual(violations, [])
 

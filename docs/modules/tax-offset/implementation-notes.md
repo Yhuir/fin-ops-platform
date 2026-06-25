@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - certified import route callback collapse
+
+- 目标：把已认证发票导入 preview/confirm 的 HTTP mapping 从 `server.py` 迁入 `TaxApiRoutes.route(...)`，完成税金抵扣 API route-owner callback 收敛。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_tax.py`、`backend/src/fin_ops_platform/app/server.py`、`tests/test_platform_runtime_boundary_guards.py` 和 modular IO autonomous state。
+- 关键决策：multipart body loader、preview payload provider、import job processing gate、import job enqueue、import job serializer 和 inline confirm executor 都作为显式平台端口注入 route owner；认证导入业务仍由 `TaxCertifiedImportApplicationService` 和 `ImportProcessingService` 承担。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品口径、API response shape、read model freshness/source-version 合同和前端行为未变化。
+- 测试覆盖：`tests/test_tax_offset_api.py` 覆盖 preview/confirm/list/month 既有 API、权限、idempotency 和 lifecycle 回归；`tests/test_import_job_queue.py` 覆盖 RabbitMQ backend 下 confirm queue/job polling contract；`tests/test_platform_runtime_boundary_guards.py` 新增 Guard，禁止迁回 app-owned tax certified import callbacks。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_tax.py backend/src/fin_ops_platform/app/server.py tests/test_tax_offset_api.py tests/test_import_job_queue.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_import_job_queue.ImportJobRepositoryTests.test_tax_certified_import_confirm_queue_result_can_be_polled -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_tax_offset_read_plan_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_tax_certified_import_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明 tax 模块或全局闭环。
+- 后续事项：审计 route callback collapse 后剩余 tax `Application` surface，判断本地 `server.py` 支持是否已 accounted。
+
 ## 2026-06-25 - read/plan route callback collapse
 
 - 目标：把税金抵扣 month、summary、calculate、plan-save、certified import job 和 certified imports list 的 HTTP mapping 从 `server.py` 迁入 `TaxApiRoutes.route(...)`。
