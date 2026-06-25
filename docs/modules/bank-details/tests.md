@@ -2,6 +2,29 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - disabled transaction categories PATCH route-owner collapse test note
+
+`server-py:bank-details-transaction-categories-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改分类业务规则，只保留禁用写入口语义。
+- Service-layer tests：不适用；禁用 PATCH 不应调用 application service。
+- API contract tests：适用；`tests/test_bank_details_routes.py` 新增 route-owner 断言，覆盖 `PATCH /api/bank-details/transactions/categories` 返回 `410 Gone` / `manual_bank_transaction_category_disabled` 且不调用 service；`tests/test_workbench_v2_api.py` 继续覆盖 public HTTP dispatch 的禁用行为。
+- Read model/cache/background job tests：不适用；禁用 PATCH 不触发 read model、dirty/outbox、cache 或 worker。
+- Frontend component and interaction tests：不适用；前端代码未改。
+- End-to-end business-flow integration tests：不适用；本 slice 只移动后端禁用 HTTP mapping，不新增业务流。
+- Existing feature regression tests：适用；platform Guard 防止 `_handle_api_bank_transaction_categories(...)` 回流到 `server.py`，并确认 route owner 保留禁用错误码。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_bank_details.py backend/src/fin_ops_platform/app/server.py tests/test_bank_details_routes.py tests/test_workbench_v2_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_patch_bank_transaction_categories_is_disabled_and_does_not_mutate_state tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_http_server_dispatches_patch_bank_transaction_categories tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_disabled_manual_clear_does_not_suppress_auto_in_bank_details_api -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_details_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
+```
+
+未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；bank-details route-owner closure 仍需复审后才能声明。
+
 ## 2026-06-25 - route-owner local closure audit test note
 
 `server-py:bank-details-route-owner-local-closure-audit` 已完成为 analysis-only：
@@ -151,7 +174,7 @@ Spec-first Browser e2e 审计入口：
 | 账户余额独立 read model | P0 | `tests/test_bank_account_balance_read_model.py`、`web/src/test/BankDetailsPage.test.tsx` | covered | latest balance、CNY 别名、日期筛选只影响 count、不从 detail rows 聚合、不用 stale 覆盖 fresh。 |
 | 关系标签投影 | P0 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/e2e/workbench-relation-fanout.spec.ts` | covered | relation distribution row、OA/invoice-only 边界、失败降级、不读 legacy candidate matches；Browser e2e 覆盖关联台 confirm 后页面标签从 `候选oa`/`候选发票` 变为 `有oa`/`有发票`。 |
 | 银行流水导入后列表显示 | P0 | `tests/test_import_formalization_api.py`、`tests/test_bank_details_sql_runtime.py`、`web/e2e/imports-bank-transactions-flow.spec.ts` | covered | 导入确认后 bank detail read model 应能展示导入行；Browser e2e 覆盖导入页 confirm 后进入银行明细看到新流水。 |
-| API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade。 |
+| API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_workbench_v2_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade；禁用 bulk category PATCH 保持 410 no-mutation。 |
 | 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-export-download.spec.ts`、`web/e2e/bank-details-stale-refreshing.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename、超过 20,000 行上限时页面展示行动建议；Browser 已覆盖全银行/全年筛选、当前账户 + 月度 + 关键字 + 分类筛选下真实 download event、文件名、linked relation 字段、account/category/date/filter 字段，并覆盖 page size/第二页只影响列表不限制导出、非 fresh 导出业务错误和 `read_export_only` 可导出；成功下载后用 `expectNoUnexpectedSuccessUiErrors` 防止导出失败/同步失败/read model 失败残留。真实 XLSX 完整解析仍按 staging/专项风险处理。 |
 | 前端列表/筛选/分页/search | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts`、`web/e2e/bank-details-initial-state.spec.ts` | covered | 默认日期、账户切换、关键词、分类 counts、分页、表格中文标签；Browser 覆盖默认当前年 query、全部账户首屏、账户余额、默认列、relation/category 字段和 fresh 空结果空态。 |
 | 前端 drawer、规则保存、重应用、分类选择浮层 | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-category-flow.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts` | covered | 保存/重应用后全局遮罩等待 `bank_detail` 可见月份 barrier fresh，再重读当前交易直到 fresh；只刷新交易，不重取账户余额；完成后广播事件和反馈状态；POST 已成功后的 barrier/reload blocked 只能显示后台同步 warning，不能弹“操作失败”；Browser 覆盖自动标签 drawer 保存请求的 `expected_version`、`refresh_scope`、reapply 不触发 PUT、blocked warning，并在成功写流后用 `expectNoUnexpectedSuccessUiErrors` 防止页面残留操作失败/同步失败/read model 失败；待分类/待确认选择面板必须 portal 到 `document.body`，避免被表格滚动容器截断；`read_export_only` 下自动标签规则保存/重应用和待确认分类入口必须禁用且不触发 mutation；`full_access` 下候选确认/撤销、人工补分类/清除必须走正确 API 并 refetch，且每个成功节点检查无保存/撤回/同步/read model 失败残留；`admin` 下候选确认写入必须可用且无成功后的错误残留。 |
@@ -164,7 +187,7 @@ Spec-first Browser e2e 审计入口：
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_service.py`、`tests/test_bank_transaction_identity_service.py` | 分类规则、内部往来、外部往来候选、manual/effective category、identity/dedup 属于核心业务。 |
 | 2. Service-layer tests | 适用 | `tests/test_bank_details_service.py`、`tests/test_bank_details_export_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 覆盖 service 编排、relation provider、导出、事务、审计、dirty/outbox rollback。 |
-| 3. API contract tests | 适用 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | 覆盖 accounts/transactions/规则/确认/人工补分类/reapply/file replacement、权限、错误字段和 stale/refreshing 响应。 |
+| 3. API contract tests | 适用 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_workbench_v2_api.py` | 覆盖 accounts/transactions/规则/确认/人工补分类/reapply/file replacement、禁用 bulk category PATCH、权限、错误字段和 stale/refreshing 响应。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_bank_details_sql_runtime.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bankdetail_backfill_cli.py` | 覆盖 bank detail rows/scopes、schema/source version、dirty scope、worker fan-out、账户余额 read model 和 backfill。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts`、`web/e2e/bank-details-initial-state.spec.ts`、`web/e2e/bank-details-stale-refreshing.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/e2e/bank-details-category-flow.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts` | 覆盖页面加载、默认当前年 query、账户余额、默认列、fresh 空态、筛选、年份/月度/全部时间筛选、分页、长列表/宽字段/窄屏/菜单遮挡、drawer 保存/重应用、候选确认/撤销、人工补分类/清除、导出、domain event、stale/refreshing/schema_mismatch/missing/false-empty/network recovery/abort，以及 `read_export_only` 下导出可用、写入口禁用和零 mutation，forbidden/expired session gate 不渲染页面且不调用 protected API，`admin` 分类写入可用。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bankdetail_write_uow_contract.py`、Workbench/no-OA/turnover/import 相关模块测试、`web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/bank-details-initial-state.spec.ts`、`web/e2e/bank-details-export-download.spec.ts`、`web/e2e/bank-details-stale-refreshing.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/e2e/bank-details-category-flow.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts` | 本模块现有集成以 API/UoW/lifecycle 为主；Browser e2e 覆盖银行明细首屏账户余额/默认列/fresh 空态、Workbench confirm 后银行明细 relation tags fan-out、银行流水导入确认后银行明细显示导入行、confirm 后导出文件包含 linked relation 字段、当前账户 + 月度 + 关键字 + 分类筛选导出、分页状态不限制导出、长列表/窄屏关键操作、只读导出权限、denied/expired session gate、admin 分类写入、自动标签规则保存/reapply freshness、候选确认/撤销、外部往来三层人工补分类/清除，以及非 fresh read model 页面诊断、account retry、network recovery 和导出业务错误；真实导入到更多页面完整 smoke 仍归 staging/nightly 风险项。 |

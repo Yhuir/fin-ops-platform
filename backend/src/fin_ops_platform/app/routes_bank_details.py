@@ -68,6 +68,14 @@ class BankDetailsApiRoutes:
                 "当前账户没有保存自动标签规则权限。",
                 lambda payload, session: self.update_auto_tag_rules(payload, session=session),
             )
+        if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
+            return self._json_response_for(
+                HTTPStatus.GONE,
+                {
+                    "error": "manual_bank_transaction_category_disabled",
+                    "message": "银行明细分类已改为系统自动分配，不能人工保存分类。",
+                },
+            )
         if method == "GET" and route_path == "/api/bank-details/accounts":
             return self._json_response_for(
                 *self.accounts(

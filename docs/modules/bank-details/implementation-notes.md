@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - disabled transaction categories PATCH route-owner collapse
+
+- 目标：执行 `server-py:bank-details-transaction-categories-route-callback-collapse`，把已禁用的 `PATCH /api/bank-details/transactions/categories` HTTP mapping 从 `server.py` 收到 `BankDetailsApiRoutes.route(...)`。
+- 影响范围：禁用 bulk category mutation 的 route owner、静态 Guard 和测试；不改变银行明细分类业务规则、read model refresh/dirty/outbox/lifecycle owner、前端行为或生产数据。
+- 关键决策：该接口继续返回 `410 Gone` / `manual_bank_transaction_category_disabled`，不解析 body、不解析 session、不调用 application service，保持无状态变更语义。
+- 文档影响：新增 modular IO implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期产品/API/read model 文档不变。
+- 测试覆盖：新增 route-owner 禁用 PATCH 测试；更新 platform Guard 防止 `_handle_api_bank_transaction_categories(...)` 回流。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-bank-details-transaction-categories-route-callback-collapse-2026-06-25.md`。
+- 未测风险：完整 backend discover、前端 Vitest、Browser e2e、真实 PostgreSQL/RabbitMQ/Redis/systemd worker、admin/write evidence 和生产写入闭环仍未执行；本 slice 不声明模块全局 closed。
+- 后续事项：执行 `server-py:bank-details-route-owner-local-closure-audit-retry`。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:bank-details-route-owner-local-closure-audit`，确认 read/export、auto-tag write、category write callbacks 迁移后是否可以声明 bank-details route-owner 本地闭合。

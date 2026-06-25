@@ -312,6 +312,19 @@ class BankDetailsRoutesTests(unittest.TestCase):
             ],
         )
 
+    def test_route_owner_keeps_disabled_bulk_category_patch_without_service_call(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        routes = BankDetailsApiRoutes(
+            application_service=service,
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+        )
+
+        response = routes.route("PATCH", "/api/bank-details/transactions/categories", {}, "{}", {})
+
+        self.assertEqual(response["status"], HTTPStatus.GONE)
+        self.assertEqual(response["payload"]["error"], "manual_bank_transaction_category_disabled")
+        self.assertEqual(service.calls, [])
+
     def test_routes_facade_denies_mutations_before_calling_application_service(self) -> None:
         service = FakeBankDetailsApplicationService()
         routes = BankDetailsApiRoutes(application_service=service)

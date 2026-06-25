@@ -1872,8 +1872,6 @@ class Application:
             return self._handle_api_import_fact_batches(query)
         if method == "GET" and route_path == "/api/import-facts/files":
             return self._handle_api_import_fact_files(query)
-        if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
-            return self._handle_api_bank_transaction_categories(body, headers)
         if route_path.startswith("/api/pending-invoices"):
             pending_invoice_response = self._pending_invoice_routes().route(method, route_path, query, body, headers)
             if pending_invoice_response is not None:
@@ -9299,20 +9297,6 @@ class Application:
         page = max(int((query.get("page") or ["1"])[0] or 1), 1)
         page_size = min(max(int((query.get("page_size") or ["100"])[0] or 100), 1), 500)
         return page, page_size
-
-    def _handle_api_bank_transaction_categories(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _ = body, headers
-        return self._json_response(
-            HTTPStatus.GONE,
-            {
-                "error": "manual_bank_transaction_category_disabled",
-                "message": "银行明细分类已改为系统自动分配，不能人工保存分类。",
-            },
-        )
 
     def _no_oa_bank_batch_application_service(self) -> NoOaBankBatchApplicationService:
         return NoOaBankBatchApplicationService(

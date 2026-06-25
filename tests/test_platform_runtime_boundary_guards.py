@@ -1337,6 +1337,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_bank_detail_category_confirmation_delete",
             "_handle_api_bank_detail_category_assignment",
             "_handle_api_bank_detail_category_assignment_delete",
+            "_handle_api_bank_transaction_categories",
         ):
             if f"def {removed_handler}(" in server_source:
                 violations.append(f"server.py still defines migrated bank details write handler {removed_handler}")
@@ -1345,6 +1346,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'route_path == "/api/bank-details/auto-tag-rules"',
             'route_path == "/api/bank-details/auto-tag-rules/reapply"',
             'route_path == "/api/bank-details/auto-tag-rules/file-replacement"',
+            'route_path == "/api/bank-details/transactions/categories"',
+            "manual_bank_transaction_category_disabled",
             'confirmation_suffix = "/category-confirmation"',
             'assignment_suffix = "/category-assignment"',
             "load_json_body=",
