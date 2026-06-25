@@ -600,3 +600,13 @@
 - 测试覆盖：扩展 reconciliation route-owner Guard，禁止 `_handle_api_etc_reconciliation_supplement_for_card_upload(...)` 回流到 `server.py`；新增 supplement upload 对象存储失败 API 回归，证明结构化 503 和失败无残留；重跑金额差异说明回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_reconciliation_item_supplement_upload_requires_note_for_amount_delta tests.test_etc_backend.EtcApiTests.test_reconciliation_item_supplement_upload_returns_structured_storage_error -v`。
 - 未测风险：generic source upload 与 ticket-root text 仍在 `Application` callback；下一本地边界是 generic source upload parser/source-mode ownership audit。生产浏览器/admin/write apply 仍是最终验证 gate。
+
+## 2026-06-25 - ETC reconciliation通用source upload parser边界审计
+
+- 目标：审计 `Application._handle_api_etc_reconciliation_upload(...)`，避免把 parser/source-mode 策略直接搬进 route owner。
+- 影响范围：信用卡账单上传、票根文件上传、任务级补充凭证上传、票根 wrong-slot/source-mode/content-type 策略、`EtcReconciliationTaskService.store_uploaded_source_file(...)` 与 `apply_parse_result(...)`。
+- 关键决策：通用 source upload 不是薄 HTTP 映射；它同时拥有 store+parse+apply 编排和票根 TXT/PDF/手工粘贴互斥策略。下一步应先抽显式 source upload service/facade，再让 route owner 保持 HTTP/multipart/error mapping 边界；ticket-root text submission 继续作为独立边界处理。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要 service 层测试、API 回归和静态 Guard。
+- 验证命令：只读审计 `server.py` callback/helper、`EtcReconciliationTaskService`、parser classes 和 targeted tests；未运行测试。
+- 未测风险：通用 source upload callback 仍在 `Application`，等待 source upload service extraction。
