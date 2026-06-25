@@ -28,6 +28,7 @@ export type OutputInvoiceCollectionWorkflow =
 export type OutputInvoiceCollectionMutationResponse = {
   readModelScopeKeys: string[];
   freshnessTargets: OperationBarrierTarget[];
+  operationBarrierTargets: OperationBarrierTarget[];
   raw: unknown;
 };
 

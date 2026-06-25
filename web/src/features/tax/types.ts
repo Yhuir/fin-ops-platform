@@ -1,3 +1,5 @@
+import type { OperationBarrierTarget } from "../operationBarrier/api";
+
 export type TaxInvoiceRecord = {
   id: string;
   invoiceNo: string;
@@ -128,6 +130,9 @@ export type TaxCertifiedImportConfirmResult =
 
 export type TaxOffsetPlanSaveResult = {
   status: "saved";
+  readModelScopeKeys: string[];
+  freshnessTargets: OperationBarrierTarget[];
+  operationBarrierTargets: OperationBarrierTarget[];
   plan: {
     id: string;
     month: string;

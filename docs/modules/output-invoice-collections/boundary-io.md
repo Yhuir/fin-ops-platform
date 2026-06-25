@@ -17,6 +17,7 @@
 - 销项发票收款情况页面、明细、收款状态、红冲关系和导出。
 - `output_invoice_collection` read model。
 - 与 invoice usage collection worker 的 scoped projection。
+- 生命周期状态、提醒、收据创建/作废/重开等写操作返回统一 write target envelope，页面优先等待 `operation_barrier_targets`。
 
 ### 不负责
 
@@ -30,6 +31,7 @@
 | --- | --- | --- |
 | 页面查询/筛选 | `OutputInvoiceCollectionsPage.tsx`、`features/outputInvoiceCollections/api.ts` | 进入 read model service/fresh gate |
 | 收款/状态写入 | output invoice collection services | 触发 lifecycle 和 read model dirty scope |
+| 写后 target envelope | `output_invoice_collection_freshness_metadata(...)` | 按发票所属月份返回 `output_invoice_collection` 的 affected/read-model scope 和 operation barrier target |
 | Refresh scope | `output_invoice_collection` manifest | month or `all`；`all` 是 fan-out command |
 
 ## 输出 I/O
@@ -38,6 +40,7 @@
 | --- | --- | --- |
 | 收款 rows/details | 前端页面 | fresh/status 可见 |
 | lifecycle/status result | API | 写后可恢复、可审计 |
+| operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |
 
 ## 持久化与投影
@@ -70,6 +73,7 @@
 - `tests/test_output_invoice_collection_api.py`
 - `tests/test_output_invoice_collection_lifecycle.py`
 - `tests/test_output_invoice_collection_read_model_fresh_gate_service.py`
+- `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 覆盖页面等待 operation barrier 行为。
 - `web/e2e/output-invoice-collections-flow.spec.ts`
 
 ## 当前缺口和删除条件

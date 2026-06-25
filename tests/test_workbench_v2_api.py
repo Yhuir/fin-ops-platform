@@ -4295,6 +4295,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             confirm_payload["affected_row_ids"],
             [oa_row["id"], bank_row["id"], invoice_row["id"]],
         )
+        self.assertEqual(confirm_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(confirm_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            confirm_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         self.assertNotIn("updated_rows", confirm_payload)
 
         updated_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4314,6 +4320,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertCountEqual(
             cancel_payload["affected_row_ids"],
             [oa_row["id"], bank_row["id"], invoice_row["id"]],
+        )
+        self.assertEqual(cancel_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            cancel_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
         )
         self.assertNotIn("updated_rows", cancel_payload)
 
@@ -4338,6 +4350,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(update_bank_payload["success"])
         self.assertEqual(update_bank_payload["action"], "update_bank_exception")
         self.assertEqual(update_bank_payload["exception_case_ids"], [update_bank_payload["exception_case_id"]])
+        self.assertEqual(update_bank_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(update_bank_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            update_bank_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         update_bank_case = app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"][update_bank_payload["exception_case_id"]]
         self.assertEqual(update_bank_case["rule_version"], "exception_rules_v1")
         self.assertEqual(update_bank_case["resolution"]["action_code"], "manual_review")
@@ -4364,6 +4382,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(mark_payload["action"], "mark_exception")
         self.assertEqual(mark_payload["updated_rows"][0]["id"], open_invoice_after_confirm["id"])
         self.assertEqual(mark_payload["exception_case_ids"], [mark_payload["exception_case_id"]])
+        self.assertEqual(mark_payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(mark_payload["read_model_scope_keys"], ["2026-03"])
+        self.assertEqual(
+            mark_payload["operation_barrier_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+        )
         mark_case = app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"][mark_payload["exception_case_id"]]
         self.assertEqual(mark_case["rule_version"], "exception_rules_v1")
         self.assertEqual(mark_case["resolution"]["action_code"], "manual_review")

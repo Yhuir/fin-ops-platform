@@ -56,7 +56,7 @@
 | --- | --- |
 | Gateway/manifest | `read_model_query_gateway.py`、`read_model_refresh_gateway.py`、`read_model_manifest.py` |
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py` |
-| Write target envelope | `read_model_write_targets.py` |
+| Write target envelope | `read_model_write_targets.py`，当前已覆盖 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset plan、workbench relation action |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py` |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
@@ -74,9 +74,10 @@
 - Architecture guards：`tests/test_read_model_architecture_guards.py`、`tests/test_platform_runtime_boundary_guards.py`。
 - Manifest/scope：`tests/test_read_model_manifest.py`、`tests/test_read_model_scope_contract.py`。
 - Gateway/freshness：`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_freshness.py`。
-- Write target envelope：`tests/test_read_model_write_targets.py`，以及 batch/no-OA/OA pending/pending invoice/turnover 的 API/service/page tests。
+- Write target envelope：`tests/test_read_model_write_targets.py`，以及 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset、workbench relation action 的 API/service/page tests。
 
 ## 当前缺口和删除条件
 
 - 新增 read model 必须同时更新 manifest、scope policy、registry、tests、docs。
 - 删除旧 read path 前必须证明所有页面 API 和 worker 均通过新 freshness/status 边界。
+- 剩余未闭合重点是 import/OA-driven、cost-statistics source/settings、tax certified import confirm、bank-account-balance induced writes 和 legacy compat path 删除/隔离；未完成前不能宣称全页面 PSCIP-L4。

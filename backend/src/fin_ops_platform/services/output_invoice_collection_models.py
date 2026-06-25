@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+
 
 OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v3"
 
@@ -68,12 +70,8 @@ def output_invoice_collection_scope_key(row: dict[str, Any]) -> str:
 
 def output_invoice_collection_freshness_metadata(row: dict[str, Any]) -> dict[str, object]:
     scope_key = output_invoice_collection_scope_key(row)
-    return {
-        "read_model_scope_keys": [scope_key],
-        "freshness_targets": [
-            {
-                "read_model_key": "output_invoice_collection",
-                "scope_key": scope_key,
-            }
-        ],
-    }
+    return write_target_envelope(
+        read_model_key="output_invoice_collection",
+        scope_keys=[scope_key],
+        fallback_scope_key="all",
+    )

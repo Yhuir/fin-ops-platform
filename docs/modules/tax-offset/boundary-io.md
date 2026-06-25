@@ -17,6 +17,7 @@
 - 税金抵扣页面查询、认证导入、抵扣计划、税金 read model。
 - `tax_offset` scoped incremental projection。
 - 与成本统计共享 cost/tax projection worker 时保持独立 scope。
+- 抵扣计划保存返回 `tax_offset` write target envelope，前端保存后优先等待服务端返回的 operation barrier targets。
 
 ### 不负责
 
@@ -30,6 +31,7 @@
 | --- | --- | --- |
 | 页面查询/筛选 | `TaxOffsetPage.tsx`、`features/tax/api.ts` | 进入 tax offset API/query service |
 | 税金导入/认证 | tax certified import services | 写后触发受影响 tax_offset scope |
+| 抵扣计划保存 | `TaxOffsetPlanService.save_plan(...)` | 验证 source versions 后保存计划，并返回当前月份 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Refresh scope | `tax_offset` manifest | month or `all`；`all` 是 fan-out command |
 
 ## 输出 I/O
@@ -38,6 +40,7 @@
 | --- | --- | --- |
 | 税金抵扣 rows/summary | 前端页面 | query gateway 后 fresh/status |
 | 导入/认证结果 | API/worker | 返回 job/result 并触发 dirty scope |
+| 计划保存结果 | 前端页面 | 保存成功后等待 `read_model_key=tax_offset`、`scope_key=<month>` fresh，再刷新页面数据 |
 | Dirty scope | runtime queue | `tax_offset.read_model.refresh` |
 
 ## 持久化与投影
@@ -72,6 +75,7 @@
 - `tests/test_tax_offset_sql_runtime.py`
 - `tests/test_tax_offset_api.py`
 - `tests/test_tax_offset_read_model_service.py`
+- `web/src/test/TaxOffsetPage.test.tsx` 覆盖保存后 barrier 等待和刷新。
 - `web/e2e/tax-offset-flow.spec.ts`
 
 ## 当前缺口和删除条件

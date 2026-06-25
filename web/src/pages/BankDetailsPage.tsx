@@ -1591,8 +1591,8 @@ export default function BankDetailsPage() {
   });
   const [searchInput, setSearchInput] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<BankDetailReadModelStatus>("fresh");
-  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<BankDetailReadModelStatus>("fresh");
+  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<BankDetailReadModelStatus>("refreshing");
+  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<BankDetailReadModelStatus>("refreshing");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [accountRequestPending, setAccountRequestPending] = useState(false);
@@ -2357,10 +2357,16 @@ export default function BankDetailsPage() {
     setRefreshToken((current) => current + 1);
   }, [publishAutoTagRulesSaved]);
 
-  const waitForCurrentBankDetailRulesRefresh = useCallback(async (setMessage: (message: string) => void) => {
+  const waitForCurrentBankDetailRulesRefresh = useCallback(async (
+    setMessage: (message: string) => void,
+    payload?: BankAutoTagRulesResponse,
+  ) => {
+    const responseTargets = (payload?.operationBarrierTargets ?? []).filter((target) => target.scopeKey);
     const scopeKeys = bankDetailOperationScopeKeys(rows, dateFilter);
     setMessage("正在等待银行明细读模型同步...");
-    await waitForOperationFreshness(operationBarrierTargets("bank_detail", scopeKeys));
+    await waitForOperationFreshness(
+      responseTargets.length > 0 ? responseTargets : operationBarrierTargets("bank_detail", scopeKeys),
+    );
     setMessage("正在刷新银行流水...");
     await reloadTransactionsAfterRulesMutation();
   }, [dateFilter, reloadTransactionsAfterRulesMutation, rows]);
@@ -2371,7 +2377,7 @@ export default function BankDetailsPage() {
       action: async ({ setMessage }) => {
         const payload = await saveBankAutoTagRules(request);
         try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage);
+          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
         } catch {
           handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_SAVE_SYNC_WARNING);
           return payload;
@@ -2393,7 +2399,7 @@ export default function BankDetailsPage() {
       action: async ({ setMessage }) => {
         const payload = await reapplyBankAutoTagRules();
         try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage);
+          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
         } catch {
           handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_REAPPLY_SYNC_WARNING);
           return payload;

@@ -25,6 +25,7 @@ import type {
 } from "./types";
 import { ApiClientError, apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
+import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 type ApiBankDetailAccount = {
   account_identity?: string | null;
@@ -222,6 +223,12 @@ type ApiBankAutoTagRulesResponse = {
   }>;
   permissions?: { can_save?: boolean };
   read_model_status?: "fresh" | "refreshing" | string;
+  read_model_scope_keys?: unknown;
+  readModelScopeKeys?: unknown;
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
 };
 
 const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
@@ -244,10 +251,10 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {
-  if (value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing") {
+  if (value === "fresh" || value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing") {
     return value;
   }
-  return "fresh";
+  return "refreshing";
 }
 
 function fieldErrorMessagesFromPayload(payload: unknown) {
@@ -549,6 +556,41 @@ function stringList(values: unknown[] | undefined) {
   return Array.isArray(values) ? values.map(String).map((value) => value.trim()).filter(Boolean) : [];
 }
 
+function unknownStringList(value: unknown) {
+  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function readModelTargets(value: unknown): OperationBarrierTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const targets: OperationBarrierTarget[] = [];
+  const seen = new Set<string>();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const raw = item as Record<string, unknown>;
+    const readModelKey = String(raw.readModelKey ?? raw.read_model_key ?? "").trim();
+    const scopeKey = String(raw.scopeKey ?? raw.scope_key ?? "").trim();
+    const scopeType = String(raw.scopeType ?? raw.scope_type ?? "").trim();
+    if (!readModelKey || !scopeKey) {
+      return;
+    }
+    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    targets.push({
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    });
+  });
+  return targets;
+}
+
 function mapAutoTagRuleConditions(rules: ApiBankAutoTagRuleConditions | undefined): BankAutoTagRuleConditions {
   return {
     matchFields: stringList(rules?.match_fields),
@@ -611,6 +653,8 @@ function mapAutoTagSystemRule(rule: ApiBankAutoTagSystemRule | undefined): BankA
 }
 
 function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAutoTagRulesResponse {
+  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
+  const operationBarrierTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     version: Number(payload.version) || 1,
     systemRule: mapAutoTagSystemRule(payload.system_rule),
@@ -639,6 +683,9 @@ function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAuto
       : [],
     permissions: { canSave: payload.permissions?.can_save !== false },
     readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
+    readModelScopeKeys: unknownStringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 

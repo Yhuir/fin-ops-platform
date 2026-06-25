@@ -17,6 +17,7 @@
 - 关联台页面展示、候选分组、异常处理、配对/撤回等用户交互入口。
 - 读取 `workbench` active generation read model，展示 fresh/stale/refreshing 状态。
 - 通过公开 action/relation 边界触发业务写操作和下游 dirty scope。
+- 配对确认、取消关联、撤回关联、旧异常分类/标记等写操作返回统一 write target envelope；关系写目标是 `workbench_relation`，不是普通 `workbench` active generation。
 
 ### 不负责
 
@@ -31,6 +32,7 @@
 | 页面过滤、月份、分页、候选分组操作 | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/*` | 前端状态只进入 workbench API，不直接拼持久化查询 |
 | 查询请求 | `backend/src/fin_ops_platform/app/routes_workbench.py`、历史 `server.py` 入口 | 必须返回 read model freshness/status |
 | 写操作 | workbench action/relation services | 写后污染受影响 workbench/workbench_relation/downstream scopes |
+| 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
 | Refresh scope | `workbench` manifest | month or `all`；`all` 是 active month shard aggregate |
 
 ## 输出 I/O
@@ -39,6 +41,7 @@
 | --- | --- | --- |
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope |
+| Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets，再刷新 workbench/相关页面 |
 | Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |
 | 下游影响 | workbench relation、tax offset、pending invoice、no-OA、turnover 等 | 由关系事实源和 lifecycle/worker 扇出 |
 
@@ -74,8 +77,10 @@
 - Read model/cache/worker：`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_dirty_queue_wiring.py`。
 - Service/API：`tests/test_workbench_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_query_facade.py`。
 - Frontend/e2e：`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts`。
+- `WorkbenchV2ApiTests.test_api_workbench_actions_return_unified_result_structure` 覆盖 confirm/cancel/update-bank-exception/mark-exception 的 target envelope。
 
 ## 当前缺口和删除条件
 
 - 对 legacy workbench API 的任何修改都必须同时写清是否仍有调用方。
 - 删除旧路径前必须证明 route、frontend、worker、tests、生产脚本都不再依赖。
+- legacy exception action 不得再丢弃 `_apply_exception_payload` 计算出的 affected scopes；删除旧异常入口前必须保留 target envelope 回归。

@@ -16,6 +16,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyKeyConflict,
 )
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_reconciliation_models import (
@@ -920,7 +921,7 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
-            "freshness_targets": WorkbenchWriteFacade._operation_freshness_targets(affected_scope_keys),
+            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
             "operation_projection": dict(result.get("operation_projection") or {}),
             "message": str(result.get("message") or ""),
@@ -1078,6 +1079,13 @@ class WorkbenchWriteFacade:
             {"read_model_key": "workbench_relation", "scope_key": scope_key}
             for scope_key in scope_keys
         ]
+
+    @staticmethod
+    def _operation_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
+        return write_target_envelope(
+            scope_keys=scope_keys,
+            targets=WorkbenchWriteFacade._operation_freshness_targets(scope_keys),
+        )
 
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
         if self._relation_command_service_factory is not None:
@@ -1433,6 +1441,7 @@ class WorkbenchWriteFacade:
 
     @staticmethod
     def _cancel_link_response_payload(result: dict[str, object]) -> dict[str, object]:
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
         return {
             "success": bool(result.get("success")),
             "action": "cancel_link",
@@ -1440,6 +1449,8 @@ class WorkbenchWriteFacade:
             "case_id": str(result.get("case_id") or ""),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
+            "affected_scope_keys": affected_scope_keys,
+            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "message": str(result.get("message") or ""),
         }
 
@@ -1868,7 +1879,7 @@ class WorkbenchWriteFacade:
             "changed_scopes": list(result.get("changed_scopes") or result.get("affected_months") or []),
             "affected_months": list(result.get("affected_months") or result.get("changed_scopes") or []),
             "affected_scope_keys": affected_scope_keys,
-            "freshness_targets": WorkbenchWriteFacade._operation_freshness_targets(affected_scope_keys),
+            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
             "operation_projection": dict(result.get("operation_projection") or {}),
@@ -3438,6 +3449,7 @@ class WorkbenchWriteFacade:
             for row_id in list(result.get("affected_row_ids") or normalized_row_ids)
             if str(row_id).strip()
         ]
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -3445,6 +3457,8 @@ class WorkbenchWriteFacade:
                 "action": action_name,
                 "month": month,
                 "affected_row_ids": affected_row_ids,
+                "affected_scope_keys": affected_scope_keys,
+                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_id": case_id,
                 "exception_case_ids": [case_id] if case_id else [],
@@ -3523,7 +3537,7 @@ class WorkbenchWriteFacade:
             )
         ))
         result["affected_scope_keys"] = list(changed_scope_keys)
-        result["freshness_targets"] = self._operation_freshness_targets(changed_scope_keys)
+        result.update(self._operation_write_target_envelope(changed_scope_keys))
         self._execute_derived_data_lifecycle_event(
             "exception_case_changed",
             scope_keys=changed_scope_keys,
