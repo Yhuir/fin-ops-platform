@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `production-browser-runner-bundle-contract-selected`
+Current state: `production-strict-diagnostics-sanitized-output-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `frontend:production-route-shell-sanitized-output-contract` as `implementation-closed` in `analysis/frontend-production-route-shell-sanitized-output-contract-2026-06-25.md`. T0 removed production route-shell `textSample` failure output, preserved route path/session/loading classifications and mutating request guard, and extended `tests/test_playwright_e2e_strict_diagnostics.py` to reject `textSample` and `bodyText.slice`. Targeted verification passed with 8/8 tests. Next boundary is `deployment:production-browser-smoke-runner-bundle-contract`.
+Completed `deployment:production-browser-smoke-runner-bundle-contract` as `analysis-closed` in `analysis/deployment-production-browser-smoke-runner-bundle-contract-2026-06-25.md`. T0 defined the separate runner bundle file/manifest/runtime/artifact contract, but did not implement packaging because `production-route-shell.spec.ts` still depends on `strictTest.ts`, whose raw console/pageerror/requestfailed diagnostic details are not safe for production artifacts. Next boundary is `frontend:production-strict-diagnostics-sanitized-output-contract`.
 
 ## Closed Or Deferred Slices
 
