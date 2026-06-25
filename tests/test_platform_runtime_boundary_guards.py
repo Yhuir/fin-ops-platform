@@ -5980,6 +5980,83 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_canonical_oa_attachment_invoice_row_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (SERVICES_ROOT / "workbench_canonical_oa_attachment_invoice_row_builder.py").read_text(encoding="utf-8")
+        row_method_source = _function_source(server_tree, server_source, "_canonical_oa_attachment_invoice_workbench_row")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_canonical_oa_attachment_invoice_row_builder")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-invoice-row-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "detail_fields",
+            "summary_fields",
+            "invoice_bank_relation",
+            "source_expense_item_id",
+            "人工导入",
+            "OA附件",
+            "InvoiceType.OUTPUT.value",
+        ):
+            if forbidden in row_method_source:
+                violations.append(f"Application canonical OA attachment row method still owns field mapping: {forbidden}")
+        if "return self._workbench_canonical_oa_attachment_invoice_row_builder().build(" not in row_method_source:
+            violations.append("Application canonical OA attachment row method does not delegate to row builder")
+        for marker in (
+            "class WorkbenchCanonicalOaAttachmentInvoiceRowBuilder",
+            "def build(",
+            "detail_fields",
+            "summary_fields",
+            "invoice_bank_relation",
+            "source_expense_item_id",
+            "人工导入",
+            "OA附件",
+            "first_month_from_oa_row",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchCanonicalOaAttachmentInvoiceRowBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchCanonicalOaAttachmentInvoiceRowBuilder(",
+            "money_text=self._workbench_invoice_money_text",
+            "first_month_from_oa_row=self._first_month_from_oa_row",
+            "output_invoice_type_value=InvoiceType.OUTPUT.value",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application canonical OA attachment row builder missing explicit dependency: {marker}")
+        for removed in ("def _append_unique_text", "def _oa_display_number_for_attachment_invoice"):
+            if removed in server_source:
+                violations.append(f"Application retained dead canonical row helper: {removed}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchCanonicalOaAttachmentInvoiceRowBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction",
+            "WorkbenchCanonicalOaAttachmentInvoiceRowBuilder",
+            "invoice field mapping",
+            "relation payload construction",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench canonical OA attachment invoice row builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
