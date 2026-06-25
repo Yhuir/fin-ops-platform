@@ -590,3 +590,13 @@
 - 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要静态 Guard 和 supplement upload targeted API 回归。
 - 验证命令：只读审计 `server.py` callback、`EtcReconciliationTaskService.upload_supplement_evidences_for_card(...)` 和相关 tests；未运行测试。
 - 未测风险：generic source upload 和 ticket-root text 仍在 `Application` callback，等待后续 parser/source-mode 边界。
+
+## 2026-06-25 - ETC reconciliation单条流水补充凭证上传callback收敛
+
+- 目标：把 `POST /api/etc/reconciliation-tasks/{task_id}/supplement-evidences/{item_id}` 的 HTTP 映射从 `Application` 收敛到 `EtcReconciliationTaskApiRoutes`。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`Application._etc_reconciliation_routes(...)`、单条信用卡流水补充凭证上传、对象存储错误映射和 runtime boundary Guard。
+- 关键决策：本 slice 只搬 per-card supplement upload 的 multipart 字段解析、expected version、actor/note/evidenceKind 提取、对象存储错误映射和 task payload response；业务校验、金额差异说明、重复检测、对象存储回滚和 parse-result 应用继续归 `EtcReconciliationTaskService.upload_supplement_evidences_for_card(...)`。通用 source upload 与 ticket-root text 仍保留在 `Application` callback，等待独立 parser/source-mode 审计。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：扩展 reconciliation route-owner Guard，禁止 `_handle_api_etc_reconciliation_supplement_for_card_upload(...)` 回流到 `server.py`；新增 supplement upload 对象存储失败 API 回归，证明结构化 503 和失败无残留；重跑金额差异说明回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_reconciliation.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_reconciliation_item_supplement_upload_requires_note_for_amount_delta tests.test_etc_backend.EtcApiTests.test_reconciliation_item_supplement_upload_returns_structured_storage_error -v`。
+- 未测风险：generic source upload 与 ticket-root text 仍在 `Application` callback；下一本地边界是 generic source upload parser/source-mode ownership audit。生产浏览器/admin/write apply 仍是最终验证 gate。

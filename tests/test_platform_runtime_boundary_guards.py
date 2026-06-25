@@ -1783,15 +1783,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_etc_reconciliation_routes does not construct the route owner")
         if "task_service=self._etc_reconciliation_task_service" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit task service injection")
+        if "load_multipart_body=self._load_multipart_body" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit multipart body parser")
         if "cleanup_service=self._etc_reconciliation_import_cleanup_service()" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit cleanup service injection")
         if "expected_version_from_payload=self._expected_version_from_payload" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit expected-version parser")
+        if "expected_version_from_fields=self._expected_version_from_fields" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit multipart expected-version parser")
+        if "reconciliation_storage_error_response=self._reconciliation_storage_error_response" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit storage error mapper")
         if "persist_state=self._persist_state" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit persist callback")
         for upload_callback in (
             "upload_source=self._handle_api_etc_reconciliation_upload",
-            "upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload",
             "submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts",
         ):
             if upload_callback not in route_factory:
@@ -1806,9 +1811,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_api_etc_reconciliation_confirm",
             "_handle_api_etc_reconciliation_reopen",
             "_handle_api_etc_reconciliation_refresh_matches",
+            "_handle_api_etc_reconciliation_supplement_for_card_upload",
         ):
             if removed_callback in server_source:
-                violations.append(f"server.py reintroduced ETC reconciliation simple mutation callback {removed_callback}")
+                violations.append(f"server.py reintroduced ETC reconciliation route-owned callback {removed_callback}")
         if "Application" in route_owner_init:
             violations.append("ETC reconciliation route owner accepts the whole Application")
         if "EtcReconciliationTaskApiRoutes" not in route_owner_names:

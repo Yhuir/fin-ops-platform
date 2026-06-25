@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-supplement-upload-selected`
+Current state: `etc-reconciliation-source-upload-parser-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-upload-parser-callback-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-upload-parser-callback-audit-2026-06-25.md`. T0 selected `server-py:etc-reconciliation-supplement-for-card-upload-callback-collapse` as the next narrow implementation boundary. Generic source upload and ticket-root text remain separate parser/source-mode boundaries. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-supplement-for-card-upload-callback-collapse` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-supplement-for-card-upload-callback-collapse-2026-06-25.md`. T0 moved per-card supplement upload HTTP mapping into `EtcReconciliationTaskApiRoutes`, removed the app-owned callback, and selected `server-py:etc-reconciliation-source-upload-parser-boundary-audit` as the next narrow local boundary. Generic source upload still owns parser/source-mode/wrong-slot behavior in `Application`; ticket-root text remains a separate boundary. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 

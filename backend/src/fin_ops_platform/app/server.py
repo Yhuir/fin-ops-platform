@@ -4903,18 +4903,20 @@ class Application:
             task_service=self._etc_reconciliation_task_service,
             json_response=self._json_response,
             load_json_body=self._load_json_body,
+            load_multipart_body=self._load_multipart_body,
             task_payload=self._etc_reconciliation_task_payload,
             unavailable_task_payload=self._etc_reconciliation_unavailable_task_payload,
             cleanup_service=self._etc_reconciliation_import_cleanup_service(),
             expected_version_from_payload=self._expected_version_from_payload,
+            expected_version_from_fields=self._expected_version_from_fields,
             reconciliation_error_response=self._reconciliation_error_response,
+            reconciliation_storage_error_response=self._reconciliation_storage_error_response,
             refresh_after_etc_invoice_link=lambda changed_months, reason: self._refresh_after_etc_invoice_link(
                 changed_months,
                 reason=reason,
             ),
             persist_state=self._persist_state,
             upload_source=self._handle_api_etc_reconciliation_upload,
-            upload_supplement_for_card=self._handle_api_etc_reconciliation_supplement_for_card_upload,
             submit_ticket_root_texts=self._handle_api_etc_reconciliation_ticket_root_texts,
         )
         self._etc_reconciliation_task_api_routes = routes
@@ -5002,46 +5004,6 @@ class Application:
                         evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
                     )
                 task = self._etc_reconciliation_task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
-        except ObjectStorageWriteError as error:
-            return self._reconciliation_storage_error_response(error)
-        except ValueError as error:
-            return self._reconciliation_error_response(error)
-        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
-
-    def _handle_api_etc_reconciliation_supplement_for_card_upload(
-        self,
-        *,
-        task_id: str,
-        item_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        fields, files, error = self._load_multipart_body(body, headers)
-        if error is not None:
-            return error
-        if not files:
-            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_reconciliation_upload", "message": "file is required."})
-        actor = (fields.get("actor") or ["web_finance_user"])[0]
-        try:
-            expected_version = self._expected_version_from_fields(fields)
-            task = self._etc_reconciliation_task_service.upload_supplement_evidences_for_card(
-                task_id=task_id,
-                item_id=item_id,
-                expected_version=expected_version,
-                actor=actor,
-                files=[
-                    {
-                        "original_name": upload.file_name,
-                        "content_type": "application/octet-stream",
-                        "content": upload.content,
-                    }
-                    for upload in files
-                ],
-                note=(fields.get("note") or fields.get("reviewNote") or fields.get("reason") or [""])[0],
-                evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
-            )
-        except KeyError:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ObjectStorageWriteError as error:
             return self._reconciliation_storage_error_response(error)
         except ValueError as error:
