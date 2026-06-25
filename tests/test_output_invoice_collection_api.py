@@ -284,9 +284,9 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 FailingOutputInvoiceCollectionQueryService().row_relation_details
             )
 
-            response = app._handle_api_output_invoice_collections_relation_details(
-                "output-row-missing-repository",
-                {"kind": ["invoice"]},
+            response = app.handle_request(
+                "GET",
+                "/api/output-invoice-collections/rows/output-row-missing-repository/relation-details?kind=invoice",
             )
 
         payload = json.loads(response.body)
@@ -339,9 +339,9 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 },
             )()
 
-            response = app._handle_api_output_invoice_collections_relation_details(
-                "output-row-read-model",
-                {"kind": ["invoice"]},
+            response = app.handle_request(
+                "GET",
+                "/api/output-invoice-collections/rows/output-row-read-model/relation-details?kind=invoice",
             )
 
         payload = json.loads(response.body)

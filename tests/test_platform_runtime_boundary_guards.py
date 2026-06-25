@@ -428,7 +428,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "routes_output_invoice_collections.py": {
                 "module": "fin_ops_platform.app.routes_output_invoice_collections",
                 "class": "OutputInvoiceCollectionApiRoutes",
-                "server_markers": ("def _output_invoice_collection_routes", "_output_invoice_collection_routes()."),
+                "server_markers": ("def _output_invoice_collection_routes", "_output_invoice_collection_routes().route("),
             },
             "routes_pending_invoices.py": {
                 "module": "fin_ops_platform.app.routes_pending_invoices",
@@ -1536,6 +1536,52 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             imported_forbidden = sorted(module for module in forbidden_modules if module in modules)
             if imported_forbidden:
                 violations.append(f"{_relative(path)} imports {imported_forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_output_invoice_collection_read_export_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        route_path = APP_ROOT / "routes_output_invoice_collections.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        route_class = _class_source(route_tree, route_source, "OutputInvoiceCollectionApiRoutes")
+        violations: list[str] = []
+
+        for required in (
+            "def route(",
+            "/api/output-invoice-collections/rows",
+            "/api/output-invoice-collections/filter-options",
+            "/api/output-invoice-collections/export-preview",
+            "/api/output-invoice-collections/export",
+            "/api/output-invoice-collections/status-rules",
+            "/api/output-invoice-collections/receipts/history",
+            "/api/output-invoice-collections/invoices/",
+            "/api/output-invoice-collections/bank-transactions/",
+            "/api/output-invoice-collections/rows/",
+            "def _json_read(",
+            "def _relation_details_response(",
+        ):
+            if required not in route_class:
+                violations.append(f"Output collection route owner is missing {required}")
+        if "_output_invoice_collection_routes().route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("Application does not dispatch output collection read routes through route owner")
+        if "def _output_invoice_collection_xlsx_response(" not in server_source:
+            violations.append("Application is missing explicit output collection xlsx response port")
+        for removed_handler in (
+            "_handle_api_output_invoice_collections_rows",
+            "_handle_api_output_invoice_collections_filter_options",
+            "_handle_api_output_invoice_collections_export_preview",
+            "_handle_api_output_invoice_collections_export",
+            "_handle_api_output_invoice_collections_invoice_detail",
+            "_handle_api_output_invoice_collections_bank_transaction_detail",
+            "_handle_api_output_invoice_collections_relation_details",
+            "_handle_api_output_invoice_collections_status_rules",
+            "_handle_api_output_invoice_collections_receipt_history",
+        ):
+            if _function_source(server_tree, server_source, removed_handler):
+                violations.append(f"server.py still owns output collection read/export callback {removed_handler}")
 
         self.assertEqual(violations, [])
 

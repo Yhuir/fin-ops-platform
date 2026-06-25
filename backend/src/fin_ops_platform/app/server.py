@@ -1957,20 +1957,12 @@ class Application:
             return self._handle_api_oa_pending_payments_auto_reconcile_bank_transactions(body, headers)
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
             return self._handle_api_oa_pending_payments_link_bank_transactions(body, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/rows":
-            return self._handle_api_output_invoice_collections_rows(query, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
-            return self._handle_api_output_invoice_collections_filter_options(query, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/export-preview":
-            return self._handle_api_output_invoice_collections_export_preview(query, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/export":
-            return self._handle_api_output_invoice_collections_export(query, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
-            return self._handle_api_output_invoice_collections_status_rules(headers)
+        if route_path.startswith("/api/output-invoice-collections"):
+            output_collection_response = self._output_invoice_collection_routes().route(method, route_path, query, body, headers)
+            if output_collection_response is not None:
+                return output_collection_response
         if method == "POST" and route_path == "/api/output-invoice-collections/receipt-preview":
             return self._handle_api_output_invoice_collections_receipt_preview(body, headers)
-        if method == "GET" and route_path == "/api/output-invoice-collections/receipts/history":
-            return self._handle_api_output_invoice_collections_receipt_history(query, headers)
         if route_path == "/api/output-invoice-collections/receipt-settings":
             if method == "GET":
                 return self._handle_api_output_invoice_collections_receipt_settings(headers)
@@ -2006,15 +1998,6 @@ class Application:
         if method == "POST" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/receipts"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_output_invoice_collections_receipt_create(row_id, body, headers)
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/invoices/") and route_path.endswith("/detail"):
-            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_invoice_detail(invoice_id, headers)
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/bank-transactions/") and route_path.endswith("/detail"):
-            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_bank_transaction_detail(bank_transaction_id, headers)
-        if method == "GET" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/relation-details"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_relation_details(row_id, query, headers)
         if method == "GET" and route_path == "/api/no-oa-bank-batches":
             return self._handle_api_no_oa_bank_batches(query)
         if method == "GET" and route_path == "/api/no-oa-bank-batches/tag-selection":
@@ -7490,54 +7473,13 @@ class Application:
             sql_rows_provider=self._get_output_invoice_collection_rows_from_sql_read_model,
             sql_all_rows_provider=self._get_output_invoice_collection_all_rows_from_sql_read_model,
             sql_relation_details_provider=self._get_output_invoice_collection_relation_details_from_sql_read_model,
+            resolve_read_session=self._resolve_output_invoice_collection_read_session,
+            json_response=self._json_response,
+            xlsx_response=self._output_invoice_collection_xlsx_response,
+            error_response=self._output_invoice_collection_error_response,
         )
 
-    def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            status_code, payload = self._output_invoice_collection_routes().rows(query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_output_invoice_collections_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            status_code, payload = self._output_invoice_collection_routes().filter_options(query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_output_invoice_collections_export_preview(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            status_code, payload = self._output_invoice_collection_routes().export_preview(query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_output_invoice_collections_export(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            filename, content = self._output_invoice_collection_routes().export(query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
+    def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
@@ -7551,48 +7493,6 @@ class Application:
             },
         )
 
-    def _handle_api_output_invoice_collections_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._output_invoice_collection_routes().invoice_detail(invoice_id, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_output_invoice_collections_bank_transaction_detail(self, bank_transaction_id: str, headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._output_invoice_collection_routes().bank_transaction_detail(bank_transaction_id, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_output_invoice_collections_relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._output_invoice_collection_routes().relation_details(row_id, query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        status_code = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json_response(status_code, payload)
-
-    def _handle_api_output_invoice_collections_status_rules(self, headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        return self._json_response(HTTPStatus.OK, self._output_invoice_collection_routes().status_rules(session=session))
-
     def _handle_api_output_invoice_collections_receipt_preview(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
         session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
         if auth_error is not None:
@@ -7605,16 +7505,6 @@ class Application:
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_output_invoice_collections_receipt_history(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._output_invoice_collection_routes().receipt_history(query, session=session)
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_output_invoice_collections_collection_status(
         self,

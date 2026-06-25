@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import Any, Callable
+from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session, tenant_id_for_session
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import OutputInvoiceCollectionLifecycleService
@@ -12,6 +13,10 @@ from fin_ops_platform.services.output_invoice_collection_service import OutputIn
 SqlRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
 SqlAllRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
 SqlRelationDetailsProvider = Callable[[str, dict[str, list[str]]], dict[str, object] | None]
+ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
+JsonResponse = Callable[[HTTPStatus, object], Any]
+XlsxResponse = Callable[[str, bytes], Any]
+ErrorResponse = Callable[[OutputInvoiceCollectionError], Any]
 
 
 class OutputInvoiceCollectionApiRoutes:
@@ -24,6 +29,10 @@ class OutputInvoiceCollectionApiRoutes:
         sql_rows_provider: SqlRowsProvider | None = None,
         sql_all_rows_provider: SqlAllRowsProvider | None = None,
         sql_relation_details_provider: SqlRelationDetailsProvider | None = None,
+        resolve_read_session: ReadSessionResolver | None = None,
+        json_response: JsonResponse | None = None,
+        xlsx_response: XlsxResponse | None = None,
+        error_response: ErrorResponse | None = None,
     ) -> None:
         self._query_service = query_service
         self._lifecycle_service = lifecycle_service
@@ -31,6 +40,49 @@ class OutputInvoiceCollectionApiRoutes:
         self._sql_rows_provider = sql_rows_provider
         self._sql_all_rows_provider = sql_all_rows_provider
         self._sql_relation_details_provider = sql_relation_details_provider
+        self._resolve_read_session = resolve_read_session
+        self._json_response = json_response
+        self._xlsx_response = xlsx_response
+        self._error_response = error_response
+
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any | None:
+        del body
+        if method == "GET" and route_path == "/api/output-invoice-collections/rows":
+            return self._json_read(headers, lambda session: self.rows(query, session=session))
+        if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
+            return self._json_read(headers, lambda session: self.filter_options(query, session=session))
+        if method == "GET" and route_path == "/api/output-invoice-collections/export-preview":
+            return self._json_read(headers, lambda session: self.export_preview(query, session=session))
+        if method == "GET" and route_path == "/api/output-invoice-collections/export":
+            session, auth_error = self._read_session(headers)
+            if auth_error is not None:
+                return auth_error
+            try:
+                filename, content = self.export(query, session=session)
+            except OutputInvoiceCollectionError as exc:
+                return self._error(exc)
+            return self._xlsx(filename, content)
+        if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
+            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.status_rules(session=session)))
+        if method == "GET" and route_path == "/api/output-invoice-collections/receipts/history":
+            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.receipt_history(query, session=session)))
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/invoices/") and route_path.endswith("/detail"):
+            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.invoice_detail(invoice_id, session=session)))
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/bank-transactions/") and route_path.endswith("/detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.bank_transaction_detail(bank_transaction_id, session=session)))
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/relation-details"):
+            row_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._relation_details_response(headers, row_id, query)
+        return None
 
     def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
@@ -360,6 +412,56 @@ class OutputInvoiceCollectionApiRoutes:
                 self._query_service.apply_lifecycle_overlays_to_rows(typed_summary_rows, tenant_id=tenant_id)
             )
         return result
+
+    def _json_read(
+        self,
+        headers: dict[str, str] | None,
+        callback: Callable[[OARequestSession | None], tuple[HTTPStatus, dict[str, Any]]],
+    ) -> Any:
+        session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            status_code, payload = callback(session)
+        except OutputInvoiceCollectionError as exc:
+            return self._error(exc)
+        return self._json(status_code, payload)
+
+    def _relation_details_response(
+        self,
+        headers: dict[str, str] | None,
+        row_id: str,
+        query: dict[str, list[str]],
+    ) -> Any:
+        session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self.relation_details(row_id, query, session=session)
+        except OutputInvoiceCollectionError as exc:
+            return self._error(exc)
+        status_code = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json(status_code, payload)
+
+    def _read_session(self, headers: dict[str, str] | None) -> tuple[OARequestSession | None, Any | None]:
+        if callable(self._resolve_read_session):
+            return self._resolve_read_session(headers)
+        return None, None
+
+    def _json(self, status: HTTPStatus, payload: object) -> Any:
+        if not callable(self._json_response):
+            raise RuntimeError("output invoice collection json response port is not configured")
+        return self._json_response(status, payload)
+
+    def _xlsx(self, filename: str, content: bytes) -> Any:
+        if not callable(self._xlsx_response):
+            raise RuntimeError("output invoice collection xlsx response port is not configured")
+        return self._xlsx_response(filename, content)
+
+    def _error(self, exc: OutputInvoiceCollectionError) -> Any:
+        if not callable(self._error_response):
+            raise exc
+        return self._error_response(exc)
 
 
 def _is_response_like(value: Any) -> bool:
