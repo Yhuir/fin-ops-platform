@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - route-owner audit
+
+- 目标：审计税金抵扣 `server.py` callback 与 `TaxApiRoutes` 的职责边界，选择首个安全 route-owner 拆分切片。
+- 影响范围：本次仅更新 modular IO autonomous state 和本实施记录；无运行时代码变更。
+- 关键决策：`TaxApiRoutes` 已拥有 month、summary、calculate、plan save 和 certified import job 的服务级 response mapping；`server.py` 仍拥有直接 dispatch/body/session 包装。下一切片迁移 month/summary/calculate/plan-save/import-job/certified-imports list；certified import preview/confirm 暂不迁移，因为它们还承担 multipart parsing、import queue/idempotency metadata 和 inline execution fallback。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：本条为审计 slice，无运行时代码变更；下一实施切片需要覆盖 `tests/test_tax_offset_api.py` 和 platform runtime boundary Guard。
+- 验证命令：`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明 tax 模块或全局闭环。
+- 后续事项：执行 `server-py:tax-offset-read-plan-route-callback-collapse`。
+
 ## 2026-06-24 - Modular IO post-full-state local closure audit
 
 - 目标：执行 `read-models:tax-offset-post-full-state-local-implementation-closure-audit`，确认 broad full-state snapshot quarantine 后，税金抵扣本地实现支持是否只剩真实生产证据缺口。

@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `tax-route-owner-audit-selected`
+Current state: `tax-offset-read-plan-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:pending-invoice-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-pending-invoice-route-owner-local-closure-audit-2026-06-25.md`. No `_handle_api_pending_invoice*` callbacks remain in `server.py`; remaining surfaces are composition-root/platform/provider ports, so pending invoice local `server.py` route-owner support is accounted for without module/global closure. T0 selected tax route-owner audit next.
+Completed `server-py:tax-route-owner-audit` as `analysis-closed` in `analysis/server-py-tax-route-owner-audit-2026-06-25.md`. Tax offset month/summary/calculate/plan-save/import-job/certified-imports list callbacks are thin enough for route-owner collapse; certified import preview/confirm multipart/import-queue semantics are deferred. T0 selected tax offset read/plan route callback collapse next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:pending-invoice-route-owner-local-closure-audit`
+`server-py:tax-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:tax-route-owner-audit`
+`server-py:tax-offset-read-plan-route-callback-collapse`
