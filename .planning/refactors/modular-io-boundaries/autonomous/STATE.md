@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-route-owner-audit-selected`
+Current state: `pending-invoice-read-export-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:oa-pending-payment-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-oa-pending-payment-route-owner-local-closure-audit-2026-06-25.md`. OA pending payment local `server.py` route-owner support is accounted for after route callback collapse; remaining OA pending payment `Application` surfaces are explicit composition-root/provider/platform ports. T0 selected pending invoice route-owner audit next.
+Completed `server-py:pending-invoice-route-owner-audit` as `analysis-closed` in `analysis/server-py-pending-invoice-route-owner-audit-2026-06-25.md`. Pending invoice app-owned callbacks were split into read/detail/candidate/export wrappers and write-oriented rules/attach/income-status wrappers. T0 selected pending invoice read/export route callback collapse next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:oa-pending-payment-route-owner-local-closure-audit`
+`server-py:pending-invoice-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:pending-invoice-route-owner-audit`
+`server-py:pending-invoice-read-export-route-callback-collapse`

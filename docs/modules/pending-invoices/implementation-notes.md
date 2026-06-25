@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - route-owner audit
+
+- 目标：审计 `/api/pending-invoices*` 在 `server.py` 中的剩余 HTTP callback，并选择首个安全 route-owner 拆分切片。
+- 影响范围：本次仅更新 modular IO autonomous state 和本实施记录；无运行时代码变更。
+- 关键决策：`PendingInvoiceApiRoutes` 已拥有 rows/filter-options/candidates/detail/export/rules/attach/income-status 方法；`PendingInvoiceReadModelService` 拥有 rows/filter/export fresh gate；`PendingInvoiceApplicationService` 和 `PendingInvoiceRulesApplicationService` 拥有写侧业务。首个实施切片只迁移 read/detail/candidate/export HTTP mapping，暂不碰 rules、attach existing 和 income status 写回 callback，因为这些 callback 还承担 write-session、persist-state 或更细的失败恢复语义。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：本条为审计 slice，无运行时代码变更；下一实施切片需要覆盖 `tests/test_pending_invoice_api.py` 和 platform runtime boundary Guard。
+- 验证命令：`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+- 后续事项：执行 `server-py:pending-invoice-read-export-route-callback-collapse`。
+
 ## 2026-06-25 - pending invoice source-version 合同对齐
 
 - 目标：修复 Row275 生产只读诊断发现的 pending invoice source-version 合同漂移，避免 `expense:all` 在相关 refresh 全部 done 后仍因 expected/actual source versions 不一致返回 `refreshing`。
