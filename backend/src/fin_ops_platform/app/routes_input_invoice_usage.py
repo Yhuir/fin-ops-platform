@@ -8,6 +8,10 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.input_invoice_usage_export_service import (
+    InputInvoiceUsageExportError,
+    InputInvoiceUsageExportService,
+)
 
 
 class InputInvoiceUsageApiRoutes:
@@ -18,6 +22,12 @@ class InputInvoiceUsageApiRoutes:
         rows_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | None],
         all_rows_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | Any | None],
         relation_details_from_sql_read_model: Callable[[str, dict[str, list[str]]], dict[str, object] | None],
+        export_service: InputInvoiceUsageExportService,
+        resolve_read_session: Callable[..., tuple[Any | None, Any | None]],
+        export_query_kwargs: Callable[[dict[str, list[str]]], dict[str, object]],
+        export_error_response: Callable[[InputInvoiceUsageExportError], Any],
+        record_export_download: Callable[[Any | None, str, dict[str, list[str]]], None],
+        xlsx_response: Callable[[str, bytes], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
     ) -> None:
@@ -25,6 +35,12 @@ class InputInvoiceUsageApiRoutes:
         self._rows_from_sql_read_model = rows_from_sql_read_model
         self._all_rows_from_sql_read_model = all_rows_from_sql_read_model
         self._relation_details_from_sql_read_model = relation_details_from_sql_read_model
+        self._export_service = export_service
+        self._resolve_read_session = resolve_read_session
+        self._export_query_kwargs = export_query_kwargs
+        self._export_error_response = export_error_response
+        self._record_export_download = record_export_download
+        self._xlsx_response = xlsx_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
 
@@ -33,11 +49,16 @@ class InputInvoiceUsageApiRoutes:
         method: str,
         route_path: str,
         query: dict[str, list[str]],
+        headers: dict[str, str] | None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/input-invoice-usage/rows":
             return self.rows(query)
         if method == "GET" and route_path == "/api/input-invoice-usage/filter-options":
             return self.filter_options(query)
+        if method == "GET" and route_path == "/api/input-invoice-usage/export-preview":
+            return self.export_preview(query, headers)
+        if method == "GET" and route_path == "/api/input-invoice-usage/export":
+            return self.export(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/payment-status-rules":
             return self.payment_status_rules()
         if method == "GET" and route_path.startswith("/api/input-invoice-usage/invoices/") and route_path.endswith("/detail"):
@@ -140,6 +161,42 @@ class InputInvoiceUsageApiRoutes:
 
     def payment_status_rules(self) -> Any:
         return self._json_response(HTTPStatus.OK, self._query_service.payment_status_rules())
+
+    def export_preview(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
+        _session, auth_error = self._resolve_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票使用情况页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._export_service.export_preview(
+                **self._export_query_kwargs(query)
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
+        except InputInvoiceUsageExportError as exc:
+            return self._export_error_response(exc)
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json_response(status, payload)
+
+    def export(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票使用情况页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            filename, content = self._export_service.export(
+                **self._export_query_kwargs(query)
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
+        except InputInvoiceUsageExportError as exc:
+            return self._export_error_response(exc)
+        self._record_export_download(session, filename, query)
+        return self._xlsx_response(filename, content)
 
 
 def _is_response(value: object) -> bool:

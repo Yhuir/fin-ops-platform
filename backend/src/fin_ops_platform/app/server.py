@@ -1924,17 +1924,13 @@ class Application:
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_pending_invoice_oa_detail(oa_id, headers)
         if route_path.startswith("/api/input-invoice-usage"):
-            input_usage_response = self._input_invoice_usage_routes().route(method, route_path, query)
+            input_usage_response = self._input_invoice_usage_routes().route(method, route_path, query, headers)
             if input_usage_response is not None:
                 return input_usage_response
         if route_path.startswith("/api/input-invoice-usage/oa-reverse"):
             oa_reverse_response = self._input_invoice_usage_oa_reverse_routes().route(method, route_path, query, body, headers)
             if oa_reverse_response is not None:
                 return oa_reverse_response
-        if method == "GET" and route_path == "/api/input-invoice-usage/export-preview":
-            return self._handle_api_input_invoice_usage_export_preview(query, headers)
-        if method == "GET" and route_path == "/api/input-invoice-usage/export":
-            return self._handle_api_input_invoice_usage_export(query, headers)
         if method == "PUT" and route_path == "/api/input-invoice-usage/payment-status-rules":
             return self._handle_api_input_invoice_usage_payment_status_rules_update(body, headers)
         if method == "GET" and route_path == "/api/oa-pending-payments/rows":
@@ -6839,6 +6835,12 @@ class Application:
             rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model,
             all_rows_from_sql_read_model=self._get_input_invoice_usage_all_rows_from_sql_read_model,
             relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model,
+            export_service=self._input_invoice_usage_export_service(),
+            resolve_read_session=self._resolve_fin_ops_read_session,
+            export_query_kwargs=self._input_invoice_usage_export_query_kwargs,
+            export_error_response=self._input_invoice_usage_export_error_response,
+            record_export_download=self._record_input_invoice_usage_export_download,
+            xlsx_response=self._input_invoice_usage_xlsx_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
         )
@@ -6992,54 +6994,22 @@ class Application:
             return "input_invoice_usage_oa_reverse", True, None
         return str(session.identity.username or session.identity.user_id or "input_invoice_usage_oa_reverse"), True, None
 
-    def _handle_api_input_invoice_usage_export_preview(
+    def _record_input_invoice_usage_export_download(
         self,
+        session: object | None,
+        filename: str,
         query: dict[str, list[str]],
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票使用情况页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._input_invoice_usage_export_service().export_preview(
-                **self._input_invoice_usage_export_query_kwargs(query)
-            )
-        except InputInvoiceUsageError as exc:
-            return self._input_invoice_usage_error_response(exc)
-        except InputInvoiceUsageExportError as exc:
-            return self._input_invoice_usage_export_error_response(exc)
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json_response(status, payload)
-
-    def _handle_api_input_invoice_usage_export(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问进项发票使用情况页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            filename, content = self._input_invoice_usage_export_service().export(
-                **self._input_invoice_usage_export_query_kwargs(query)
-            )
-        except InputInvoiceUsageError as exc:
-            return self._input_invoice_usage_error_response(exc)
-        except InputInvoiceUsageExportError as exc:
-            return self._input_invoice_usage_export_error_response(exc)
+    ) -> None:
+        identity = getattr(session, "identity", None)
         self._audit_service.record_action(
-            actor_id=str(session.identity.username or "input_invoice_usage_export") if session is not None else "input_invoice_usage_export",
+            actor_id=str(getattr(identity, "username", None) or "input_invoice_usage_export"),
             action="input_invoice_usage_export_downloaded",
             entity_type="input_invoice_usage_export",
             entity_id=filename,
             metadata={"query": {key: values[0] for key, values in query.items() if values}},
         )
+
+    def _input_invoice_usage_xlsx_response(self, filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,

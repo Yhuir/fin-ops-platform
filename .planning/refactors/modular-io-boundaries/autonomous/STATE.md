@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-export-route-callback-collapse-selected`
+Current state: `input-invoice-usage-payment-rules-write-boundary-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-export-route-owner-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-export-route-owner-audit-2026-06-25.md`. T0 selected export preview/download route callback collapse with explicit export service, auth, audit and XLSX response ports, while keeping payment rules PUT in `Application`. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-export-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`. Export preview/download HTTP mapping now lives in `InputInvoiceUsageApiRoutes` with explicit export service, auth, audit and XLSX response ports; the two app-owned export handlers were removed. Payment rules PUT remains in `Application` for the next write-boundary audit. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-export-route-owner-audit`
+`server-py:input-invoice-usage-export-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-export-route-callback-collapse`
+`server-py:input-invoice-usage-payment-rules-write-boundary-audit`

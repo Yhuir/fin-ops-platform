@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Input usage export route callback collapse
+
+- 目标：把进项使用 export preview/download HTTP mapping 迁入 `InputInvoiceUsageApiRoutes`。
+- 影响范围：`routes_input_invoice_usage.py`、`server.py` export route dispatch/factory、静态 Guard 和 input usage export/read/OA reverse API 回归。
+- 关键决策：导出业务语义仍由 `InputInvoiceUsageExportService` 负责；route owner 只通过显式 export service、auth/session、query kwargs、error response、audit 和 XLSX response 端口做 HTTP mapping。payment-status-rules PUT 仍留在 `Application`，下一步单独审计写边界。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实、响应 shape、XLSX header 和 read-model freshness 语义不变。
+- 测试覆盖：扩展 route-owner static Guard，回归 export preview/download filter behavior、refreshing payload、input usage read routes 和 OA reverse fallthrough。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-export-route-callback-collapse-2026-06-25.md`。
+- 未测风险：真实导出大数据量性能、生产 PostgreSQL/worker/App Status、browser/admin/write 仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-payment-rules-write-boundary-audit`。
+
 ## 2026-06-25 - Input usage export route owner audit
 
 - 目标：审计进项使用 export preview/download route ownership，选择下一步边界。
