@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `pending-invoice-write-route-callback-audit-selected`
+Current state: `pending-invoice-write-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:pending-invoice-read-export-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-pending-invoice-read-export-route-callback-collapse-2026-06-25.md`. Pending invoice rows/filter-options/candidates/batch-candidates/detail/export-preview/export HTTP mapping now lives in `PendingInvoiceApiRoutes.route(...)` with explicit read-session/body/JSON/error/export ports, and migrated app callbacks were removed. T0 selected pending invoice write-route callback audit next.
+Completed `server-py:pending-invoice-write-route-callback-audit` as `analysis-closed` in `analysis/server-py-pending-invoice-write-route-callback-audit-2026-06-25.md`. Remaining pending invoice rules, attach-existing and income-status callbacks are thin HTTP body/session/error/JSON/persist wrappers around route/application/rules services. T0 selected full write route callback collapse with explicit write-session and persist-state ports next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:pending-invoice-read-export-route-callback-collapse`
+`server-py:pending-invoice-write-route-callback-audit`
 
 ## Next Prompt
 
-`server-py:pending-invoice-write-route-callback-audit`
+`server-py:pending-invoice-write-route-callback-collapse`

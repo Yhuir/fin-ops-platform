@@ -36,6 +36,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - write route callback audit
+
+- 目标：审计待找发票剩余 rules、attach existing 和 income status HTTP callback，明确下一步是否可以从 `server.py` 迁入 route owner。
+- 影响范围：本次仅更新 modular IO autonomous state 和本实施记录；无运行时代码变更。
+- 关键决策：剩余 callback 的业务语义已由 `PendingInvoiceApiRoutes`、`PendingInvoiceApplicationService` 和 `PendingInvoiceRulesApplicationService` 承担；`server.py` 主要还拥有 body/session/error/JSON/persist-state 包装。下一切片可整体迁移到 `PendingInvoiceApiRoutes.route(...)`，但必须把 write-session 和 persist-state 作为显式平台端口。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：本条为审计 slice，无运行时代码变更；下一实施切片需要继续覆盖 `tests/test_pending_invoice_api.py` 和 platform runtime boundary Guard。
+- 验证命令：`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明待找发票模块或全局闭环。
+- 后续事项：执行 `server-py:pending-invoice-write-route-callback-collapse`。
+
 ## 2026-06-25 - read/export route callback collapse
 
 - 目标：把待找发票 rows/filter-options/candidates/detail/export-preview/export 的 HTTP mapping 从 `server.py` 迁入 `PendingInvoiceApiRoutes.route(...)`，继续收敛 `server.py` 路由边界。
