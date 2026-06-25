@@ -3583,25 +3583,53 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         method_source = _function_source(tree, source, "_supplemental_retained_oa_row_ids")
+        builder_source = _function_source(tree, source, "_workbench_supplemental_retained_oa_row_selector")
         port_source = (SERVICES_ROOT / "workbench_retained_oa_supplemental_relation_read_port.py").read_text(encoding="utf-8")
+        selector_source = (SERVICES_ROOT / "workbench_supplemental_retained_oa_row_selector.py").read_text(encoding="utf-8")
 
         violations: list[str] = []
         if "class WorkbenchRetainedOaSupplementalRelationReadPort" not in port_source:
             violations.append("Workbench retained-OA supplemental relation read port is missing")
         if "def list_active_relations" not in port_source:
             violations.append("WorkbenchRetainedOaSupplementalRelationReadPort does not expose list_active_relations")
-        if "_workbench_pair_relation_service.list_active_relations" in method_source:
+        if "_workbench_pair_relation_service.list_active_relations" in source:
             violations.append("_supplemental_retained_oa_row_ids still reads broad pair service directly")
-        if "_workbench_retained_oa_supplemental_relation_read_port()" not in method_source:
-            violations.append("_supplemental_retained_oa_row_ids does not use retained-OA supplemental relation read port")
-        for required in (
-            "_manual_retained_oa_row_ids()",
-            "_resolve_live_rows_direct(bank_row_ids, month_hint=\"all\")",
-            "_row_is_on_or_after(row, cutoff_date, row_type=\"bank\")",
+        if "return self._workbench_supplemental_retained_oa_row_selector().select(cutoff_date)" not in method_source:
+            violations.append("_supplemental_retained_oa_row_ids does not delegate to selector")
+        for marker in (
+            "manual_retained_oa_row_ids=self._manual_retained_oa_row_ids",
+            "relation_read_port=self._workbench_retained_oa_supplemental_relation_read_port()",
+            "resolve_live_rows=lambda bank_row_ids: self._resolve_live_rows_direct(bank_row_ids, month_hint=\"all\")",
+            "row_is_on_or_after=self._row_is_on_or_after",
+        ):
+            if marker not in builder_source:
+                violations.append(f"supplemental retained OA selector builder missing {marker}")
+        for marker in (
+            "class WorkbenchSupplementalRetainedOaRowSelector",
+            "def select(",
+            "retained_row_ids: set[str] = set(self._manual_retained_oa_row_ids())",
+            "list_active_relations",
+            "self._resolve_live_rows(bank_row_ids)",
+            "self._row_is_on_or_after(row, cutoff_date, row_type=\"bank\")",
             "return sorted(retained_row_ids)",
         ):
-            if required not in method_source:
-                violations.append(f"_supplemental_retained_oa_row_ids no longer preserves {required}")
+            if marker not in selector_source:
+                violations.append(f"WorkbenchSupplementalRetainedOaRowSelector missing {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in selector_source:
+                violations.append(f"WorkbenchSupplementalRetainedOaRowSelector gained forbidden dependency: {forbidden}")
 
         self.assertEqual(violations, [])
 

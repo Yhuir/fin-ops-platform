@@ -520,6 +520,9 @@ from fin_ops_platform.services.workbench_retained_oa_supplemental_relation_read_
 )
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+from fin_ops_platform.services.workbench_supplemental_retained_oa_row_selector import (
+    WorkbenchSupplementalRetainedOaRowSelector,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
@@ -12867,34 +12870,19 @@ class Application:
         return datetime.now().strftime("%Y-%m")
 
     def _supplemental_retained_oa_row_ids(self, cutoff_date: datetime) -> list[str]:
-        retained_row_ids: set[str] = set(self._manual_retained_oa_row_ids())
-        relation_read_port = self._workbench_retained_oa_supplemental_relation_read_port()
-        for relation in relation_read_port.list_active_relations():
-            row_ids = [
-                str(row_id).strip()
-                for row_id in list(relation.get("row_ids") or [])
-                if str(row_id).strip()
-            ]
-            row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
-            oa_row_ids = [
-                row_id
-                for index, row_id in enumerate(row_ids)
-                if (row_types[index] if index < len(row_types) else "") == "oa"
-            ]
-            bank_row_ids = [
-                row_id
-                for index, row_id in enumerate(row_ids)
-                if (row_types[index] if index < len(row_types) else "") == "bank"
-            ]
-            if not oa_row_ids or not bank_row_ids:
-                continue
-            try:
-                bank_rows = self._resolve_live_rows_direct(bank_row_ids, month_hint="all")
-            except KeyError:
-                continue
-            if any(self._row_is_on_or_after(row, cutoff_date, row_type="bank") for row in bank_rows):
-                retained_row_ids.update(oa_row_ids)
-        return sorted(retained_row_ids)
+        return self._workbench_supplemental_retained_oa_row_selector().select(cutoff_date)
+
+    def _workbench_supplemental_retained_oa_row_selector(self) -> WorkbenchSupplementalRetainedOaRowSelector:
+        selector = getattr(self, "_workbench_supplemental_retained_oa_row_selector_instance", None)
+        if selector is None:
+            selector = WorkbenchSupplementalRetainedOaRowSelector(
+                manual_retained_oa_row_ids=self._manual_retained_oa_row_ids,
+                relation_read_port=self._workbench_retained_oa_supplemental_relation_read_port(),
+                resolve_live_rows=lambda bank_row_ids: self._resolve_live_rows_direct(bank_row_ids, month_hint="all"),
+                row_is_on_or_after=self._row_is_on_or_after,
+            )
+            self._workbench_supplemental_retained_oa_row_selector_instance = selector
+        return selector
 
     def _manual_retained_oa_row_ids(self) -> list[str]:
         service = getattr(self, "_oa_manual_import_service", None)
