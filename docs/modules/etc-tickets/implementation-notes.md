@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC business batch OA draft revoke callback audit
+
+- 目标：审计 `Application._handle_api_etc_business_oa_draft_revoke(...)` 的剩余所有权，确定下一步本地模块化边界。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：不新建专用 revoke service；下一步应扩展 `EtcBusinessBatchApplicationService` 的 payload 方法，并让 `EtcBusinessBatchApiRoutes` 接管 `oa-draft/revoke` HTTP 映射。核心状态迁移继续由 `EtcService.revoke_business_batch_oa_draft(...)` 承担。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需补静态 Guard，并回归 OA draft/revoke API 与 service tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-oa-draft-revoke-callback-audit-2026-06-25.md`。
+- 未测风险：OA draft revoke callback 仍在 `Application`；未做生产 browser/admin/write 验证。
+- 后续事项：执行 `server-py:etc-business-oa-draft-revoke-route-callback-collapse`。
+
 ## 2026-06-25 - ETC business batch delete route callback collapse
 
 - 目标：把 business-batch DELETE 的 HTTP body/error/response 映射从 `Application` 收回到 `EtcBusinessBatchApiRoutes`。
