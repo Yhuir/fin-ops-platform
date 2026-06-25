@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Route owner residual audit
+
+- 目标：审计销项发票收款情况 `server.py` 中剩余 direct dispatch 和 `_handle_api_output_invoice_collections*` callback，拆分可安全迁移的 route-owner slice。
+- 影响范围：分析 `Application`、`OutputInvoiceCollectionApiRoutes`、模块状态机和测试矩阵；未修改运行时代码。
+- 关键决策：rows/filter-options/export-preview/export/status-rules/receipt-history/detail callbacks 是薄 HTTP/session/response wrapper，可作为下一步 bounded callback collapse；lifecycle mutation、receipt create/void/reissue、receipt settings update 和 SQL fresh-gate extraction 暂不混入同一 slice。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：纯审计 slice 未新增测试；下一实现 slice 应覆盖 output collection API regressions 和 runtime boundary Guard。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：本审计不证明真实 PostgreSQL/worker/App Status/high-row/browser evidence，也不声明模块或全局闭环。
+
 ## 2026-06-24 - rows/filter-options freshness 合并 fail-closed
 
 - 目标：审计前端 stale/refreshing/fresh 行为时，修复销项发票收款情况页只把 `refreshing` 识别为非 fresh 的缺口；当 rows 为 fresh 但 filter-options 返回 stale/missing/schema_mismatch/refreshing 时，页面不能显示普通空态或允许导出。

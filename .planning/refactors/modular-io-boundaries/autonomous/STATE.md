@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `output-invoice-collection-route-owner-audit-selected`
+Current state: `output-invoice-collection-read-export-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-post-fresh-gate-local-closure-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-post-fresh-gate-local-closure-audit-2026-06-25.md`. Input usage local `server.py` support is accounted for after route-owner collapse and fresh-gate extraction; remaining methods are dependency/platform/refresh/source-version/import-scope provider ports, not new input usage implementation gaps. T0 selected output invoice collection route-owner audit next because that adjacent module still has broad app-owned route callbacks and direct dispatch branches.
+Completed `server-py:output-invoice-collection-route-owner-audit` as `analysis-closed` in `analysis/server-py-output-invoice-collection-route-owner-audit-2026-06-25.md`. Output collection still has broad app-owned direct dispatch and `_handle_api_output_invoice_collections*` wrappers, while `OutputInvoiceCollectionApiRoutes` already owns route-facing methods. T0 selected read/export/status/history callback collapse as the first bounded implementation slice and deferred mutation callbacks plus fresh-gate extraction.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-post-fresh-gate-local-closure-audit`
+`server-py:output-invoice-collection-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:output-invoice-collection-route-owner-audit`
+`server-py:output-invoice-collection-read-export-route-callback-collapse`
