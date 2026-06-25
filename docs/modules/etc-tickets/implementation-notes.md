@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC business batch route owner local closure audit
+
+- 目标：审计 business-batch delete/revoke callback collapse 后，ETC business-batch route owner 本地实现支持是否已闭合。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：active business-batch 路由映射已由 `EtcBusinessBatchApiRoutes` 承担；`server.py` 剩余 business-batch 函数只保留 dispatch/session/body/response wrapper、dependency assembly 和 legacy batch compatibility resolver。该结论不代表 ETC 整体模块闭合或全局闭合。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；既有静态 Guard 已防止移除的 business-batch 私有 callback 回流。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-business-route-owner-local-closure-audit-2026-06-25.md`。
+- 未测风险：未做生产 browser/admin/write 验证；ETC 其他 surface 和 `server.py` 其他模块 handler 仍需单独推进。
+- 后续事项：执行 `server-py:input-invoice-usage-oa-reverse-route-owner-audit`。
+
 ## 2026-06-25 - ETC business batch OA draft revoke route callback collapse
 
 - 目标：把 `oa-draft/revoke` 的 HTTP 映射从 `Application` 收回到 business-batch route/application-service 边界。
