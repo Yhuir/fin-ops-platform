@@ -2,6 +2,27 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-25 - route-owner local closure audit test note
+
+`server-py:bank-details-route-owner-local-closure-audit` 已完成为 analysis-only：
+
+- Business core unit tests：不适用；本轮不改业务规则。
+- Service-layer tests：不适用；本轮不改 services/facades/repositories。
+- API contract tests：后续 transaction categories PATCH implementation slice 适用；本轮仅发现剩余路径。
+- Read model/cache/background job tests：不适用；本轮不改 read model/worker/cache。
+- Frontend component and interaction tests：不适用；本轮不改前端。
+- End-to-end business-flow integration tests：不适用；本轮不改业务流。
+- Existing feature regression tests：本轮沿用静态搜索和现有 Guard，不新增运行时断言。
+
+验证命令：
+
+```bash
+bash scripts/verify.sh docs
+git diff --check
+```
+
+未测风险：`PATCH /api/bank-details/transactions/categories` 仍待迁移；route-owner closure 不能声明。
+
 ## 2026-06-25 - category write route-owner collapse test note
 
 `server-py:bank-details-category-write-route-callback-collapse` 已完成：

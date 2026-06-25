@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `bank-details-route-owner-local-closure-audit-selected`
+Current state: `bank-details-transaction-categories-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:bank-details-category-write-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-bank-details-category-write-route-callback-collapse-2026-06-25.md`. Bank details category confirmation/assignment POST/DELETE HTTP mapping now lives in `BankDetailsApiRoutes.route(...)`; no bank-details read/export, auto-tag write or category write route callbacks remain in `server.py`. T0 selected bank-details route-owner local closure audit next.
+Completed `server-py:bank-details-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-bank-details-route-owner-local-closure-audit-2026-06-25.md`. Migrated bank-details callbacks are gone, but `PATCH /api/bank-details/transactions/categories` still lives in `server.py`; T0 selected `server-py:bank-details-transaction-categories-route-callback-collapse` next and did not claim bank-details route-owner closure.
 
 ## Closed Or Deferred Slices
 
