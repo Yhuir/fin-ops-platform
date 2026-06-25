@@ -1,5 +1,16 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-25 - closure withdraw route-owner collapse
+
+- 目标：执行 `server-py:turnover-ledger-closure-withdraw-route-callback-collapse`，把 `POST /api/turnover-ledger/closures/withdraw` HTTP mapping 从 `server.py` 收到 `TurnoverLedgerApiRoutes.route(...)`。
+- 影响范围：closure withdraw 的 session/body/actor/tenant/idempotency/error mapping；不改变 closure request boundary、write facade、Workbench relation command service、refresh、权限、read model freshness 或 relation withdraw 写路径。
+- 关键决策：route owner 复用 closure request-boundary port；server 注入使用 lambda 动态解析，保留 app 构建后测试/运行时替换 `_turnover_ledger_closure_request_boundary_facade` 的兼容语义；不直接 import `app.auth`，不解析 cookie/header 细节，不接收 whole `Application`。
+- 文档影响：新增 modular IO closure withdraw route callback collapse analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；外部往来状态机定义不变。
+- 测试覆盖：新增 closure withdraw source-inspect test 并更新 platform Guard；复跑 targeted closure withdraw regressions 与完整 `tests.test_turnover_ledger_api`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_closure_withdraw_handler_uses_closure_boundary_without_relation_withdraw_inline tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_cash_closure_withdraw_route_uses_closure_boundary tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；relation withdraw callback 仍未迁移。
+- 后续事项：执行 `server-py:turnover-ledger-relation-withdraw-route-callback-collapse`。
+
 ## 2026-06-25 - closure confirm route-owner collapse
 
 - 目标：执行 `server-py:turnover-ledger-closure-confirm-route-callback-collapse`，把 `POST /api/turnover-ledger/closures/confirm` HTTP mapping 从 `server.py` 收到 `TurnoverLedgerApiRoutes.route(...)`。

@@ -225,6 +225,8 @@ class TurnoverLedgerApiRoutes:
             return self.handle_confirm_relation_route(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
             return self.handle_closure_confirm_route(body, headers)
+        if method == "POST" and route_path == "/api/turnover-ledger/closures/withdraw":
+            return self.handle_closure_withdraw_route(body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.handle_relation_extra_route(relation_id)
@@ -421,6 +423,45 @@ class TurnoverLedgerApiRoutes:
                 tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
                 expected_versions=expected_versions,
+                idempotency_key=idempotency_key,
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._respond(
+                exc.status_code,
+                self._write_precondition_error_payload(exc),  # type: ignore[misc]
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._respond(HTTPStatus.OK, result)
+
+    def handle_closure_withdraw_route(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        self._ensure_closure_write_ports()
+        session_response = self._mutation_session_resolver(headers)  # type: ignore[misc]
+        if self._session_error_detector(session_response):  # type: ignore[misc]
+            return session_response
+        payload, error = self._load_json_body(body)  # type: ignore[misc]
+        if error is not None:
+            return error
+        cash_closure_case_id = str(payload.get("cash_closure_case_id") or payload.get("cashClosureCaseId") or "").strip()
+        identity = session_response.identity
+        actor = identity.username or identity.user_id or "web_finance_user"
+        facade = self._closure_request_boundary_provider()  # type: ignore[misc]
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+        try:
+            result = facade.withdraw_cash_closure_case_from_request(
+                cash_closure_case_id=cash_closure_case_id,
+                actor_id=actor,
+                tenant_id=self._tenant_id_provider(session_response),  # type: ignore[misc]
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
                 idempotency_key=idempotency_key,
             )
         except TurnoverRelationValidationError as exc:

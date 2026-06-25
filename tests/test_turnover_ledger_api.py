@@ -3850,6 +3850,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_after_turnover_relation_mutation(", source)
         self.assertNotIn("_resolve_turnover_relation_affected_months", source)
 
+    def test_closure_withdraw_handler_uses_closure_boundary_without_relation_withdraw_inline(self) -> None:
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_closure_withdraw_route)
+
+        self.assertIn("facade = self._closure_request_boundary_provider()", source)
+        self.assertIn("result = facade.withdraw_cash_closure_case_from_request(", source)
+        self.assertIn('payload.get("cash_closure_case_id") or payload.get("cashClosureCaseId")', source)
+        self.assertNotIn("withdraw_relation_from_request(", source)
+        self.assertNotIn("_after_turnover_relation_mutation(", source)
+
     def test_confirm_request_boundary_facade_owns_affected_months_resolution_and_response_field(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_confirm_request_boundary_facade)
 

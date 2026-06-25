@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `turnover-ledger-closure-withdraw-route-callback-collapse-selected`
+Current state: `turnover-ledger-relation-withdraw-route-callback-collapse-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:turnover-ledger-closure-confirm-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-closure-confirm-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/closures/confirm` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit closure request-boundary port, and the app callback was removed. T0 selected closure withdraw route callback collapse next.
+Completed `server-py:turnover-ledger-closure-withdraw-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-turnover-ledger-closure-withdraw-route-callback-collapse-2026-06-25.md`. `POST /api/turnover-ledger/closures/withdraw` now lives in `TurnoverLedgerApiRoutes.route(...)` with an explicit closure request-boundary port preserving dynamic override semantics, and the app callback was removed. T0 selected relation withdraw route callback collapse next.
 
 ## Closed Or Deferred Slices
 

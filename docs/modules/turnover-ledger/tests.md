@@ -62,6 +62,29 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-25 - closure withdraw route-owner collapse test note
+
+`server-py:turnover-ledger-closure-withdraw-route-callback-collapse` 已完成：
+
+- Business core unit tests：不适用；本 slice 不改 withdraw cash closure case 的业务规则。
+- Service-layer tests：适用但未新增；既有 closure request boundary/write facade/UoW 回归继续覆盖 Workbench relation command service wiring、idempotency 和 refresh side effects。
+- API contract tests：适用；复跑 closure withdraw targeted regressions 和完整 `tests.test_turnover_ledger_api`，证明 cash closure case id 兼容、provider override、response shape 和 closure/withdraw wiring 保持。
+- Read model/cache/background job tests：间接适用；closure withdraw 成功后的 refresh 由既有 API/UoW tests 覆盖，本 slice 未改 worker、dirty/outbox 或 read model writer。
+- Frontend component and interaction tests：不适用；未改前端 API mapper、toolbar withdraw UI 或 operation overlay。
+- End-to-end business-flow integration tests：间接适用但未新增；本 slice 只迁移 HTTP mapping，不改变 closure withdraw business flow。
+- Existing feature regression tests：适用；更新 platform Guard，防止 `_handle_api_turnover_ledger_closure_withdraw(...)` 回到 `server.py`，并确认 relation withdraw callback 仍保留。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_closure_withdraw_handler_uses_closure_boundary_without_relation_withdraw_inline tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_cash_closure_withdraw_route_uses_closure_boundary tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；relation withdraw callback 是后续边界。
+
 ## 2026-06-25 - closure confirm route-owner collapse test note
 
 `server-py:turnover-ledger-closure-confirm-route-callback-collapse` 已完成：
