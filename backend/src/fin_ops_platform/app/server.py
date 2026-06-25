@@ -507,6 +507,7 @@ from fin_ops_platform.services.workbench_oa_raw_payload_signal_month_helper impo
 )
 from fin_ops_platform.services.workbench_live_oa_merge_helper import WorkbenchLiveOaMergeHelper
 from fin_ops_platform.services.workbench_group_row_payload_helper import WorkbenchGroupRowPayloadHelper
+from fin_ops_platform.services.workbench_cache_read_payload_helper import WorkbenchCacheReadPayloadHelper
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13067,58 +13068,31 @@ class Application:
         ).group(payload, turnover_relations=turnover_relations)
 
     def _can_use_cached_workbench_payload(self, payload: dict[str, object]) -> bool:
-        if not self._oa_status_is_ready_for_cache(payload):
-            return False
-        if self._cached_payload_needs_oa_invoice_offset_rebuild(payload):
-            return False
-        cached_candidate_hash = str(payload.get("workbench_candidate_snapshot_hash") or "").strip()
-        if cached_candidate_hash:
-            expected_candidate_hash = self._workbench_candidate_snapshot_hash(
-                str(payload.get("month") or "all")
-            )
-            if cached_candidate_hash != expected_candidate_hash:
-                return False
-        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            cached_schema_version = str(payload.get("workbench_read_model_schema_version") or "").strip()
-            if cached_schema_version != WORKBENCH_READ_MODEL_SCHEMA_VERSION:
-                return False
-            cached_candidate_schema_version = str(
-                payload.get("workbench_candidate_match_schema_version") or ""
-            ).strip()
-            if cached_candidate_schema_version != CANDIDATE_MATCH_SCHEMA_VERSION:
-                return False
-            cached_rules_version = str(payload.get("workbench_matching_rules_version") or "").strip()
-            if cached_rules_version != WORKBENCH_MATCHING_RULES_VERSION:
-                return False
-            expected_parser_version = self._current_oa_attachment_invoice_parser_version()
-            cached_parser_version = str(payload.get("oa_attachment_invoice_parser_version") or "").strip()
-            if expected_parser_version and cached_parser_version != expected_parser_version:
-                return False
-            expected_candidate_hash = self._workbench_candidate_snapshot_hash(
-                str(payload.get("month") or "all")
-            )
-            cached_candidate_hash = str(payload.get("workbench_candidate_snapshot_hash") or "").strip()
-            if cached_candidate_hash != expected_candidate_hash:
-                return False
-            summary = payload.get("summary")
-            if isinstance(summary, dict):
-                try:
-                    return int(summary.get("oa_count", 0) or 0) > 0
-                except (TypeError, ValueError):
-                    return False
-        return True
+        return self._workbench_cache_read_payload_helper().can_use_cached_payload(payload)
 
     def _can_persist_workbench_payload(self, payload: dict[str, object]) -> bool:
-        return self._oa_status_is_ready_for_cache(payload)
+        return self._workbench_cache_read_payload_helper().can_persist_payload(payload)
 
     def _can_fallback_to_stale_workbench_payload(self, payload: dict[str, object]) -> bool:
-        return self._oa_status_is_ready_for_cache(payload)
+        return self._workbench_cache_read_payload_helper().can_fallback_to_stale_payload(payload)
 
     def _oa_status_is_ready_for_cache(self, payload: dict[str, object]) -> bool:
-        oa_status = payload.get("oa_status")
-        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            return isinstance(oa_status, dict) and str(oa_status.get("code", "")).strip() == "ready"
-        return not isinstance(oa_status, dict) or str(oa_status.get("code", "")).strip() == "ready"
+        return self._workbench_cache_read_payload_helper().oa_status_is_ready_for_cache(payload)
+
+    def _workbench_cache_read_payload_helper(self) -> WorkbenchCacheReadPayloadHelper:
+        helper = getattr(self, "_workbench_cache_read_payload_helper_instance", None)
+        if helper is None:
+            helper = WorkbenchCacheReadPayloadHelper(
+                is_mongo_oa_adapter=lambda: isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter),
+                cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild,
+                workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash,
+                current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version,
+                workbench_read_model_schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+                candidate_match_schema_version=CANDIDATE_MATCH_SCHEMA_VERSION,
+                workbench_matching_rules_version=WORKBENCH_MATCHING_RULES_VERSION,
+            )
+            self._workbench_cache_read_payload_helper_instance = helper
+        return helper
 
     def _cached_payload_needs_oa_invoice_offset_rebuild(self, payload: dict[str, object]) -> bool:
         applicant_names = {

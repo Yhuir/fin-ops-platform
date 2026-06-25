@@ -6346,6 +6346,94 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_cache_read_payload_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_cache_read_payload_helper.py").read_text(encoding="utf-8")
+        can_use_source = _function_source(server_tree, server_source, "_can_use_cached_workbench_payload")
+        persist_source = _function_source(server_tree, server_source, "_can_persist_workbench_payload")
+        fallback_source = _function_source(server_tree, server_source, "_can_fallback_to_stale_workbench_payload")
+        status_source = _function_source(server_tree, server_source, "_oa_status_is_ready_for_cache")
+        builder_source = _function_source(server_tree, server_source, "_workbench_cache_read_payload_helper")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cache-read-payload-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_can_use_cached_workbench_payload", can_use_source),
+            ("_can_persist_workbench_payload", persist_source),
+            ("_can_fallback_to_stale_workbench_payload", fallback_source),
+            ("_oa_status_is_ready_for_cache", status_source),
+        ):
+            if "_workbench_cache_read_payload_helper()" not in method_source:
+                violations.append(f"Application {method_name} does not delegate to cache read payload helper")
+        combined_method_source = "\n".join([can_use_source, persist_source, fallback_source, status_source])
+        for forbidden in (
+            "workbench_candidate_snapshot_hash",
+            "WORKBENCH_READ_MODEL_SCHEMA_VERSION",
+            "CANDIDATE_MATCH_SCHEMA_VERSION",
+            "WORKBENCH_MATCHING_RULES_VERSION",
+            "oa_attachment_invoice_parser_version",
+            "summary",
+            "payload.get(\"oa_status\")",
+        ):
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns cache/read payload detail: {forbidden}")
+        for marker in (
+            "class WorkbenchCacheReadPayloadHelper",
+            "def can_use_cached_payload(",
+            "def can_persist_payload(",
+            "def can_fallback_to_stale_payload(",
+            "def oa_status_is_ready_for_cache(",
+            "workbench_candidate_snapshot_hash",
+            "workbench_read_model_schema_version",
+            "candidate_match_schema_version",
+            "workbench_matching_rules_version",
+            "oa_attachment_invoice_parser_version",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchCacheReadPayloadHelper missing marker: {marker}")
+        for marker in (
+            "WorkbenchCacheReadPayloadHelper(",
+            "is_mongo_oa_adapter=lambda: isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter)",
+            "cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild",
+            "workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash",
+            "current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version",
+            "workbench_read_model_schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION",
+            "candidate_match_schema_version=CANDIDATE_MATCH_SCHEMA_VERSION",
+            "workbench_matching_rules_version=WORKBENCH_MATCHING_RULES_VERSION",
+        ):
+            if marker not in builder_source:
+                violations.append(f"Application cache helper missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchCacheReadPayloadHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-cache-read-payload-helper-extraction",
+            "WorkbenchCacheReadPayloadHelper",
+            "OA invoice offset rebuild",
+            "offset rebuild helper",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench cache read payload helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
