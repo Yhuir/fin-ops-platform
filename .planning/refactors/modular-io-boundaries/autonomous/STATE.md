@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `oa-pending-payment-route-callback-collapse-selected`
+Current state: `oa-pending-payment-route-owner-local-closure-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:oa-pending-payment-route-owner-audit` as `analysis-closed` in `analysis/server-py-oa-pending-payment-route-owner-audit-2026-06-25.md`. OA pending payment callbacks in `server.py` are thin auth/body/error/JSON/status wrappers around `OaPendingPaymentApiRoutes`, `OaPendingPaymentReadModelService` and `OaPendingPaymentCommandService`. T0 selected full OA pending payment route callback collapse next.
+Completed `server-py:oa-pending-payment-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-oa-pending-payment-route-callback-collapse-2026-06-25.md`. `/api/oa-pending-payments*` HTTP mapping now lives in `OaPendingPaymentApiRoutes.route(...)`, with explicit read-session/write-auth/body/JSON/error ports, and app-owned callbacks were removed. T0 selected OA pending payment route-owner local closure audit next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:oa-pending-payment-route-owner-audit`
+`server-py:oa-pending-payment-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:oa-pending-payment-route-callback-collapse`
+`server-py:oa-pending-payment-route-owner-local-closure-audit`

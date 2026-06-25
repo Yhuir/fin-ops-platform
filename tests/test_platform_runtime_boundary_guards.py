@@ -1625,6 +1625,54 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_oa_pending_payment_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        route_path = APP_ROOT / "routes_oa_pending_payments.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        route_class = _class_source(route_tree, route_source, "OaPendingPaymentApiRoutes")
+        violations: list[str] = []
+
+        for required in (
+            "def route(",
+            "/api/oa-pending-payments/rows",
+            "/api/oa-pending-payments/filter-options",
+            "/api/oa-pending-payments/bank-transaction-candidates",
+            "/api/oa-pending-payments/oa/",
+            "/api/oa-pending-payments/bank-transactions/",
+            "/api/oa-pending-payments/invoices/",
+            "/api/oa-pending-payments/rows/",
+            "/api/oa-pending-payments/confirm-paid",
+            "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+            "/api/oa-pending-payments/link-bank-transactions",
+            "def _json_read(",
+            "def _json_write(",
+            "def _command_unavailable(",
+        ):
+            if required not in route_class:
+                violations.append(f"OA pending payment route owner is missing {required}")
+        if "_oa_pending_payment_routes().route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("Application does not dispatch OA pending payment routes through route owner")
+        for removed_handler in (
+            "_handle_api_oa_pending_payments_rows",
+            "_handle_api_oa_pending_payments_filter_options",
+            "_handle_api_oa_pending_payments_bank_transaction_candidates",
+            "_handle_api_oa_pending_payments_oa_detail",
+            "_handle_api_oa_pending_payments_bank_transaction_detail",
+            "_handle_api_oa_pending_payments_invoice_detail",
+            "_handle_api_oa_pending_payments_relation_details",
+            "_handle_api_oa_pending_payments_confirm_paid",
+            "_handle_api_oa_pending_payments_auto_reconcile_bank_transactions",
+            "_handle_api_oa_pending_payments_link_bank_transactions",
+            "_oa_pending_payment_sql_payload_status",
+        ):
+            if _function_source(server_tree, server_source, removed_handler):
+                violations.append(f"server.py still owns OA pending payment route callback {removed_handler}")
+
+        self.assertEqual(violations, [])
+
     def test_downstream_relation_read_models_use_workbench_relation_distribution(self) -> None:
         downstream_paths = {
             SERVICES_ROOT / "search_pending_sql_projection.py",

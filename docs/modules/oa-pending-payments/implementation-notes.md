@@ -3,6 +3,15 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-25 - route callback collapse
+
+- 目标：把 `/api/oa-pending-payments*` HTTP dispatch 从 `Application` 移入 `OaPendingPaymentApiRoutes.route(...)`。
+- 改动：route owner 新增 `route(...)` 和 `configure_platform_ports(...)`；通过显式 read-session、write-auth、body loader、JSON response 和 error response ports 处理 rows/filter-options/detail/candidates/confirm-paid/auto-reconcile/link-bank；`server.py` 删除 `_handle_api_oa_pending_payments*` callbacks 和 `_oa_pending_payment_sql_payload_status(...)`。
+- 保持不变：read-model freshness/source-version/detail unavailable 仍由 `OaPendingPaymentReadModelService` 负责；自动匹配、写回和支出流水关联仍由 `OaPendingPaymentCommandService` 负责；API payload 和业务语义不变。
+- 测试覆盖：更新 `tests/test_oa_pending_payment_api.py`，不再依赖被删除的 app callback 名称；新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_oa_pending_payment_routes_use_route_owner` 防止 callback 回流。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_oa_pending_payments.py backend/src/fin_ops_platform/app/server.py tests/test_oa_pending_payment_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_oa_pending_payment_routes_use_route_owner -v`。
+- 未测风险：真实 PostgreSQL/OA/worker/App Status/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-25 - route-owner audit
 
 - 目标：审计 `/api/oa-pending-payments*` 在 `server.py` 中的剩余 HTTP callback 是否仍承载业务/read-model/command 逻辑。

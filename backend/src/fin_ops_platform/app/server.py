@@ -1933,30 +1933,10 @@ class Application:
             oa_reverse_response = self._input_invoice_usage_oa_reverse_routes().route(method, route_path, query, body, headers)
             if oa_reverse_response is not None:
                 return oa_reverse_response
-        if method == "GET" and route_path == "/api/oa-pending-payments/rows":
-            return self._handle_api_oa_pending_payments_rows(query, headers)
-        if method == "GET" and route_path == "/api/oa-pending-payments/filter-options":
-            return self._handle_api_oa_pending_payments_filter_options(query, headers)
-        if method == "GET" and route_path == "/api/oa-pending-payments/bank-transaction-candidates":
-            return self._handle_api_oa_pending_payments_bank_transaction_candidates(query, headers)
-        if method == "GET" and route_path.startswith("/api/oa-pending-payments/oa/") and route_path.endswith("/detail"):
-            oa_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_oa_detail(oa_id, headers)
-        if method == "GET" and route_path.startswith("/api/oa-pending-payments/bank-transactions/") and route_path.endswith("/detail"):
-            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_bank_transaction_detail(bank_transaction_id, headers)
-        if method == "GET" and route_path.startswith("/api/oa-pending-payments/invoices/") and route_path.endswith("/detail"):
-            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_invoice_detail(invoice_id, headers)
-        if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_relation_details(row_id, query, headers)
-        if method == "POST" and route_path == "/api/oa-pending-payments/confirm-paid":
-            return self._handle_api_oa_pending_payments_confirm_paid(body, headers)
-        if method == "POST" and route_path == "/api/oa-pending-payments/auto-reconcile-bank-transactions":
-            return self._handle_api_oa_pending_payments_auto_reconcile_bank_transactions(body, headers)
-        if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
-            return self._handle_api_oa_pending_payments_link_bank_transactions(body, headers)
+        if route_path.startswith("/api/oa-pending-payments"):
+            oa_pending_payment_response = self._oa_pending_payment_routes().route(method, route_path, query, body, headers)
+            if oa_pending_payment_response is not None:
+                return oa_pending_payment_response
         if route_path.startswith("/api/output-invoice-collections"):
             output_collection_response = self._output_invoice_collection_routes().route(method, route_path, query, body, headers)
             if output_collection_response is not None:
@@ -7078,14 +7058,23 @@ class Application:
     def _oa_pending_payment_routes(self) -> OaPendingPaymentApiRoutes:
         routes = getattr(self, "_oa_pending_payment_api_routes", None)
         if isinstance(routes, OaPendingPaymentApiRoutes):
-            return routes
+            return self._configure_oa_pending_payment_route_ports(routes)
         routes = OaPendingPaymentApiRoutes(
             self._oa_pending_payment_service(),
             read_model_service=self._oa_pending_payment_read_model_service(),
             command_service=self._oa_pending_payment_command_service(),
         )
-        self._oa_pending_payment_api_routes = routes
-        return routes
+        self._oa_pending_payment_api_routes = self._configure_oa_pending_payment_route_ports(routes)
+        return self._oa_pending_payment_api_routes
+
+    def _configure_oa_pending_payment_route_ports(self, routes: OaPendingPaymentApiRoutes) -> OaPendingPaymentApiRoutes:
+        return routes.configure_platform_ports(
+            resolve_read_session=self._resolve_oa_pending_payment_read_session,
+            write_auth_context=self._workbench_write_auth_context,
+            json_response=self._json_response,
+            load_json_body=self._load_json_body,
+            error_response=self._oa_pending_payment_error_response,
+        )
 
     def _oa_payment_status_repository(self):
         override = getattr(self, "_oa_payment_status_repository_override", None)
@@ -7196,187 +7185,6 @@ class Application:
         )
         self._oa_pending_payment_read_model_service = service
         return service
-
-    def _handle_api_oa_pending_payments_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            status_code, payload = self._oa_pending_payment_routes().rows(query)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_oa_pending_payments_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            status_code, payload = self._oa_pending_payment_routes().filter_options(query)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(status_code, payload)
-
-    def _handle_api_oa_pending_payments_oa_detail(self, oa_id: str, headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_pending_payment_routes().oa_detail(oa_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
-
-    def _handle_api_oa_pending_payments_bank_transaction_detail(self, bank_transaction_id: str, headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_pending_payment_routes().bank_transaction_detail(bank_transaction_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
-
-    def _handle_api_oa_pending_payments_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_pending_payment_routes().invoice_detail(invoice_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
-
-    def _handle_api_oa_pending_payments_relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_pending_payment_routes().relation_details(row_id, query)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
-
-    def _handle_api_oa_pending_payments_bank_transaction_candidates(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_pending_payment_routes().bank_transaction_candidates(query)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        except RuntimeError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": {
-                        "code": "oa_pending_payment_command_unavailable",
-                        "message": str(exc),
-                        "details": {},
-                    }
-                },
-            )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_oa_pending_payments_confirm_paid(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        auth_context = self._workbench_write_auth_context(headers)
-        if isinstance(auth_context, Response):
-            return auth_context
-        actor_id, _tenant_id = auth_context
-        try:
-            result = self._oa_pending_payment_routes().confirm_paid(payload, actor_id=actor_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        except RuntimeError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": {
-                        "code": "oa_pending_payment_command_unavailable",
-                        "message": str(exc),
-                        "details": {},
-                    }
-                },
-            )
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_oa_pending_payments_auto_reconcile_bank_transactions(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        auth_context = self._workbench_write_auth_context(headers)
-        if isinstance(auth_context, Response):
-            return auth_context
-        actor_id, _tenant_id = auth_context
-        try:
-            result = self._oa_pending_payment_routes().auto_reconcile_bank_transactions(payload, actor_id=actor_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        except RuntimeError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": {
-                        "code": "oa_pending_payment_command_unavailable",
-                        "message": str(exc),
-                        "details": {},
-                    }
-                },
-            )
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_oa_pending_payments_link_bank_transactions(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        auth_context = self._workbench_write_auth_context(headers)
-        if isinstance(auth_context, Response):
-            return auth_context
-        actor_id, _tenant_id = auth_context
-        try:
-            result = self._oa_pending_payment_routes().link_bank_transactions(payload, actor_id=actor_id)
-        except OaPendingPaymentError as exc:
-            return self._oa_pending_payment_error_response(exc)
-        except RuntimeError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": {
-                        "code": "oa_pending_payment_command_unavailable",
-                        "message": str(exc),
-                        "details": {},
-                    }
-                },
-            )
-        return self._json_response(HTTPStatus.OK, result)
-
-    @staticmethod
-    def _oa_pending_payment_sql_payload_status(payload: dict[str, object]) -> HTTPStatus:
-        return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
 
     def _oa_pending_payment_error_response(self, exc: OaPendingPaymentError) -> Response:
         payload: dict[str, object] = {

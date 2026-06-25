@@ -10,7 +10,7 @@ import unittest
 from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application, Response, build_application
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -20,7 +20,7 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
+from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     OA_PENDING_PAYMENT_FILTER_FIELDS,
     _oa_pending_payment_read_model_record,
@@ -737,7 +737,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._oa_pending_payment_sql_read_repository = None
         app._oa_pending_payment_api_routes = _read_model_routes(repository=None, queue=queue)
 
-        response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 202)
@@ -768,7 +768,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         )()
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
-        response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 202)
@@ -810,7 +810,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             },
         )
 
-        response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 202)
@@ -832,7 +832,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         )()
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
-        response = app._handle_api_oa_pending_payments_filter_options({"month": ["2026-05"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.filter_options({"month": ["2026-05"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 202)
@@ -867,7 +867,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             query_service=_empty_query_service(),
         )
 
-        response = app._handle_api_oa_pending_payments_rows({"page": ["1"], "page_size": ["50"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"page": ["1"], "page_size": ["50"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -912,7 +912,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             source_versions_provider=app._oa_pending_payment_expected_source_versions,
         )
 
-        response = app._handle_api_oa_pending_payments_rows({"page": ["1"], "page_size": ["50"]})
+        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"page": ["1"], "page_size": ["50"]}))
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -1027,16 +1027,14 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row())
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
-        oa_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
-        bank_response = app._handle_api_oa_pending_payments_bank_transaction_detail("bank-api")
-        invoice_response = app._handle_api_oa_pending_payments_invoice_detail("inv-api")
-        relation_response = app._handle_api_oa_pending_payments_relation_details(
-            "oa-payment-row-api",
-            {"kind": ["invoice"]},
+        oa_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.oa_detail("oa-api"))
+        bank_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.bank_transaction_detail("bank-api"))
+        invoice_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.invoice_detail("inv-api"))
+        relation_response = _json_test_response_for_payload(
+            app._oa_pending_payment_api_routes.relation_details("oa-payment-row-api", {"kind": ["invoice"]})
         )
-        oa_relation_response = app._handle_api_oa_pending_payments_relation_details(
-            "oa-payment-row-api",
-            {"kind": ["oa"]},
+        oa_relation_response = _json_test_response_for_payload(
+            app._oa_pending_payment_api_routes.relation_details("oa-payment-row-api", {"kind": ["oa"]})
         )
 
         self.assertEqual(oa_response.status_code, 200)
@@ -1063,12 +1061,12 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row(), refresh_status="stale")
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
-        stale_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
+        stale_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.oa_detail("oa-api"))
         stale_payload = json.loads(stale_response.body)
 
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=None, has_scope=False)
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
-        missing_scope_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
+        missing_scope_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.oa_detail("oa-api"))
         missing_scope_payload = json.loads(missing_scope_response.body)
 
         self.assertEqual(stale_response.status_code, 202)
@@ -1096,17 +1094,22 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             queue=app._runtime_repositories.queue_repository,
         )
 
-        missing_response = app._handle_api_oa_pending_payments_oa_detail("missing-oa")
+        try:
+            missing_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.oa_detail("missing-oa"))
+        except Exception as exc:
+            missing_response = _oa_pending_payment_error_test_response(exc)
 
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row())
         app._oa_pending_payment_api_routes = _read_model_routes(
             repository=app._oa_pending_payment_sql_read_repository,
             queue=app._runtime_repositories.queue_repository,
         )
-        invalid_kind_response = app._handle_api_oa_pending_payments_relation_details(
-            "oa-payment-row-api",
-            {"kind": ["bad"]},
-        )
+        try:
+            invalid_kind_response = _json_test_response_for_payload(
+                app._oa_pending_payment_api_routes.relation_details("oa-payment-row-api", {"kind": ["bad"]})
+            )
+        except Exception as exc:
+            invalid_kind_response = _oa_pending_payment_error_test_response(exc)
 
         self.assertEqual(missing_response.status_code, 404)
         self.assertEqual(json.loads(missing_response.body)["error"]["code"], "oa_not_found")
@@ -1204,6 +1207,30 @@ def _read_model_routes(
             query_service=query_service,  # type: ignore[arg-type]
             source_versions_provider=source_versions_provider or oa_pending_payment_source_versions,  # type: ignore[arg-type]
         ),
+    )
+
+
+def _json_test_response(status_code: HTTPStatus, payload: dict[str, Any]) -> Response:
+    return Response(status_code=int(status_code), body=json.dumps(payload, ensure_ascii=False))
+
+
+def _json_test_response_for_payload(payload: dict[str, Any]) -> Response:
+    status_code = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+    return _json_test_response(status_code, payload)
+
+
+def _oa_pending_payment_error_test_response(exc: Exception) -> Response:
+    if not isinstance(exc, OaPendingPaymentError):
+        raise exc
+    return _json_test_response(
+        exc.status_code,
+        {
+            "error": {
+                "code": exc.error_code,
+                "message": str(exc),
+                "details": exc.details,
+            }
+        },
     )
 
 
