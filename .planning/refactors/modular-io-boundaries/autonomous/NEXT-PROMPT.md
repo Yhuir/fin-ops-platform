@@ -1,61 +1,59 @@
 # Next Prompt
 
-Continue after `server-py:turnover-ledger-read-export-route-callback-collapse`.
+Continue after `server-py:turnover-ledger-write-route-callback-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:turnover-ledger-read-export-route-callback-collapse`.
-- Row379 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-read-export-route-callback-collapse-2026-06-25.md`.
-- Turnover ledger read/export/GET HTTP mapping now lives in `TurnoverLedgerApiRoutes.route(...)`.
-- `server.py` no longer defines the migrated read/export GET callbacks.
-- Mutation callbacks remain in `Application` for a dedicated write-boundary audit.
+- Last completed boundary: `server-py:turnover-ledger-write-route-callback-audit`.
+- Row380 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-write-route-callback-audit-2026-06-25.md`.
+- Turnover ledger read/export/GET HTTP mapping already lives in `TurnoverLedgerApiRoutes.route(...)`.
+- Remaining turnover ledger mutation callbacks are still in `Application`.
+- The audit selected tag-selection PUT as the smallest next implementation slice.
 - Turnover ledger module/global closure and production PostgreSQL/worker/App Status/browser/admin/write evidence are not claimed.
 
 ## Previous Prompt Completion
 
-`server-py:turnover-ledger-read-export-route-callback-collapse` is complete:
+`server-py:turnover-ledger-write-route-callback-audit` is complete:
 
-- added `TurnoverLedgerApiRoutes.route(...)`;
-- moved list/grouped ledger GET, export preview/export GET, tag-selection GET, relation detail GET and relation extra GET HTTP mapping into the route owner;
-- injected `json_response`, `export_response` and `tag_selection_provider` as explicit route ports;
-- removed migrated app-owned GET callbacks and query helpers from `server.py`;
-- added `test_turnover_ledger_read_export_routes_use_route_owner`;
-- updated the export limit API test to inject failures through the new route-owner boundary;
-- verified targeted read facade, API and static Guard coverage locally.
+- audited tag-selection PUT, bank-row-tags batch POST, relation extra PUT, relation confirm POST, closure confirm POST, closure withdraw POST and relation withdraw POST;
+- confirmed existing request-boundary facades already own most business normalization, affected-months, stale/idempotency and legacy fallback behavior;
+- selected only `PUT /api/turnover-ledger/tag-selection` for the next route callback collapse;
+- deferred bank-row-tags, relation-extra, confirm, closure and withdraw groups to later slices.
 
 ## Next Boundary
 
-`server-py:turnover-ledger-write-route-callback-audit`
+`server-py:turnover-ledger-tag-selection-write-route-callback-collapse`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-read-export-route-callback-collapse-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-turnover-ledger-write-route-callback-audit-2026-06-25.md`
    - `docs/modules/turnover-ledger/README.md`
    - `docs/modules/turnover-ledger/state-machine.md`
    - `docs/modules/turnover-ledger/tests.md`
    - `backend/src/fin_ops_platform/app/server.py`
    - `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
-   - `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
    - `tests/test_turnover_ledger_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-3. Audit only the remaining turnover ledger PUT/POST callbacks:
-   - tag-selection PUT;
-   - bank-row-tags batch POST;
-   - relation extra PUT;
-   - relation confirm POST;
-   - closure confirm POST;
-   - closure withdraw POST;
-   - relation withdraw POST.
-4. Decide the smallest next implementation boundary: direct route-owner callback collapse, or first extracting a service/request boundary if route code would otherwise own business side effects.
+3. Implement only `PUT /api/turnover-ledger/tag-selection` route-owner collapse:
+   - move session/body/actor/tenant/idempotency/error mapping into `TurnoverLedgerApiRoutes`;
+   - inject explicit ports from `Application`;
+   - remove `_handle_api_turnover_ledger_tag_selection_update(...)`;
+   - keep all other turnover ledger mutation callbacks unchanged.
+4. Update tests:
+   - adapt source-inspect tag-selection tests from `Application._handle_api_turnover_ledger_tag_selection_update` to the route-owner method;
+   - update platform Guard so tag-selection PUT callback is removed while other mutation callbacks remain;
+   - run targeted tag-selection API regressions and relevant Guard tests.
 5. Update analysis/state/queue/next prompt and commit/push if verification passes.
 
 ## Stop Gates
 
 - Do not run production validation or mutation.
-- Do not migrate write callbacks during the audit slice unless the audit explicitly selects and scopes an implementation boundary.
+- Do not migrate bank-row-tags, relation-extra, confirm, closure or withdraw callbacks in this slice.
 - Do not change turnover ledger write behavior, idempotency, stale preconditions, operation barrier targets, Workbench relation command boundaries, export limits or freshness semantics.
-- Do not broaden into unrelated domains.
+- Do not pass the whole `Application` into `TurnoverLedgerApiRoutes`.
+- Do not make route owner import `app.auth` or directly parse HTTP cookie/header internals.

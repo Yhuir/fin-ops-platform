@@ -1,5 +1,16 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-25 - write route callback audit
+
+- 目标：执行 `server-py:turnover-ledger-write-route-callback-audit`，审计 read/export GET collapse 后剩余的 `/api/turnover-ledger*` 写路径 callbacks。
+- 影响范围：tag-selection PUT、bank-row-tags batch POST、relation extra PUT、relation confirm POST、closure confirm POST、closure withdraw POST、relation withdraw POST；本轮不改运行时代码。
+- 关键决策：下一实现边界选择 `server-py:turnover-ledger-tag-selection-write-route-callback-collapse`。tag-selection PUT 是最薄的写 callback，只做 session/body/actor/tenant/idempotency/error 映射并委托 `TurnoverLedgerTagSelectionRequestBoundaryFacade`；bank-row-tags、relation-extra、confirm、closure、withdraw 涉及目标校验、stale precondition、affected months、Workbench relation command 或 operation visibility，后续分组迁移。
+- 文档影响：新增 modular IO write route callback audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和本实施记录；外部往来状态机定义不变。
+- 测试覆盖：本轮为 analysis-only，未改代码；下一实现边界需更新 tag-selection source-inspect tests、platform Guard 和 API 回归。
+- 验证命令：提交前运行 `bash scripts/verify.sh docs` 与 `git diff --check`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实 Browser、admin/write evidence 和生产写入闭环仍未执行；mutation callbacks 仍未完成迁移。
+- 后续事项：执行 `server-py:turnover-ledger-tag-selection-write-route-callback-collapse`。
+
 ## 2026-06-25 - read/export GET route-owner collapse
 
 - 目标：执行 `server-py:turnover-ledger-read-export-route-callback-collapse`，把外部往来 read/export/GET HTTP mapping 从 `server.py` 收到 `TurnoverLedgerApiRoutes.route(...)`。
