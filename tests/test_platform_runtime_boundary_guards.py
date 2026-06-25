@@ -5349,6 +5349,86 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_raw_payload_assembler_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        assembler_source = (SERVICES_ROOT / "workbench_raw_payload_assembler.py").read_text(encoding="utf-8")
+        build_raw_source = _function_source(server_tree, server_source, "_build_raw_workbench_payload")
+        assembler_builder_source = _function_source(server_tree, server_source, "_workbench_raw_payload_assembler")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-assembler-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_live_workbench_service.has_rows_for_month",
+            "_sync_live_auto_pair_relations(",
+            "_build_live_workbench_row_payload(",
+            "_build_oa_workbench_row_payload(",
+            "_sync_oa_invoice_offset_auto_pair_relations(",
+            "_repair_active_relations_with_oa_attachment_context(",
+            "_apply_pair_relations_to_payload(",
+            "_workbench_override_service.apply_to_payload(",
+        ):
+            if forbidden in build_raw_source:
+                violations.append(f"Application _build_raw_workbench_payload still owns raw assembler step: {forbidden}")
+        if "return self._workbench_raw_payload_assembler().build(" not in build_raw_source:
+            violations.append("Application _build_raw_workbench_payload does not delegate to WorkbenchRawPayloadAssembler")
+        for marker in (
+            "class WorkbenchRawPayloadAssembler",
+            "has_live_rows_for_month",
+            "sync_live_auto_pair_relations",
+            "build_live_workbench_row_payload",
+            "build_oa_workbench_row_payload",
+            "sync_oa_invoice_offset_auto_pair_relations",
+            "repair_active_relations_with_oa_attachment_context",
+            "apply_pair_relations_to_payload",
+            "apply_overrides_to_payload",
+            "supplement_missing_rows=supplement_missing_pair_relation_rows",
+        ):
+            if marker not in assembler_source:
+                violations.append(f"WorkbenchRawPayloadAssembler missing marker: {marker}")
+        for marker in (
+            "WorkbenchRawPayloadAssembler(",
+            "has_live_rows_for_month=self._live_workbench_service.has_rows_for_month",
+            "sync_live_auto_pair_relations=self._sync_live_auto_pair_relations",
+            "build_live_workbench_row_payload=self._build_live_workbench_row_payload",
+            "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
+            "sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations",
+            "repair_active_relations_with_oa_attachment_context=self._repair_active_relations_with_oa_attachment_context",
+            "apply_pair_relations_to_payload=self._apply_pair_relations_to_payload",
+            "apply_overrides_to_payload=self._workbench_override_service.apply_to_payload",
+        ):
+            if marker not in assembler_builder_source:
+                violations.append(f"Application raw assembler builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in assembler_source:
+                violations.append(f"WorkbenchRawPayloadAssembler gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-raw-payload-assembler-extraction",
+            "WorkbenchRawPayloadAssembler",
+            "_build_raw_workbench_payload",
+            "OA retention internals",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench raw payload assembler analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

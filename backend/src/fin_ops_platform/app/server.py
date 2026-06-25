@@ -469,6 +469,7 @@ from fin_ops_platform.services.workbench_legacy_api_sql_read_provider import Wor
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_raw_payload_assembler import WorkbenchRawPayloadAssembler
 from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
 from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
     WorkbenchRefreshStatusPayloadProvider,
@@ -12729,18 +12730,26 @@ class Application:
         *,
         supplement_missing_pair_relation_rows: bool = True,
     ) -> dict[str, object]:
-        if self._live_workbench_service.has_rows_for_month(month):
-            self._sync_live_auto_pair_relations()
-            payload = self._build_live_workbench_row_payload(month)
-        else:
-            payload = self._build_oa_workbench_row_payload(month)
-        self._sync_oa_invoice_offset_auto_pair_relations(payload)
-        self._repair_active_relations_with_oa_attachment_context(payload)
-        paired_payload = self._apply_pair_relations_to_payload(
-            payload,
-            supplement_missing_rows=supplement_missing_pair_relation_rows,
+        return self._workbench_raw_payload_assembler().build(
+            month,
+            supplement_missing_pair_relation_rows=supplement_missing_pair_relation_rows,
         )
-        return self._workbench_override_service.apply_to_payload(paired_payload)
+
+    def _workbench_raw_payload_assembler(self) -> WorkbenchRawPayloadAssembler:
+        assembler = getattr(self, "_workbench_raw_payload_assembler_instance", None)
+        if assembler is None:
+            assembler = WorkbenchRawPayloadAssembler(
+                has_live_rows_for_month=self._live_workbench_service.has_rows_for_month,
+                sync_live_auto_pair_relations=self._sync_live_auto_pair_relations,
+                build_live_workbench_row_payload=self._build_live_workbench_row_payload,
+                build_oa_workbench_row_payload=self._build_oa_workbench_row_payload,
+                sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations,
+                repair_active_relations_with_oa_attachment_context=self._repair_active_relations_with_oa_attachment_context,
+                apply_pair_relations_to_payload=self._apply_pair_relations_to_payload,
+                apply_overrides_to_payload=self._workbench_override_service.apply_to_payload,
+            )
+            self._workbench_raw_payload_assembler_instance = assembler
+        return assembler
 
     def _build_live_workbench_row_payload(self, month: str) -> dict[str, object]:
         live_payload = self._live_workbench_service.get_workbench(month)
