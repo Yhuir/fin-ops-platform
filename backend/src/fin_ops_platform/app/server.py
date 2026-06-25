@@ -435,6 +435,7 @@ from fin_ops_platform.services.turnover_relation_service import (
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+from fin_ops_platform.services.workbench_api_payload_assembler import WorkbenchApiPayloadAssembler
 from fin_ops_platform.services.workbench_candidate_match_service import (
     CANDIDATE_MATCH_SCHEMA_VERSION,
     WorkbenchCandidateMatchService,
@@ -12106,16 +12107,20 @@ class Application:
         return []
 
     def _build_api_workbench_payload(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
-        read_model = self._get_or_build_workbench_read_model(
-            month,
-            visibility_key=visibility_key,
-            ensure_candidate_matches=True,
-        )
-        payload = read_model.get("payload")
-        retained = self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
-        self._append_etc_invoice_summary_rows(retained)
-        retained["invoice_inventory"] = self._build_invoice_inventory_payload(retained)
-        return self._derive_tags_for_grouped_payload(retained)
+        return self._workbench_api_payload_assembler().build(month, visibility_key=visibility_key)
+
+    def _workbench_api_payload_assembler(self) -> WorkbenchApiPayloadAssembler:
+        assembler = getattr(self, "_workbench_api_payload_assembler_instance", None)
+        if assembler is None:
+            assembler = WorkbenchApiPayloadAssembler(
+                read_model_provider=self._get_or_build_workbench_read_model,
+                apply_oa_retention=self._apply_oa_retention_to_grouped_payload,
+                append_etc_invoice_summary_rows=self._append_etc_invoice_summary_rows,
+                build_invoice_inventory=self._build_invoice_inventory_payload,
+                derive_tags=self._derive_tags_for_grouped_payload,
+            )
+            self._workbench_api_payload_assembler_instance = assembler
+        return assembler
 
     def _build_invoice_inventory_payload(self, grouped_payload: dict[str, object]) -> dict[str, int]:
         stats = InvoiceInventoryStatsService().build_stats(

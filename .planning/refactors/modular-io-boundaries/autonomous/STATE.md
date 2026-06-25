@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-legacy-api-sql-read-provider-extraction-closed`
+Current state: `workbench-api-payload-assembler-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-legacy-api-sql-read-provider-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-legacy-api-sql-read-provider-extraction-2026-06-25.md`. `WorkbenchLegacyApiSqlReadProvider` now owns legacy `/api/workbench` SQL read-model view lookup, miss/stale/OA-sync payload mapping and refresh enqueue orchestration; raw/grouped payload builder behavior remains deferred. The next local boundary is `server-py:workbench-legacy-api-payload-builder-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-api-payload-assembler-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-api-payload-assembler-extraction-2026-06-25.md`. `WorkbenchApiPayloadAssembler` now owns grouped payload post-processing orchestration for legacy Workbench API payloads; raw payload builder, OA retention internals and tag derivation internals remain deferred. The next local boundary is `server-py:workbench-raw-payload-builder-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

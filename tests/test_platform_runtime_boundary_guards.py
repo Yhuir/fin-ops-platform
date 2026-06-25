@@ -5277,6 +5277,78 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_api_payload_assembler_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        assembler_source = (SERVICES_ROOT / "workbench_api_payload_assembler.py").read_text(encoding="utf-8")
+        build_payload_source = _function_source(server_tree, server_source, "_build_api_workbench_payload")
+        assembler_builder_source = _function_source(server_tree, server_source, "_workbench_api_payload_assembler")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-api-payload-assembler-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_get_or_build_workbench_read_model(",
+            "_apply_oa_retention_to_grouped_payload(",
+            "_append_etc_invoice_summary_rows(",
+            "_build_invoice_inventory_payload(",
+            "_derive_tags_for_grouped_payload(",
+        ):
+            if forbidden in build_payload_source:
+                violations.append(f"Application _build_api_workbench_payload still owns assembler step: {forbidden}")
+        if "return self._workbench_api_payload_assembler().build(month, visibility_key=visibility_key)" not in build_payload_source:
+            violations.append("Application _build_api_workbench_payload does not delegate to WorkbenchApiPayloadAssembler")
+        for marker in (
+            "class WorkbenchApiPayloadAssembler",
+            "read_model_provider",
+            "apply_oa_retention",
+            "append_etc_invoice_summary_rows",
+            "build_invoice_inventory",
+            "derive_tags",
+            "ensure_candidate_matches=True",
+            "retained[\"invoice_inventory\"]",
+        ):
+            if marker not in assembler_source:
+                violations.append(f"WorkbenchApiPayloadAssembler missing marker: {marker}")
+        for marker in (
+            "WorkbenchApiPayloadAssembler(",
+            "read_model_provider=self._get_or_build_workbench_read_model",
+            "apply_oa_retention=self._apply_oa_retention_to_grouped_payload",
+            "append_etc_invoice_summary_rows=self._append_etc_invoice_summary_rows",
+            "build_invoice_inventory=self._build_invoice_inventory_payload",
+            "derive_tags=self._derive_tags_for_grouped_payload",
+        ):
+            if marker not in assembler_builder_source:
+                violations.append(f"Application assembler builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in assembler_source:
+                violations.append(f"WorkbenchApiPayloadAssembler gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-api-payload-assembler-extraction",
+            "WorkbenchApiPayloadAssembler",
+            "raw payload builder",
+            "_build_raw_workbench_payload",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench API payload assembler analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
