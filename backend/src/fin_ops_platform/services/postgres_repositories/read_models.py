@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date
 from datetime import datetime
@@ -61,7 +62,7 @@ def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
     if not params_seq:
         return 0
     execute_many_values = getattr(connection, "execute_many_values", None)
-    if callable(execute_many_values) and _should_execute_many_values(sql):
+    if callable(execute_many_values) and _should_execute_many_values(sql) and _supports_execute_many_values_params(params_seq):
         return int(execute_many_values(sql, params_seq) or 0)
     execute_many = getattr(connection, "execute_many", None)
     if callable(execute_many):
@@ -75,6 +76,10 @@ def _execute_many(connection: Any, sql: str, params_seq: list[Any]) -> int:
 def _should_execute_many_values(sql: str) -> bool:
     normalized = " ".join(str(sql or "").lower().split())
     return "insert into read_model." in normalized
+
+
+def _supports_execute_many_values_params(params_seq: list[Any]) -> bool:
+    return all(not isinstance(params, Mapping) for params in params_seq)
 
 
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {

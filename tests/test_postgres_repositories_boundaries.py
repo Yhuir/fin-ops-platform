@@ -5,6 +5,7 @@ from pathlib import Path
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import _execute_many
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
@@ -88,6 +89,17 @@ class ValuesBulkConnection:
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         return None
+
+
+class MappingParamsBulkConnection(ValuesBulkConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.executed_many: list[tuple[str, list[dict]]] = []
+
+    def execute_many(self, sql: str, params_seq: list[dict]) -> int:
+        rows = list(params_seq)
+        self.executed_many.append((" ".join(sql.split()), rows))
+        return len(rows)
 
 
 class WorkbenchRelationWriteConnection(RecordingConnection):
@@ -297,6 +309,19 @@ def test_read_model_bulk_insert_prefers_multi_values_path() -> None:
     ]
     assert len(insert_calls) == 1
     assert len(insert_calls[0][1]) == 1
+
+
+def test_read_model_bulk_insert_with_mapping_params_uses_execute_many() -> None:
+    connection = MappingParamsBulkConnection()
+
+    _execute_many(
+        connection,
+        "insert into read_model.input_invoice_usage_rows(row_id, payload) values (%(row_id)s, %(payload)s)",
+        [{"row_id": "invoice-1", "payload": {"row_id": "invoice-1"}}],
+    )
+
+    assert len(connection.executed_many) == 1
+    assert connection.executed_many_values == []
 
 
 def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:
