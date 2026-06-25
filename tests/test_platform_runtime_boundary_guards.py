@@ -5392,7 +5392,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"WorkbenchRawPayloadAssembler missing marker: {marker}")
         for marker in (
             "WorkbenchRawPayloadAssembler(",
-            "has_live_rows_for_month=self._live_workbench_service.has_rows_for_month",
+            "has_live_rows_for_month=lambda month: self._live_workbench_service.has_rows_for_month(month)",
             "sync_live_auto_pair_relations=self._sync_live_auto_pair_relations",
             "build_live_workbench_row_payload=self._build_live_workbench_row_payload",
             "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
@@ -5464,7 +5464,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"WorkbenchLivePayloadBuilder missing marker: {marker}")
         for marker in (
             "WorkbenchLivePayloadBuilder(",
-            "get_live_workbench=self._live_workbench_service.get_workbench",
+            "get_live_workbench=lambda month: self._live_workbench_service.get_workbench(month)",
             "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
             "merge_live_with_oa_rows=self._merge_live_workbench_with_oa_rows",
             "serialize_value=self._serialize_value",
@@ -5494,6 +5494,83 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench live payload builder analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_oa_payload_builder_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder_source = (SERVICES_ROOT / "workbench_oa_payload_builder.py").read_text(encoding="utf-8")
+        oa_method_source = _function_source(server_tree, server_source, "_build_oa_workbench_row_payload")
+        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_oa_payload_builder")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-payload-builder-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_build_retained_all_oa_row_payload(",
+            "_workbench_api_routes.get_workbench(",
+            "_promote_oa_attachment_invoices_to_canonical(",
+            "_append_canonical_oa_attachment_invoice_rows(",
+            "MongoOAAdapter",
+            "SEARCH_MONTH_RE",
+        ):
+            if forbidden in oa_method_source:
+                violations.append(f"Application _build_oa_workbench_row_payload still owns OA builder step: {forbidden}")
+        if "return self._workbench_oa_payload_builder().build(month)" not in oa_method_source:
+            violations.append("Application _build_oa_workbench_row_payload does not delegate to WorkbenchOaPayloadBuilder")
+        for marker in (
+            "class WorkbenchOaPayloadBuilder",
+            "use_retained_all_payload",
+            "build_retained_all_oa_row_payload",
+            "get_workbench_payload",
+            "serialize_value",
+            "is_month_scope",
+            "promote_oa_attachment_invoices_to_canonical",
+            "append_canonical_oa_attachment_invoice_rows",
+        ):
+            if marker not in builder_source:
+                violations.append(f"WorkbenchOaPayloadBuilder missing marker: {marker}")
+        for marker in (
+            "WorkbenchOaPayloadBuilder(",
+            "use_retained_all_payload=lambda month: month == \"all\"",
+            "isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter)",
+            "build_retained_all_oa_row_payload=self._build_retained_all_oa_row_payload",
+            "get_workbench_payload=lambda month: self._workbench_api_routes.get_workbench(month)",
+            "serialize_value=self._serialize_value",
+            "is_month_scope=lambda month: bool(SEARCH_MONTH_RE.match(month))",
+            "promote_oa_attachment_invoices_to_canonical=self._promote_oa_attachment_invoices_to_canonical",
+            "append_canonical_oa_attachment_invoice_rows=self._append_canonical_oa_attachment_invoice_rows",
+        ):
+            if marker not in builder_source_in_app:
+                violations.append(f"Application OA builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in builder_source:
+                violations.append(f"WorkbenchOaPayloadBuilder gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-payload-builder-extraction",
+            "WorkbenchOaPayloadBuilder",
+            "_build_retained_all_oa_row_payload",
+            "retained all-OA",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA payload builder analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 

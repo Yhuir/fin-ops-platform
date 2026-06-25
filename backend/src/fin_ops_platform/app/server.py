@@ -452,6 +452,7 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_oa_payload_builder import WorkbenchOaPayloadBuilder
 from fin_ops_platform.services.workbench_auto_pair_conflict_relation_read_port import (
     WorkbenchAutoPairConflictRelationReadPort,
 )
@@ -12740,7 +12741,7 @@ class Application:
         assembler = getattr(self, "_workbench_raw_payload_assembler_instance", None)
         if assembler is None:
             assembler = WorkbenchRawPayloadAssembler(
-                has_live_rows_for_month=self._live_workbench_service.has_rows_for_month,
+                has_live_rows_for_month=lambda month: self._live_workbench_service.has_rows_for_month(month),
                 sync_live_auto_pair_relations=self._sync_live_auto_pair_relations,
                 build_live_workbench_row_payload=self._build_live_workbench_row_payload,
                 build_oa_workbench_row_payload=self._build_oa_workbench_row_payload,
@@ -12759,7 +12760,7 @@ class Application:
         builder = getattr(self, "_workbench_live_payload_builder_instance", None)
         if builder is None:
             builder = WorkbenchLivePayloadBuilder(
-                get_live_workbench=self._live_workbench_service.get_workbench,
+                get_live_workbench=lambda month: self._live_workbench_service.get_workbench(month),
                 build_oa_workbench_row_payload=self._build_oa_workbench_row_payload,
                 merge_live_with_oa_rows=self._merge_live_workbench_with_oa_rows,
                 serialize_value=self._serialize_value,
@@ -12768,14 +12769,23 @@ class Application:
         return builder
 
     def _build_oa_workbench_row_payload(self, month: str) -> dict[str, object]:
-        if month == "all" and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            payload = self._build_retained_all_oa_row_payload()
-        else:
-            payload = self._serialize_value(self._workbench_api_routes.get_workbench(month))
-            if SEARCH_MONTH_RE.match(month):
-                self._promote_oa_attachment_invoices_to_canonical({month})
-        self._append_canonical_oa_attachment_invoice_rows(payload)
-        return payload
+        return self._workbench_oa_payload_builder().build(month)
+
+    def _workbench_oa_payload_builder(self) -> WorkbenchOaPayloadBuilder:
+        builder = getattr(self, "_workbench_oa_payload_builder_instance", None)
+        if builder is None:
+            builder = WorkbenchOaPayloadBuilder(
+                use_retained_all_payload=lambda month: month == "all"
+                and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter),
+                build_retained_all_oa_row_payload=self._build_retained_all_oa_row_payload,
+                get_workbench_payload=lambda month: self._workbench_api_routes.get_workbench(month),
+                serialize_value=self._serialize_value,
+                is_month_scope=lambda month: bool(SEARCH_MONTH_RE.match(month)),
+                promote_oa_attachment_invoices_to_canonical=self._promote_oa_attachment_invoices_to_canonical,
+                append_canonical_oa_attachment_invoice_rows=self._append_canonical_oa_attachment_invoice_rows,
+            )
+            self._workbench_oa_payload_builder_instance = builder
+        return builder
 
     def _build_retained_all_oa_row_payload(self) -> dict[str, object]:
         cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
