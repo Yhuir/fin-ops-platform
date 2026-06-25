@@ -464,6 +464,7 @@ from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port
     WorkbenchConfirmLinkContextRelationReadPort,
 )
 from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
+from fin_ops_platform.services.workbench_legacy_api_sql_read_provider import WorkbenchLegacyApiSqlReadProvider
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
@@ -2717,7 +2718,7 @@ class Application:
         search: str | None = None,
     ) -> Response:
         current_month = month or "all"
-        sql_response = self._handle_api_workbench_from_sql_read_model(
+        sql_result = self._workbench_legacy_api_sql_read_provider().read(
             current_month,
             page=page,
             page_size=page_size,
@@ -2725,8 +2726,8 @@ class Application:
             source_kind=source_kind,
             search=search,
         )
-        if sql_response is not None:
-            return sql_response
+        if sql_result is not None:
+            return self._json_response(sql_result.status_code, sql_result.payload)
         if self._requires_sql_read_model_runtime():
             scope_key = self._workbench_read_model_scope_key(current_month)
             self._enqueue_workbench_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
@@ -2741,77 +2742,21 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, self._build_api_workbench_payload(current_month))
 
-    def _handle_api_workbench_from_sql_read_model(
-        self,
-        month: str,
-        *,
-        page: str | None = None,
-        page_size: str | None = None,
-        status: str | None = None,
-        source_kind: str | None = None,
-        search: str | None = None,
-    ) -> Response | None:
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        get_view = getattr(repository, "get_workbench_view", None)
-        if not callable(get_view):
-            return None
-        scope_key = self._workbench_read_model_scope_key(month)
-        view = get_view(
-            scope_key=scope_key,
-            page=page,
-            page_size=page_size,
-            status=status,
-            source_kind=source_kind,
-            search=search,
-        )
-        if not isinstance(view, dict):
-            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_miss")
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "read_model_status": "refreshing",
-                    "scope_key": scope_key,
-                    "message": "Workbench read model is missing; refresh has been enqueued.",
-                },
+    def _workbench_legacy_api_sql_read_provider(self) -> WorkbenchLegacyApiSqlReadProvider:
+        provider = getattr(self, "_workbench_legacy_api_sql_read_provider_instance", None)
+        if provider is None:
+            provider = WorkbenchLegacyApiSqlReadProvider(
+                repository_provider=lambda: getattr(self, "_workbench_sql_read_repository", None),
+                scope_key_for_month=self._workbench_read_model_scope_key,
+                enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
+                stale_reasons=self._workbench_sql_read_model_stale_reasons,
+                oa_sync_refresh_reason=self._workbench_sql_view_oa_sync_refresh_reason,
+                enqueue_oa_projection_sync=self._enqueue_oa_projection_sync_refresh,
+                current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version,
+                current_oa_projection_sync_version=self._current_oa_projection_sync_version,
             )
-        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        oa_sync_refresh_reason = self._workbench_sql_view_oa_sync_refresh_reason(view)
-        if oa_sync_refresh_reason:
-            self._enqueue_oa_projection_sync_refresh(
-                scope_key,
-                reason=oa_sync_refresh_reason,
-            )
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            payload["read_model_refresh_reason"] = oa_sync_refresh_reason
-            current_parser_version = self._current_oa_attachment_invoice_parser_version()
-            if current_parser_version:
-                payload["oa_attachment_invoice_parser_version"] = current_parser_version
-            current_projection_version = self._current_oa_projection_sync_version()
-            if current_projection_version:
-                payload["oa_projection_sync_version"] = current_projection_version
-            if view.get("generated_at"):
-                payload["read_model_generated_at"] = view.get("generated_at")
-            if isinstance(view.get("rows_page"), dict):
-                payload["rows_page"] = view.get("rows_page")
-            return self._json_response(HTTPStatus.ACCEPTED, payload)
-        refresh_status = str(view.get("refresh_status") or view.get("cache_status") or "fresh")
-        stale_reasons = self._workbench_sql_read_model_stale_reasons(
-            view.get("source_versions"),
-            scope_key=scope_key,
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-            payload["read_model_stale_reasons"] = stale_reasons
-        if refresh_status != "fresh":
-            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_stale")
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        if isinstance(view.get("rows_page"), dict):
-            payload["rows_page"] = view.get("rows_page")
-        return self._json_response(HTTPStatus.OK, payload)
+            self._workbench_legacy_api_sql_read_provider_instance = provider
+        return provider
 
     def _workbench_query_facade(self) -> WorkbenchQueryFacade:
         repository = getattr(self, "_workbench_sql_read_repository", None)

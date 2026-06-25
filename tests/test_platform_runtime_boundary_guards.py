@@ -5203,6 +5203,80 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_legacy_api_sql_read_provider_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        provider_source = (SERVICES_ROOT / "workbench_legacy_api_sql_read_provider.py").read_text(encoding="utf-8")
+        api_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench")
+        provider_builder_source = _function_source(server_tree, server_source, "_workbench_legacy_api_sql_read_provider")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-legacy-api-sql-read-provider-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "def _handle_api_workbench_from_sql_read_model",
+            "_handle_api_workbench_from_sql_read_model(",
+        ):
+            if forbidden in server_source:
+                violations.append(f"Application still owns Workbench legacy SQL read handler: {forbidden}")
+        for marker in (
+            "class WorkbenchLegacyApiSqlReadProvider",
+            "class WorkbenchLegacyApiSqlReadResult",
+            "def read(",
+            "get_workbench_view",
+            "api_miss",
+            "api_stale",
+            "read_model_refresh_reason",
+            "rows_page",
+        ):
+            if marker not in provider_source:
+                violations.append(f"WorkbenchLegacyApiSqlReadProvider missing marker: {marker}")
+        for marker in (
+            "sql_result = self._workbench_legacy_api_sql_read_provider().read(",
+            "return self._json_response(sql_result.status_code, sql_result.payload)",
+            "self._build_api_workbench_payload(current_month)",
+        ):
+            if marker not in api_handler_source:
+                violations.append(f"Application legacy workbench handler missing delegation marker: {marker}")
+        for marker in (
+            "WorkbenchLegacyApiSqlReadProvider(",
+            "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
+            "scope_key_for_month=self._workbench_read_model_scope_key",
+            "enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh",
+            "stale_reasons=self._workbench_sql_read_model_stale_reasons",
+            "oa_sync_refresh_reason=self._workbench_sql_view_oa_sync_refresh_reason",
+            "enqueue_oa_projection_sync=self._enqueue_oa_projection_sync_refresh",
+        ):
+            if marker not in provider_builder_source:
+                violations.append(f"Application legacy SQL provider builder missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+        ):
+            if forbidden in provider_source:
+                violations.append(f"WorkbenchLegacyApiSqlReadProvider gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-legacy-api-sql-read-provider-extraction",
+            "WorkbenchLegacyApiSqlReadProvider",
+            "legacy `/api/workbench` SQL fallback",
+            "raw payload builder",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench legacy SQL provider analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
