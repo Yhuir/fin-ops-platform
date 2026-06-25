@@ -13,6 +13,10 @@ from fin_ops_platform.services.turnover_ledger_export_service import (
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
+from fin_ops_platform.services.turnover_ledger_write_adapters import (
+    TurnoverLedgerRelationExtraRequestBoundaryError,
+    TurnoverLedgerWritePreconditionError,
+)
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryConflictError,
@@ -165,6 +169,9 @@ class TurnoverLedgerApiRoutes:
         tenant_id_provider: Callable[[Any], str] | None = None,
         tag_selection_write_boundary_provider: Callable[[], Any] | None = None,
         bank_row_tags_request_boundary_provider: Callable[[], Any] | None = None,
+        relation_extra_request_boundary_provider: Callable[[], Any] | None = None,
+        relation_extra_tenant_id_provider: Callable[[], str] | None = None,
+        write_precondition_error_payload: Callable[[TurnoverLedgerWritePreconditionError], dict[str, object]] | None = None,
     ) -> None:
         self._ledger_service = ledger_service
         self._relation_service = relation_service
@@ -180,6 +187,9 @@ class TurnoverLedgerApiRoutes:
         self._tenant_id_provider = tenant_id_provider
         self._tag_selection_write_boundary_provider = tag_selection_write_boundary_provider
         self._bank_row_tags_request_boundary_provider = bank_row_tags_request_boundary_provider
+        self._relation_extra_request_boundary_provider = relation_extra_request_boundary_provider
+        self._relation_extra_tenant_id_provider = relation_extra_tenant_id_provider
+        self._write_precondition_error_payload = write_precondition_error_payload
 
     def route(
         self,
@@ -201,6 +211,9 @@ class TurnoverLedgerApiRoutes:
             return self.handle_tag_selection_update_route(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
             return self.handle_bank_row_tags_batch_route(body, headers)
+        if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self.handle_relation_extra_update_route(relation_id, body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.handle_relation_extra_route(relation_id)
@@ -269,6 +282,56 @@ class TurnoverLedgerApiRoutes:
             return self._respond(status, {"error": exc.error_code, "message": str(exc)})
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._respond(HTTPStatus.OK, result)
+
+    def handle_relation_extra_update_route(
+        self,
+        relation_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        self._ensure_relation_extra_write_ports()
+        session_response = self._mutation_session_resolver(headers)  # type: ignore[misc]
+        if self._session_error_detector(session_response):  # type: ignore[misc]
+            return session_response
+        payload, error = self._load_json_body(body)  # type: ignore[misc]
+        if error is not None:
+            return error
+        if not isinstance(payload, dict):
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_extra", "message": "payload must be an object."},
+            )
+        identity = session_response.identity
+        actor = identity.username or identity.user_id or "web_finance_user"
+        try:
+            facade = self._relation_extra_request_boundary_provider()  # type: ignore[misc]
+            result = facade.update_relation_extra_from_request(
+                relation_id=relation_id,
+                payload=payload,
+                actor_id=actor,
+                tenant_id=self._relation_extra_tenant_id_provider(),  # type: ignore[misc]
+                scope_keys=["all"],
+            )
+        except KeyError:
+            return self._unknown_relation_response()
+        except TurnoverLedgerRelationExtraRequestBoundaryError as exc:
+            return self._respond(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._respond(
+                exc.status_code,
+                self._write_precondition_error_payload(exc),  # type: ignore[misc]
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except (TurnoverLedgerExtraValidationError, ValueError) as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
+            )
         return self._respond(HTTPStatus.OK, result)
 
     def handle_bank_row_tags_batch_route(
@@ -411,6 +474,20 @@ class TurnoverLedgerApiRoutes:
         self._ensure_mutation_route_ports()
         if self._bank_row_tags_request_boundary_provider is None:
             raise RuntimeError("turnover ledger bank row tags write port is not configured")
+
+    def _ensure_relation_extra_write_ports(self) -> None:
+        self._ensure_mutation_route_ports()
+        missing = [
+            name
+            for name, value in {
+                "relation_extra_request_boundary_provider": self._relation_extra_request_boundary_provider,
+                "relation_extra_tenant_id_provider": self._relation_extra_tenant_id_provider,
+                "write_precondition_error_payload": self._write_precondition_error_payload,
+            }.items()
+            if value is None
+        ]
+        if missing:
+            raise RuntimeError(f"turnover ledger relation extra write ports are not configured: {', '.join(missing)}")
 
     def _ensure_mutation_route_ports(self) -> None:
         missing = [

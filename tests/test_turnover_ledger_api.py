@@ -3259,7 +3259,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
     def test_relation_extra_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_relation_extra_update)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_relation_extra_update_route)
 
         self.assertNotIn("if facade is None", source)
         self.assertNotIn("_persist_turnover_ledger_extras_best_effort(", source)
@@ -3267,9 +3267,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
 
     def test_relation_extra_handler_delegates_expected_versions_idempotency_and_stale_boundary(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_relation_extra_update)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_relation_extra_update_route)
 
-        self.assertIn("facade = self._turnover_ledger_relation_extra_request_boundary_facade()", source)
+        self.assertIn("facade = self._relation_extra_request_boundary_provider()", source)
         self.assertIn("result = facade.update_relation_extra_from_request(", source)
         self.assertIn("except TurnoverLedgerRelationExtraRequestBoundaryError as exc:", source)
         self.assertNotIn('expected_versions = payload.get("expected_versions")', source)

@@ -62,7 +62,6 @@ from fin_ops_platform.app.routes_pending_invoices import PendingInvoiceApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
     InMemoryTurnoverLedgerExtraService,
     TurnoverLedgerApiRoutes,
-    TurnoverLedgerExtraValidationError,
 )
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import (
@@ -383,7 +382,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
-    TurnoverLedgerRelationExtraRequestBoundaryError,
     TurnoverLedgerRelationExtraRequestBoundaryFacade,
     TurnoverLedgerLocalBankRowTagsAdapterSet,
     TurnoverLedgerLocalConfirmRelationAdapterSet,
@@ -1293,6 +1291,9 @@ class Application:
             tenant_id_provider=tenant_id_for_session,
             tag_selection_write_boundary_provider=self._turnover_ledger_tag_selection_request_boundary_facade,
             bank_row_tags_request_boundary_provider=self._turnover_ledger_bank_row_tags_request_boundary_facade,
+            relation_extra_request_boundary_provider=self._turnover_ledger_relation_extra_request_boundary_facade,
+            relation_extra_tenant_id_provider=self._workbench_reconciliation_tenant_id,
+            write_precondition_error_payload=self._turnover_write_precondition_error_payload,
         )
         self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
             routes=self._turnover_ledger_api_routes,
@@ -1964,9 +1965,6 @@ class Application:
             turnover_ledger_response = self._turnover_ledger_api_routes.route(method, route_path, query, body, headers)
             if turnover_ledger_response is not None:
                 return turnover_ledger_response
-        if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
-            relation_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_turnover_ledger_relation_extra_update(relation_id, body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/relations/confirm":
             return self._handle_api_turnover_ledger_confirm(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
@@ -9968,57 +9966,6 @@ class Application:
                 f"Bank transaction is not tagged as turnover: {transaction_id}",
                 transaction_id=transaction_id,
             )
-
-    def _handle_api_turnover_ledger_relation_extra_update(
-        self,
-        relation_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session_response = self._turnover_mutation_session(headers)
-        if isinstance(session_response, Response):
-            return session_response
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        if not isinstance(payload, dict):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_ledger_extra", "message": "payload must be an object."},
-            )
-        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        try:
-            facade = self._turnover_ledger_relation_extra_request_boundary_facade()
-            result = facade.update_relation_extra_from_request(
-                relation_id=relation_id,
-                payload=payload,
-                actor_id=actor,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-                scope_keys=["all"],
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
-            )
-        except TurnoverLedgerRelationExtraRequestBoundaryError as exc:
-            return self._json_response(
-                exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
-            )
-        except TurnoverLedgerWritePreconditionError as exc:
-            return self._json_response(
-                exc.status_code,
-                self._turnover_write_precondition_error_payload(exc),
-            )
-        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
-            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except (TurnoverLedgerExtraValidationError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, result)
 
     def _turnover_ledger_relation_extra_request_boundary_facade(self) -> TurnoverLedgerRelationExtraRequestBoundaryFacade:
         return TurnoverLedgerRelationExtraRequestBoundaryFacade(
