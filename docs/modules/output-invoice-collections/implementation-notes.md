@@ -49,6 +49,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Mutation route callback audit
+
+- 目标：审计 read/export route callback collapse 后剩余的 receipt preview/settings、收款状态、提醒、红蓝票和收据 create/void/reissue callbacks。
+- 影响范围：分析 `Application`、`OutputInvoiceCollectionApiRoutes` 和模块测试矩阵；未修改运行时代码。
+- 关键决策：剩余 callbacks 均为 body/session/error/trace/idempotency HTTP wrapper，业务规则已经在 route owner、lifecycle service 和 receipt service；下一步可以迁移到 route owner，并注入 `load_json_body` port。SQL fresh-gate extraction 不混入该 slice。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：纯审计 slice 未新增测试；下一实现 slice 应覆盖 lifecycle writes、receipt create/void/reissue/settings、权限和 static Guard。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段；本审计不声明模块或全局闭环。
+
 ## 2026-06-25 - Read/export route callback collapse
 
 - 目标：把销项发票收款情况 rows、filter-options、export-preview、export、status-rules、receipt-history、invoice detail、bank detail 和 relation detail 的 HTTP mapping 从 `Application` 移入 `OutputInvoiceCollectionApiRoutes`。
