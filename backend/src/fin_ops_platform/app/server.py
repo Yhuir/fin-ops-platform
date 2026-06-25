@@ -508,6 +508,9 @@ from fin_ops_platform.services.workbench_oa_raw_payload_signal_month_helper impo
 from fin_ops_platform.services.workbench_live_oa_merge_helper import WorkbenchLiveOaMergeHelper
 from fin_ops_platform.services.workbench_group_row_payload_helper import WorkbenchGroupRowPayloadHelper
 from fin_ops_platform.services.workbench_cache_read_payload_helper import WorkbenchCacheReadPayloadHelper
+from fin_ops_platform.services.workbench_oa_invoice_offset_rebuild_helper import (
+    WorkbenchOaInvoiceOffsetRebuildHelper,
+)
 from fin_ops_platform.services.workbench_oa_invoice_offset_relation_read_port import (
     WorkbenchOaInvoiceOffsetRelationReadPort,
 )
@@ -13095,34 +13098,18 @@ class Application:
         return helper
 
     def _cached_payload_needs_oa_invoice_offset_rebuild(self, payload: dict[str, object]) -> bool:
-        applicant_names = {
-            str(name).strip()
-            for name in self._app_settings_service.get_oa_invoice_offset_applicant_names()
-            if str(name).strip()
-        }
-        if not applicant_names:
-            return False
-        for section in ("paired", "open"):
-            section_payload = payload.get(section, {})
-            if not isinstance(section_payload, dict):
-                continue
-            for group in list(section_payload.get("groups", [])):
-                if not isinstance(group, dict):
-                    continue
-                oa_rows = [row for row in list(group.get("oa_rows", [])) if isinstance(row, dict)]
-                invoice_rows = [row for row in list(group.get("invoice_rows", [])) if isinstance(row, dict)]
-                for oa_row in oa_rows:
-                    if str(oa_row.get("applicant", "")).strip() not in applicant_names:
-                        continue
-                    if not self._oa_attachment_invoice_rows_for_oa(oa_row, invoice_rows):
-                        continue
-                    if section == "open":
-                        return True
-                    for row in [*oa_rows, *invoice_rows]:
-                        tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}
-                        if OA_INVOICE_OFFSET_TAG not in tags or not bool(row.get("cost_excluded")):
-                            return True
-        return False
+        return self._workbench_oa_invoice_offset_rebuild_helper().cached_payload_needs_rebuild(payload)
+
+    def _workbench_oa_invoice_offset_rebuild_helper(self) -> WorkbenchOaInvoiceOffsetRebuildHelper:
+        helper = getattr(self, "_workbench_oa_invoice_offset_rebuild_helper_instance", None)
+        if helper is None:
+            helper = WorkbenchOaInvoiceOffsetRebuildHelper(
+                applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names,
+                attachment_matches_oa=oa_attachment_matches_oa,
+                offset_tag=OA_INVOICE_OFFSET_TAG,
+            )
+            self._workbench_oa_invoice_offset_rebuild_helper_instance = helper
+        return helper
 
     def _apply_oa_retention_to_grouped_payload(self, payload: dict[str, object]) -> dict[str, object]:
         cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
@@ -13883,19 +13870,15 @@ class Application:
             }
         return desired_relations
 
-    @staticmethod
     def _oa_attachment_invoice_rows_for_oa(
+        self,
         oa_row: dict[str, object],
         invoice_rows: list[dict[str, object]],
     ) -> list[dict[str, object]]:
-        oa_row_id = str(oa_row.get("id", "")).strip()
-        matches: list[dict[str, object]] = []
-        for invoice_row in invoice_rows:
-            if str(invoice_row.get("source_kind", "")) != "oa_attachment_invoice":
-                continue
-            if oa_attachment_matches_oa(invoice_row, oa_row_id):
-                matches.append(invoice_row)
-        return matches
+        return self._workbench_oa_invoice_offset_rebuild_helper().attachment_invoice_rows_for_oa(
+            oa_row,
+            invoice_rows,
+        )
 
     def _month_scope_for_oa_invoice_offset_relation(self, rows: list[dict[str, object]]) -> str:
         row_months = {self._row_month_scope(row) for row in rows}

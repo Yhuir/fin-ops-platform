@@ -6434,6 +6434,84 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_oa_invoice_offset_rebuild_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_rebuild_helper.py").read_text(
+            encoding="utf-8"
+        )
+        rebuild_source = _function_source(server_tree, server_source, "_cached_payload_needs_oa_invoice_offset_rebuild")
+        attachment_source = _function_source(server_tree, server_source, "_oa_attachment_invoice_rows_for_oa")
+        builder_source = _function_source(server_tree, server_source, "_workbench_oa_invoice_offset_rebuild_helper")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-invoice-offset-rebuild-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "_workbench_oa_invoice_offset_rebuild_helper()" not in rebuild_source:
+            violations.append("Application cache rebuild gate does not delegate to OA invoice offset rebuild helper")
+        if "_workbench_oa_invoice_offset_rebuild_helper()" not in attachment_source:
+            violations.append("Application attachment invoice row matcher does not delegate to OA invoice offset rebuild helper")
+        for forbidden in (
+            "get_oa_invoice_offset_applicant_names",
+            "OA_INVOICE_OFFSET_TAG not in tags",
+            "cost_excluded",
+            "source_kind",
+            "\"oa_attachment_invoice\"",
+            "oa_attachment_matches_oa(",
+            "section == \"open\"",
+        ):
+            if forbidden in "\n".join([rebuild_source, attachment_source]):
+                violations.append(f"Application still owns OA invoice offset rebuild detail: {forbidden}")
+        for marker in (
+            "class WorkbenchOaInvoiceOffsetRebuildHelper",
+            "def cached_payload_needs_rebuild(",
+            "def attachment_invoice_rows_for_oa(",
+            "applicant_names_provider",
+            "attachment_matches_oa",
+            "offset_tag",
+            "section == \"open\"",
+            "cost_excluded",
+            "oa_attachment_invoice",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchOaInvoiceOffsetRebuildHelper missing marker: {marker}")
+        for marker in (
+            "WorkbenchOaInvoiceOffsetRebuildHelper(",
+            "applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names",
+            "attachment_matches_oa=oa_attachment_matches_oa",
+            "offset_tag=OA_INVOICE_OFFSET_TAG",
+        ):
+            if marker not in builder_source:
+                violations.append(f"Application OA invoice offset rebuild helper missing explicit dependency: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchOaInvoiceOffsetRebuildHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-oa-invoice-offset-rebuild-helper-extraction",
+            "WorkbenchOaInvoiceOffsetRebuildHelper",
+            "cached payload rebuild",
+            "attachment invoice rows",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench OA invoice offset rebuild helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (

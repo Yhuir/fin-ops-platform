@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-cache-read-payload-helper-extraction-closed`
+Current state: `workbench-oa-invoice-offset-rebuild-helper-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-cache-read-payload-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-cache-read-payload-helper-extraction-2026-06-25.md`. `WorkbenchCacheReadPayloadHelper` now owns cached payload use/persist/fallback gates, OA status readiness and schema/hash/parser/rules summary checks; OA invoice offset rebuild helper extraction remains deferred. The next local boundary is `server-py:workbench-oa-invoice-offset-rebuild-helper-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-oa-invoice-offset-rebuild-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-oa-invoice-offset-rebuild-helper-extraction-2026-06-25.md`. `WorkbenchOaInvoiceOffsetRebuildHelper` now owns cached payload rebuild detection and attachment invoice row filtering; OA invoice offset desired relation sync orchestration remains deferred. The next local boundary is `server-py:workbench-oa-invoice-offset-relation-sync-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 
