@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-reconciliation-post-payload-facade-local-closure-audit-selected`
+Current state: `etc-business-batch-delete-fallback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-task-payload-facade-extraction` as `local-implementation-closed` in `analysis/server-py-etc-reconciliation-task-payload-facade-extraction-2026-06-25.md`. T0 added `EtcReconciliationTaskPayloadFacade`, moved task payload/read-shaping helpers out of `Application`, wired `EtcReconciliationTaskApiRoutes` through explicit facade methods, and added facade/API/static Guard coverage. Selected post-payload facade local closure audit next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-reconciliation-post-payload-facade-local-closure-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-post-payload-facade-local-closure-audit-2026-06-25.md`. T0 confirmed the ETC reconciliation task route-owner surface is locally closed after callback, upload, cleanup and payload facade extraction; selected ETC business batch delete fallback audit next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-reconciliation-task-payload-facade-extraction`
+`server-py:etc-reconciliation-post-payload-facade-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:etc-reconciliation-post-payload-facade-local-closure-audit`
+`server-py:etc-business-batch-delete-fallback-audit`

@@ -680,3 +680,13 @@
 - 测试覆盖：新增 facade 直接测试；更新 stale `canConfirm` 回归调用 facade；扩展 static Guard 禁止 payload helper 回流 `server.py`；重跑 payload/API/imported summary 相关 ETC API 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_task_payload_facade.py backend/src/fin_ops_platform/app/server.py tests/test_etc_reconciliation_service.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py`；facade direct tests 3 条通过；route-owner Guard 通过；targeted ETC API payload/import/remove regressions 6 条通过。
 - 未测风险：需要下一步 post-payload-facade local closure audit 确认 ETC reconciliation route-owner surface 是否还有 residual `Application` ownership。
+
+## 2026-06-25 - ETC reconciliation post-payload facade本地闭环审计
+
+- 目标：确认 reconciliation task route-owner surface 在 callback、upload/parser、cleanup 和 payload facade 抽取后是否本地闭环。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`EtcReconciliationTaskPayloadFacade`、`EtcReconciliationSourceUploadService`、`EtcReconciliationImportCleanupService`、`Application._etc_reconciliation_routes(...)` 和 route-owner Guard。
+- 关键决策：该 route-owner surface 在当前 modularization pass 中可视为本地闭环；`server.py` 剩余职责是依赖组装、通用 error/version/storage/refresh/persist 映射，不再拥有 reconciliation task route callback 或 payload helper 实现。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，复用上一实现 slice 的 facade/API/static Guard 证据；未改运行时代码。
+- 验证命令：只读审计 `server.py` residual、route owner、payload facade、source upload service、cleanup service、Guard 和 CodeGraph；未运行新增测试。
+- 未测风险：ETC 模块整体仍未闭环；下一步审计 `server.py` 中 business-batch delete fallback/orchestration residual。
