@@ -3826,16 +3826,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_confirm_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_confirm)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_confirm_relation_route)
 
         self.assertNotIn("if facade is not None", source)
         self.assertNotIn("rebuild_from_bank_rows(", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
 
     def test_confirm_handler_delegates_affected_months_boundary_to_request_facade(self) -> None:
-        source = inspect.getsource(Application._handle_api_turnover_ledger_confirm)
+        source = inspect.getsource(TurnoverLedgerApiRoutes.handle_confirm_relation_route)
 
-        self.assertIn("facade = self._turnover_ledger_confirm_request_boundary_facade()", source)
+        self.assertIn("facade = self._confirm_relation_request_boundary_provider()", source)
         self.assertIn("result = facade.confirm_relation_from_request(", source)
         self.assertNotIn("normalized_bank_row_ids = [str(row_id) for row_id in bank_row_ids]", source)
         self.assertNotIn("affected_months = self._bank_transaction_category_affected_months(normalized_bank_row_ids)", source)
