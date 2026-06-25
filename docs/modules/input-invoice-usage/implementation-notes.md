@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-06-25 - Post fresh-gate local closure audit
+
+- 目标：审计 route-owner collapse 和 read model fresh gate service extraction 后，`server.py` 是否还保留 input usage 本地实现缺口。
+- 影响范围：分析 `Application` 中剩余 `_input_invoice_usage*`、OA reverse、export、payment rules、refresh enqueue、source-version 和 import scope provider surface；未修改运行时代码。
+- 关键决策：剩余 input usage app 方法均归类为 dependency/platform/refresh/source-version/import-scope provider port；不再作为新的 input usage implementation gap。下一步转向相邻的 output invoice collection route-owner residual audit。
+- 文档影响：更新 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：纯审计 slice 未新增测试；依赖 Row355 已通过的 input usage API/export/static Guard/service 回归。
+- 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段；本审计不声明模块或全局闭环。
+
 ## 2026-06-25 - Read model fresh gate service extraction
 
 - 目标：把进项发票使用页 SQL read model fresh gate、schema stale 检查、source-version 检查、all-rows 聚合、relation detail fail-closed 和 export row-page loading 从 `Application` 抽到显式 service 边界。

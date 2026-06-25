@@ -1,55 +1,55 @@
 # Next Prompt
 
-Continue after `server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`.
+Continue after `server-py:input-invoice-usage-post-fresh-gate-local-closure-audit`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:input-invoice-usage-read-model-fresh-gate-service-extraction`.
-- Row355 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-read-model-fresh-gate-service-extraction-2026-06-25.md`.
-- Input usage route-owner callbacks have been collapsed into route owner classes.
-- Input usage SQL read-model fresh gate/source-version/schema stale/all-rows/detail/export row-page behavior now lives in `InputInvoiceUsageReadModelFreshGateService`.
-- Output invoice collection behavior was intentionally left unchanged and covered by targeted regression.
+- Last completed boundary: `server-py:input-invoice-usage-post-fresh-gate-local-closure-audit`.
+- Row356 status: `analysis-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-post-fresh-gate-local-closure-audit-2026-06-25.md`.
+- Input usage local `server.py` support is accounted for after route-owner collapse and fresh-gate extraction.
+- Remaining input usage app methods are dependency/platform/refresh/source-version/import-scope provider ports.
 - Input usage module/global closure is not claimed.
 
 ## Previous Prompt Completion
 
-`server-py:input-invoice-usage-read-model-fresh-gate-service-extraction` is complete:
+`server-py:input-invoice-usage-post-fresh-gate-local-closure-audit` is complete:
 
-- `server.py` no longer owns `_load_input_invoice_usage_export_page(...)`, `_input_invoice_usage_export_query_from_kwargs(...)` or `_input_invoice_usage_sql_payload_requires_schema_refresh(...)`;
-- app-owned input usage rows/all-rows/relation-detail helpers delegate to the fresh-gate service;
-- export row-page loading uses the fresh-gate service;
-- refreshing/fail-closed semantics are preserved for missing SQL repository, schema stale, stale refresh status and source-version mismatch;
-- static guards prevent the removed app-owned fresh-gate helpers from returning.
+- no `_handle_api_input_invoice_usage*` callback remains in `server.py`;
+- no input usage app-owned SQL payload schema helper remains;
+- no input usage app-owned export row-page loader remains;
+- no input usage app-owned fresh/stale/source-version response assembly remains;
+- output invoice collection was identified as the next adjacent `server.py` residual surface.
 
 ## Next Boundary
 
-`server-py:input-invoice-usage-post-fresh-gate-local-closure-audit`
+`server-py:output-invoice-collection-route-owner-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-route-owner-local-closure-audit-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-read-model-fresh-gate-service-extraction-2026-06-25.md`
-   - `backend/src/fin_ops_platform/app/server.py` around input usage factories and remaining `_input_invoice_usage*` helpers
-   - `backend/src/fin_ops_platform/app/routes_input_invoice_usage.py`
-   - `backend/src/fin_ops_platform/app/routes_input_invoice_usage_oa_reverse.py`
-   - `backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-post-fresh-gate-local-closure-audit-2026-06-25.md`
+   - `docs/modules/output-invoice-collections/README.md`
+   - `docs/modules/output-invoice-collections/state-machine.md`
+   - `docs/modules/output-invoice-collections/tests.md`
+   - `backend/src/fin_ops_platform/app/server.py` around `/api/output-invoice-collections*` dispatch and `_handle_api_output_invoice_collections*`
+   - `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`
+   - `tests/test_output_invoice_collection_api.py`
    - `tests/test_platform_runtime_boundary_guards.py`
-   - `tests/test_input_invoice_usage_api.py`
 3. Use CodeGraph before implementation-oriented changes.
-4. Audit remaining input usage app-owned surfaces:
-   - distinguish route dispatch/dependency assembly/platform ports from business/freshness/payload implementation;
-   - confirm whether remaining helpers are acceptable explicit ports or are still implementation gaps;
-   - select the next precise local implementation boundary if a residual gap remains.
+4. Audit output collection route ownership:
+   - identify which app callbacks are thin HTTP/session/body/response wrappers;
+   - identify which callbacks still own lifecycle, receipt, red invoice, reminder or fresh-gate implementation;
+   - split route-owner callback collapse from broader service/fresh-gate extraction if needed;
+   - select the smallest safe next local implementation boundary.
 5. Update analysis/state/docs and commit/push if verification passes.
 
 ## Stop Gates
 
-- Do not run production validation or mutation.
-- Do not claim input usage module/global closure unless the audit proves no local implementation gap remains and explicitly defers only real PostgreSQL/worker/App Status/high-row/browser evidence.
-- Do not weaken stale/source-version/schema/fail-closed checks.
-- Do not change output invoice collection behavior.
-- Do not broaden into unrelated `server.py` domains.
+- Do not change output collection behavior in the audit.
+- Do not weaken output collection freshness/source-version/schema/fail-closed semantics.
+- Do not collapse route callbacks that still own broad lifecycle/receipt/fresh-gate logic without a separate implementation plan.
+- Do not claim output collection module/global closure from route-owner accounting alone.
+- Do not run production validation or mutation while local implementation gaps remain.
