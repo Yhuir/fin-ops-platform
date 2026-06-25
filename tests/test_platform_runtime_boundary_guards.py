@@ -1865,6 +1865,76 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_legacy_batch_routes_delegate_to_compat_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+
+        handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
+        route_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_routes")
+        route_owner_names = [
+            node.name
+            for node in ast.walk(route_tree)
+            if isinstance(node, ast.ClassDef)
+        ]
+        route_owner_init = _function_source(route_tree, route_source, "__init__")
+        route_owner_route = _function_source(route_tree, route_source, "route")
+        route_owner_route_batch = _function_source(route_tree, route_source, "_route_batch")
+
+        violations: list[str] = []
+        if "EtcLegacyBatchApiRoutes" not in server_source:
+            violations.append("server.py does not import/use EtcLegacyBatchApiRoutes")
+        if "_etc_legacy_batch_routes().route(" not in handle_request:
+            violations.append("handle_request no longer delegates legacy ETC batch routes to route owner")
+        if "EtcLegacyBatchApiRoutes(" not in route_factory:
+            violations.append("_etc_legacy_batch_routes does not construct the route owner")
+        for required_callback in (
+            "list_batches=self._handle_api_etc_batches",
+            "detail=self._handle_api_etc_batch_detail",
+            "delete=self._handle_api_etc_batch_delete",
+            "create_draft=self._handle_api_etc_batch_draft",
+            "create_draft_for_batch=self._handle_api_etc_batch_draft_for_batch",
+            "confirm_submitted=self._handle_api_etc_batch_confirm_submitted",
+            "mark_not_submitted=self._handle_api_etc_batch_mark_not_submitted",
+        ):
+            if required_callback not in route_factory:
+                violations.append(f"ETC legacy batch route owner lacks explicit callback {required_callback}")
+        if "Application" in route_owner_init:
+            violations.append("ETC legacy batch route owner accepts the whole Application")
+        if "EtcLegacyBatchApiRoutes" not in route_owner_names:
+            violations.append("routes_etc_legacy_batches.py does not define EtcLegacyBatchApiRoutes")
+        for required_route in (
+            'route_path == "/api/etc/batches"',
+            'route_path == "/api/etc/batches/draft"',
+            'route_path.startswith("/api/etc/batches/")',
+        ):
+            if required_route not in route_owner_route:
+                violations.append(f"ETC legacy batch route owner missing dispatch branch {required_route}")
+        for required_subroute in (
+            'parts[1] == "draft"',
+            'parts[1] == "confirm-submitted"',
+            'parts[1] == "mark-not-submitted"',
+        ):
+            if required_subroute not in route_owner_route_batch:
+                violations.append(f"ETC legacy batch route owner missing subroute branch {required_subroute}")
+        direct_dispatch_markers = (
+            "_handle_api_etc_batches(",
+            "_handle_api_etc_batch_detail(",
+            "_handle_api_etc_batch_delete(",
+            "_handle_api_etc_batch_draft(",
+            "_handle_api_etc_batch_draft_for_batch(",
+            "_handle_api_etc_batch_confirm_submitted(",
+            "_handle_api_etc_batch_mark_not_submitted(",
+        )
+        for marker in direct_dispatch_markers:
+            if marker in handle_request:
+                violations.append(f"server.py reintroduced direct legacy ETC batch route dispatch {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {

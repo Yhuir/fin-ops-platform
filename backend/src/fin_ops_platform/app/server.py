@@ -50,6 +50,7 @@ from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoute
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_etc_import import EtcImportApiRoutes
+from fin_ops_platform.app.routes_etc_legacy_batches import EtcLegacyBatchApiRoutes
 from fin_ops_platform.app.routes_etc_reconciliation import EtcReconciliationTaskApiRoutes
 from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
@@ -2157,34 +2158,10 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
-        if method == "GET" and route_path == "/api/etc/batches":
-            return self._handle_api_etc_batches(
-                status=query.get("status", [None])[0],
-                month=query.get("month", [None])[0],
-                plate=query.get("plate", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                page=query.get("page", [None])[0],
-                page_size=query.get("page_size", [None])[0],
-            )
-        if method == "DELETE" and route_path.startswith("/api/etc/batches/"):
-            batch_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_etc_batch_delete(batch_id)
-        if method == "GET" and route_path.startswith("/api/etc/batches/"):
-            batch_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_etc_batch_detail(batch_id)
         if method == "POST" and route_path == "/api/etc/invoices/revoke-submitted":
             return self._handle_api_etc_revoke_submitted(body)
-        if method == "POST" and route_path == "/api/etc/batches/draft":
-            return self._handle_api_etc_batch_draft(body, headers)
-        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/draft"):
-            batch_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_etc_batch_draft_for_batch(batch_id, headers)
-        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/confirm-submitted"):
-            batch_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_etc_batch_confirm_submitted(batch_id)
-        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/mark-not-submitted"):
-            batch_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_etc_batch_mark_not_submitted(batch_id)
+        if route_path == "/api/etc/batches" or route_path.startswith("/api/etc/batches/"):
+            return self._etc_legacy_batch_routes().route(method, route_path, query, body, headers)
         if method == "GET" and route_path == "/api/session/me":
             return self._handle_api_session_me(headers)
         if method == "GET" and route_path == "/api/workbench/ignored":
@@ -4866,6 +4843,23 @@ class Application:
 
     def _search_read_model_refresh_producer(self) -> SearchReadModelRefreshProducer:
         return SearchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
+
+    def _etc_legacy_batch_routes(self) -> EtcLegacyBatchApiRoutes:
+        routes = getattr(self, "_etc_legacy_batch_api_routes", None)
+        if isinstance(routes, EtcLegacyBatchApiRoutes):
+            return routes
+        routes = EtcLegacyBatchApiRoutes(
+            json_response=self._json_response,
+            list_batches=self._handle_api_etc_batches,
+            detail=self._handle_api_etc_batch_detail,
+            delete=self._handle_api_etc_batch_delete,
+            create_draft=self._handle_api_etc_batch_draft,
+            create_draft_for_batch=self._handle_api_etc_batch_draft_for_batch,
+            confirm_submitted=self._handle_api_etc_batch_confirm_submitted,
+            mark_not_submitted=self._handle_api_etc_batch_mark_not_submitted,
+        )
+        self._etc_legacy_batch_api_routes = routes
+        return routes
 
     def _etc_import_routes(self) -> EtcImportApiRoutes:
         routes = getattr(self, "_etc_import_api_routes", None)

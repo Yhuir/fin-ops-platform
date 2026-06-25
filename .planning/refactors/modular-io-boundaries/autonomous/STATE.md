@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-import-routes-route-owned`
+Current state: `etc-legacy-batch-compat-routes-route-owned`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-import-route-owner-audit` as `local-implementation-closed` in `analysis/server-py-etc-import-route-owner-audit-2026-06-25.md`. T0 added `EtcImportApiRoutes`, moved `/api/etc/import`, `/api/etc/import/preview` and `/api/etc/import/confirm` HTTP ownership out of `server.py`, kept import execution behind existing `ImportProcessingService`/job/queue ports, and added route-owner guard coverage. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-route-owner-audit`.
+Completed `server-py:etc-legacy-batch-route-owner-audit` as `local-implementation-closed` in `analysis/server-py-etc-legacy-batch-route-owner-audit-2026-06-25.md`. T0 added `EtcLegacyBatchApiRoutes`, moved legacy `/api/etc/batches*` URL parsing/dispatch out of `server.py`, and kept heavy delete/draft/confirm side effects as explicit callbacks for the next boundary. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-legacy-batch-delete-side-effect-service-audit`.
 
 ## Closed Or Deferred Slices
 

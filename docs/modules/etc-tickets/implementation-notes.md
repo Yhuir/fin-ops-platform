@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC legacy batch compat route owner
+
+- 目标：把 legacy `/api/etc/batches*` 兼容路由的 URL 分发从 `Application` 迁入显式 route owner，继续收窄 `server.py` 的 route ownership。
+- 影响范围：新增 `EtcLegacyBatchApiRoutes`；`server.py` 主分发改为委托；list/detail/delete/draft/confirm/mark-not-submitted 的复杂 handler 暂时作为显式 callback 保留。
+- 关键决策：legacy batch delete 涉及 business-batch delete、submission/import cleanup、reconciliation task cleanup、canonical invoice cleanup、link repair、refresh 和 persist，本轮不把这些副作用直接搬进 route owner。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `test_etc_legacy_batch_routes_delegate_to_compat_route_owner` 静态 guard，并回归 targeted legacy batch list/detail/delete/draft tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-legacy-batch-route-owner-audit-2026-06-25.md`。
+- 未测风险：legacy batch handler 内部和 payload helpers 仍在 `Application`；ETC invoice list/revoke 路由仍在 `Application`；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计 legacy batch delete side effect 是否应抽 cleanup service、operation-result port，或再做更窄的 delete callback migration。
+
 ## 2026-06-25 - ETC import route owner
 
 - 目标：把 `/api/etc/import`、`/api/etc/import/preview`、`/api/etc/import/confirm` 从 `Application` 迁入显式 route owner，继续收窄 `server.py` 的 ETC route ownership。
