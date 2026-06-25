@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-25 - route-owner audit
+
+- 目标：审计 `/api/oa-pending-payments*` 在 `server.py` 中的剩余 HTTP callback 是否仍承载业务/read-model/command 逻辑。
+- 结论：`OaPendingPaymentApiRoutes` 已拥有 rows/filter/detail/candidates/confirm-paid/auto-reconcile/link-bank 方法；`OaPendingPaymentReadModelService` 拥有 freshness/source-version/detail unavailable 语义；`OaPendingPaymentCommandService` 拥有自动匹配、写回和支出流水关联语义。`server.py` 剩余 callbacks 是 auth/session、body、write actor、JSON/error/status mapping。
+- 下一步：选择 `server-py:oa-pending-payment-route-callback-collapse`，把 HTTP dispatch 移到 `OaPendingPaymentApiRoutes.route(...)`，用显式 read-session/write-auth/body/JSON/error ports 替代 app-owned callbacks。
+- 文档影响：更新 modular IO autonomous state；产品/API 长期语义未变化。
+- 未测风险：真实 PostgreSQL/OA/worker/App Status/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-24 - selected as next modular IO read model pilot
 
 - 目标：在 `pending_invoice` 本地实现支持 accounted 后，评估 OA 待付款是否适合作为下一个非 Go read model 试点。
