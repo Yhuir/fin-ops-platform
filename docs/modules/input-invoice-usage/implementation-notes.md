@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - Core input usage route owner audit
+
+- 目标：审计非 OA reverse 的进项发票使用情况 route handler，选择下一步本地模块化边界。
+- 影响范围：本轮只更新 modular IO analysis/state；未改运行时代码。
+- 关键决策：下一步先迁移读路径 HTTP mapping：rows、filter-options、invoice/bank/OA detail、relation-details、payment-status-rules GET；export preview/download 因 XLSX bytes/header/audit 另拆，payment-status-rules PUT 因 settings 写入和 refresh fan-out 另拆。SQL/read-model fresh-gate helper 本轮不改。
+- 文档影响：更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：本轮为 analysis-only，未新增测试；下一步实现需补 route-owner Guard 并回归 rows/filter/detail/relation-details/payment rules GET。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-input-invoice-usage-core-route-owner-audit-2026-06-25.md`。
+- 未测风险：真实 PostgreSQL/worker/App Status、生产 browser/admin/write 和导出性能仍是后续验证风险；本轮不做生产验证。
+- 后续事项：执行 `server-py:input-invoice-usage-read-route-owner-facade-extraction`。
+
 ## 2026-06-25 - OA reverse route owner local closure audit
 
 - 目标：审计 OA reverse route owner 在本地模块化层面是否已经 accounted。

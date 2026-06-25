@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `input-invoice-usage-core-route-owner-audit-selected`
+Current state: `input-invoice-usage-read-route-owner-facade-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-oa-reverse-route-owner-local-closure-audit-2026-06-25.md`. T0 confirmed all `/api/input-invoice-usage/oa-reverse*` HTTP mapping is route-owned and remaining OA reverse `Application` methods are explicit dependency/platform/helper ports. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:input-invoice-usage-core-route-owner-audit` as `analysis-closed` in `analysis/server-py-input-invoice-usage-core-route-owner-audit-2026-06-25.md`. T0 selected a read route-owner facade extraction for rows/filter/detail/relation-detail/payment-status-rules GET while deferring export download and payment rules PUT. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:input-invoice-usage-oa-reverse-route-owner-local-closure-audit`
+`server-py:input-invoice-usage-core-route-owner-audit`
 
 ## Next Prompt
 
-`server-py:input-invoice-usage-core-route-owner-audit`
+`server-py:input-invoice-usage-read-route-owner-facade-extraction`
