@@ -1,37 +1,37 @@
 # Next Prompt
 
-Continue after `server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction`.
+Continue after `server-py:workbench-raw-payload-mutation-helper-extraction`.
 
 ## Current State
 
 - Branch: `dev`.
-- Last completed boundary: `server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction`.
-- Row441 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-invoice-row-builder-extraction-2026-06-25.md`.
-- `WorkbenchCanonicalOaAttachmentInvoiceRowBuilder` now owns invoice field mapping, tags/source links, detail/summary fields, relation payload and source metadata construction.
-- Raw payload replace/dedupe/summary helper extraction remains deferred to a dedicated slice.
+- Last completed boundary: `server-py:workbench-raw-payload-mutation-helper-extraction`.
+- Row443 status: `local-implementation-closed`.
+- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-mutation-helper-extraction-2026-06-25.md`.
+- `WorkbenchRawPayloadMutationHelper` now owns raw payload row replacement, row-id dedupe and summary recomputation.
+- OA raw payload signal/month helpers remain deferred to a dedicated slice.
 - Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
 
 ## Previous Prompt Completion
 
-`server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction` is complete:
+`server-py:workbench-raw-payload-mutation-helper-extraction` is complete:
 
-- added `WorkbenchCanonicalOaAttachmentInvoiceRowBuilder`;
-- moved invoice field mapping, tags/source links, detail/summary fields, relation payload and source metadata construction out of `Application`;
-- removed dead `Application` helpers used only by that construction path;
-- preserved row construction behavior with local tests;
+- added `WorkbenchRawPayloadMutationHelper`;
+- moved raw payload row replacement, row-id dedupe and summary recomputation out of `Application` compatibility helper bodies;
+- preserved existing `Application` helper names as delegates;
+- preserved mutation behavior with local tests;
 - added static Guard coverage;
 - avoided production validation.
 
 ## Next Boundary
 
-`server-py:workbench-raw-payload-mutation-helper-audit`
+`server-py:workbench-oa-raw-payload-signal-month-helper-audit`
 
 ## Required First Steps On Resume
 
 1. Confirm `git status --short --branch` and classify dirty files.
 2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-invoice-row-builder-extraction-2026-06-25.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-mutation-helper-extraction-2026-06-25.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
    - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
    - `backend/src/fin_ops_platform/app/routes_workbench.py`
@@ -39,10 +39,10 @@ Continue after `server-py:workbench-canonical-oa-attachment-invoice-row-builder-
    - `tests/test_workbench_sql_runtime.py` and `tests/test_workbench_v2_api.py` raw payload, OA retention and relation repair tests
    - relevant Workbench static guards in `tests/test_platform_runtime_boundary_guards.py`
 3. Audit remaining Workbench read/support surfaces:
-   - `_replace_raw_workbench_row(...)`;
-   - `_dedupe_raw_workbench_rows_by_id(...)`;
-   - `_refresh_raw_workbench_payload_summary(...)`;
-   - `_first_month_from_oa_row(...)` and OA raw payload signal/month helpers.
+   - `_first_month_from_oa_row(...)`;
+   - `_oa_months_from_raw_workbench_payload(...)`;
+   - `_raw_payload_has_oa_attachment_invoice_signal(...)`;
+   - raw OA attachment signal/month extraction.
 4. Select the next narrow local implementation or guard boundary.
 5. If safe, implement with tests/Guard/docs; otherwise close the audit and select the next boundary.
 

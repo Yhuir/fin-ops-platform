@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `workbench-canonical-oa-attachment-invoice-row-builder-extraction-closed`
+Current state: `workbench-raw-payload-mutation-helper-extraction-closed`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-canonical-oa-attachment-invoice-row-builder-extraction-2026-06-25.md`. `WorkbenchCanonicalOaAttachmentInvoiceRowBuilder` now owns invoice field mapping, tags/source links, detail/summary fields, relation payload and source metadata construction; raw payload replace/dedupe/summary helper extraction remains deferred. The next local boundary is `server-py:workbench-raw-payload-mutation-helper-audit`. Production browser/admin/write evidence remains deferred.
+Completed `server-py:workbench-raw-payload-mutation-helper-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-raw-payload-mutation-helper-extraction-2026-06-25.md`. `WorkbenchRawPayloadMutationHelper` now owns raw payload row replacement, row-id dedupe and summary recomputation; OA raw payload signal/month helpers remain deferred. The next local boundary is `server-py:workbench-oa-raw-payload-signal-month-helper-audit`. Production browser/admin/write evidence remains deferred.
 
 ## Closed Or Deferred Slices
 

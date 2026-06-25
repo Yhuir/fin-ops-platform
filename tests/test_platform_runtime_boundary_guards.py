@@ -6057,6 +6057,77 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_raw_payload_mutation_helper_extraction_stays_local(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        helper_source = (SERVICES_ROOT / "workbench_raw_payload_mutation_helper.py").read_text(encoding="utf-8")
+        replace_source = _function_source(server_tree, server_source, "_replace_raw_workbench_row")
+        dedupe_source = _function_source(server_tree, server_source, "_dedupe_raw_workbench_rows_by_id")
+        summary_source = _function_source(server_tree, server_source, "_refresh_raw_workbench_payload_summary")
+        analysis_source = (
+            REPO_ROOT
+            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-mutation-helper-extraction-2026-06-25.md"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for method_name, method_source in (
+            ("_replace_raw_workbench_row", replace_source),
+            ("_dedupe_raw_workbench_rows_by_id", dedupe_source),
+            ("_refresh_raw_workbench_payload_summary", summary_source),
+        ):
+            if "WorkbenchRawPayloadMutationHelper" not in method_source:
+                violations.append(f"Application {method_name} does not delegate to raw payload mutation helper")
+        combined_method_source = "\n".join([replace_source, dedupe_source, summary_source])
+        for forbidden in (
+            "for section_name in (\"paired\", \"open\")",
+            "seen_row_ids",
+            "deduped_rows",
+            "exception_count",
+            "rows[index]",
+            "payload[\"summary\"]",
+        ):
+            if forbidden in combined_method_source:
+                violations.append(f"Application still owns raw payload mutation detail: {forbidden}")
+        for marker in (
+            "class WorkbenchRawPayloadMutationHelper",
+            "def replace_row(",
+            "def dedupe_rows_by_id(",
+            "def refresh_summary(",
+            "for section_name in (\"paired\", \"open\")",
+            "seen_row_ids",
+            "exception_count",
+            "serialize_value",
+        ):
+            if marker not in helper_source:
+                violations.append(f"WorkbenchRawPayloadMutationHelper missing marker: {marker}")
+        for forbidden in (
+            "Response",
+            "HTTPStatus",
+            "_json_response",
+            "ReadModelRefreshGateway",
+            "outbox",
+            "readiness",
+            "clear_cache",
+            "set_cached",
+            "save_workbench",
+            "app.auth",
+            "server.py",
+            "MongoOAAdapter",
+        ):
+            if forbidden in helper_source:
+                violations.append(f"WorkbenchRawPayloadMutationHelper gained forbidden dependency: {forbidden}")
+        for marker in (
+            "server-py:workbench-raw-payload-mutation-helper-extraction",
+            "WorkbenchRawPayloadMutationHelper",
+            "replace/dedupe/summary",
+            "OA raw payload signal/month helpers",
+        ):
+            if marker not in analysis_source:
+                violations.append(f"Workbench raw payload mutation helper analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
