@@ -690,3 +690,13 @@
 - 测试覆盖：本 slice 为 analysis-only，复用上一实现 slice 的 facade/API/static Guard 证据；未改运行时代码。
 - 验证命令：只读审计 `server.py` residual、route owner、payload facade、source upload service、cleanup service、Guard 和 CodeGraph；未运行新增测试。
 - 未测风险：ETC 模块整体仍未闭环；下一步审计 `server.py` 中 business-batch delete fallback/orchestration residual。
+
+## 2026-06-25 - ETC business-batch delete fallback审计
+
+- 目标：审计仍在 `Application` 的 `_handle_api_etc_business_batch_delete(...)` 和 legacy business delete fallback，选择下一条本地实现边界。
+- 影响范围：business batch DELETE、submitted reset、summary relation cancellation、canonical ETC invoice cleanup、reconciliation task cleanup/tombstone、refresh/persist、legacy linked batch delete fallback。
+- 关键决策：直接迁移到 route owner 会把删除副作用放进 HTTP 层；直接扩展 `EtcBusinessBatchApplicationService` 会一次性引入过多 import/relation/cleanup/persist 依赖。下一步先抽专用 `EtcBusinessBatchDeleteService`，让 `Application` 暂时只做 HTTP body/error/response mapping。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only；下一实现 slice 需要 direct service tests、business batch delete API regressions 和 static Guard。
+- 验证命令：只读审计 `server.py`、business route owner、business application service、legacy delete service、cleanup service、Guard 和 CodeGraph；未运行新增测试。
+- 未测风险：business-batch delete side-effect orchestration 仍在 `Application`，等待 service extraction。

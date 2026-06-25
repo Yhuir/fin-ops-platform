@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-business-batch-delete-fallback-audit-selected`
+Current state: `etc-business-batch-delete-service-extraction-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-reconciliation-post-payload-facade-local-closure-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-post-payload-facade-local-closure-audit-2026-06-25.md`. T0 confirmed the ETC reconciliation task route-owner surface is locally closed after callback, upload, cleanup and payload facade extraction; selected ETC business batch delete fallback audit next. Production browser/admin/write evidence remains final validation only.
+Completed `server-py:etc-business-batch-delete-fallback-audit` as `analysis-closed` in `analysis/server-py-etc-business-batch-delete-fallback-audit-2026-06-25.md`. T0 confirmed `_handle_api_etc_business_batch_delete(...)` still owns broad business-batch delete side-effect orchestration and selected dedicated delete service extraction next. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:etc-reconciliation-post-payload-facade-local-closure-audit`
+`server-py:etc-business-batch-delete-fallback-audit`
 
 ## Next Prompt
 
-`server-py:etc-business-batch-delete-fallback-audit`
+`server-py:etc-business-batch-delete-service-extraction`
