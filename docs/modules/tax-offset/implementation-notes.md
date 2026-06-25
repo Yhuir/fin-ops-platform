@@ -33,6 +33,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - read/plan route callback collapse
+
+- 目标：把税金抵扣 month、summary、calculate、plan-save、certified import job 和 certified imports list 的 HTTP mapping 从 `server.py` 迁入 `TaxApiRoutes.route(...)`。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_tax.py`、`backend/src/fin_ops_platform/app/server.py`、`tests/test_platform_runtime_boundary_guards.py` 和 modular IO autonomous state。
+- 关键决策：read session、mutation session、JSON body loader、actor id 和 certified import records payload 都作为显式平台端口注入 route owner；certified import preview/confirm 暂留 `server.py`，因为它们还承担 multipart parsing、import queue/idempotency metadata 和 inline execution fallback。
+- 文档影响：更新本实施记录和 modular IO autonomous state；产品口径、API response shape、read model freshness/source-version 合同和前端行为未变化。
+- 测试覆盖：`tests/test_tax_offset_api.py` 覆盖 month/summary/calculate/plan-save/import-job/list/preview/confirm 既有 API、权限、idempotency 和 lifecycle 回归；`tests/test_platform_runtime_boundary_guards.py` 新增 Guard，禁止迁回 app-owned tax read/plan callbacks，同时确保 preview/confirm 暂留。
+- 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_tax.py backend/src/fin_ops_platform/app/server.py tests/test_tax_offset_api.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_tax_offset_read_plan_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：真实 PostgreSQL/worker/App Status/browser evidence 未运行，保留到后续生产验证；本 slice 不声明 tax 模块或全局闭环。
+- 后续事项：审计 certified import preview/confirm callback 的 multipart、import queue/idempotency 和 inline fallback 边界。
+
 ## 2026-06-25 - route-owner audit
 
 - 目标：审计税金抵扣 `server.py` callback 与 `TaxApiRoutes` 的职责边界，选择首个安全 route-owner 拆分切片。

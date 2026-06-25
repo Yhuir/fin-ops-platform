@@ -1,6 +1,6 @@
 # Prompt: Modular IO Refactor Master Goal Controller
 
-Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:tax-offset-read-plan-route-callback-collapse-selected` after tax route-owner audit.
+Copy the full prompt below into Codex to start or resume the autonomous run. Current local-first boundary state is `server-py:tax-certified-import-route-callback-audit-selected` after tax offset read/plan route callback collapse.
 
 ```text
 $gsd-autonomous --auto

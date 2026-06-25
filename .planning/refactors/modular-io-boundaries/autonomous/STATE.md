@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `tax-offset-read-plan-route-callback-collapse-selected`
+Current state: `tax-certified-import-route-callback-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:tax-route-owner-audit` as `analysis-closed` in `analysis/server-py-tax-route-owner-audit-2026-06-25.md`. Tax offset month/summary/calculate/plan-save/import-job/certified-imports list callbacks are thin enough for route-owner collapse; certified import preview/confirm multipart/import-queue semantics are deferred. T0 selected tax offset read/plan route callback collapse next.
+Completed `server-py:tax-offset-read-plan-route-callback-collapse` as `local-implementation-closed` in `analysis/server-py-tax-offset-read-plan-route-callback-collapse-2026-06-25.md`. Tax offset month/summary/calculate/plan-save/import-job/certified-imports list HTTP mapping now lives in `TaxApiRoutes.route(...)`; certified import preview/confirm remain deferred in `server.py`. T0 selected tax certified import route callback audit next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:tax-route-owner-audit`
+`server-py:tax-offset-read-plan-route-callback-collapse`
 
 ## Next Prompt
 
-`server-py:tax-offset-read-plan-route-callback-collapse`
+`server-py:tax-certified-import-route-callback-audit`

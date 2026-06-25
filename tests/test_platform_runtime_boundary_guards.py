@@ -608,6 +608,60 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_tax_offset_read_plan_routes_use_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        route_path = APP_ROOT / "routes_tax.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "TaxApiRoutes")
+        for marker in (
+            "def route",
+            "/api/tax-offset/summary",
+            "/api/tax-offset/calculate",
+            "/api/tax-offset/plans",
+            "/api/tax-offset/certified-import/jobs/",
+            "/api/tax-offset/certified-imports",
+            "resolve_mutation_session",
+            "certified_import_records_provider",
+        ):
+            if marker not in route_class:
+                violations.append(f"tax route owner is missing marker {marker}")
+
+        route_factory = _function_source(_parse(server_path), server_source, "_configure_tax_offset_application_services")
+        for marker in (
+            "resolve_read_session=self._resolve_tax_offset_read_session",
+            "resolve_mutation_session=self._resolve_tax_offset_mutation_session",
+            "load_json_body=self._load_json_body",
+            "actor_id_provider=self._tax_offset_actor_id",
+            "certified_import_records_provider=self._tax_certified_import_application_service.records_payload",
+        ):
+            if marker not in route_factory:
+                violations.append(f"tax route factory is missing port {marker}")
+
+        if "_tax_offset_routes().route(method, route_path, query, body, headers)" not in server_source:
+            violations.append("server.py does not delegate tax offset dispatch to the route owner")
+        for forbidden in (
+            "def _handle_api_tax_offset(",
+            "def _handle_api_tax_offset_summary",
+            "def _handle_api_tax_certified_import_job",
+            "def _handle_api_tax_certified_imports",
+            "def _handle_api_tax_offset_calculate",
+            "def _handle_api_tax_offset_plan_save",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns migrated tax callback {forbidden}")
+        for deferred in (
+            "def _handle_api_tax_certified_import_preview",
+            "def _handle_api_tax_certified_import_confirm",
+        ):
+            if deferred not in server_source:
+                violations.append(f"server.py no longer preserves deferred tax callback {deferred}")
+
+        self.assertEqual(violations, [])
+
     def test_workbench_exception_apply_mapping_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

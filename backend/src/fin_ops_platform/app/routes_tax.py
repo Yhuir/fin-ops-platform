@@ -4,9 +4,16 @@ from datetime import datetime
 from http import HTTPStatus
 from time import monotonic
 from typing import Any, Callable
+from urllib.parse import unquote
 
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
+
+
+SessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
+JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
+ActorIdProvider = Callable[[Any | None, dict[str, Any], str], str]
+CertifiedImportRecordsProvider = Callable[[str], dict[str, Any]]
 
 
 class TaxApiRoutes:
@@ -18,6 +25,11 @@ class TaxApiRoutes:
         certified_import_job_service: Any | None = None,
         plan_service: Any | None = None,
         json_response: Callable[[HTTPStatus, dict[str, Any]], Any] | None = None,
+        resolve_read_session: SessionResolver | None = None,
+        resolve_mutation_session: SessionResolver | None = None,
+        load_json_body: JsonBodyLoader | None = None,
+        actor_id_provider: ActorIdProvider | None = None,
+        certified_import_records_provider: CertifiedImportRecordsProvider | None = None,
         month_metric_emitter: Callable[..., None] | None = None,
         calculate_metric_emitter: Callable[..., None] | None = None,
         duration_ms: Callable[[float], float] | None = None,
@@ -28,10 +40,56 @@ class TaxApiRoutes:
         self._certified_import_job_service = certified_import_job_service
         self._plan_service = plan_service
         self._json_response = json_response
+        self._resolve_read_session = resolve_read_session
+        self._resolve_mutation_session = resolve_mutation_session
+        self._load_json_body = load_json_body
+        self._actor_id_provider = actor_id_provider
+        self._certified_import_records_provider = certified_import_records_provider
         self._month_metric_emitter = month_metric_emitter
         self._calculate_metric_emitter = calculate_metric_emitter
         self._duration_ms = duration_ms or (lambda started_at: (monotonic() - started_at) * 1000)
         self._now_provider = now_provider or datetime.now
+
+    def configure_platform_ports(
+        self,
+        *,
+        json_response: Callable[[HTTPStatus, dict[str, Any]], Any],
+        resolve_read_session: SessionResolver,
+        resolve_mutation_session: SessionResolver,
+        load_json_body: JsonBodyLoader,
+        actor_id_provider: ActorIdProvider,
+        certified_import_records_provider: CertifiedImportRecordsProvider,
+    ) -> "TaxApiRoutes":
+        self._json_response = json_response
+        self._resolve_read_session = resolve_read_session
+        self._resolve_mutation_session = resolve_mutation_session
+        self._load_json_body = load_json_body
+        self._actor_id_provider = actor_id_provider
+        self._certified_import_records_provider = certified_import_records_provider
+        return self
+
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any | None:
+        if method == "GET" and route_path == "/api/tax-offset":
+            return self._read(headers, lambda _session: self.handle_month(query.get("month", [None])[0]))
+        if method == "GET" and route_path == "/api/tax-offset/summary":
+            return self._read(headers, lambda _session: self.handle_summary(query.get("month", [None])[0]))
+        if method == "GET" and route_path.startswith("/api/tax-offset/certified-import/jobs/"):
+            import_job_id = unquote(route_path.removeprefix("/api/tax-offset/certified-import/jobs/")).strip()
+            return self._read(headers, lambda _session: self.handle_import_job(import_job_id))
+        if method == "GET" and route_path == "/api/tax-offset/certified-imports":
+            return self._read(headers, lambda _session: self.handle_certified_imports(query.get("month", [None])[0]))
+        if method == "POST" and route_path == "/api/tax-offset/calculate":
+            return self._json_body_read(body, headers, self.handle_calculate)
+        if method == "POST" and route_path == "/api/tax-offset/plans":
+            return self._json_body_mutation(body, headers, self.handle_save_plan, actor_fallback="tax_offset_api")
+        return None
 
     def get_tax_offset(self, month: str) -> dict[str, object]:
         return self._tax_offset_service.get_month_payload(month)
@@ -152,6 +210,19 @@ class TaxApiRoutes:
             )
         return self._respond(HTTPStatus.OK, {"import_job": import_job})
 
+    def handle_certified_imports(self, month: str | None) -> Any:
+        if month is None or not month.strip():
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_tax_certified_import_request",
+                    "message": "month is required.",
+                },
+            )
+        if self._certified_import_records_provider is None:
+            raise RuntimeError("Tax certified import records provider is not configured.")
+        return self._respond(HTTPStatus.OK, self._certified_import_records_provider(month.strip()))
+
     def _require_query_service(self) -> Any:
         if self._query_service is None:
             raise RuntimeError("Tax offset query service is not configured.")
@@ -171,6 +242,58 @@ class TaxApiRoutes:
         if self._json_response is None:
             return status, payload
         return self._json_response(status, payload)
+
+    def _read(self, headers: dict[str, str] | None, action: Callable[[Any | None], Any]) -> Any:
+        session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        return action(session)
+
+    def _json_body_read(self, body: str | bytes | None, headers: dict[str, str] | None, action: Callable[[dict[str, Any]], Any]) -> Any:
+        _session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._json_body(body)
+        if error is not None:
+            return error
+        return action(payload)
+
+    def _json_body_mutation(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        action: Callable[..., Any],
+        *,
+        actor_fallback: str,
+    ) -> Any:
+        session, auth_error = self._mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._json_body(body)
+        if error is not None:
+            return error
+        actor_id = self._actor_id(session, payload, actor_fallback)
+        return action(actor_id=actor_id, payload=payload)
+
+    def _read_session(self, headers: dict[str, str] | None) -> tuple[Any | None, Any | None]:
+        if self._resolve_read_session is None:
+            return None, None
+        return self._resolve_read_session(headers)
+
+    def _mutation_session(self, headers: dict[str, str] | None) -> tuple[Any | None, Any | None]:
+        if self._resolve_mutation_session is None:
+            return None, None
+        return self._resolve_mutation_session(headers)
+
+    def _json_body(self, body: str | bytes | None) -> tuple[dict[str, Any], Any | None]:
+        if self._load_json_body is None:
+            raise RuntimeError("Tax JSON body loader is not configured.")
+        return self._load_json_body(body)
+
+    def _actor_id(self, session: Any | None, payload: dict[str, Any], fallback: str) -> str:
+        if self._actor_id_provider is not None:
+            return self._actor_id_provider(session, payload, fallback)
+        return fallback
 
 
 def _safe_list_count(value: object) -> int:

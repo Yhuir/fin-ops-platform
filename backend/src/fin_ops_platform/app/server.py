@@ -1331,6 +1331,11 @@ class Application:
             certified_import_job_service=self._tax_certified_import_job_service,
             plan_service=self._tax_offset_plan_service,
             json_response=self._json_response,
+            resolve_read_session=self._resolve_tax_offset_read_session,
+            resolve_mutation_session=self._resolve_tax_offset_mutation_session,
+            load_json_body=self._load_json_body,
+            actor_id_provider=self._tax_offset_actor_id,
+            certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
             month_metric_emitter=self._emit_tax_offset_month_metric,
             calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
             duration_ms=self._duration_ms,
@@ -1389,7 +1394,14 @@ class Application:
 
     def _tax_offset_routes(self) -> TaxApiRoutes:
         self._ensure_tax_offset_application_services()
-        return self._tax_api_routes
+        return self._tax_api_routes.configure_platform_ports(
+            json_response=self._json_response,
+            resolve_read_session=self._resolve_tax_offset_read_session,
+            resolve_mutation_session=self._resolve_tax_offset_mutation_session,
+            load_json_body=self._load_json_body,
+            actor_id_provider=self._tax_offset_actor_id,
+            certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
+        )
 
     def _tax_offset_runtime(self) -> TaxOffsetRuntimeService:
         self._ensure_tax_offset_application_services()
@@ -2118,26 +2130,14 @@ class Application:
             return self._handle_api_workbench_ignore_row(body)
         if method == "POST" and route_path == "/api/workbench/actions/unignore-row":
             return self._handle_api_workbench_unignore_row(body)
-        if method == "GET" and route_path == "/api/tax-offset":
-            month = query.get("month", [None])[0]
-            return self._handle_api_tax_offset(month, headers)
-        if method == "GET" and route_path == "/api/tax-offset/summary":
-            month = query.get("month", [None])[0]
-            return self._handle_api_tax_offset_summary(month, headers)
+        if route_path == "/api/tax-offset" or route_path.startswith("/api/tax-offset/"):
+            tax_offset_response = self._tax_offset_routes().route(method, route_path, query, body, headers)
+            if tax_offset_response is not None:
+                return tax_offset_response
         if method == "POST" and route_path == "/api/tax-offset/certified-import/preview":
             return self._handle_api_tax_certified_import_preview(body, headers)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
             return self._handle_api_tax_certified_import_confirm(body, headers)
-        if method == "GET" and route_path.startswith("/api/tax-offset/certified-import/jobs/"):
-            import_job_id = unquote(route_path.removeprefix("/api/tax-offset/certified-import/jobs/")).strip()
-            return self._handle_api_tax_certified_import_job(import_job_id, headers)
-        if method == "GET" and route_path == "/api/tax-offset/certified-imports":
-            month = query.get("month", [None])[0]
-            return self._handle_api_tax_certified_imports(month, headers)
-        if method == "POST" and route_path == "/api/tax-offset/calculate":
-            return self._handle_api_tax_offset_calculate(body, headers)
-        if method == "POST" and route_path == "/api/tax-offset/plans":
-            return self._handle_api_tax_offset_plan_save(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics":
             month = query.get("month", [None])[0]
             project_scope = query.get("project_scope", [None])[0]
@@ -7492,6 +7492,10 @@ class Application:
             )
         return session, None
 
+    @staticmethod
+    def _tax_offset_actor_id(session: OARequestSession | None, payload: dict[str, object], fallback: str) -> str:
+        return actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or fallback)
+
     def _resolve_bank_details_read_session(
         self,
         headers: dict[str, str] | None,
@@ -9232,18 +9236,6 @@ class Application:
             return freshness_error
         return self._handle_workbench_unignore_row_payload(payload)
 
-    def _handle_api_tax_offset(self, month: str | None, headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_tax_offset_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        return self._tax_offset_routes().handle_month(month)
-
-    def _handle_api_tax_offset_summary(self, month: str | None, headers: dict[str, str] | None = None) -> Response:
-        _session, auth_error = self._resolve_tax_offset_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        return self._tax_offset_routes().handle_summary(month)
-
     def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
         return self._tax_offset_query().get_month_payload(month)
 
@@ -10774,62 +10766,6 @@ class Application:
 
     def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
         return self._import_processing_service.execute_tax_certified_import_confirm(session_id)
-
-    def _handle_api_tax_certified_import_job(
-        self,
-        import_job_id: str,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_tax_offset_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        return self._tax_offset_routes().handle_import_job(import_job_id)
-
-    def _handle_api_tax_certified_imports(
-        self,
-        month: str | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_tax_offset_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        if month is None or not month.strip():
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_tax_certified_import_request",
-                    "message": "month is required.",
-                },
-            )
-        current_month = month.strip()
-        return self._json_response(HTTPStatus.OK, self._tax_certified_import_application_service.records_payload(current_month))
-
-    def _handle_api_tax_offset_calculate(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        _session, auth_error = self._resolve_tax_offset_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        return self._tax_offset_routes().handle_calculate(payload)
-
-    def _handle_api_tax_offset_plan_save(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None = None,
-    ) -> Response:
-        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "tax_offset_api")
-        return self._tax_offset_routes().handle_save_plan(actor_id=actor_id, payload=payload)
 
     def _handle_workbench(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
