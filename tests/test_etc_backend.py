@@ -1827,7 +1827,7 @@ class EtcApiTests(unittest.TestCase):
                     item.manual_resolution_reason = "非本次"
                     item.review_note = "非本次"
 
-            payload = app._etc_reconciliation_task_payload(live_task)
+            payload = app._etc_reconciliation_task_payload_facade().task_payload(live_task)
 
         self.assertFalse(payload["canConfirm"])
 

@@ -27,6 +27,9 @@ from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
     EtcReconciliationSourceUpload,
     EtcReconciliationSourceUploadService,
 )
+from fin_ops_platform.services.etc_reconciliation_task_payload_facade import (
+    EtcReconciliationTaskPayloadFacade,
+)
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     StaleReconciliationPreviewError,
     preview_etc_zip_for_task,
@@ -323,6 +326,78 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(updated.ticket_root_items[0].vehicle_plate, "云ADA0381")
         self.assertEqual(updated.ticket_root_items[0].amount, Decimal("71.25"))
         self.assertEqual(updated.parse_results[0].parser_code, TicketRootClipboardTextParser.parser_code)
+
+    def test_task_payload_facade_builds_created_payload_and_import_blockers(self) -> None:
+        service = EtcReconciliationTaskService()
+        task = service.create_task(title="ETC", created_by="alice")
+        facade = EtcReconciliationTaskPayloadFacade(
+            etc_import_batch_by_id=lambda _batch_id: None,
+            serialize_value=lambda value: value,
+        )
+
+        payload = facade.task_payload(task)
+        unavailable_payload = facade.unavailable_task_payload(task)
+
+        self.assertEqual(payload["taskId"], task.task_id)
+        self.assertEqual(payload["status"], "draft")
+        self.assertEqual(payload["sourceFiles"], [])
+        self.assertEqual(payload["parseIssues"], [])
+        self.assertEqual(payload["creditCardItems"], [])
+        self.assertFalse(payload["canConfirm"])
+        self.assertEqual(
+            unavailable_payload["importBlockers"],
+            [{"code": "not_confirmed", "message": "请先在 ETC 对账页确认对账。"}],
+        )
+
+    def test_task_payload_facade_uses_import_batch_lookup_for_imported_summary(self) -> None:
+        task = EtcReconciliationTask(
+            task_id="TASK-1",
+            status=EtcReconciliationTaskStatus.IMPORTED,
+            version=5,
+            title="ETC",
+            import_batch_id="IMPORT-1",
+        )
+        facade = EtcReconciliationTaskPayloadFacade(
+            etc_import_batch_by_id=lambda batch_id: (
+                SimpleNamespace(invoice_count=2, total_amount=Decimal("13.07"))
+                if batch_id == "IMPORT-1"
+                else None
+            ),
+            serialize_value=lambda value: value,
+        )
+
+        payload = facade.task_payload(task)
+
+        self.assertTrue(payload["hasImportedInvoices"])
+        self.assertEqual(payload["importedInvoiceCount"], 2)
+        self.assertEqual(payload["importedInvoiceAmount"], Decimal("13.07"))
+        self.assertFalse(payload["canConfirm"])
+
+    def test_task_payload_facade_blocks_stale_included_etc_resolution(self) -> None:
+        service = EtcReconciliationTaskService()
+        task = service.create_task(title="ETC", created_by="alice")
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-1", text=CCB_STATEMENT_TEXT),
+            actor="alice",
+        )
+        first_candidate_seen = False
+        for item in task.credit_card_items:
+            if item.is_etc_candidate and not first_candidate_seen:
+                item.manual_resolution = "included_etc"
+                first_candidate_seen = True
+            elif item.is_etc_candidate:
+                item.manual_resolution = "excluded_non_etc"
+                item.manual_resolution_reason = "非本次"
+                item.review_note = "非本次"
+        facade = EtcReconciliationTaskPayloadFacade(
+            etc_import_batch_by_id=lambda _batch_id: None,
+            serialize_value=lambda value: value,
+        )
+
+        payload = facade.task_payload(task)
+
+        self.assertFalse(payload["canConfirm"])
 
     def _parsed_task(self, *, ticket_text: str = TICKET_ROOT_TEXT) -> tuple[EtcReconciliationTaskService, str]:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))

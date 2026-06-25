@@ -1758,6 +1758,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_tree = _parse(route_path)
         source_upload_path = SERVICES_ROOT / "etc_reconciliation_source_upload_service.py"
         source_upload_source = source_upload_path.read_text(encoding="utf-8")
+        payload_facade_path = SERVICES_ROOT / "etc_reconciliation_task_payload_facade.py"
+        payload_facade_source = payload_facade_path.read_text(encoding="utf-8")
 
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_reconciliation_routes")
@@ -1802,8 +1804,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner lacks explicit persist callback")
         if "source_upload_service=self._etc_reconciliation_source_upload_service()" not in route_factory:
             violations.append("ETC reconciliation route owner lacks explicit source upload service injection")
+        if "payload_facade = self._etc_reconciliation_task_payload_facade()" not in route_factory:
+            violations.append("ETC reconciliation route owner lacks explicit payload facade assembly")
+        if "task_payload=payload_facade.task_payload" not in route_factory:
+            violations.append("ETC reconciliation route owner no longer receives payload facade task payload")
+        if "unavailable_task_payload=payload_facade.unavailable_task_payload" not in route_factory:
+            violations.append("ETC reconciliation route owner no longer receives payload facade unavailable payload")
         if "EtcReconciliationSourceUploadService(task_service=self._etc_reconciliation_task_service)" not in source_upload_factory:
             violations.append("ETC reconciliation source upload service is not explicitly assembled from task service")
+        if "EtcReconciliationTaskPayloadFacade(" not in server_source:
+            violations.append("server.py does not explicitly assemble ETC reconciliation task payload facade")
+        if "etc_import_batch_by_id=self._etc_import_batch_by_id" not in server_source:
+            violations.append("ETC reconciliation payload facade lacks explicit import batch lookup dependency")
+        if "serialize_value=self._serialize_value" not in server_source:
+            violations.append("ETC reconciliation payload facade lacks explicit serializer dependency")
         if "self._source_upload_service.upload_sources(" not in route_owner_upload_source:
             violations.append("ETC reconciliation route owner upload handler no longer delegates parser orchestration to source upload service")
         if "self._source_upload_service.submit_ticket_root_texts(" not in route_owner_ticket_root_texts:
@@ -1838,6 +1852,32 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required_service_detail not in source_upload_source:
                 violations.append(f"ETC reconciliation source upload service lacks {required_service_detail}")
+        for required_payload_detail in (
+            "class EtcReconciliationTaskPayloadFacade",
+            "def task_payload(",
+            "def unavailable_task_payload(",
+            "def import_blockers(",
+            "def imported_invoice_summary(",
+            "def task_can_confirm(",
+            "def source_file_payloads(",
+            "def parse_issue_payloads(",
+        ):
+            if required_payload_detail not in payload_facade_source:
+                violations.append(f"ETC reconciliation payload facade lacks {required_payload_detail}")
+        for removed_payload_helper in (
+            "def _etc_reconciliation_task_payload(",
+            "def _etc_reconciliation_unavailable_task_payload(",
+            "def _etc_reconciliation_import_blockers(",
+            "def _etc_reconciliation_imported_invoice_summary(",
+            "def _etc_reconciliation_task_can_confirm(",
+            "def _etc_source_file_payloads(",
+            "def _etc_parse_issue_payloads(",
+            "def _etc_task_card_has_linked_etc_evidence(",
+            "def _etc_task_card_has_linked_supplement(",
+            "def _etc_task_card_supplement_delta_requires_note(",
+        ):
+            if removed_payload_helper in server_source:
+                violations.append(f"server.py reintroduced ETC reconciliation payload helper {removed_payload_helper}")
         if "_handle_api_etc_reconciliation_task_delete" in server_source:
             violations.append("server.py reintroduced ETC reconciliation task delete HTTP callback")
         if "_handle_api_etc_reconciliation_imported_invoices_delete" in server_source:
