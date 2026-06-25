@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `output-invoice-collection-post-fresh-gate-local-closure-audit-selected`
+Current state: `oa-pending-payment-route-owner-audit-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:output-invoice-collection-read-model-fresh-gate-service-extraction` as `local-implementation-closed` in `analysis/server-py-output-invoice-collection-read-model-fresh-gate-service-extraction-2026-06-25.md`. Output collection route ownership is locally accounted for and SQL read-model fresh gate/source-version/schema stale/all-rows/detail helper logic now lives behind `OutputInvoiceCollectionReadModelFreshGateService`. T0 selected a post-fresh-gate local closure audit next.
+Completed `server-py:output-invoice-collection-post-fresh-gate-local-closure-audit` as `analysis-closed` in `analysis/server-py-output-invoice-collection-post-fresh-gate-local-closure-audit-2026-06-25.md`. Output collection local `server.py` support is accounted for after route-owner collapse and read-model fresh-gate extraction; remaining output collection `Application` surfaces are explicit composition-root/platform/provider ports. T0 selected OA pending payment route-owner audit next.
 
 ## Closed Or Deferred Slices
 
@@ -309,8 +309,8 @@ T7 reconfirmed Go admission remains deferred: local collector returns `configura
 
 ## Last Prompt
 
-`server-py:output-invoice-collection-read-model-fresh-gate-service-extraction`
+`server-py:output-invoice-collection-post-fresh-gate-local-closure-audit`
 
 ## Next Prompt
 
-`server-py:output-invoice-collection-post-fresh-gate-local-closure-audit`
+`server-py:oa-pending-payment-route-owner-audit`

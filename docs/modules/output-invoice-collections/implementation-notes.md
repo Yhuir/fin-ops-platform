@@ -49,6 +49,15 @@
 
 ## 历史记录
 
+## 2026-06-25 - Post fresh gate local server.py audit
+
+- 目标：在 route-owner callback collapse 和 read model fresh-gate service extraction 后，审计销项发票收款情况剩余 `Application` 表面是否还有本地 implementation gap。
+- 结论：本地 `server.py` 支持已 accounted；剩余方法是 service/route/fresh-gate composition、HTTP response adapter、auth/session resolver、source-version provider、refresh gateway provider、import scope provider 或 shared invoice-usage invalidation fan-out，不再承载 output collection 私有业务算法、SQL 持久化细节或 fresh-gate payload 实现。
+- 文档影响：更新 modular IO autonomous state；产品/API 长期语义未变化。
+- 测试覆盖：沿用 route-owner/fresh-gate Guard 和 output collection API 回归；本条为审计 slice，无运行时代码变更。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_output_invoice_collection_read_export_routes_use_route_owner -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍保留到后续生产验证阶段；本 slice 不声明模块或全局闭环。
+
 ## 2026-06-25 - Read model fresh gate service extraction
 
 - 目标：把销项发票收款情况 SQL read model fresh gate、schema stale 检查、source-version 检查、all-rows 聚合和 relation detail fail-closed 从 `Application` 抽到显式 service 边界。
