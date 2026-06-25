@@ -1797,6 +1797,74 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_import_routes_delegate_to_route_owner(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        route_path = APP_ROOT / "routes_etc_import.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+
+        handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
+        route_factory = _function_source(server_tree, server_source, "_etc_import_routes")
+        route_owner_names = [
+            node.name
+            for node in ast.walk(route_tree)
+            if isinstance(node, ast.ClassDef)
+        ]
+        route_owner_init = _function_source(route_tree, route_source, "__init__")
+        route_owner_route = _function_source(route_tree, route_source, "route")
+        route_owner_preview = _function_source(route_tree, route_source, "preview")
+        route_owner_confirm = _function_source(route_tree, route_source, "confirm")
+
+        violations: list[str] = []
+        if "EtcImportApiRoutes" not in server_source:
+            violations.append("server.py does not import/use EtcImportApiRoutes")
+        if "_etc_import_routes().route(" not in handle_request:
+            violations.append("handle_request no longer delegates ETC import routes to route owner")
+        if "EtcImportApiRoutes(" not in route_factory:
+            violations.append("_etc_import_routes does not construct the route owner")
+        for required_dependency in (
+            "etc_service=self._etc_service",
+            "task_service=self._etc_reconciliation_task_service",
+            "background_job_service=self._background_job_service",
+            "reconciliation_import_previews=self._etc_reconciliation_import_previews",
+            "enqueue_import_job=self._enqueue_import_process_job",
+            "execute_etc_invoice_import_confirm_job=self._execute_etc_invoice_import_confirm_job",
+        ):
+            if required_dependency not in route_factory:
+                violations.append(f"ETC import route owner lacks explicit dependency {required_dependency}")
+        for removed_handler in (
+            "_handle_api_etc_import_preview",
+            "_handle_api_etc_import_confirm",
+            "_handle_api_etc_import(",
+        ):
+            if removed_handler in server_source:
+                violations.append(f"server.py reintroduced ETC import handler {removed_handler}")
+        if "Application" in route_owner_init:
+            violations.append("ETC import route owner accepts the whole Application")
+        if "EtcImportApiRoutes" not in route_owner_names:
+            violations.append("routes_etc_import.py does not define EtcImportApiRoutes")
+        for required_route in (
+            'route_path == "/api/etc/import/preview"',
+            'route_path == "/api/etc/import/confirm"',
+            'route_path == "/api/etc/import"',
+        ):
+            if required_route not in route_owner_route:
+                violations.append(f"ETC import route owner missing dispatch branch {required_route}")
+        if "preview_etc_zip_for_task" not in route_owner_preview:
+            violations.append("ETC import route owner preview does not apply reconciliation task filter")
+        if "filter_uploads_by_allowlist" not in route_owner_preview:
+            violations.append("ETC import route owner preview does not filter uploads by task allowlist")
+        if "create_or_get_idempotent_job_with_created" not in route_owner_confirm:
+            violations.append("ETC import route owner confirm does not create idempotent background job")
+        if "begin_import" not in route_owner_confirm:
+            violations.append("ETC import route owner confirm does not mark task import start")
+        if "_enqueue_import_process_job" in route_source:
+            violations.append("ETC import route owner uses app-private enqueue helper instead of injected port")
+
+        self.assertEqual(violations, [])
+
     def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {

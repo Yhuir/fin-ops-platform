@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-25 - ETC import route owner
+
+- 目标：把 `/api/etc/import`、`/api/etc/import/preview`、`/api/etc/import/confirm` 从 `Application` 迁入显式 route owner，继续收窄 `server.py` 的 ETC route ownership。
+- 影响范围：新增 `EtcImportApiRoutes`；`server.py` 只负责路由分发和依赖组装；preview/confirm 的 HTTP body/error/response、task-aware ZIP filter、idempotent background job 创建和队列端口调用由 route owner 承担。
+- 关键决策：实际导入执行、canonical invoice link、derived lifecycle refresh 和 read model side effect 继续由现有 `ImportProcessingService` 端口处理；route owner 不接收整个 `Application`，只接收显式 service/helper/port。
+- 文档影响：只更新本实施记录和 modular IO analysis/state；产品/API 长期事实不变。
+- 测试覆盖：新增 `test_etc_import_routes_delegate_to_route_owner` 静态 guard，并回归 targeted ETC import preview/confirm/direct import tests。
+- 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/server-py-etc-import-route-owner-audit-2026-06-25.md`。
+- 未测风险：legacy `/api/etc/batches*` 和 ETC invoice list/revoke 路由仍在 `Application`；未做生产验证，因为本轮无 API/业务行为变化。
+- 后续事项：审计 legacy `/api/etc/batches*` 是否应迁入 compat-only route owner，或是否需要先抽 side-effect service 边界。
+
 ## 2026-06-25 - ETC reconciliation delete callbacks route owner
 
 - 目标：把 `/api/etc/reconciliation-tasks/{task_id}` 删除和 `/imported-invoices` 删除的 HTTP callback 从 `Application` 迁入 `EtcReconciliationTaskApiRoutes`，关闭 reconciliation task route owner 的剩余 delete owner 缺口。
