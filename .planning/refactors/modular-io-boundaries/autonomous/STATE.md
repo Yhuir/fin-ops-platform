@@ -8,7 +8,7 @@
 
 ## Global Status
 
-Current state: `etc-invoice-routes-owned`
+Current state: `etc-reconciliation-simple-mutations-selected`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:etc-invoice-route-owner-audit` as `local-implementation-closed` in `analysis/server-py-etc-invoice-route-owner-audit-2026-06-25.md`. T0 added `EtcInvoiceApiRoutes`, moved `/api/etc/invoices` list and `/api/etc/invoices/revoke-submitted` HTTP mapping out of `Application`, preserved ETC service mutation plus link/refresh ports, and guarded the expanded route-owner inventory. Production browser/admin/write evidence remains final validation only. Next boundary is `server-py:etc-reconciliation-task-mutation-callback-audit`.
+Completed `server-py:etc-reconciliation-task-mutation-callback-audit` as `analysis-closed` in `analysis/server-py-etc-reconciliation-task-mutation-callback-audit-2026-06-25.md`. T0 classified residual reconciliation task callbacks into simple mutation HTTP mapping versus upload/parser-heavy flows and selected `server-py:etc-reconciliation-simple-mutation-callback-collapse` as the next implementation boundary. Production browser/admin/write evidence remains final validation only.
 
 ## Closed Or Deferred Slices
 

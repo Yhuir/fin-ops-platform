@@ -560,3 +560,13 @@
 - 测试覆盖：新增发票 route owner 静态 Guard，补齐 ETC route owner inventory，回归发票导入查询、撤回、无效输入和旧 direct import 不落库路径。
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_etc_invoices.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_invoice_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_import_query_revoke_and_batch_api_round_trip tests.test_etc_backend.EtcApiTests.test_api_returns_clear_errors_for_invalid_input tests.test_etc_backend.EtcApiTests.test_old_direct_import_no_longer_persists_records -v`。
 - 未测风险：未运行生产浏览器/admin/write apply；这些仍是最终生产验证 gate。下一本地边界是 ETC reconciliation task mutation callbacks 审计。
+
+## 2026-06-25 - ETC reconciliation task mutation callback审计
+
+- 目标：审计 `EtcReconciliationTaskApiRoutes` 仍从 `Application` 注入的 mutation callbacks，选择下一条最小安全实现边界。
+- 影响范围：`EtcReconciliationTaskApiRoutes`、`Application._etc_reconciliation_routes(...)`、上传/票根文本/source-file delete/item patch/confirm/reopen/refresh-match 路由。
+- 关键决策：callback 分成两组。source-file delete、item patch、confirm、reopen、refresh-match 是薄 HTTP 映射，下一步可先迁入 route owner；上传、supplement-for-card 和 ticket-root text 包含 multipart、对象存储、解析器、slot/source mode 校验，不能和薄 mutation 混在同一 slice 搬迁。
+- 文档影响：更新本实施记录和 modular IO 状态机；产品口径不变。
+- 测试覆盖：本 slice 为 analysis-only，未改运行时代码；下一实现 slice 需要静态 Guard 和 targeted ETC reconciliation task API 回归。
+- 验证命令：只读审计 `routes_etc_reconciliation.py`、`server.py` callback 注入和 targeted tests；未运行测试。
+- 未测风险：上传/parser-heavy flows 仍在 `Application` callbacks，等待后续独立边界。
