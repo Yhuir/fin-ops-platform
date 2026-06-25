@@ -182,6 +182,31 @@ class ReadModelManifestTests(unittest.TestCase):
                     f"{method_name} is declared by both {previous_owner} and {entry.key}",
                 )
 
+    def test_manifest_repository_owner_uses_read_model_port_except_workbench(self) -> None:
+        expected_port_owners = {
+            "bank_account_balance": "BankAccountBalanceReadModelRepositoryPort",
+            "bank_detail": "BankDetailReadModelRepositoryPort",
+            "cost_statistics": "CostStatisticsReadModelRepositoryPort",
+            "input_invoice_usage": "InputInvoiceUsageReadModelRepositoryPort",
+            "invoice_lifecycle": "InvoiceLifecycleReadModelRepositoryPort",
+            "no_oa_bank_batch": "NoOaBankBatchReadModelRepositoryPort",
+            "oa_pending_payment": "OaPendingPaymentReadModelRepositoryPort",
+            "output_invoice_collection": "OutputInvoiceCollectionReadModelRepositoryPort",
+            "pending_invoice": "PendingInvoiceReadModelRepositoryPort",
+            "search": "SearchReadModelRepositoryPort",
+            "tax_offset": "TaxOffsetReadModelRepositoryPort",
+            "turnover_ledger": "TurnoverLedgerReadModelRepositoryPort",
+            "workbench_relation": "WorkbenchRelationReadModelRepositoryPort",
+        }
+
+        self.assertEqual(
+            READ_MODEL_MANIFEST["workbench"].repository_owner,
+            "PostgresReadModelRepository.workbench",
+        )
+        for key, repository_owner in expected_port_owners.items():
+            with self.subTest(read_model_key=key):
+                self.assertEqual(READ_MODEL_MANIFEST[key].repository_owner, repository_owner)
+
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]
         required_active_generation_ports = {

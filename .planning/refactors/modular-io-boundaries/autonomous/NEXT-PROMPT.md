@@ -1,53 +1,76 @@
 # Next Prompt
 
-Continue after `server-py:workbench-pair-relation-display-policy-extraction`.
+Continue the user-authorized `main-read-model-closure` run.
 
 ## Current State
 
-- Branch: `dev`.
-- Last completed boundary: `server-py:workbench-pair-relation-display-policy-extraction`.
-- Row465 status: `local-implementation-closed`.
-- Analysis file: `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md`.
-- `WorkbenchPairRelationDisplayPolicy` now owns relation display payload mapping.
-- Pair relation row mutation and mode-specific metadata decorators remain deferred.
-- Production browser/admin/write evidence remains deferred; no module/global closure is claimed.
-
-## Previous Prompt Completion
-
-`server-py:workbench-pair-relation-display-policy-extraction` is complete:
-
-- added `WorkbenchPairRelationDisplayPolicy`;
-- moved relation display payload mapping out of `Application`;
-- preserved existing `Application` helper name as a delegate;
-- preserved no-OA, internal transfer, salary, personal advance repayment, turnover closure, OA invoice offset and default display behavior;
-- added static Guard and local tests;
-- avoided production validation.
-
-## Next Boundary
-
-`server-py:workbench-pair-relation-row-mutation-audit`
+- Branch: `main`.
+- Backup branch: `codex/backup-main-before-read-model-closure-20260625-230543`.
+- Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
+- Latest completed wave: `main-read-model-closure:wave-1-repository-owner-contract-reconciliation`.
+- Reconciliation file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-25.md`.
+- Wave 1 aligned non-Workbench manifest `repository_owner` values to existing narrow read model repository ports and added a manifest guard.
+- No production/server/DB access was used. No secret, production DB mutation, queue mutation, readiness mutation or worker replay occurred.
+- No PSCIP-L4 global closure is claimed.
 
 ## Required First Steps On Resume
 
-1. Confirm `git status --short --branch` and classify dirty files.
-2. Read:
-   - `.planning/refactors/modular-io-boundaries/analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md`
-   - `.planning/refactors/modular-io-boundaries/autonomous/STATE.md`
-   - `backend/src/fin_ops_platform/app/server.py` around `_apply_pair_relation_to_row(...)`, `_apply_oa_invoice_offset_pair_metadata(...)`, `_apply_cash_special_pair_metadata(...)`, `_apply_cash_special_available_actions(...)`, `_apply_internal_transfer_pair_metadata(...)`
-   - relevant Workbench grouping/display tests and static guards
-3. Audit pair relation row mutation:
-   - relation field assignment;
-   - relation metadata propagation;
-   - amount check propagation;
-   - available actions;
-   - mode-specific decorators.
-4. Select the next narrow local implementation or guard boundary.
-5. If safe, implement with tests/Guard/docs; otherwise close the audit and select the next boundary.
+1. Confirm `git status --short --branch`; stop if unrelated dirty files would be committed.
+2. Confirm `main` is fast-forward synced with `origin/main`.
+3. Read:
+   - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-25.md`
+   - `backend/src/fin_ops_platform/services/read_model_manifest.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+   - `backend/src/fin_ops_platform/services/postgres_state_store.py`
+   - relevant `*_read_model_repository.py` ports for the selected family
+   - relevant module tests for the selected family
+4. Use CodeGraph before editing:
+   - `codegraph_status`
+   - `codegraph_context` for the selected physical SQL family
+   - `codegraph_impact` for any shared repository method before changing it
 
-## Stop Gates
+## Next Boundary
 
-- Do not run production validation or mutation.
-- Do not claim global closure from this display policy extraction.
-- Do not choose Go implementation; Go admission remains blocked.
-- Do not move unrelated relation repair, grouping or route logic in this slice.
+`main-read-model-closure:wave-2-physical-sql-owner-split`
+
+Recommended first family: invoice read models.
+
+Scope:
+- `pending_invoice`
+- `invoice_lifecycle`
+- `input_invoice_usage`
+- `output_invoice_collection`
+- `oa_pending_payment`
+
+Goal:
+- Move from “narrow port wrapping broad `PostgresReadModelRepository` methods” toward clearer physical SQL ownership without changing API behavior.
+- Prefer a coherent extraction pattern that keeps public port APIs stable.
+- Do not split every method one-by-one if a family-level owner can be extracted safely with tests.
+
+Acceptance:
+- No API response shape change unless explicitly tested.
+- No stale-as-fresh path introduced.
+- No new direct dirty/outbox SQL outside allowed owners.
+- No broad `all` fake fresh.
+- No Redis/RabbitMQ freshness truth.
+- Existing repository port tests remain green.
+- Add or update at least one guard proving the selected family no longer treats shared `PostgresReadModelRepository` as its physical owner once extracted.
+- Record PSCIP level movement in a new `analysis/read-model-main-wave-2-physical-sql-owner-split-2026-06-25.md`.
+- Update this `NEXT-PROMPT.md` at the end of the wave.
+
+Suggested verification:
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards -v
+PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_invoice_lifecycle_read_model_refresh.py tests/test_invoice_lifecycle_read_facade.py tests/test_invoice_lifecycle_page_integration.py tests/test_invoice_usage_collection_sql_runtime.py tests/test_oa_pending_payment_api.py -q
+bash scripts/verify.sh docs
+git diff --check
+```
+
+If this family is too broad for one verified wave, split it into two coherent subwaves:
+- lifecycle + pending invoice
+- invoice usage collection + OA pending payment
+
+Do not claim PSCIP-L4 without production or equivalent runtime evidence.
