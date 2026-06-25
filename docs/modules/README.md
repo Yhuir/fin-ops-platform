@@ -5,6 +5,7 @@
 
 模块文档是日常维护入口，不替代长期事实源：
 
+- 模块边界、I/O、文件范围索引和 read model 合同以 `docs/architecture/module-boundaries/` 为准。
 - 业务口径仍以 `docs/product-specs/` 为准。
 - 页面、运行链、read model、worker 和跨页面影响仍以 `docs/app-architecture/` 为准。
 - API、测试和本地开发仍以 `docs/dev/` 为准。
@@ -13,11 +14,13 @@
 ## 使用规则
 
 1. 修改前识别目标页面或功能域。
-2. 读取目标模块 `README.md`。
-3. 如涉及状态、权限、API、read model、worker、部署或测试，继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`。
-4. 若改动跨多个页面或资源域，读取每个受影响模块。
-5. 修改后做 docs impact assessment；模块事实、状态、测试、风险或验证方式变化时，更新对应模块文档。
-6. 不保存原始 Codex prompt；只在 `implementation-notes.md` 记录提炼后的目标、决策、验收和风险。
+2. 读取 `docs/architecture/module-boundaries/README.md` 和 `docs/architecture/module-boundaries/inventory.md`。
+3. 读取目标模块 `README.md`。
+4. 如涉及状态、权限、API、read model、worker、部署或测试，继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`。
+5. 如涉及 read model，继续读取 `docs/architecture/module-boundaries/read-model-contracts.md`。
+6. 若改动跨多个页面或资源域，读取每个受影响模块。
+7. 修改后做 docs impact assessment；模块事实、边界、I/O、文件范围、状态、测试、风险或验证方式变化时，更新对应模块文档和 `docs/architecture/module-boundaries/`。
+8. 不保存原始 Codex prompt；只在 `implementation-notes.md` 记录提炼后的目标、决策、验收和风险。
 
 ## 模块清单
 
@@ -63,6 +66,7 @@
 - `tests.md`：七类测试适用性、现有测试入口、回归范围和验证命令。
 - `e2e-spec.md`：Spec-first Browser e2e 业务验收合同；页面/功能应该如何工作。
 - `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 覆盖的映射和缺口分类。
+- `boundary-io.md`：模块边界、I/O、持久化、文件范围、依赖方向、验证入口、当前缺口和旧代码删除条件。每个模块都必须维护。
 - `implementation-notes.md`：提炼后的实施记录、决策、验收结果、风险和后续事项。
 
 不适用的文件不要删除；在文件内写明“不适用原因”，这样后续 Agent 不需要重复判断。旧模块可以按风险逐步补齐 `e2e-spec.md` / `e2e-coverage.md`，但一旦开始 Spec-first E2E Audit，后续新增或修改 Browser e2e 必须先映射到 Spec ID。

@@ -5,11 +5,13 @@
 - `../../ARCHITECTURE.md`：系统架构总览。
 - `system-overview.md`：模块边界和主要数据流。
 - `data-model.md`：核心领域实体和状态设计。
+- `module-boundaries/README.md`：模块边界、I/O、文件范围、read model 合同和 GSD 维护规则。
 
 ## 专题
 
 - `oa-integration.md`：OA 页面壳体、登录复用、菜单权限和部署路径。
 - `persistence-and-read-models.md`：当前持久化、read model、缓存失效和性能演进。
+- `module-boundaries/read-model-contracts.md`：当前 read model manifest 合同、projection 目标态和验收要求。
 - `deployment.md`：部署形态、环境、反向代理和发布边界。
 - `backend-refactor/README.md`：Python-first 后端架构重构文档入口。
 - `backend-refactor/target-architecture.md`：Python-first 目标架构、组件边界和技术取舍。

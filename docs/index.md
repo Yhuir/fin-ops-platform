@@ -26,7 +26,7 @@
 | `business-flows/` | 面向业务读者的页面目的、操作流程、数据流向和页面间影响关系 |
 | `modules/` | 按页面和关键功能域组织的维护入口、状态机、测试矩阵和实施记录 |
 | `product-specs/` | 面向产品和业务的需求、口径、验收标准 |
-| `architecture/` | 系统边界、数据模型、持久化、部署形态 |
+| `architecture/` | 系统边界、模块边界/I/O、数据模型、持久化、部署形态 |
 | `dev/` | 开发者入口、接口契约、测试、本地运行 |
 | `operations/` | 部署、数据安全、worker/read model、监控告警 |
 | `references/` | 仓库布局、外部系统、原始业务源和迁移历史摘要 |
@@ -73,19 +73,31 @@
 8. `architecture/backend-refactor/migration-state-log.md`
 9. `architecture/backend-refactor/refactor-prompts.md`
 
+### 模块边界与 I/O 维护
+
+1. `architecture/module-boundaries/README.md`
+2. `architecture/module-boundaries/inventory.md`
+3. `architecture/module-boundaries/read-model-contracts.md`
+4. `architecture/module-boundaries/maintenance.md`
+5. `modules/README.md`
+6. 按目标模块继续读取 `modules/<module>/README.md` 和必要的状态机、测试、实施记录。
+
 ### 当前 App 架构维护
 
 1. `app-architecture/pages.md`
 2. `app-architecture/runtime-and-ownership.md`
 3. `app-architecture/docs-maintenance.md`
-4. `modules/README.md`
+4. `architecture/module-boundaries/README.md`
+5. `modules/README.md`
 
 ### 页面和功能模块维护
 
-1. `modules/README.md`
-2. 按目标页面或功能域读取对应 `modules/<module>/README.md`
-3. 按影响范围继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`
-4. 如模块文档链接到产品、架构、开发或运维长期事实源，以长期事实源为准并同步维护
+1. `architecture/module-boundaries/README.md`
+2. `architecture/module-boundaries/inventory.md`
+3. `modules/README.md`
+4. 按目标页面或功能域读取对应 `modules/<module>/README.md`
+5. 按影响范围继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`
+6. 如模块文档链接到产品、架构、开发或运维长期事实源，以长期事实源为准并同步维护
 
 ### UI 平台迁移
 
