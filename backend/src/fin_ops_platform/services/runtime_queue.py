@@ -265,6 +265,139 @@ class RuntimeQueueRepository:
                 metadata=metadata,
             )
 
+    def enqueue_workbench_all_aggregate_refresh(
+        self,
+        *,
+        tenant_id: str = "default",
+        parent_scope_keys: Iterable[object] | None = None,
+        source_version: int | str | None = None,
+        reason: str = "workbench_aggregate_changed",
+        priority: str = "low",
+        trace_id: str | None = None,
+    ) -> RuntimeQueueEvent:
+        normalized_source_version = _optional_int(source_version)
+        normalized_reason = str(reason or "").strip() or "workbench_aggregate_changed"
+        normalized_priority = _normalize_priority(priority)
+        normalized_trace_id = str(trace_id or "").strip() or None
+        normalized_parent_scope_keys = _normalized_scope_key_list(parent_scope_keys)
+        payload = {
+            "scope_type": "workbench",
+            "scope_key": "all",
+            "reason": normalized_reason,
+            "aggregate_only": True,
+            "parent_scope_keys": normalized_parent_scope_keys,
+            **({"source_version": normalized_source_version} if normalized_source_version is not None else {}),
+        }
+        dedupe_key = "workbench.read_model.refresh:workbench:all:aggregate"
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                insert into job.outbox_events (
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    raw_payload,
+                    schema_version,
+                    source_version,
+                    priority,
+                    trace_id
+                )
+                values (
+                    %s,
+                    'workbench.read_model.refresh',
+                    'read_model',
+                    'all',
+                    'workbench',
+                    'all',
+                    %s,
+                    %s,
+                    %s,
+                    1,
+                    %s,
+                    %s,
+                    %s
+                )
+                on conflict (tenant_id, dedupe_key)
+                where dedupe_key is not null and status = 'pending'
+                do update set
+                    payload = (
+                        job.outbox_events.payload
+                        || excluded.payload
+                        || jsonb_build_object(
+                            'parent_scope_keys',
+                            (
+                                select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                                from jsonb_array_elements_text(
+                                    coalesce(job.outbox_events.payload->'parent_scope_keys', '[]'::jsonb)
+                                    || coalesce(excluded.payload->'parent_scope_keys', '[]'::jsonb)
+                                ) as merged(value)
+                            )
+                        )
+                    ),
+                    raw_payload = (
+                        job.outbox_events.raw_payload
+                        || excluded.raw_payload
+                        || jsonb_build_object(
+                            'parent_scope_keys',
+                            (
+                                select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                                from jsonb_array_elements_text(
+                                    coalesce(job.outbox_events.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                                    || coalesce(excluded.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                                ) as merged(value)
+                            )
+                        )
+                    ),
+                    source_version = greatest(
+                        coalesce(job.outbox_events.source_version, 0),
+                        coalesce(excluded.source_version, 0)
+                    ),
+                    priority = excluded.priority,
+                    trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
+                    publish_status = 'unpublished',
+                    published_at = null,
+                    publish_last_error = null,
+                    next_publish_at = now(),
+                    publish_locked_by = null,
+                    publish_locked_at = null,
+                    publish_confirmed_at = null,
+                    updated_at = now()
+                returning
+                    id::text as event_id,
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    attempts,
+                    status,
+                    schema_version,
+                    source_version,
+                    priority,
+                    trace_id
+                """,
+                (
+                    tenant_id,
+                    dedupe_key,
+                    self._json_param(payload),
+                    self._json_param(payload),
+                    normalized_source_version,
+                    normalized_priority,
+                    normalized_trace_id,
+                ),
+            )
+        if row is None:
+            raise RuntimeQueueDataError("Workbench aggregate refresh enqueue did not return an event.")
+        return _event_from_row(row)
+
     def enqueue_read_model_refresh_in_transaction(
         self,
         *,
@@ -1907,6 +2040,18 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     if not action_name:
         return {}
     return {"action_name": action_name[:120]}
+
+
+def _normalized_scope_key_list(values: Iterable[object] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        text_value = str(value or "").strip()
+        if not text_value or text_value in seen:
+            continue
+        normalized.append(text_value)
+        seen.add(text_value)
+    return sorted(normalized)
 
 
 def _positive_int(raw: Any, *, default: int, name: str) -> int:

@@ -647,7 +647,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
     dedupe_key = f"{event_type}:{scope_type}:{scope_key}"
     normalized_dedupe_kind = text(dedupe_kind)
     if normalized_dedupe_kind:
-        dedupe_key = f"{event_type}:{scope_type}:{scope_key}:{normalized_dedupe_kind}:{source_version or 'latest'}"
+        dedupe_key = f"{event_type}:{scope_type}:{scope_key}:{normalized_dedupe_kind}"
     connection.execute(
         """
         insert into job.outbox_events (
@@ -659,9 +659,44 @@ def _enqueue_single_read_model_refresh_in_transaction(
         on conflict (tenant_id, dedupe_key)
         where dedupe_key is not null and status = 'pending'
         do update set
-            payload = job.outbox_events.payload || excluded.payload,
-            raw_payload = excluded.raw_payload,
-            source_version = excluded.source_version,
+            payload = (
+                job.outbox_events.payload
+                || excluded.payload
+                || case
+                    when excluded.payload ? 'parent_scope_keys' then jsonb_build_object(
+                        'parent_scope_keys',
+                        (
+                            select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                            from jsonb_array_elements_text(
+                                coalesce(job.outbox_events.payload->'parent_scope_keys', '[]'::jsonb)
+                                || coalesce(excluded.payload->'parent_scope_keys', '[]'::jsonb)
+                            ) as merged(value)
+                        )
+                    )
+                    else '{}'::jsonb
+                end
+            ),
+            raw_payload = (
+                job.outbox_events.raw_payload
+                || excluded.raw_payload
+                || case
+                    when excluded.raw_payload ? 'parent_scope_keys' then jsonb_build_object(
+                        'parent_scope_keys',
+                        (
+                            select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                            from jsonb_array_elements_text(
+                                coalesce(job.outbox_events.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                                || coalesce(excluded.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                            ) as merged(value)
+                        )
+                    )
+                    else '{}'::jsonb
+                end
+            ),
+            source_version = greatest(
+                coalesce(job.outbox_events.source_version, 0),
+                coalesce(excluded.source_version, 0)
+            ),
             priority = excluded.priority,
             publish_status = 'unpublished',
             published_at = null,

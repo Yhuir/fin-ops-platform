@@ -180,6 +180,43 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertNotIn("payload", event.to_envelope())
         self.assertEqual(event.attempt_count, 2)
 
+    def test_workbench_all_aggregate_enqueue_coalesces_pending_parent_scopes(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="all",
+                    scope_type="workbench",
+                    scope_key="all",
+                    dedupe_key="workbench.read_model.refresh:workbench:all:aggregate",
+                    payload={"aggregate_only": True, "parent_scope_keys": ["2026-04", "2026-05"]},
+                    source_version=8,
+                    priority="low",
+                )
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_workbench_all_aggregate_refresh(
+            tenant_id="tenant-a",
+            parent_scope_keys=["2026-05", "2026-04", "2026-05"],
+            source_version=8,
+            reason="workbench_relation_changed",
+            priority="low",
+            trace_id="trace-a",
+        )
+
+        self.assertEqual(event.dedupe_key, "workbench.read_model.refresh:workbench:all:aggregate")
+        method, sql, params = transaction.calls[0]
+        self.assertEqual(method, "fetch_one")
+        self.assertIn("jsonb_array_elements_text", sql)
+        self.assertEqual(params[1], "workbench.read_model.refresh:workbench:all:aggregate")
+        payload = getattr(params[2], "obj", params[2])
+        self.assertEqual(payload["parent_scope_keys"], ["2026-04", "2026-05"])
+        self.assertEqual(payload["aggregate_only"], True)
+        self.assertEqual(payload["reason"], "workbench_relation_changed")
+
     def test_enqueue_inserts_runtime_event_fields_and_returns_event(self) -> None:
         available_at = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
         transaction = FakeTransaction(rows=[event_row()])

@@ -1420,3 +1420,11 @@
 - 改动：`TurnoverLedgerWriteFacade` 的 bank-row-tags、confirm、manual closure confirm、withdraw refresh requests 从默认 `all` 收敛为 affected months；`TurnoverLedgerConfirmRequestBoundaryFacade` 返回 affected turnover month scopes + affected workbench_relation scopes；`TurnoverLedgerPage` 在 manual closure 提交前按所选 rows 的月份等待 turnover ledger fresh，无法解析月份时才退回 `all`。
 - 例外：`all` 仍保留为 manifest fan-out command，以及 cash closure withdraw 等写前无法解析 affected months 的路径；legacy fallback adapters 仍需后续删除或隔离，不能作为新链路默认行为。
 - 测试覆盖：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_write_targets.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。
+
+## 2026-06-26 - Workbench aggregate-only parent refresh coalescing
+
+- 目标：修复生产 Workbench turnover 样本写后读闭环中 `workbench:all` aggregate-only parent refresh 队列放大。`workbench:all` parent aggregate 是合法 active-generation 例外，但不能按 source version 生成一串 pending parent events，导致 dirty/outbox drain 和 5s write-operation SLO 长尾。
+- 生产证据：`workbench-withdraw-turnover:turnover_rel_89e8fb47e3ffce91` 业务写入成功，样本已按 bounded DB restore protocol 恢复到操作前 canonical facts；恢复后 readiness 最终 fresh，但 `workbench:2026-01` enqueue-to-fresh `9508.538ms`，队列中剩余多条 `workbench.read_model.refresh` / `workbench:all` / `aggregate_only=true` pending events。
+- 改动：`RuntimeQueueRepository.enqueue_workbench_all_aggregate_refresh(...)` 使用稳定 dedupe key `workbench.read_model.refresh:workbench:all:aggregate`，合并 `parent_scope_keys`、保留最大 `source_version`、透传 `reason`；`WorkbenchReadModelRefreshService` 优先使用该 coalescing 入口；`PostgresWorkbenchRelationRepository` 的事务内 aggregate helper 改为同一稳定 dedupe 语义。
+- 约束：不取消 `workbench:all` parent aggregate，不把 parent aggregate 标为 fake fresh；只合并 pending aggregate-only wakeups，仍由 worker 基于 active shard 发布真实 parent generation。
+- 测试覆盖：`tests/test_runtime_queue.py`、`tests/test_workbench_relation_repository.py`、`tests/test_workbench_sql_runtime.py` 覆盖稳定 dedupe key、parent scope 合并、专用 enqueue 优先、无 legacy enqueue 方法时仍可排 aggregate，以及原有 aggregate-only fresh gate。
