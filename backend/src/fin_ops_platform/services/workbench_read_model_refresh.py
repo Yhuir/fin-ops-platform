@@ -103,7 +103,14 @@ class WorkbenchReadModelRefreshService:
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        enqueued_scope_keys = refresh_gateway.enqueue_many("workbench", shard_keys, reason="workbench_all_shard")
+        event_priority = str(event.priority or "normal").strip() or "normal"
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            "workbench",
+            shard_keys,
+            reason="workbench_all_shard",
+            priority=event_priority,
+            trace_id=event.trace_id,
+        )
         enqueue_event = getattr(self._queue_repository, "enqueue", None)
         enqueue_aggregate = getattr(self._queue_repository, "enqueue_workbench_all_aggregate_refresh", None)
         can_enqueue_aggregate = callable(enqueue_aggregate) or callable(enqueue_event)
@@ -115,7 +122,7 @@ class WorkbenchReadModelRefreshService:
                     parent_scope_keys=enqueued_scope_keys,
                     source_version=source_version,
                     reason=str(event.payload.get("reason") or "workbench_all_shard"),
-                    priority="low",
+                    priority=event_priority,
                     trace_id=event.trace_id,
                 )
             else:
@@ -135,7 +142,7 @@ class WorkbenchReadModelRefreshService:
                     },
                     tenant_id=event.tenant_id,
                     source_version=source_version,
-                    priority="low",
+                    priority=event_priority,
                     trace_id=event.trace_id,
                 )
         return {
@@ -153,13 +160,14 @@ class WorkbenchReadModelRefreshService:
         if not callable(enqueue_aggregate) and not callable(enqueue_event):
             return None
         source_version = event.source_version or event.payload.get("source_version")
+        event_priority = str(event.priority or "normal").strip() or "normal"
         if callable(enqueue_aggregate):
             enqueue_aggregate(
                 tenant_id=event.tenant_id,
                 parent_scope_keys=[scope_key],
                 source_version=source_version,
                 reason=str(event.payload.get("reason") or "workbench_shard_published"),
-                priority="low",
+                priority=event_priority,
                 trace_id=event.trace_id,
             )
         else:
@@ -179,7 +187,7 @@ class WorkbenchReadModelRefreshService:
                 },
                 tenant_id=event.tenant_id,
                 source_version=source_version,
-                priority="low",
+                priority=event_priority,
                 trace_id=event.trace_id,
             )
         return True

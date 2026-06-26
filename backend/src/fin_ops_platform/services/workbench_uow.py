@@ -91,13 +91,14 @@ class WorkbenchWriteUnitOfWork:
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
             action_name = str(getattr(command, "action_name", "") or "")
+            refresh_reason = _refresh_reason_for(command, action_name)
             metadata = _refresh_metadata_for(command, action_name)
             for scope_key in _scope_keys_for(command, result):
                 event = self._read_model_refresh_writer.enqueue_refresh(
                     transaction=transaction,
                     scope_type="workbench",
                     scope_key=scope_key,
-                    reason=action_name,
+                    reason=refresh_reason,
                     metadata=dict(metadata) if metadata is not None else None,
                 )
                 source_versions[scope_key] = _event_value(event, "source_version")
@@ -186,6 +187,17 @@ def _refresh_metadata_for(command: Any, action_name: str) -> dict[str, object] |
     if action_name:
         metadata["action_name"] = action_name
     return metadata or None
+
+
+def _refresh_reason_for(command: Any, action_name: str) -> str:
+    raw_metadata = getattr(command, "refresh_metadata", None)
+    if isinstance(raw_metadata, dict):
+        explicit_reason = str(raw_metadata.get("refresh_reason") or "").strip()
+        if explicit_reason:
+            return explicit_reason
+    if action_name in {"confirm_link", "withdraw_link", "cancel_link"}:
+        return "workbench_relation_changed"
+    return action_name or "workbench_write_changed"
 
 
 def _event_value(event: Any, name: str) -> Any:

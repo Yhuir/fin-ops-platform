@@ -326,14 +326,6 @@ class RuntimeWorker:
         return int(self._config.retry_delay_seconds * (2**exponent))
 
     def _dependency_not_fresh_delay_seconds(self, event: RuntimeQueueEvent, error: str) -> float:
-        normalized_scope_type = str(event.scope_type or "").strip().lower()
-        if normalized_scope_type and self._parent_scope_keys_from_error(error):
-            for match in READ_MODEL_NOT_FRESH_RE.finditer(str(error or "").strip().lower()):
-                if match.group(1) == normalized_scope_type:
-                    return max(
-                        float(self._config.dependency_not_fresh_delay_seconds),
-                        float(self._config.retry_delay_seconds),
-                    )
         return float(self._config.dependency_not_fresh_delay_seconds)
 
     @staticmethod

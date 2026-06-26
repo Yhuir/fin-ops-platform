@@ -367,7 +367,7 @@ class RuntimeWorkerTests(unittest.TestCase):
                     "event-1",
                     "worker-1",
                     "workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=2026-03",
-                    60.0,
+                    4,
                 )
             ],
         )
@@ -381,7 +381,7 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(dependency["priority"], "high")
         self.assertEqual(dependency["trace_id"], "trace-workbench-all")
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
-        self.assertEqual(deferred_payloads[0]["delay_seconds"], 60.0)
+        self.assertEqual(deferred_payloads[0]["delay_seconds"], 4)
         self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "workbench", "scope_key": "2026-03"}])
 
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
