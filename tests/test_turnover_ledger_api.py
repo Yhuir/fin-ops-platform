@@ -760,7 +760,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     },
                     "affected_months": ["2026-05"],
                     "freshness_targets": [
-                        {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                        {"read_model_key": "turnover_ledger", "scope_key": "2026-05"},
                         {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
                     ],
                 }
@@ -1385,25 +1385,29 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             command.refresh_requests,
             [
-                {"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_changed"},
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["2026-02", "2026-03"],
+                    "reason": "turnover_relation_changed",
+                },
                 {
                     "scope_type": "workbench",
-                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
                 },
                 {
                     "scope_type": "workbench_relation",
-                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
                 },
                 {
                     "scope_type": "cost_statistics",
-                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
                 },
                 {
                     "scope_type": "search",
-                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
                 },
             ],
@@ -1587,7 +1591,13 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [("confirm_relation", "confirmed")],
         )
-        self.assertEqual(len(queue.enqueued), 1)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+            ],
+        )
 
     def test_target_confirm_idempotency_key_conflict_rejects_different_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1628,7 +1638,13 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [("confirm_relation", "confirmed")],
         )
-        self.assertEqual(len(queue.enqueued), 1)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+            ],
+        )
 
     def test_bank_row_tags_write_facade_without_idempotency_key_keeps_empty_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
@@ -2230,7 +2246,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
 
     def test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects(self) -> None:
         # PF-P118 characterization: facade None fallback remains a legacy direct-save/direct-invalidation path.
@@ -2318,7 +2334,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["updated"], 2)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "all"})
+        self.assertEqual(payload["operation_barrier_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "2026-02"})
         self.assertTrue(payload["turnover_ledger_invalidated"])
         self.assertTrue(payload["workbench_invalidated"])
         self.assertEqual(
@@ -2563,7 +2579,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
         self.assertEqual(queue.enqueued, [])
 
     def test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh(self) -> None:
@@ -2606,7 +2622,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [
                 ("bank_detail", "2026-02", "bank_transaction_category_changed"),
                 ("workbench", "2026-02", "workbench_scope_invalidated"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
             ],
         )
         self.assertEqual(read_repository.clear_calls, 0)
@@ -2655,7 +2671,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
         self.assertEqual(
             [item for item in queue.transactional if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "all", "turnover_relation_changed", queue.transactional[-1][3])],
+            [("turnover_ledger", "2026-02", "turnover_relation_changed", queue.transactional[-1][3])],
         )
 
     def test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save(self) -> None:
@@ -2760,7 +2776,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
         self.assertEqual(queue.enqueued, [])
 
     def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
@@ -2789,7 +2805,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
 
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:
@@ -3755,8 +3771,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 
@@ -3791,7 +3809,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "all", "turnover_relation_changed")],
+            [
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+            ],
         )
 
     def test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh(self) -> None:
@@ -3824,7 +3845,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "all", "turnover_relation_changed")],
+            [
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+            ],
         )
 
     def test_confirm_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
@@ -3919,7 +3943,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(audit_log, [])
         self.assertEqual(
             [item for item in queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "all", "turnover_relation_changed")],
+            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
         )
 
     def test_confirm_relation_fallback_adapter_keeps_legacy_rebuild_confirm_and_after_mutation(self) -> None:
@@ -3976,7 +4000,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             payload["operation_barrier_targets"],
             [
-                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "turnover_ledger", "scope_key": "2026-02"},
+                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
             ],
@@ -4032,7 +4057,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(
             [item[:3] for item in queue.transactional],
-            [("turnover_ledger", "all", "turnover_relation_changed")],
+            [
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+            ],
         )
         self.assertEqual(queue.enqueued, [])
 
@@ -4118,8 +4146,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 
@@ -4166,8 +4196,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 
@@ -4211,8 +4243,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 
@@ -4260,8 +4294,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 
@@ -4296,22 +4332,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item[:3] for item in queue.transactional],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
                 ("workbench", "2026-02", "turnover_relation_changed"),
                 ("workbench", "2026-03", "turnover_relation_changed"),
-                ("workbench", "all", "turnover_relation_changed"),
                 ("workbench_relation", "2026-02", "turnover_relation_changed"),
                 ("workbench_relation", "2026-03", "turnover_relation_changed"),
-                ("workbench_relation", "all", "turnover_relation_changed"),
                 ("cost_statistics", "active:2026-02", "turnover_relation_changed"),
                 ("cost_statistics", "all:2026-02", "turnover_relation_changed"),
                 ("cost_statistics", "active:2026-03", "turnover_relation_changed"),
                 ("cost_statistics", "all:2026-03", "turnover_relation_changed"),
-                ("cost_statistics", "active:all", "turnover_relation_changed"),
-                ("cost_statistics", "all:all", "turnover_relation_changed"),
                 ("search", "2026-02", "turnover_relation_changed"),
                 ("search", "2026-03", "turnover_relation_changed"),
-                ("search", "all", "turnover_relation_changed"),
             ],
         )
         self.assertEqual(queue.enqueued, [])
@@ -4350,7 +4382,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "all"})
+        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "2026-02"})
         self.assertEqual(len(facade.withdraw_calls), 1)
         self.assertEqual(facade.withdraw_calls[0]["relation_id"], relation_id)
         self.assertEqual(facade.withdraw_calls[0]["note"], "facade withdraw")
@@ -4476,7 +4508,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["relation"]["status"], "withdrawn")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"][1], {"read_model_key": "workbench_relation", "scope_key": "2026-02"})
+        self.assertEqual(payload["operation_barrier_targets"][2], {"read_model_key": "workbench_relation", "scope_key": "2026-02"})
         self.assertEqual(after_mutation_months, [["2026-02", "2026-03"]])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
         self.assertEqual(read_repository.clear_calls, 1)
@@ -4513,7 +4545,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(relation_detail["relation"]["status"], "confirmed")
         self.assertEqual(
             [item for item in failing_queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "all", "turnover_relation_changed")],
+            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
         )
 
     def test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
@@ -4546,8 +4578,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
-                ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
             ],
         )
 

@@ -73,7 +73,7 @@
 same group flow rows selected
   -> one or more income rows + one or more expense rows
   -> amount delta == 0.00
-  -> frontend waits turnover_ledger:all fresh and reloads grouped ledger
+  -> frontend waits affected turnover_ledger month scopes fresh and reloads grouped ledger
   -> frontend rebinds selected bank row ids to latest same-group flow rows
   -> backend stale precondition passes
   -> Turnover manual confirmed relation
@@ -82,8 +82,8 @@ same group flow rows selected
   -> Workbench open relation until invoice/full business relation is completed in Workbench
   -> turnover/workbench/workbench_relation dirty-outbox refresh
   -> API 返回 operation freshness targets
-  -> frontend waits turnover_ledger:all + affected workbench_relation scopes as hard operation visibility targets
-  -> workbench month/all aggregate and other downstream read models converge in background SLO path
+  -> frontend waits affected turnover_ledger month scopes + affected workbench_relation scopes as hard operation visibility targets
+  -> workbench month aggregate and other downstream read models converge in background SLO path
   -> frontend emits Workbench refresh event; post-write sync/reload blockage is warning, not mutation failure
 ```
 
@@ -172,7 +172,7 @@ Read model key：`turnover_ledger`
 
 Scope type：`turnover_ledger`
 
-Scope key：当前主路径为 `all`。
+Scope key：正常写路径为 affected month scopes；`all` 仅作为 fan-out command 或无法在写前确定月份的例外路径。
 
 Worker instance：`turnover-ledger`
 
@@ -192,10 +192,10 @@ Refresh event：`turnover_ledger.read_model.refresh`
 refresh 触发来源：
 
 - tag-selection 保存。
-- bank-row-tags batch。
+- bank-row-tags batch，按 affected months refresh。
 - relation extra 保存。
-- manual closure confirm。
-- withdraw。
+- manual closure confirm，按 affected months refresh；无法解析 affected months 时才退回 `all`。
+- withdraw，按 affected months refresh；cash closure withdraw 等写前无法解析 affected months 的例外路径可使用 `all` fan-out。
 - 底层银行流水分类、relation、extra、settings、source versions 变化。
 
 worker 流程：
@@ -222,6 +222,7 @@ job.outbox_events / job.read_model_dirty_scopes
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-26 | 普通 turnover 写操作从 `turnover_ledger:all` 收敛为 affected month scopes | bank-row-tags、manual closure confirm、relation confirm/withdraw、frontend pre/post operation barrier 默认等待 affected month scopes；`all` 只保留为 fan-out/未知月份例外，降低写后 read model 全量刷新长尾 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变外部往来业务/UI/read model/worker 状态；锁定 `turnover_ledger` 为 `partitioned_scoped_incremental`、`all` 为 fan-out command，并保持 query owner、permission owner 和 repository ports 不与 cost/tax 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |

@@ -270,7 +270,7 @@ describe("turnover ledger API", () => {
           affected_months: ["2026-05"],
           affected_scope_keys: ["2026-05"],
           operation_barrier_targets: [
-            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
             { read_model_key: "workbench_relation", scope_key: "2026-05" },
           ],
         }), {
@@ -285,7 +285,7 @@ describe("turnover ledger API", () => {
           status: "withdrawn",
           affected_months: ["2026-05"],
           freshness_targets: [
-            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           ],
         }), {
           headers: { "Content-Type": "application/json" },
@@ -330,7 +330,7 @@ describe("turnover ledger API", () => {
       status: "confirmed",
       affectedScopeKeys: ["2026-05"],
       operationBarrierTargets: [
-        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "turnover_ledger", scopeKey: "2026-05" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
       ],
     });
@@ -338,7 +338,7 @@ describe("turnover ledger API", () => {
       relationId: "rel-001",
       status: "withdrawn",
       operationBarrierTargets: [
-        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "turnover_ledger", scopeKey: "2026-05" },
       ],
     });
   });
@@ -366,7 +366,7 @@ describe("turnover ledger API", () => {
         affected_months: ["2026-05"],
         affected_scope_keys: ["2026-05"],
         freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
         ],
       });
@@ -387,11 +387,11 @@ describe("turnover ledger API", () => {
       workbenchPairRelationId: "turnover:turnover_rel_001",
       workbenchRelationMode: "turnover_manual_closure",
       freshnessTargets: [
-        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "turnover_ledger", scopeKey: "2026-05" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
       ],
       operationBarrierTargets: [
-        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "turnover_ledger", scopeKey: "2026-05" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
       ],
     });
@@ -414,7 +414,7 @@ describe("turnover ledger API", () => {
         },
         affected_months: ["2026-05"],
         freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
         ],
       });
@@ -430,7 +430,7 @@ describe("turnover ledger API", () => {
       workbenchPairRelationId: "case-workbench-cash-1",
       workbenchRelationMode: "manual_confirmed",
       freshnessTargets: [
-        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "turnover_ledger", scopeKey: "2026-05" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
       ],
     });

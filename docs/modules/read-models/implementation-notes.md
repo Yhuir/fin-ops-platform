@@ -1413,3 +1413,10 @@
 - 目标：修复 public authenticated HTTP gate 发现的 `/api/no-oa-bank-batches?month=2026-06` stale-as-stale loop：worker 已将 2026-06 projection 和 readiness 写成 fresh，但 API 读路径在比较 source versions 前没有按请求月份加载 `workbench_relation_source_versions`，可能沿用进程内其它月份的 relation version，导致 fresh projection 被误判 stale 并反复 enqueue。
 - 改动：`NoOaBankBatchApplicationService.list_batches_payload(...)` 在 SQL read model rows 做 stale check 前，按目标 scope keys 调用 relation facade 的 `source_versions_for_month(..., require_fresh=False)`；保留 worker 刷新路径中 bank row fallback 的旧行为。
 - 测试覆盖：新增 `test_month_sql_read_model_loads_relation_source_versions_before_stale_check`，模拟 relation facade 先缓存 2026-01 版本、read model rows 为 2026-06 版本，验证 API 会重新加载 2026-06 relation source versions 并返回 fresh。
+
+## 2026-06-26 - turnover ledger write target scope narrowing
+
+- 目标：修复 turnover controlled write SLO 中 `turnover_ledger:all`、`workbench:all`、`cost_statistics:all` 等宽 scope 带来的写后 freshness 长尾；普通 turnover 写操作应符合 Partitioned + Scoped + Incremental Projection，只刷新 affected month scopes。
+- 改动：`TurnoverLedgerWriteFacade` 的 bank-row-tags、confirm、manual closure confirm、withdraw refresh requests 从默认 `all` 收敛为 affected months；`TurnoverLedgerConfirmRequestBoundaryFacade` 返回 affected turnover month scopes + affected workbench_relation scopes；`TurnoverLedgerPage` 在 manual closure 提交前按所选 rows 的月份等待 turnover ledger fresh，无法解析月份时才退回 `all`。
+- 例外：`all` 仍保留为 manifest fan-out command，以及 cash closure withdraw 等写前无法解析 affected months 的路径；legacy fallback adapters 仍需后续删除或隔离，不能作为新链路默认行为。
+- 测试覆盖：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_write_targets.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。

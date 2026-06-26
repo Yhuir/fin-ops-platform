@@ -914,7 +914,7 @@ function installTurnoverLedgerFetch(options: {
         },
         affected_months: ["2026-05"],
         freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
         ],
       });
@@ -928,7 +928,7 @@ function installTurnoverLedgerFetch(options: {
         },
         affected_months: ["2026-05"],
         freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
         ],
       });
@@ -941,7 +941,7 @@ function installTurnoverLedgerFetch(options: {
         status: "withdrawn",
         affected_months: ["2026-05"],
         freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
         ],
       });
@@ -1447,7 +1447,7 @@ describe("Turnover ledger page", () => {
         }
         return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
           targets: [
-            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
             { read_model_key: "workbench_relation", scope_key: "2026-05" },
           ],
         });
@@ -1691,7 +1691,7 @@ describe("Turnover ledger page", () => {
         }
         return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
           targets: [
-            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
             { read_model_key: "workbench_relation", scope_key: "2026-05" },
           ],
         });

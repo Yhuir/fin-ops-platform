@@ -1457,7 +1457,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(
             [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
-            [("turnover_ledger", ["all"], "turnover_relation_changed")],
+            [("turnover_ledger", ["2026-02"], "turnover_relation_changed")],
         )
 
     def test_target_withdraw_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
@@ -1525,11 +1525,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(
             [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
             [
-                ("turnover_ledger", ["all"], "turnover_relation_changed"),
-                ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
-                ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
-                ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
-                ("search", ["2026-02", "all"], "turnover_relation_changed"),
+                ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
+                ("workbench", ["2026-02"], "turnover_relation_changed"),
+                ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
+                ("search", ["2026-02"], "turnover_relation_changed"),
             ],
         )
 
@@ -1671,11 +1671,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     (request["scope_type"], request["scope_keys"], request["reason"])
                     for request in getattr(command, "refresh_requests")
                 ] == [
-                    ("turnover_ledger", ["all"], "turnover_relation_changed"),
+                    ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                     ("workbench", ["2026-02"], "turnover_relation_changed"),
                     ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                    ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
-                    ("search", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
+                    ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(
                     SimpleNamespace(
@@ -1791,7 +1791,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(
             result["freshness_targets"],
             [
-                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "turnover_ledger", "scope_key": "2026-02"},
+                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
             ],
@@ -1922,11 +1923,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     (request["scope_type"], request["scope_keys"], request["reason"])
                     for request in getattr(command, "refresh_requests")
                 ] == [
-                    ("turnover_ledger", ["all"], "turnover_relation_changed"),
-                    ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
-                    ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
-                    ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
-                    ("search", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
+                    ("workbench", ["2026-02"], "turnover_relation_changed"),
+                    ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                    ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
+                    ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(
                     SimpleNamespace(
@@ -2236,7 +2237,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             [
                 ("bank_detail", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
                 ("workbench", ["2026-02", "2026-03"], "workbench_scope_invalidated"),
-                ("turnover_ledger", ["all"], "turnover_relation_changed"),
+                ("turnover_ledger", ["2026-02", "2026-03"], "turnover_relation_changed"),
             ],
         )
 
