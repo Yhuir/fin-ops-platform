@@ -1,75 +1,115 @@
 # Next Prompt
 
-Continue the user-authorized `main-read-model-closure` run from Wave 9.
+Continue the user-authorized `main-read-model-closure` run from Wave 10.
 
 ## Current State
 
 - Branch: `main`.
-- Backup branch: `codex/backup-main-before-read-model-closure-20260626-050615`.
+- Backup branch: `codex/backup-main-before-read-model-closure-20260628-190532`.
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
-- Latest reconciliation: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-26.md`.
-- Latest wave summary: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-9-public-authenticated-api-sse-and-write-matrix-closure-2026-06-26.md`.
-- Production evidence runbook: `docs/operations/read-model-production-evidence-runbook.md`.
-- User has approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
-- Missing business inverse restore path is not a blocker by itself. It must route into the preapproved bounded DB restore protocol; only missing operation-before snapshot, exact predicate, transaction safety, or post-restore verification can hard-stop sample recovery.
-- Do not print or persist any secret. Use secure credential manager/session secret handling only for Admin Token use.
+- Latest reconciliation: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-28.md`.
+- Latest production evidence: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`.
+- Production release commit: `a3cca8478fb315764be3326ad42d2659a1957788`.
+- Local `main` contains production read-model runtime code plus the updated 07 prompt/report docs; backend/web/test diff versus production `a3cca847` is empty.
 - Do not implement Go, Go Fiber or Go Worker.
+- Do not print or persist secrets.
 
-## Completed In Current Wave So Far
+## Evidence Already Collected
 
-Wave 9 found a concrete production write-matrix gap: turnover write-operation SLO long tails caused by normal write paths refreshing broad `all` scopes.
-
-Local fix completed:
-
-- `TurnoverLedgerWriteFacade` now uses affected month scope keys for bank-row-tags, relation confirm, manual closure confirm, and relation withdraw.
-- `TurnoverLedgerConfirmRequestBoundaryFacade` returns affected `turnover_ledger:<month>` targets plus affected `workbench_relation:<month>` targets for closure visibility.
-- `TurnoverLedgerPage` waits for affected turnover ledger month scopes before manual closure fresh rebind, falling back to `all` only when row months cannot be parsed.
-- Module docs and read-model implementation notes were updated.
-
-Local verification already passed:
+Local checks passed:
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest -q tests.test_turnover_ledger_api tests.test_turnover_ledger_uow_contract tests.test_read_model_write_targets
-npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx
-PYTHONPATH=backend/src python3 -m unittest -q tests.test_turnover_ledger_api tests.test_turnover_ledger_uow_contract tests.test_read_model_write_targets tests.test_write_operation_slo_audit tests.test_slo_tool_defaults tests.test_read_model_manifest tests.test_runtime_worker_read_model_refresh_scopes tests.test_operation_freshness_barrier
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_query_gateway tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards tests.test_read_model_write_targets -v
+bash scripts/verify.sh docs
+npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx src/test/BatchAccountingApi.test.ts src/test/NoOaBankBatchApi.test.ts src/test/BankDetailsApi.test.ts src/test/ImportsApi.test.ts src/test/WorkbenchApi.test.ts
+git diff --check
 ```
 
-## Next Boundary
+Production evidence already collected:
 
-`main-read-model-closure:wave-9-deploy-and-production-write-matrix-retest`
+- `/health/ready` status ready.
+- scope contract dry-run ok, violation count 0.
+- uncovered outbox failure count 0.
+- stale dirty scope count 0.
+- required worker missing/stale/mismatch counts 0.
+- RabbitMQ queue depth 0 and DLQ 0.
+- Admin-token API smoke used hidden dialog; token was not printed or stored.
+- Sampled stale endpoints did not fake fresh.
+- `read_model_slo_smoke --apply --critical-only` made all 15 planned scopes reach `done/fresh` or documented pending-invoice page-first `dirty_done`.
 
-Goal:
+## Current Blocker
 
-- Finish local verification and commit/push the turnover write-target narrowing.
-- Deploy current `main` to production via `./scripts/deploy-oa.sh`.
-- Re-run production read model health and critical SLO smoke.
-- Re-run controlled production write-operation samples, focusing first on turnover relation/closure write SLO and then no-OA/workbench matrix gaps.
-- Restore samples through business inverse where available; use bounded DB restore only when no business restore path exists and the operation-before snapshot + exact predicate + transaction safety + post-restore verification are established.
+PSCIP-L4 is blocked only by production SLO performance.
 
-Required first steps:
+Failed 1000ms enqueue-to-fresh target:
 
-1. Confirm `git status --short --branch`; stop only for unrelated dirty files.
-2. Run final local checks:
-   - `git diff --check`
-   - `bash scripts/verify.sh docs`
-   - targeted backend/frontend tests if not already fresh in this session.
-3. Review diff for secrets, unrelated files, stale docs, and accidental broad scope regressions.
-4. Commit and push to `origin/main`.
-5. Deploy with `./scripts/deploy-oa.sh`.
-6. On production, verify release consistency, services/workers active, dirty/outbox/readiness aggregates converged, and critical read model SLO.
-7. Re-run write-operation SLO samples and record sanitized evidence in the Wave 9 analysis file.
+| read model | scope | enqueue_to_fresh_ms |
+| --- | --- | ---: |
+| `workbench` | `2026-04` | 9160.301 |
+| `bank_detail` | `2026-06` | 1063.026 |
+| `invoice_lifecycle` | `2025-09` | 2827.900 |
+| `cost_statistics` | `active:2026-01` | 9193.540 |
+| `no_oa_bank_batch` | `2026-03` | 1169.816 |
+| `turnover_ledger` | `all` | 5706.690 |
 
-No-block policy:
+## Wave 10 Objective
 
-- Do not ask the user for sample approval, rollout approval, SSH approval, or DB restore approval; these are already granted.
-- Do not directly modify DB for the validation operation itself.
-- Bounded DB write is allowed only to restore a validation sample to its operation-before state when no business restore path exists.
-- Do not claim PSCIP-L4/global closure until production read/write evidence passes.
+Close production SLO performance for the six failing scopes without changing read model architecture semantics.
 
-End of boundary:
+Do this as one macro-wave:
 
-- Update `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-9-public-authenticated-api-sse-and-write-matrix-closure-2026-06-26.md`.
-- Update `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
-- Update this `NEXT-PROMPT.md` with the next executable wave or final closure prompt.
-- Commit verified non-secret artifacts on `main`.
-- Continue automatically unless a precise hard stop is reached.
+1. Diagnose whether latency is queue/poll/coalescing overhead, worker handler duration, SQL builder hot path, broad scope choice, or parent aggregate behavior.
+2. Prefer one shared fix if the root cause is shared queue/worker timing.
+3. Otherwise fix only the high-impact family hot spots:
+   - Workbench active generation refresh.
+   - Cost statistics parent/shard refresh.
+   - Turnover ledger all-scope refresh.
+   - Invoice lifecycle refresh.
+   - Near-threshold bank detail and no-OA refresh.
+4. Do not manually write readiness fresh.
+5. Do not delete queue/readiness rows to make evidence pass.
+6. Do not broaden scope to Direct API removal.
+7. Do not edit canonical facts prompt files.
+
+## Required First Steps
+
+1. Run:
+
+```bash
+git status --short --branch
+```
+
+There may be unrelated canonical facts prompt files dirty in the worktree. Do not stage or modify them for this read-model wave.
+
+2. Collect targeted production diagnostics with root SSH:
+
+- recent worker logs for the six read models;
+- handler duration samples if present;
+- App Status/dirty/outbox/readiness aggregate after the failed SLO run;
+- existing API performance samples for the six read models;
+- query-plan or SQL timing evidence only if it does not print sensitive payload.
+
+3. Implement the smallest code change that addresses the measured bottleneck.
+
+4. Run local targeted tests and the shared gates.
+
+5. Push `main` only after local verification is green.
+
+6. Deploy only through `./scripts/deploy-oa.sh` or an already active equivalent release path. No ad hoc production patching.
+
+7. Re-run production:
+
+```bash
+read-model-scope-contract --json
+read_model_slo_smoke --json --apply --critical-only --target-ms 1000 --timeout-seconds 120
+```
+
+8. Update:
+
+- `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`
+- `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`
+- this `NEXT-PROMPT.md`
+
+Continue automatically unless a precise hard stop is reached.
