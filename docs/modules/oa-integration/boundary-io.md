@@ -38,10 +38,12 @@
 | OA projection rows | repositories/read models | 带 source version |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
+| OA manual import mutation result | settings/workbench frontend、operation barrier | `refresh-attachments`、`manual-imports` create/remove 必须返回 affected scopes、read model scope keys、freshness targets 和 operation barrier targets |
 
 ## 持久化与投影
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
+- OA manual import/create/refresh/remove 影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`；返回 target envelope 后由页面等待 operation barrier。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
 
@@ -66,6 +68,7 @@
 
 - `tests/test_mongo_oa_adapter.py`
 - `tests/test_oa_projection_sync_service.py`
+- `tests/test_oa_manual_import_api.py`
 - `tests/test_oa_pending_payment_api.py`
 - `tests/test_target_oa_applicant_token_provider.py`
 

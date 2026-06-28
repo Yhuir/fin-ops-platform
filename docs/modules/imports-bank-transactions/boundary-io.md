@@ -17,6 +17,7 @@
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
 - 通过后台任务和 lifecycle 触发银行明细及下游 read model 刷新。
 - 记录导入预览审计。
+- 导入确认结果或完成后的 job result 必须透出 read model write target envelope；银行流水导入必须包含 `bank_detail:<month>` 与 `bank_account_balance:all` operation barrier targets。
 
 ### 不负责
 
@@ -39,11 +40,12 @@
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
+| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 影响 read model：`bank_detail`、`workbench`、`search`、`workbench_relation` 等。
+- 影响 read model：`bank_detail`、`bank_account_balance`、`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`。
 - Worker：import job/runtime worker handlers。
 
 ## 文件范围
@@ -69,8 +71,11 @@
 - `tests/test_import_api.py`
 - `tests/test_import_job_queue.py`
 - `tests/test_import_processing_service.py`
+- `web/src/test/BackgroundJobProgress.test.tsx`
+- `web/src/test/ImportsApi.test.ts`
 - `web/e2e/imports-bank-transactions-flow.spec.ts`
 
 ## 当前缺口和删除条件
 
 - 模板识别变更必须覆盖预览、确认、失败恢复和 downstream freshness。
+- 删除旧同步导入路径前，必须证明确认响应/job result 仍能给出 bank detail + account balance 的 operation barrier targets。

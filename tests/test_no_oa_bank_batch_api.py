@@ -482,6 +482,11 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertTrue(payload["batch"]["can_withdraw"])
             self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
             self.assertEqual(payload["affected_months"], ["2026-03"])
+            self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+            self.assertEqual(
+                payload["operation_barrier_targets"],
+                [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}],
+            )
             self.assertTrue(payload["workbench_rebuild_queued"])
             self.assertEqual(payload["results"][0]["status"], "submitted")
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
@@ -556,6 +561,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(payload["pair_relation"]["row_ids"], ["bank-202603-fee-1"])
         self.assertEqual(payload["affected_months"], ["2026-03"])
+        self.assertEqual(payload["freshness_targets"], [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}])
         self.assertTrue(payload["workbench_rebuild_queued"])
 
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
@@ -580,6 +586,11 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.body)
             self.assertEqual(payload["batch"]["status"], "withdrawn")
             self.assertEqual(payload["affected_months"], ["2026-03"])
+            self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+            self.assertEqual(
+                payload["operation_barrier_targets"],
+                [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}],
+            )
             self.assertEqual(payload["pair_relation"]["status"], "cancelled")
             self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][submitted["batch_id"]]["status"], "withdrawn")
@@ -625,6 +636,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["submitted"], 1)
         self.assertEqual(payload["summary"]["failed"], 1)
         self.assertEqual(payload["affected_months"], ["2026-03"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+        self.assertEqual(payload["freshness_targets"], [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}])
         self.assertEqual([result["status"] for result in payload["results"]], ["submitted", "failed"])
         self.assertEqual(payload["results"][1]["error"], "no_oa_bank_batch_version_conflict")
 

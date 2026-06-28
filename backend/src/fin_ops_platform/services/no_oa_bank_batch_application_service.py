@@ -25,6 +25,7 @@ from fin_ops_platform.services.read_model_freshness import (
     source_version_mismatch_reasons,
 )
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
@@ -1175,6 +1176,11 @@ class NoOaBankBatchApplicationService:
             "batch": self.resolve_labels([batch])[0],
             "pair_relation": relation or {},
             "affected_months": affected_months,
+            **write_target_envelope(
+                read_model_key="no_oa_bank_batch",
+                scope_keys=affected_months,
+                fallback_scope_key="all",
+            ),
             "workbench_rebuild_queued": workbench_rebuild_queued,
             "results": [{"batch_id": batch.get("batch_id"), "status": status}],
         }

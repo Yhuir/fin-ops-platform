@@ -24,6 +24,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -186,8 +187,7 @@ class BankDetailsApplicationService:
             read_model_status="refreshing",
         )
         payload["read_model_status"] = "refreshing"
-        payload["read_model_scope_keys"] = list(scope_keys)
-        payload["freshness_targets"] = self._bank_detail_freshness_targets(scope_keys)
+        payload.update(self._bank_detail_refresh_contract_payload(scope_keys))
         payload["refresh_enqueued"] = True
         payload["refresh_reason"] = "bank_auto_tag_rules_reapply_requested"
         payload["enqueued_jobs"] = ["bank_detail.read_model.refresh"]
@@ -759,10 +759,11 @@ class BankDetailsApplicationService:
 
     def _bank_detail_refresh_contract_payload(self, scope_keys: list[str]) -> dict[str, object]:
         target_scope_keys = self._bank_detail_operation_scope_keys(scope_keys)
-        return {
-            "read_model_scope_keys": target_scope_keys,
-            "freshness_targets": self._bank_detail_freshness_targets(target_scope_keys),
-        }
+        return write_target_envelope(
+            scope_keys=target_scope_keys,
+            targets=self._bank_detail_freshness_targets(target_scope_keys),
+            fallback_scope_key="all",
+        )
 
     def _bank_detail_freshness_targets(self, scope_keys: list[str]) -> list[dict[str, str]]:
         return [

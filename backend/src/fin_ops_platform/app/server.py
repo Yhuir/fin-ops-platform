@@ -136,7 +136,9 @@ from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor impor
     NoOaBankBatchDerivedLifecycleExecutor,
 )
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
+from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.read_model_write_targets import normalized_scope_keys as normalized_write_scope_keys
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import (
     EtcBatchDeleteError,
@@ -7623,7 +7625,8 @@ class Application:
         if row_ids_error is not None:
             return row_ids_error
         result = service.refresh_attachments(row_ids)
-        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_workbench_settings_oa_manual_imports(self) -> Response:
@@ -7686,7 +7689,8 @@ class Application:
         if isinstance(service, Response):
             raise RuntimeError("OA manual import service is not available.")
         result = service.import_row_ids(row_ids, actor_id=actor_id)
-        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
         return result
 
     def _handle_api_workbench_settings_oa_manual_import_delete(
@@ -7718,7 +7722,8 @@ class Application:
             else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
         )
         result = service.remove_manual_import(normalized_row_id, actor_id=actor_id or "workbench_settings")
-        self._invalidate_after_oa_manual_import_mutation(result, row_ids=[normalized_row_id])
+        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=[normalized_row_id])
+        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
         return self._json_response(HTTPStatus.OK, result)
 
     def _oa_manual_import_service_or_response(self) -> OAManualImportService | Response:
@@ -7794,7 +7799,7 @@ class Application:
         result: dict[str, object],
         *,
         row_ids: list[str],
-    ) -> None:
+    ) -> list[str]:
         scope_keys = self._oa_manual_import_affected_scope_keys(result, row_ids=row_ids)
         self._execute_derived_data_lifecycle_event(
             "oa_attachment_invoice_cache_updated",
@@ -7804,6 +7809,41 @@ class Application:
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
             invalidate_records_cache([scope_key for scope_key in scope_keys if scope_key != "all"])
+        return scope_keys
+
+    @staticmethod
+    def _oa_manual_import_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
+        targets: list[dict[str, str]] = []
+
+        def add(read_model_key: str, raw_scope_keys: list[str]) -> None:
+            normalized_scope_keys = normalized_write_scope_keys(raw_scope_keys, fallback="all")
+            if read_model_key in DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types():
+                normalized_scope_keys = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(
+                    read_model_key,
+                    normalized_scope_keys,
+                )
+            for scope_key in normalized_scope_keys:
+                target = {"read_model_key": read_model_key, "scope_key": scope_key}
+                if target not in targets:
+                    targets.append(target)
+
+        base_scope_keys = normalized_write_scope_keys(scope_keys, fallback="all")
+        for read_model_key in (
+            "workbench",
+            "workbench_relation",
+            "invoice_lifecycle",
+            "tax_offset",
+            "search",
+            "cost_statistics",
+        ):
+            add(read_model_key, base_scope_keys)
+        target_scope_keys = normalized_write_scope_keys([target["scope_key"] for target in targets])
+        return {
+            "affected_scope_keys": target_scope_keys,
+            "read_model_scope_keys": target_scope_keys,
+            "freshness_targets": targets,
+            "operation_barrier_targets": list(targets),
+        }
 
     def _oa_manual_import_affected_scope_keys(
         self,
@@ -10526,7 +10566,18 @@ class Application:
             self._background_job_service.run_job(job, run_file_import)
 
         response_payload = self._serialize_file_session(session)
-        response_payload["job"] = job.to_payload()
+        job_payload = job.to_payload()
+        result_summary = job_payload.get("result_summary") if isinstance(job_payload, dict) else None
+        if isinstance(result_summary, dict):
+            for key in (
+                "affected_scope_keys",
+                "read_model_scope_keys",
+                "freshness_targets",
+                "operation_barrier_targets",
+            ):
+                if key in result_summary:
+                    response_payload[key] = result_summary[key]
+        response_payload["job"] = job_payload
         return self._json_response(HTTPStatus.ACCEPTED, response_payload)
 
     @staticmethod

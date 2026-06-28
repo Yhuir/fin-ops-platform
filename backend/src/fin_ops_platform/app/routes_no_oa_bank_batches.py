@@ -10,6 +10,7 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaBankBatchPersistenceError,
 )
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -231,6 +232,11 @@ class NoOaBankBatchApiRoutes:
             "summary": {"submitted": submitted_count, "failed": failed_count},
             "results": results,
             "affected_months": sorted(affected_months),
+            **write_target_envelope(
+                read_model_key="no_oa_bank_batch",
+                scope_keys=sorted(affected_months),
+                fallback_scope_key="all",
+            ),
             "workbench_rebuild_queued": workbench_rebuild_queued,
         }
 

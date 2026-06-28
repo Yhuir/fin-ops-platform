@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Any, Callable
 from urllib.parse import unquote
 
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
 from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
@@ -316,7 +317,13 @@ class TaxApiRoutes:
                 HTTPStatus.NOT_FOUND,
                 {"error": "tax_certified_import_session_not_found", "message": str(exc)},
             )
-        return self._respond(HTTPStatus.OK, result)
+        return self._respond(
+            HTTPStatus.OK,
+            {
+                **result,
+                **self._tax_certified_import_write_targets(result),
+            },
+        )
 
     def _require_query_service(self) -> Any:
         if self._query_service is None:
@@ -440,6 +447,15 @@ class TaxApiRoutes:
         if self._execute_tax_certified_import_confirm is None:
             raise RuntimeError("Tax certified import confirm executor is not configured.")
         return self._execute_tax_certified_import_confirm(session_id)
+
+    @staticmethod
+    def _tax_certified_import_write_targets(result: dict[str, object]) -> dict[str, object]:
+        batch = result.get("batch") if isinstance(result.get("batch"), dict) else {}
+        return write_target_envelope(
+            read_model_key="tax_offset",
+            scope_keys=list(batch.get("months") or []),
+            fallback_scope_key="all",
+        )
 
 
 def _safe_list_count(value: object) -> int:

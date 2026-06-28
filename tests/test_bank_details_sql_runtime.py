@@ -1268,8 +1268,10 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result["affected_months"], ["2026-04"])
+        self.assertEqual(result["affected_scope_keys"], ["2026-04"])
         self.assertEqual(result["read_model_scope_keys"], ["2026-04"])
         self.assertEqual(result["freshness_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
+        self.assertEqual(result["operation_barrier_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
         self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)

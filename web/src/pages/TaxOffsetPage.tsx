@@ -377,7 +377,10 @@ export default function TaxOffsetPage() {
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
-      const synced = await waitForTaxOffsetBarrier();
+      const barrierTargets = result.operationBarrierTargets.filter((target) => target.scopeKey);
+      const synced = barrierTargets.length > 0
+        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
+        : await waitForTaxOffsetBarrier();
       if (!synced) {
         setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，后台同步尚未完成，请稍后刷新。`);
         setPlanFeedback(null);
@@ -399,7 +402,7 @@ export default function TaxOffsetPage() {
     setImportFeedback(null);
     setPlanFeedback(null);
     try {
-      await saveTaxOffsetPlan({
+      const saveResult = await saveTaxOffsetPlan({
         month: currentMonth,
         selectedOutputIds: monthData.defaultSelectedOutputIds,
         selectedInputIds,
@@ -407,7 +410,10 @@ export default function TaxOffsetPage() {
         expectedSourceVersions: monthData.sourceVersions,
         idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
       });
-      const synced = await waitForTaxOffsetBarrier();
+      const barrierTargets = saveResult.operationBarrierTargets.filter((target) => target.scopeKey);
+      const synced = barrierTargets.length > 0
+        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
+        : await waitForTaxOffsetBarrier();
       if (!synced) {
         setPlanFeedback("已保存本月税金抵扣计划，后台同步尚未完成，请稍后刷新。");
         return;

@@ -39,11 +39,13 @@
 | 设置 payload/result | 前端页面 | 不泄露 secret |
 | Reset job | background job/app health | 可查询、可恢复 |
 | Dirty scope/lifecycle | runtime queue | 设置影响 read model 时必须显式触发 |
+| OA manual import target envelope | operation barrier/frontend refresh | OA 手工导入、附件刷新、删除导入标记返回的 `operation_barrier_targets` 必须被设置页等待后再展示最终 fresh 状态 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
 - 影响 read model：设置重置可能影响全部 read model。
+- OA 手工导入设置入口会影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search`、`cost_statistics`，不拥有这些 read model。
 - Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。
 
 ## 文件范围
@@ -70,6 +72,7 @@
 - `tests/test_app_settings_service.py`
 - `tests/test_settings_data_reset_service.py`
 - `web/e2e/settings-data-reset-flow.spec.ts`
+- `web/src/test/SettingsOaManualSearchImportTable.test.tsx`
 
 ## 当前缺口和删除条件
 

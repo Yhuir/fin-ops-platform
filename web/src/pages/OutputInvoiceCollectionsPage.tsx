@@ -471,7 +471,8 @@ export default function OutputInvoiceCollectionsPage() {
   }, [collectionStatusRow, manualStatusOptions]);
 
   const handleLifecycleChanged = useCallback(async (result?: OutputInvoiceCollectionMutationResponse | null) => {
-    const responseTargets = (result?.freshnessTargets ?? []).filter((target) => target.scopeKey && target.scopeKey !== "all");
+    const responseTargets = (result?.operationBarrierTargets ?? result?.freshnessTargets ?? [])
+      .filter((target) => target.scopeKey && target.scopeKey !== "all");
     const targets = responseTargets.length > 0
       ? responseTargets
       : operationBarrierTargets("output_invoice_collection", [query.month || "all"]);

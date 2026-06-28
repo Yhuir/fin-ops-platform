@@ -668,7 +668,7 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
         excludedDirectionRows: numberValue(sourceSummary.excluded_direction_rows),
       } : undefined,
     },
-    readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRowsResponse["readModelStatus"],
+    readModelStatus: stringValue(payload.read_model_status, "refreshing") as PendingInvoiceRowsResponse["readModelStatus"],
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
   };
 }
@@ -783,7 +783,7 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
   return {
     version: numberValue(payload.version),
     direction: stringValue(payload.direction, "expense") as PendingInvoiceRulesPayload["direction"],
-    readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRulesPayload["readModelStatus"],
+    readModelStatus: stringValue(payload.read_model_status, "refreshing") as PendingInvoiceRulesPayload["readModelStatus"],
     availableTags,
     groups: {
       requiresInvoice: mapRuleGroup(payload, "requires_invoice"),

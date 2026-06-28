@@ -11,6 +11,7 @@ import type {
   TaxOffsetPlanSaveResult,
   TaxSummary,
 } from "./types";
+import type { OperationBarrierTarget } from "../operationBarrier/api";
 import { apiRequestJson } from "../apiClient";
 
 type ApiTaxSummary = {
@@ -164,6 +165,12 @@ type ApiTaxCertifiedImportConfirmPayload = {
   success?: boolean;
   batch?: ApiTaxCertifiedImportBatch;
   import_job?: ApiTaxCertifiedImportJob;
+  read_model_scope_keys?: unknown;
+  readModelScopeKeys?: unknown;
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
 };
 
 type ApiTaxCertifiedImportJobPayload = {
@@ -172,6 +179,12 @@ type ApiTaxCertifiedImportJobPayload = {
 
 type ApiTaxOffsetPlanSavePayload = {
   status: "saved";
+  read_model_scope_keys?: unknown;
+  readModelScopeKeys?: unknown;
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
   plan: {
     id: string;
     month: string;
@@ -186,6 +199,42 @@ type ApiTaxOffsetPlanSavePayload = {
 
 function parseMoney(value: string) {
   return Number(value.replace(/,/g, ""));
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringList(value: unknown): string[] {
+  return arrayValue(value).map((item) => String(item).trim()).filter(Boolean);
+}
+
+function targetList(value: unknown): OperationBarrierTarget[] {
+  const result: OperationBarrierTarget[] = [];
+  const seen = new Set<string>();
+  arrayValue(value).forEach((item) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const raw = item as Record<string, unknown>;
+    const readModelKey = String(raw.readModelKey ?? raw.read_model_key ?? "").trim();
+    const scopeKey = String(raw.scopeKey ?? raw.scope_key ?? "").trim();
+    const scopeType = String(raw.scopeType ?? raw.scope_type ?? "").trim();
+    if (!readModelKey || !scopeKey) {
+      return;
+    }
+    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push({
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    });
+  });
+  return result;
 }
 
 function formatMoney(value: number) {
@@ -302,7 +351,12 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
   };
 }
 
-function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifiedImportConfirmedResult {
+function mapCertifiedImportBatch(
+  batch: ApiTaxCertifiedImportBatch,
+  payload?: ApiTaxCertifiedImportConfirmPayload,
+): TaxCertifiedImportConfirmedResult {
+  const freshnessTargets = targetList(payload?.freshness_targets ?? payload?.freshnessTargets);
+  const operationBarrierTargets = targetList(payload?.operation_barrier_targets ?? payload?.operationBarrierTargets);
   return {
     status: "confirmed",
     batchId: batch.id,
@@ -311,6 +365,9 @@ function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifie
     fileCount: batch.file_count,
     months: batch.months,
     persistedRecordCount: batch.persisted_record_count,
+    readModelScopeKeys: stringList(payload?.read_model_scope_keys ?? payload?.readModelScopeKeys),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 
@@ -422,8 +479,13 @@ export async function saveTaxOffsetPlan(params: {
       idempotency_key: params.idempotencyKey,
     }),
   });
+  const freshnessTargets = targetList(payload.freshness_targets ?? payload.freshnessTargets);
+  const operationBarrierTargets = targetList(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     status: payload.status,
+    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     plan: {
       id: payload.plan.id,
       month: payload.plan.month,
@@ -487,7 +549,7 @@ export async function confirmTaxCertifiedImport(sessionId: string): Promise<TaxC
   if (!payload.batch) {
     throw new Error("Confirmed tax certified import response is missing batch.");
   }
-  return mapCertifiedImportBatch(payload.batch);
+  return mapCertifiedImportBatch(payload.batch, payload);
 }
 
 export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {

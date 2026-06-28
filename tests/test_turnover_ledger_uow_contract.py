@@ -1796,6 +1796,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
             ],
         )
+        self.assertEqual(result["affected_scope_keys"], ["2026-02", "2026-03"])
+        self.assertEqual(result["operation_barrier_targets"], result["freshness_targets"])
 
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))

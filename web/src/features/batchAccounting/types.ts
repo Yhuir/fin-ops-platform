@@ -100,10 +100,20 @@ export type WithdrawBatchAccountingRequest = {
   signal?: AbortSignal;
 };
 
+export type ReadModelOperationBarrierTarget = {
+  readModelKey: string;
+  scopeKey: string;
+  scopeType?: string;
+};
+
 export type BatchAccountingMutationResult = {
   success: boolean;
   relationId: string;
   affectedRowIds: string[];
   affectedMonths: string[];
+  affectedScopeKeys: string[];
+  readModelScopeKeys: string[];
+  freshnessTargets: ReadModelOperationBarrierTarget[];
+  operationBarrierTargets: ReadModelOperationBarrierTarget[];
   message: string;
 };

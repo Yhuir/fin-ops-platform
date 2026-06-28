@@ -131,7 +131,7 @@ function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageIn
     total: 0,
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
-    readModelStatus: "fresh",
+    readModelStatus: "refreshing",
   };
 }
 
@@ -311,6 +311,9 @@ function actionFreshnessTargets(result: WorkbenchActionResult | null): Operation
   if (!result) {
     return [];
   }
+  if (result.operationBarrierTargets.length > 0) {
+    return result.operationBarrierTargets.filter((target) => target.scopeKey !== "all");
+  }
   if (result.freshnessTargets.length > 0) {
     return result.freshnessTargets.filter((target) => target.scopeKey !== "all");
   }
@@ -339,7 +342,7 @@ function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) 
 
 function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", WorkbenchZonePageInfo>) {
   const statuses = [pages.paired.readModelStatus, pages.open.readModelStatus]
-    .map((status) => String(status || "fresh").trim() || "fresh");
+    .map((status) => String(status || "refreshing").trim() || "refreshing");
   if (statuses.some((status) => status === "failed")) {
     return "failed";
   }
@@ -352,7 +355,7 @@ function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", Work
   if (statuses.some((status) => status === "stale")) {
     return "stale";
   }
-  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "fresh";
+  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "refreshing";
 }
 
 function workbenchReadModelStatusMessage(status: string | null, lastError?: string | null) {
@@ -1579,9 +1582,11 @@ export default function ReconciliationWorkbenchPage() {
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    const targets = result.freshnessTargets.length > 0
-      ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
-      : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
+    const targets = result.operationBarrierTargets.length > 0
+      ? result.operationBarrierTargets.filter((target) => target.scopeKey !== "all")
+      : result.freshnessTargets.length > 0
+        ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
+        : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
     if (targets.length > 0) {
       onProgress({
         phase: "syncing",

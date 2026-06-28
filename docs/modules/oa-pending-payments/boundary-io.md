@@ -38,7 +38,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | OA 待付款 rows/details | 前端页面 | fresh/status 可见 |
-| 关系 promotion 结果 | relation/downstream | 可审计、可恢复 |
+| 关系 promotion/确认付款结果 | relation/downstream/frontend | 可审计、可恢复；返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`，目标覆盖 `oa_pending_payment` 与受影响 `workbench_relation` scope |
 | Dirty scope | runtime queue | `oa_pending_payment.read_model.refresh` |
 
 ## 持久化与投影

@@ -1,4 +1,5 @@
 import { apiRequestJson } from "../apiClient";
+import type { OperationBarrierTarget } from "../operationBarrier/api";
 import type { BackgroundJob, BackgroundJobActivePayload, BackgroundJobStatus } from "./types";
 
 export type ApiBackgroundJob = {
@@ -72,8 +73,44 @@ function toStringArray(value: unknown) {
     : [];
 }
 
+function cleanOperationBarrierTargets(value: unknown): OperationBarrierTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const targets: OperationBarrierTarget[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
+    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
+    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
+    if (!readModelKey || !scopeKey || scopeKey === "all") {
+      continue;
+    }
+    const target = {
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    };
+    if (!targets.some((candidate) =>
+      candidate.readModelKey === target.readModelKey
+      && candidate.scopeKey === target.scopeKey
+      && candidate.scopeType === target.scopeType
+    )) {
+      targets.push(target);
+    }
+  }
+  return targets;
+}
+
 export function mapBackgroundJob(job: ApiBackgroundJob): BackgroundJob {
   const jobId = job.job_id ?? job.jobId ?? "";
+  const resultSummary = job.result_summary ?? job.resultSummary ?? {};
+  const operationBarrierTargets = cleanOperationBarrierTargets(
+    resultSummary.operationBarrierTargets ?? resultSummary.operation_barrier_targets,
+  );
   return {
     jobId,
     type: job.type ?? "file_import",
@@ -85,14 +122,19 @@ export function mapBackgroundJob(job: ApiBackgroundJob): BackgroundJob {
     total: toNumber(job.total),
     percent: toNumber(job.percent),
     message: job.message ?? "",
-    resultSummary: job.result_summary ?? job.resultSummary ?? {},
+    resultSummary,
+    affectedScopeKeys: toStringArray(resultSummary.affectedScopeKeys ?? resultSummary.affected_scope_keys)
+      .filter((scopeKey) => scopeKey !== "all"),
+    readModelScopeKeys: toStringArray(resultSummary.readModelScopeKeys ?? resultSummary.read_model_scope_keys)
+      .filter((scopeKey) => scopeKey !== "all"),
+    operationBarrierTargets,
     source: job.source ?? {},
     retryable: job.retryable === true,
     retryMode: job.retry_mode ?? job.retryMode ?? "",
     acknowledgeable: job.acknowledgeable === true,
     attention: job.attention === true,
     supersededByJobId: job.superseded_by_job_id ?? job.supersededByJobId ?? null,
-    affectedMonths: toStringArray(job.affected_months ?? job.affectedMonths),
+    affectedMonths: toStringArray(job.affected_months ?? job.affectedMonths ?? resultSummary.affectedMonths ?? resultSummary.affected_months),
     error: job.error ?? null,
     createdAt: job.created_at ?? job.createdAt ?? "",
     updatedAt: job.updated_at ?? job.updatedAt ?? "",

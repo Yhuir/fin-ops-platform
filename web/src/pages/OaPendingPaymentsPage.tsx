@@ -71,7 +71,7 @@ function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): str
     .map((payload) => (payload.readModelStatus ?? payload.read_model_status ?? "").trim().toLowerCase())
     .filter(Boolean);
   if (statuses.length === 0) {
-    return "fresh";
+    return "refreshing";
   }
   const knownStatuses = statuses.filter((status) => readModelStatusPriority.includes(status));
   if (knownStatuses.length > 0) {
@@ -79,7 +79,7 @@ function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): str
       readModelStatusPriority.indexOf(left) - readModelStatusPriority.indexOf(right)
     ))[0];
   }
-  return statuses.find((status) => status !== "fresh") ?? "fresh";
+  return statuses.find((status) => status !== "fresh") ?? "refreshing";
 }
 
 function isReadModelFresh(status: string) {
@@ -155,7 +155,7 @@ export default function OaPendingPaymentsPage() {
   const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
-  const [readModelStatus, setReadModelStatus] = useState("fresh");
+  const [readModelStatus, setReadModelStatus] = useState("refreshing");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -216,7 +216,7 @@ export default function OaPendingPaymentsPage() {
         setRows([]);
         setTotal(0);
         setSummary({ rowCount: 0 });
-        setReadModelStatus("fresh");
+        setReadModelStatus("unavailable");
         setError(caught instanceof Error ? caught.message : "OA 待付款核对加载失败。");
       })
       .finally(() => {

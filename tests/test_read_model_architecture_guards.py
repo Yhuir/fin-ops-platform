@@ -17,6 +17,9 @@ READ_MODEL_WRITE_TARGET_INVENTORY = (
     / "analysis"
     / "read-model-main-write-target-inventory-2026-06-26.md"
 )
+READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
+    REPO_ROOT / "docs" / "operations" / "read-model-production-evidence-runbook.md"
+)
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
@@ -293,68 +296,7 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
 }
 
-FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
-    (
-        "web/src/features/batchAccounting/api.ts",
-        "helper_default",
-        'readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "fresh"),',
-    ): (1, "legacy API normalizer default; Wave 2 must replace with fail-closed backend status contract."),
-    (
-        "web/src/features/pendingInvoices/api.ts",
-        "helper_default",
-        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRowsResponse["readModelStatus"],',
-    ): (1, "legacy rows normalizer default; Wave 2 must remove default-fresh fallback."),
-    (
-        "web/src/features/pendingInvoices/api.ts",
-        "helper_default",
-        'readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRulesPayload["readModelStatus"],',
-    ): (1, "legacy rules normalizer default; Wave 2 must remove default-fresh fallback."),
-    (
-        "web/src/features/turnoverLedger/api.ts",
-        "helper_default",
-        'readModelStatus: text(payload.read_model_status, "fresh"),',
-    ): (1, "legacy turnover normalizer default; Wave 2 must require backend status."),
-    (
-        "web/src/features/workbench/api.ts",
-        "nullish_or_logical",
-        'const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";',
-    ): (1, "legacy workbench status fallback; Wave 2 must keep unknown as non-fresh."),
-    (
-        "web/src/pages/BatchAccountingPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
-    (
-        "web/src/pages/BatchAccountingPage.tsx",
-        "logical_or",
-        'const readModelStatus = payload.readModelStatus || "fresh";',
-    ): (1, "legacy page fallback; Wave 2 must remove stale-as-fresh default."),
-    (
-        "web/src/pages/NoOaBankBatchPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial local placeholder; Wave 2 must prove it cannot render final state before backend payload."),
-    (
-        "web/src/pages/OaPendingPaymentsPage.tsx",
-        "use_state",
-        'const [readModelStatus, setReadModelStatus] = useState("fresh");',
-    ): (1, "initial page state; Wave 2 must make loading/unknown non-fresh until payload arrives."),
-    (
-        "web/src/pages/ReconciliationWorkbenchPage.tsx",
-        "object_literal",
-        'readModelStatus: "fresh",',
-    ): (1, "initial workbench placeholder; Wave 2 must prove backend status gates final display."),
-    (
-        "web/src/pages/TurnoverLedgerPage.tsx",
-        "logical_or",
-        'const readModelStatus = cleanText(ledger?.readModelStatus) || "fresh";',
-    ): (1, "legacy turnover page fallback; Wave 2 must remove default-fresh behavior."),
-    (
-        "web/src/pages/TurnoverLedgerPage.tsx",
-        "logical_or",
-        'if ((cleanText(freshLedger.readModelStatus) || "fresh") !== "fresh") {',
-    ): (1, "legacy turnover post-mutation fallback; Wave 2 must require explicit fresh status."),
-}
+FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
 REQUIRED_WRITE_TARGET_INVENTORY_MODULES = {
     "workbench",
@@ -596,6 +538,27 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotRegex(text, r"\b(?:TODO|TBD)\b")
         self.assertIn("business inverse", text)
         self.assertIn("bounded DB restore", text)
+
+    def test_read_model_production_evidence_runbook_keeps_restore_and_secret_gates(self) -> None:
+        text = READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK.read_text(encoding="utf-8")
+        required_markers = [
+            "Admin Token",
+            "不得从普通聊天粘贴到 transcript",
+            "业务 inverse",
+            "Bounded DB Restore Protocol",
+            "operation-before snapshot",
+            "exact predicate",
+            "单事务",
+            "post-restore verification",
+            "operation barrier",
+            "PSCIP-L4",
+            "./scripts/deploy-oa.sh",
+        ]
+        missing = [marker for marker in required_markers if marker not in text]
+        self.assertEqual(missing, [])
+
+        index_text = (REPO_ROOT / "docs" / "operations" / "index.md").read_text(encoding="utf-8")
+        self.assertIn("read-model-production-evidence-runbook.md", index_text)
 
     def _iter_source_trees(self) -> list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]]:
         entries: list[tuple[Path, ast.AST, dict[ast.AST, ast.AST]]] = []

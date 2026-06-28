@@ -313,6 +313,16 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(provider.requested_codes, ["zhou_jieying"])
         self.assertEqual(provider.client.requests[0]["payload"]["data"]["applicant"], "周洁莹")
         self.assertIn("input_invoice_usage_oa_reverse_batch_", drafted["batchId"])
+        self.assertEqual(drafted["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(drafted["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            drafted["freshness_targets"],
+            [{"read_model_key": "input_invoice_usage", "scope_key": "2026-05"}],
+        )
+        self.assertEqual(
+            drafted["operation_barrier_targets"],
+            [{"read_model_key": "input_invoice_usage", "scope_key": "2026-05"}],
+        )
 
     def test_staged_drafts_returns_created_drafts_waiting_for_user_decision(self) -> None:
         service = self._service(
@@ -440,6 +450,16 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertIsNone(revoked["oaDraftId"])
         self.assertEqual(revoked["oaDetectionStatus"], "revoked")
         self.assertEqual(revoked["oaDetectionPayload"]["revokedOaDraftId"], "oa-draft-001")
+        self.assertEqual(revoked["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(revoked["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            revoked["freshness_targets"],
+            [{"read_model_key": "input_invoice_usage", "scope_key": "2026-05"}],
+        )
+        self.assertEqual(
+            revoked["operation_barrier_targets"],
+            [{"read_model_key": "input_invoice_usage", "scope_key": "2026-05"}],
+        )
         self.assertIn((["2026-05"], "input_invoice_usage_oa_reverse_draft_revoked"), invalidations)
 
     def test_create_oa_draft_uses_selected_applicant_form_data_and_waits_for_user_submission_choice(self) -> None:

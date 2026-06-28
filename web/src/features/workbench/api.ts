@@ -47,6 +47,7 @@ import type {
   WorkbenchZonePageInfo,
   OaManualAttachmentRefreshResult,
   OaManualImportList,
+  OaManualImportRemovalResult,
   OaManualImportResult,
   OaManualSearchFilters,
   OaManualSearchItem,
@@ -528,6 +529,22 @@ type ApiWorkbenchActionResult = {
     scopeKey?: unknown;
     scope_key?: unknown;
   }>;
+  operationBarrierTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operation_barrier_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
   operationProjection?: ApiWorkbenchOperationProjection;
   operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
@@ -555,9 +572,10 @@ export type WorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "affectedScopeKeys"> & {
+export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "operationBarrierTargets" | "affectedScopeKeys"> & {
   affectedScopeKeys: string[];
   freshnessTargets: WorkbenchActionFreshnessTarget[];
+  operationBarrierTargets: WorkbenchActionFreshnessTarget[];
   operationProjection?: WorkbenchOperationProjection;
 };
 
@@ -657,6 +675,22 @@ type ApiWorkbenchExceptionApplyResult = {
     scope_key?: unknown;
   }>;
   freshnessTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operation_barrier_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operationBarrierTargets?: Array<{
     readModelKey?: unknown;
     read_model_key?: unknown;
     scopeType?: unknown;
@@ -866,7 +900,27 @@ type ApiOaManualSearchResult = {
   page_size?: number | null;
 };
 
-type ApiOaManualAttachmentRefreshResult = {
+type ApiReadModelTarget = {
+  readModelKey?: unknown;
+  read_model_key?: unknown;
+  scopeType?: unknown;
+  scope_type?: unknown;
+  scopeKey?: unknown;
+  scope_key?: unknown;
+};
+
+type ApiReadModelTargetEnvelope = {
+  affectedScopeKeys?: unknown[] | null;
+  affected_scope_keys?: unknown[] | null;
+  readModelScopeKeys?: unknown[] | null;
+  read_model_scope_keys?: unknown[] | null;
+  freshnessTargets?: ApiReadModelTarget[] | null;
+  freshness_targets?: ApiReadModelTarget[] | null;
+  operationBarrierTargets?: ApiReadModelTarget[] | null;
+  operation_barrier_targets?: ApiReadModelTarget[] | null;
+};
+
+type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
   rows?: Array<{
     row_id?: string | null;
     attachment_file_count?: number | null;
@@ -876,11 +930,16 @@ type ApiOaManualAttachmentRefreshResult = {
   errors?: Array<Record<string, unknown>> | null;
 };
 
-type ApiOaManualImportResult = {
+type ApiOaManualImportResult = ApiReadModelTargetEnvelope & {
   imported?: string[] | null;
   already_imported?: string[] | null;
   failed?: Array<Record<string, unknown>> | null;
   rows?: ApiOaManualSearchRow[] | null;
+};
+
+type ApiOaManualImportRemovalResult = ApiReadModelTargetEnvelope & {
+  removed?: boolean | null;
+  row_id?: string | null;
 };
 
 type ApiOaManualImportList = {
@@ -1737,6 +1796,8 @@ function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): Wo
 function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
@@ -1745,7 +1806,8 @@ function mapWorkbenchExceptionApplyResult(
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
     affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
       .filter((scopeKey) => scopeKey !== "all"),
-    freshnessTargets: cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
@@ -1826,7 +1888,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
 }
 
 function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
-  return String(value ?? "fresh").trim() as WorkbenchReadModelStatus || "fresh";
+  return String(value ?? "refreshing").trim() as WorkbenchReadModelStatus || "refreshing";
 }
 
 function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
@@ -2328,7 +2390,7 @@ function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRe
 }
 
 function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
-  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";
+  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "refreshing").trim() || "refreshing";
   return {
     scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
     readModelStatus: rawStatus as WorkbenchReadModelStatus,
@@ -2853,6 +2915,7 @@ export async function refreshManualOaImportAttachments(
       unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
     })).filter((row) => row.rowId.length > 0),
     errors: payload.errors ?? [],
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -2875,6 +2938,7 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
     failed: payload.failed ?? [],
     rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -2895,14 +2959,15 @@ export async function fetchManualOaImports(): Promise<OaManualImportList> {
   };
 }
 
-export async function removeManualOaImport(rowId: string): Promise<{ removed: boolean; rowId: string }> {
-  const payload = await requestJson<{ removed?: boolean; row_id?: string | null }>(
+export async function removeManualOaImport(rowId: string): Promise<OaManualImportRemovalResult> {
+  const payload = await requestJson<ApiOaManualImportRemovalResult>(
     `/api/workbench/settings/oa/manual-imports/${encodeURIComponent(rowId)}`,
     { method: "DELETE" },
   );
   return {
     removed: payload.removed === true,
     rowId: toDisplayValue(payload.row_id, rowId),
+    ...mapReadModelTargetEnvelope(payload),
   };
 }
 
@@ -3028,18 +3093,42 @@ function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchA
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
   const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
   const {
     operationProjection: _rawOperationProjection,
+    operation_projection: _rawOperationProjectionSnake,
     freshnessTargets: _rawFreshnessTargets,
+    freshness_targets: _rawFreshnessTargetsSnake,
+    operationBarrierTargets: _rawOperationBarrierTargets,
+    operation_barrier_targets: _rawOperationBarrierTargetsSnake,
     affectedScopeKeys: _rawAffectedScopeKeys,
+    affected_scope_keys: _rawAffectedScopeKeysSnake,
     ...rest
   } = payload;
   return {
     ...rest,
     affectedScopeKeys,
     freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     ...(operationProjection ? { operationProjection } : {}),
+  };
+}
+
+function mapReadModelTargetEnvelope(payload: ApiReadModelTargetEnvelope) {
+  const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
+    .filter((scopeKey) => scopeKey !== "all");
+  const readModelScopeKeys = cleanScopeList(payload.readModelScopeKeys ?? payload.read_model_scope_keys)
+    .filter((scopeKey) => scopeKey !== "all");
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationBarrierTargets = cleanFreshnessTargets(
+    payload.operationBarrierTargets ?? payload.operation_barrier_targets,
+  );
+  return {
+    affectedScopeKeys,
+    readModelScopeKeys,
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 

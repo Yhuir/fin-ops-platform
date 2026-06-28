@@ -9,6 +9,7 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
 import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
+import type { OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -31,7 +32,7 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   oaRows: [],
   relationsByBankRowId: {},
   pagination: {},
-  readModelStatus: "fresh",
+  readModelStatus: "refreshing",
   readModelStaleReasons: [],
   readModelScopeKeys: [],
   refreshEnqueued: false,
@@ -172,8 +173,25 @@ function oaSearchText(row: BatchAccountingOaRow) {
   ].join(" "));
 }
 
-function mutationEventDetail(result: { affectedMonths?: string[] }) {
-  return { affectedMonths: result.affectedMonths ?? [] };
+function mutationEventDetail(result: {
+  affectedMonths?: string[];
+  affectedScopeKeys?: string[];
+  operationBarrierTargets?: OperationBarrierTarget[];
+}) {
+  return {
+    affectedMonths: result.affectedMonths ?? [],
+    affectedScopeKeys: result.affectedScopeKeys ?? [],
+    operationBarrierTargets: result.operationBarrierTargets ?? [],
+  };
+}
+
+function mutationBarrierTargets(
+  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
+  fallbackScopeKey: string,
+) {
+  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
+    ? result.operationBarrierTargets
+    : operationBarrierTargetsFromMonths("workbench_relation", result.affectedMonths ?? [], fallbackScopeKey);
 }
 
 function monthFromBankRow(row: BatchAccountingBankRow | null) {
@@ -344,7 +362,7 @@ export default function BatchAccountingPage() {
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
   const selectedOaTotalCents = selectedOaRows.reduce((total, row) => total + parseMoneyCents(row.amount), 0);
   const differenceCents = bankAmountCents - selectedOaTotalCents;
-  const readModelStatus = payload.readModelStatus || "fresh";
+  const readModelStatus = payload.readModelStatus || "refreshing";
   const readModelNeedsRefresh = readModelStatus !== "fresh";
   const readModelScopeMessage = scopeMessage(payload.readModelScopeKeys);
   const readModelStatusMessage = payload.refreshEnqueued
@@ -548,7 +566,7 @@ export default function BatchAccountingPage() {
           });
           setMessage("正在等待批量账务关联读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("workbench_relation", submitResult.affectedMonths, monthFromBankRow(selectedBankRow)),
+            mutationBarrierTargets(submitResult, monthFromBankRow(selectedBankRow)),
           );
           setMessage("正在刷新批量账务关联数据...");
           await reloadDataAfterMutation();
@@ -587,7 +605,7 @@ export default function BatchAccountingPage() {
           setWithdrawReason("");
           setMessage("正在等待批量账务关联读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("workbench_relation", withdrawResult.affectedMonths, monthFromBankRow(selectedBankRow)),
+            mutationBarrierTargets(withdrawResult, monthFromBankRow(selectedBankRow)),
           );
           setMessage("正在刷新批量账务关联数据...");
           await reloadDataAfterMutation();

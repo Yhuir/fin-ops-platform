@@ -1,4 +1,5 @@
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
+import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 export type BankDetailAccount = {
   accountIdentity?: string | null;
@@ -260,6 +261,9 @@ export type BankAutoTagRulesResponse = {
     canSave: boolean;
   };
   readModelStatus?: "fresh" | "refreshing" | string;
+  readModelScopeKeys: string[];
+  freshnessTargets: OperationBarrierTarget[];
+  operationBarrierTargets: OperationBarrierTarget[];
   refreshReason?: "saved" | "reapplied";
 };
 

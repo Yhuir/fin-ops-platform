@@ -17,6 +17,7 @@
 - 进项发票使用情况页面列表、筛选、明细、OA 反提和使用规则。
 - `input_invoice_usage` scoped read model。
 - 与 invoice usage collection worker 的 event 合同。
+- OA reverse 创建草稿、撤回本地草稿绑定等写操作返回 `input_invoice_usage` write target envelope，用于页面或调用方等待受影响月份 fresh。
 
 ### 不负责
 
@@ -30,6 +31,7 @@
 | --- | --- | --- |
 | 页面查询/明细 | `InputInvoiceUsagePage.tsx`、`features/inputInvoiceUsage/api.ts` | 进入 read model service/fresh gate |
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
+| OA reverse target envelope | `InputInvoiceUsageOaReverseService.batch_payload(...)` | 从 batch invoice display rows 提取 invoice month；无月份时退回 `all`，并返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Refresh scope | `input_invoice_usage` manifest | month or `all`；`all` 是 fan-out command |
 
 ## 输出 I/O
@@ -38,6 +40,7 @@
 | --- | --- | --- |
 | 使用情况 rows/details | 前端页面 | fresh/status 可见 |
 | OA reverse 结果 | API/OA | 业务写后触发 dirty scope |
+| OA reverse 写后 freshness target | API/frontend/operation barrier | `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |
 | Dirty scope | runtime queue | `input_invoice_usage.read_model.refresh` |
 
 ## 持久化与投影
@@ -71,6 +74,7 @@
 - `tests/test_input_invoice_usage_api.py`
 - `tests/test_input_invoice_usage_read_model_fresh_gate_service.py`
 - `tests/test_invoice_usage_collection_sql_runtime.py`
+- `tests/test_input_invoice_usage_oa_reverse_service.py` 覆盖 OA reverse 创建/撤回后的 target envelope。
 - `web/e2e/input-invoice-usage-flow.spec.ts`
 
 ## 当前缺口和删除条件

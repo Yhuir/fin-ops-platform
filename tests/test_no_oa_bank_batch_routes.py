@@ -291,6 +291,11 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload["summary"], {"submitted": 1, "failed": 4})
         self.assertEqual(payload["affected_months"], ["2026-05"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-05"}],
+        )
         self.assertTrue(payload["workbench_rebuild_queued"])
         self.assertEqual(payload["results"][0]["status"], "submitted")
         self.assertEqual(payload["results"][1]["error"], "unknown_no_oa_bank_batch")

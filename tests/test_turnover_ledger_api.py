@@ -2317,6 +2317,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated"], 2)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["operation_barrier_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "all"})
         self.assertTrue(payload["turnover_ledger_invalidated"])
         self.assertTrue(payload["workbench_invalidated"])
         self.assertEqual(
@@ -3970,6 +3972,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["relation"]["status"], "confirmed")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [
+                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+            ],
+        )
         self.assertEqual(call_order, ["rebuild", "after_mutation"])
         self.assertEqual(after_mutation_months, [["2026-02", "2026-03"]])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
@@ -4338,6 +4349,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "all"})
         self.assertEqual(len(facade.withdraw_calls), 1)
         self.assertEqual(facade.withdraw_calls[0]["relation_id"], relation_id)
         self.assertEqual(facade.withdraw_calls[0]["note"], "facade withdraw")
@@ -4463,6 +4476,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["relation"]["status"], "withdrawn")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(payload["operation_barrier_targets"][1], {"read_model_key": "workbench_relation", "scope_key": "2026-02"})
         self.assertEqual(after_mutation_months, [["2026-02", "2026-03"]])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
         self.assertEqual(read_repository.clear_calls, 1)

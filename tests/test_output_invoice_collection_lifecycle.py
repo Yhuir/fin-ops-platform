@@ -69,8 +69,10 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
 
         refreshed_row = query.list_rows()["rows"][0]
         expected_freshness = {
+            "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
             "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+            "operation_barrier_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
         }
         self.assertEqual(status_result["override"]["version"], 1)
         self.assertEqual(
@@ -221,8 +223,10 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
 
         history = query.receipt_history(invoice_id="out-receipt")
         expected_freshness = {
+            "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
             "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+            "operation_barrier_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
         }
         self.assertEqual(first["receipt"]["id"], replay["receipt"]["id"])
         self.assertEqual(first["receipt"]["receiptNo"], replay["receipt"]["receiptNo"])

@@ -307,10 +307,21 @@ No Go candidate has passed admission. The global admission reconciliation, Workb
 
 T7 reconfirmed Go admission remains deferred: local collector returns `configuration_missing`, and real Workbench compute p95/p99, active generation enqueue-to-fresh, executable shadow diff and rollback switch evidence remain missing.
 
+## Main Read Model Closure Current State
+
+- Current branch: `main`.
+- Backup branch: `codex/backup-main-before-read-model-closure-20260626-050615`.
+- Latest deployed production release: `main-18a0509f-20260626063245`.
+- Latest deployed commit: `18a0509f3dca0649d1d7661293909c657853e91f`.
+- Latest evidence file: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-wave-8-controlled-production-rollout-and-evidence-sweep-2026-06-26.md`.
+- Closed in Wave 8: production rollout, service/worker active evidence, runtime release consistency, scope contract with zero violations, final dirty/outbox/readiness convergence, direct critical read model SLO smoke 15/15 pass, and one Workbench relation write/restore audit using bounded DB restore.
+- Not closed in Wave 8: secure Admin Token was not acquired; public real-authenticated Admin Token HTTP/SSE/browser proof was not executed; the full public write-operation matrix is not yet proven.
+- No-block rule: missing business inverse restore is not a blocker. It routes to bounded DB restore only when operation-before snapshot, exact predicate, transaction safety and post-restore verification are available.
+
 ## Last Prompt
 
-`server-py:no-oa-bank-batch-post-display-policy-local-closure-audit`
+`main-read-model-closure:wave-8-controlled-production-rollout-and-evidence-sweep`
 
 ## Next Prompt
 
-`planning:post-no-oa-server-local-support-next-boundary-selection`
+`main-read-model-closure:wave-9-public-authenticated-api-sse-and-write-matrix-closure`

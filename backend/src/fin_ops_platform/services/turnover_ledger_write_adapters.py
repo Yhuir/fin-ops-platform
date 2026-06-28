@@ -10,6 +10,7 @@ from fin_ops_platform.services.read_model_scope_policy import (
     DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
     ReadModelScopePolicyRegistry,
 )
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -1107,6 +1108,20 @@ def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -
     ]
 
 
+def _turnover_write_target_envelope(
+    affected_months: list[str],
+    *,
+    targets: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    return write_target_envelope(
+        scope_keys=list(affected_months or []),
+        targets=targets
+        if targets is not None
+        else _turnover_closure_visibility_freshness_targets(affected_months),
+        fallback_scope_key="all",
+    )
+
+
 class TurnoverLedgerConfirmRequestBoundaryFacade:
     def __init__(
         self,
@@ -1146,6 +1161,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
+        payload.update(_turnover_write_target_envelope(affected_months))
         return payload
 
     def confirm_zero_difference_closure_from_request(
@@ -1182,6 +1198,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(
             affected_months
         )
+        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
         return payload
 
     def withdraw_cash_closure_case_from_request(
@@ -1218,6 +1235,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         ]
         payload["affected_months"] = affected_months
         payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(affected_months)
+        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
         return payload
 
 
@@ -1367,6 +1385,7 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
         result = self._facade.withdraw_relation(**withdraw_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
+        payload.update(_turnover_write_target_envelope(affected_months))
         return payload
 
 
@@ -1416,6 +1435,7 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         payload["affected_months"] = list(affected_months)
         payload["turnover_ledger_invalidated"] = True
         payload["workbench_invalidated"] = True
+        payload.update(_turnover_write_target_envelope(affected_months))
         return payload
 
 
@@ -1476,6 +1496,7 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
         )
         response_payload = dict(result or {})
         response_payload["turnover_ledger_invalidated"] = True
+        response_payload.update(_turnover_write_target_envelope(list(scope_keys or ["all"])))
         return response_payload
 
 
@@ -1492,7 +1513,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
         facade = self._facade_provider()
-        return dict(
+        payload = dict(
             facade.update_tag_selection(
                 payload=dict(payload or {}),
                 actor_id=actor_id,
@@ -1502,6 +1523,13 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             )
             or {}
         )
+        payload.update(
+            _turnover_write_target_envelope(
+                ["all"],
+                targets=[{"read_model_key": "turnover_ledger", "scope_key": "all"}],
+            )
+        )
+        return payload
 
 
 class TurnoverLedgerConfirmLegacyFallbackAdapterSet:

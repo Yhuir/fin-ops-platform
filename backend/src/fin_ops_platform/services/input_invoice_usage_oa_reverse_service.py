@@ -17,6 +17,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
@@ -710,6 +711,7 @@ class InputInvoiceUsageOaReverseService:
 
     @staticmethod
     def batch_payload(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
+        scope_keys = InputInvoiceUsageOaReverseService._batch_scope_keys(batch)
         return {
             "batchId": batch.batch_id,
             "status": batch.status,
@@ -742,7 +744,24 @@ class InputInvoiceUsageOaReverseService:
             "canRevoke": _can_revoke_oa_draft(batch),
             "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
+            **write_target_envelope(
+                read_model_key="input_invoice_usage",
+                scope_keys=scope_keys,
+                fallback_scope_key="all",
+            ),
         }
+
+    @staticmethod
+    def _batch_scope_keys(batch: InputInvoiceUsageOaReverseBatch) -> list[str]:
+        months = sorted(
+            {
+                month
+                for row in list(batch.invoice_display_rows or [])
+                for month in [str(row.get("invoiceDate") or "")[:7]]
+                if len(month) == 7
+            }
+        )
+        return months or ["all"]
 
     @staticmethod
     def _submitted_history_item(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:

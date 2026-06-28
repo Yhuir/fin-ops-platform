@@ -22,6 +22,7 @@ from fin_ops_platform.services.oa_pending_payment_service import (
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
     OaPendingPaymentRelationRepositoryError,
 )
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -126,6 +127,7 @@ class OaPendingPaymentCommandService:
             "oaPaymentWriteback": writeback,
             "relation": relation_result,
             "readModelRefresh": refresh,
+            **_oa_pending_payment_write_target_envelope(refresh),
         }
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -192,6 +194,7 @@ class OaPendingPaymentCommandService:
             "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
             "oaPaymentWritebacks": writebacks,
             "readModelRefresh": refresh,
+            **_oa_pending_payment_write_target_envelope(refresh),
         }
 
     def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -227,6 +230,7 @@ class OaPendingPaymentCommandService:
             "skippedAutoMatches": auto_match_result["skipped"],
             "oaPaymentWritebacks": [_public_writeback(item) for item in writebacks],
             "readModelRefresh": refresh,
+            **_oa_pending_payment_write_target_envelope(refresh),
         }
 
     def bank_transaction_candidates(self, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
@@ -1092,6 +1096,17 @@ def _empty_refresh_payload() -> dict[str, Any]:
         "enqueued": False,
         "targetSeconds": 2,
     }
+
+
+def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[str, object]:
+    scope_keys = _payload_list(refresh, "scopeKeys", "scope_keys")
+    if not scope_keys and not bool(refresh.get("enqueued")):
+        return write_target_envelope(scope_keys=[], targets=[])
+    targets: list[dict[str, str]] = []
+    for scope_key in scope_keys or ["all"]:
+        targets.append({"read_model_key": "oa_pending_payment", "scope_key": scope_key})
+        targets.append({"read_model_key": "workbench_relation", "scope_key": scope_key})
+    return write_target_envelope(scope_keys=scope_keys, targets=targets, fallback_scope_key="all")
 
 
 def _confirm_paid_case_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:

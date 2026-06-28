@@ -16,6 +16,7 @@
 
 - 银行流水列表、账户筛选、标签/分类展示、自动标签规则、导出。
 - 维护 `bank_detail` scoped read model freshness。
+- 标签/分类/自动规则写操作返回统一 write target envelope，包含 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
 - 为下游 workbench/no-OA/turnover 关系提供银行流水身份和标签读取边界。
 
 ### 不负责
@@ -30,6 +31,7 @@
 | --- | --- | --- |
 | 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract |
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
+| 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
 
 ## 输出 I/O
@@ -37,6 +39,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 银行明细列表/账户/标签 payload | 前端页面 | 必须带 freshness/status |
+| 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 
@@ -71,8 +74,10 @@
 - Service/read model：`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_service.py`。
 - API/frontend：`tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx`。
 - E2E：`web/e2e/bank-details-*.spec.ts`。
+- Wave 3 target envelope 回归：`BankDetailSqlRepositoryTests.test_category_mutation_response_returns_bank_detail_operation_barrier_targets`、`web/src/test/BankDetailsApi.test.ts`。
 
 ## 当前缺口和删除条件
 
 - 将本文件补齐的后端入口同步到模块 README。
 - 删除旧查询路径前，必须验证写标签、自动规则、导出和 stale/refreshing UI。
+- 后续删除旧路径时，不得删除自动规则 response envelope 或前端 unknown-status fail-closed 断言。

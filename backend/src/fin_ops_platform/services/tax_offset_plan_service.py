@@ -10,6 +10,7 @@ from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
     source_version_mismatch_reasons,
 )
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -170,7 +171,15 @@ class TaxOffsetPlanService:
             },
         }
         saved_plan = self._plan_repository.save_tax_offset_plan(plan)
-        return {"status": "saved", "plan": saved_plan}
+        return {
+            "status": "saved",
+            "plan": saved_plan,
+            **write_target_envelope(
+                read_model_key="tax_offset",
+                scope_keys=[read_model_scope_key],
+                fallback_scope_key=month,
+            ),
+        }
 
     @staticmethod
     def _normalize_month(value: Any) -> str:

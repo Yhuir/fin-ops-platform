@@ -88,9 +88,12 @@ function mapFreshnessTargets(value: unknown): OperationBarrierTarget[] {
 
 function mapMutationResponse(payload: unknown): OutputInvoiceCollectionMutationResponse {
   const raw = objectValue(payload);
+  const freshnessTargets = mapFreshnessTargets(camelOrSnake(raw, "freshnessTargets", "freshness_targets"));
+  const operationBarrierTargets = mapFreshnessTargets(camelOrSnake(raw, "operationBarrierTargets", "operation_barrier_targets"));
   return {
     readModelScopeKeys: stringList(camelOrSnake(raw, "readModelScopeKeys", "read_model_scope_keys")),
-    freshnessTargets: mapFreshnessTargets(camelOrSnake(raw, "freshnessTargets", "freshness_targets")),
+    freshnessTargets,
+    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     raw: payload,
   };
 }
