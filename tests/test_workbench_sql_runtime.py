@@ -6459,7 +6459,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.fresh_checks, [("tenant-a", "workbench", "2026-02")])
         self.assertEqual(queue.completed, [])
 
-    def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
+    def test_workbench_refresh_handler_enqueues_all_aggregate_with_event_priority_after_month_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -6501,6 +6501,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             payload={"scope_key": "2026-05", "source_version": 19},
             attempts=1,
             status="processing",
+            priority="high",
+            trace_id="trace-workbench-month",
         )
 
         result = service.handle_runtime_event(event)
@@ -6510,10 +6512,121 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(queue.enqueued), 1)
         aggregate = queue.enqueued[0]
         self.assertEqual(aggregate["scope_key"], "all")
-        self.assertEqual(aggregate["priority"], "low")
+        self.assertEqual(aggregate["priority"], "high")
+        self.assertEqual(aggregate["trace_id"], "trace-workbench-month")
         self.assertEqual(aggregate["dedupe_key"], "workbench.read_model.refresh:workbench:all:aggregate:19")
         self.assertEqual(aggregate["payload"]["aggregate_only"], True)
         self.assertEqual(aggregate["payload"]["parent_scope_keys"], ["2026-05"])
+
+    def test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+                self.enqueued: list[dict[str, object]] = []
+                self.aggregate_enqueued: list[dict[str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+            def enqueue(self, **kwargs: object) -> None:
+                self.enqueued.append(dict(kwargs))
+
+            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
+                self.aggregate_enqueued.append(dict(kwargs))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-month",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 19},
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="trace-workbench-month",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
+        self.assertEqual(result["aggregate_enqueued"], True)
+        self.assertEqual(queue.enqueued, [])
+        self.assertEqual(
+            queue.aggregate_enqueued,
+            [
+                {
+                    "tenant_id": "tenant-a",
+                    "parent_scope_keys": ["2026-05"],
+                    "source_version": 19,
+                    "reason": "workbench_shard_published",
+                    "priority": "high",
+                    "trace_id": "trace-workbench-month",
+                }
+            ],
+        )
+
+    def test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.aggregate_enqueued: list[dict[str, object]] = []
+
+            def complete_read_model_refresh(self, **_kwargs: object) -> None:
+                return None
+
+            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
+                self.aggregate_enqueued.append(dict(kwargs))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-month",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 19},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result["aggregate_enqueued"], True)
+        self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
 
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
         class FakeBuilder:
@@ -6529,12 +6642,21 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         class FakeQueue:
             def __init__(self) -> None:
-                self.refreshes: list[tuple[str, str, str]] = []
+                self.refreshes: list[tuple[str, str, str, str, str | None]] = []
                 self.completed: list[tuple[str, str, str, object]] = []
                 self.enqueued: list[dict[str, object]] = []
 
-            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-                self.refreshes.append((scope_type, scope_key, reason))
+            def enqueue_read_model_refresh(
+                self,
+                *,
+                scope_type: str,
+                scope_key: str,
+                reason: str,
+                priority: str = "normal",
+                trace_id: str | None = None,
+                **_kwargs: object,
+            ) -> None:
+                self.refreshes.append((scope_type, scope_key, reason, priority, trace_id))
 
             def enqueue(self, **kwargs):
                 self.enqueued.append(dict(kwargs))
@@ -6564,6 +6686,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             payload={"scope_key": "all"},
             attempts=1,
             status="processing",
+            priority="high",
+            trace_id="trace-workbench-all",
         )
 
         result = service.handle_runtime_event(event)
@@ -6580,13 +6704,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(
             queue.refreshes,
-            [("workbench", "2026-05", "workbench_all_shard"), ("workbench", "2026-04", "workbench_all_shard")],
+            [
+                ("workbench", "2026-05", "workbench_all_shard", "high", "trace-workbench-all"),
+                ("workbench", "2026-04", "workbench_all_shard", "high", "trace-workbench-all"),
+            ],
         )
         self.assertEqual(queue.completed, [])
         self.assertEqual(len(queue.enqueued), 1)
         self.assertEqual(queue.enqueued[0]["scope_key"], "all")
         self.assertEqual(queue.enqueued[0]["payload"]["aggregate_only"], True)
-        self.assertEqual(queue.enqueued[0]["priority"], "low")
+        self.assertEqual(queue.enqueued[0]["priority"], "high")
+        self.assertEqual(queue.enqueued[0]["trace_id"], "trace-workbench-all")
 
     def test_workbench_refresh_handler_completes_all_after_aggregate_only_event(self) -> None:
         class FakeBuilder:

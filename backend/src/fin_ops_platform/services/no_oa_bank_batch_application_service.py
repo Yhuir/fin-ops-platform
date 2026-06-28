@@ -186,6 +186,7 @@ class NoOaBankBatchApplicationService:
                     "refresh_reason": refresh_reason,
                 }
             if summary_read_model_batches is not None and read_model_batches is not None:
+                self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
                 summary_public_batches = self._public_batches(summary_read_model_batches)
                 read_model_public_batches = self._public_batches(read_model_batches)
@@ -603,7 +604,19 @@ class NoOaBankBatchApplicationService:
         if not callable(load_source_versions):
             self._workbench_relation_active_relations_for_bank_rows(bank_rows)
             return
-        for month in self._months_for_bank_rows(bank_rows):
+        self.load_relation_source_versions_for_scope_keys(self._months_for_bank_rows(bank_rows))
+
+    def load_relation_source_versions_for_scope_keys(self, scope_keys: list[str]) -> None:
+        if self._relation_facade is None:
+            return
+        load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
+        if not callable(load_source_versions):
+            return
+        for month in [
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+        ]:
             load_source_versions(
                 month,
                 require_fresh=False,

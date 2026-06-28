@@ -103,33 +103,52 @@ class WorkbenchReadModelRefreshService:
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        enqueued_scope_keys = refresh_gateway.enqueue_many("workbench", shard_keys, reason="workbench_all_shard")
+        event_priority = str(event.priority or "normal").strip() or "normal"
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            "workbench",
+            shard_keys,
+            reason="workbench_all_shard",
+            priority=event_priority,
+            trace_id=event.trace_id,
+        )
         enqueue_event = getattr(self._queue_repository, "enqueue", None)
-        if callable(enqueue_event):
+        enqueue_aggregate = getattr(self._queue_repository, "enqueue_workbench_all_aggregate_refresh", None)
+        can_enqueue_aggregate = callable(enqueue_aggregate) or callable(enqueue_event)
+        if can_enqueue_aggregate:
             source_version = event.source_version or event.payload.get("source_version")
-            enqueue_event(
-                event_type="workbench.read_model.refresh",
-                aggregate_type="read_model",
-                aggregate_id="all",
-                scope_type="workbench",
-                scope_key=scope_key,
-                dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
-                payload={
-                    "scope_type": "workbench",
-                    "scope_key": scope_key,
-                    "aggregate_only": True,
-                    "source_version": source_version,
-                    "parent_scope_keys": enqueued_scope_keys,
-                },
-                tenant_id=event.tenant_id,
-                source_version=source_version,
-                priority="low",
-                trace_id=event.trace_id,
-            )
+            if callable(enqueue_aggregate):
+                enqueue_aggregate(
+                    tenant_id=event.tenant_id,
+                    parent_scope_keys=enqueued_scope_keys,
+                    source_version=source_version,
+                    reason=str(event.payload.get("reason") or "workbench_all_shard"),
+                    priority=event_priority,
+                    trace_id=event.trace_id,
+                )
+            else:
+                enqueue_event(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="all",
+                    scope_type="workbench",
+                    scope_key=scope_key,
+                    dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
+                    payload={
+                        "scope_type": "workbench",
+                        "scope_key": scope_key,
+                        "aggregate_only": True,
+                        "source_version": source_version,
+                        "parent_scope_keys": enqueued_scope_keys,
+                    },
+                    tenant_id=event.tenant_id,
+                    source_version=source_version,
+                    priority=event_priority,
+                    trace_id=event.trace_id,
+                )
         return {
             "scope_key": scope_key,
             "enqueued_scope_keys": enqueued_scope_keys,
-            "aggregate_enqueued": callable(enqueue_event),
+            "aggregate_enqueued": can_enqueue_aggregate,
             "row_count": 0,
         }
 
@@ -137,28 +156,40 @@ class WorkbenchReadModelRefreshService:
         if scope_key == "all":
             return None
         enqueue_event = getattr(self._queue_repository, "enqueue", None)
-        if not callable(enqueue_event):
+        enqueue_aggregate = getattr(self._queue_repository, "enqueue_workbench_all_aggregate_refresh", None)
+        if not callable(enqueue_aggregate) and not callable(enqueue_event):
             return None
         source_version = event.source_version or event.payload.get("source_version")
-        enqueue_event(
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
-            payload={
-                "scope_type": "workbench",
-                "scope_key": "all",
-                "aggregate_only": True,
-                "source_version": source_version,
-                "parent_scope_keys": [scope_key],
-            },
-            tenant_id=event.tenant_id,
-            source_version=source_version,
-            priority="low",
-            trace_id=event.trace_id,
-        )
+        event_priority = str(event.priority or "normal").strip() or "normal"
+        if callable(enqueue_aggregate):
+            enqueue_aggregate(
+                tenant_id=event.tenant_id,
+                parent_scope_keys=[scope_key],
+                source_version=source_version,
+                reason=str(event.payload.get("reason") or "workbench_shard_published"),
+                priority=event_priority,
+                trace_id=event.trace_id,
+            )
+        else:
+            enqueue_event(
+                event_type="workbench.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
+                scope_type="workbench",
+                scope_key="all",
+                dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
+                payload={
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "aggregate_only": True,
+                    "source_version": source_version,
+                    "parent_scope_keys": [scope_key],
+                },
+                tenant_id=event.tenant_id,
+                source_version=source_version,
+                priority=event_priority,
+                trace_id=event.trace_id,
+            )
         return True
 
     def _warm_after_publish(self, scope_key: str) -> dict[str, Any] | None:

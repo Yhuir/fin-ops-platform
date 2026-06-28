@@ -2,13 +2,13 @@
 
 **Created:** 2026-06-23
 **Mode:** unattended best-effort
-**Target branch:** `dev`
+**Target branch:** `main`
 **Working directory:** `/Users/yu/Desktop/fin-ops-platform`
-**Branch policy:** direct execution on `dev` in the main repository directory; no separate worktree and no separate `codex/*` integration branch
+**Branch policy:** direct execution on `main` for the user-authorized read model closure run; no separate worktree and no separate `codex/*` integration branch
 
 ## Global Status
 
-Current state: `workbench-pair-relation-display-policy-extraction-closed`
+Current state: `main-read-model-closure-wave-9-turnover-scope-narrowing-local-verified`
 
 Go hot-path state: `blocked-by-candidate-admission-prerequisites`
 
@@ -33,7 +33,7 @@ Progress accounting state: `commit-backed-reconciliation-completed-2026-06-25`
 
 ## Current Module
 
-Completed `server-py:workbench-pair-relation-display-policy-extraction` as `local-implementation-closed` in `analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md`. `WorkbenchPairRelationDisplayPolicy` now owns relation display payload mapping; pair relation row mutation and mode-specific metadata decorators remain deferred. The next local boundary is `server-py:workbench-pair-relation-row-mutation-audit`. Production browser/admin/write evidence remains deferred.
+In `main-read-model-closure:wave-9-public-authenticated-api-sse-and-write-matrix-closure`, the current local boundary is turnover write-target scope narrowing. Normal month-addressable turnover writes now use affected month scopes instead of `turnover_ledger:all` / downstream `all` defaults. Local backend/frontend targeted verification has passed; production deploy and controlled write-matrix retest remain open before any PSCIP-L4/global closure claim.
 
 ## Closed Or Deferred Slices
 

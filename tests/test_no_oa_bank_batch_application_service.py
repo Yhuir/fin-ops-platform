@@ -88,22 +88,37 @@ class RecordingNoOaRelationCommandService:
 
 
 class EmptyWorkbenchRelationFacade:
+    def __init__(self) -> None:
+        self.last_source_versions: dict[str, object] = {}
+
     def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        self.last_source_versions = {"schema_version": 52, "scope_key": month}
         return {
             "status": "fresh",
             "rows": [],
             "groups": [],
-            "source_versions": {"schema_version": 52},
+            "source_versions": dict(self.last_source_versions),
             "read_model_scope_keys": [month],
         }
 
     def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        self.last_source_versions = {"schema_version": 52, "scope_key": "2026-03"}
         return {
             "status": "fresh",
             "rows": [],
             "groups": [],
-            "source_versions": {"schema_version": 52},
+            "source_versions": dict(self.last_source_versions),
             "read_model_scope_keys": ["2026-03"],
+        }
+
+    def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        self.last_source_versions = {"schema_version": 52, "scope_key": month}
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [],
+            "source_versions": dict(self.last_source_versions),
+            "read_model_scope_keys": [month],
         }
 
 
@@ -157,6 +172,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         no_oa_bank_batch_read_model_repository: object | None = None,
         workbench_sql_read_repository: object | None = None,
         read_model_refresh_producer: object | None = None,
+        relation_facade: object | None = None,
     ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
         categories = no_oa_categories(rows)
         pair_service = pair_relation_service or WorkbenchPairRelationService()
@@ -193,7 +209,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_service),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
             state_store=None,
-            relation_facade=EmptyWorkbenchRelationFacade(),
+            relation_facade=relation_facade or EmptyWorkbenchRelationFacade(),
             relation_command_service=command_service,
             no_oa_bank_batch_read_model_repository=no_oa_bank_batch_read_model_repository,
             workbench_sql_read_repository=workbench_sql_read_repository,
@@ -468,6 +484,63 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             producer.calls,
             [{"scope_keys": ["2026-06"], "reason": "api_no_oa_source_versions_stale", "metadata": None}],
         )
+
+    def test_month_sql_read_model_loads_relation_source_versions_before_stale_check(self) -> None:
+        class RelationFacade:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+                self.last_source_versions: dict[str, object] = {"scope_key": "2026-01", "source_version": 1}
+
+            def source_versions_for_month(self, month: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+                self.calls.append(month)
+                self.last_source_versions = {"scope_key": month, "source_version": 2}
+                return {
+                    "status": "fresh",
+                    "rows": [],
+                    "groups": [],
+                    "source_versions": dict(self.last_source_versions),
+                    "read_model_scope_keys": [month],
+                }
+
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.rows: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
+                return deepcopy(self.rows)
+
+        relation_facade = RelationFacade()
+        repository = ReadRepository()
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee"],
+            no_oa_bank_batch_read_model_repository=repository,
+            relation_facade=relation_facade,
+        )
+        relation_facade.source_versions_for_month("2026-06")
+        repository.rows = [
+            {
+                "batch_id": "batch-fresh-fee",
+                "batch_type": "fee",
+                "scope_month": "2026-06",
+                "account_key": "CCB:8106",
+                "status": "draft",
+                "status_bucket": "unsubmitted",
+                "row_count": 1,
+                "total_amount": "12.00",
+                "source_versions": service.no_oa_bank_batch_source_versions(),
+            }
+        ]
+        relation_facade.last_source_versions = {"scope_key": "2026-01", "source_version": 1}
+        relation_facade.calls = []
+
+        payload = service.list_batches_payload(
+            {"month": ["2026-06"], "bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]}
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload.get("read_model_stale_reasons", []), [])
+        self.assertEqual(relation_facade.calls, ["2026-06"])
 
     def test_sql_read_model_exception_batches_are_not_public_payload(self) -> None:
         class ReadRepository:

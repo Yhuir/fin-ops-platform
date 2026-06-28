@@ -259,6 +259,14 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
     ]
     assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
     assert workbench_all_outbox_payloads[-1]["parent_scope_keys"] == ["2026-01", "2026-02"]
+    workbench_all_outbox_params = [
+        params
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "workbench"
+        and str(params[4]) == "all"
+    ]
+    assert workbench_all_outbox_params[-1][5] == "workbench.read_model.refresh:workbench:all:aggregate"
 
 
 def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -> None:

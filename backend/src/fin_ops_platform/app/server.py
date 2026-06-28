@@ -3055,6 +3055,7 @@ class Application:
             read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
                 queue_repository,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
+                priority="high",
             ),
             idempotency_store=idempotency_store,
         )
@@ -3080,6 +3081,7 @@ class Application:
             read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
                 queue_repository,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
+                priority="high",
             ),
             idempotency_store=idempotency_store,
         )
@@ -3105,6 +3107,7 @@ class Application:
             read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
                 queue_repository,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
+                priority="high",
             ),
             idempotency_store=idempotency_store,
         )

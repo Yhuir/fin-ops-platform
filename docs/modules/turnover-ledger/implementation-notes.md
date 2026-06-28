@@ -560,3 +560,12 @@ git diff --check
 - 决策：projection 必须在 `_collect_rows(...)` 之前捕获 source_versions，之后仍允许 `_with_workbench_relation_context(...)` 追加 Workbench relation source_versions。这样 worker 保存的 top-level/row-level source_versions 与 API fresh gate 对齐，不改变 grouped rows 的业务生成逻辑。
 - 测试：新增 source-version 捕获时序回归，模拟 grouped ledger collection 改变 relation snapshot，断言保存的 payload 和 row `source_versions` 仍使用重建前版本。
 - 非目标：本 slice 不改变外部往来自动关系重建、manual closure/withdraw、Workbench relation 写入、grouped payload 业务字段、API metadata shape 或生产部署。
+
+## 2026-06-26 - write target affected-month scope narrowing
+
+- 触发事实：生产受控写样本显示 turnover relation/closure 写后存在 `turnover_ledger:all`、`workbench:all`、`cost_statistics:all` 等宽 scope 长尾，影响写后 freshness SLO。
+- 根因：普通 turnover 写路径已经能解析 affected months，但 `TurnoverLedgerWriteFacade` 仍把 turnover ledger 以及 downstream workbench/cost/search refresh requests 默认扩成 `all` 或混入 `all`；manual closure 前端提交前 fresh gate 也默认等 `turnover_ledger:all`。
+- 决策：bank-row-tags、relation confirm、manual closure confirm、relation withdraw 在已知 affected months 时只 refresh affected month scopes；`all` 只保留为 manifest fan-out command、tag-selection/extra 等全局或未知月份路径，以及 cash closure withdraw 等写前无法解析 affected months 的例外。
+- 前端边界：manual closure 点击确认前按所选 flow rows 的交易/借款/还款日期提取月份并等待对应 `turnover_ledger:<month>` fresh；无法提取月份时才退回 `all`。写成功后的 operation barrier 使用后端返回 targets。
+- 测试覆盖：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_write_targets.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。
+- 未测风险：本条为本地代码和合同修复；仍需要发布后用生产 turnover/workbench/no-OA 写样本重跑 write-operation SLO，并在恢复样本后复核 dirty/outbox/readiness 全 fresh。

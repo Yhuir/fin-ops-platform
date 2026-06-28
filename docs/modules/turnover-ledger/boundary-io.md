@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：high
 - 目标边界：外部往来款页面读取 `turnover_ledger` read model；写操作通过 write facade/UoW/adapters 进入 scoped dirty projection。
-- 当前缺口：read facade 位于 `app/` 下，历史 write adapters 和 service 边界仍需继续收敛。
+- 当前缺口：read facade 位于 `app/` 下，历史 fallback adapters 仍需继续收敛；正常 write facade/UoW 路径不得再使用 `turnover_ledger:all` 作为默认刷新范围。
 - 旧代码删除条件：旧 direct write/read paths 不再被 API、测试或工具引用，confirm/withdraw/recovery 全链路通过。
 
 ## 职责边界
@@ -29,8 +29,8 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 query service/read facade |
-| 确认/撤回写操作 | write facade/UoW | 触发 turnover/workbench_relation/bank scopes |
-| Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command |
+| 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
+| Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope |
 
 ## 输出 I/O
 
@@ -79,4 +79,4 @@
 ## 当前缺口和删除条件
 
 - 读 facade 从 `app/` 下继续迁移前，先补测试保护。
-- 方式 B 可控样本验证必须通过业务操作，不直接数据库写。
+- 方式 B 可控样本验证优先通过业务操作恢复；若生产样本没有业务恢复路径，可按用户批准的 bounded DB restore protocol 使用精确 predicate 恢复到操作前快照，不得通过 DB 伪造 read model freshness。

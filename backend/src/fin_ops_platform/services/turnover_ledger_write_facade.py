@@ -6,6 +6,16 @@ from typing import Any, Callable
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 
 
+def _scoped_month_keys_or_all(months: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for month in list(months or []):
+        scope_key = str(month or "").strip()
+        if not scope_key or scope_key == "all" or scope_key in normalized:
+            continue
+        normalized.append(scope_key)
+    return normalized or ["all"]
+
+
 @dataclass(frozen=True)
 class TurnoverLedgerWriteCommand:
     action_name: str
@@ -127,7 +137,7 @@ class TurnoverLedgerWriteFacade:
             },
             {
                 "scope_type": "turnover_ledger",
-                "scope_keys": ["all"],
+                "scope_keys": _scoped_month_keys_or_all(normalized_months),
                 "reason": "turnover_relation_changed",
             },
         ]
@@ -147,7 +157,7 @@ class TurnoverLedgerWriteFacade:
             )
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=["all"],
+            scope_keys=_scoped_month_keys_or_all(normalized_months),
             refresh_requests=refresh_requests,
             actor_id=actor_id,
             tenant_id=tenant_id,
@@ -210,11 +220,11 @@ class TurnoverLedgerWriteFacade:
             )
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=["all"],
+            scope_keys=_scoped_month_keys_or_all(normalized_months),
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",
-                    "scope_keys": ["all"],
+                    "scope_keys": _scoped_month_keys_or_all(normalized_months),
                     "reason": "turnover_relation_changed",
                 }
             ],
@@ -277,15 +287,15 @@ class TurnoverLedgerWriteFacade:
                     "expected_versions": dict(normalized_expected_versions),
                 },
             )
-        refresh_scope_keys = sorted({"all", *normalized_months})
-        workbench_refresh_scope_keys = sorted(set(normalized_months)) or ["all"]
+        refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
+        workbench_refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=["all"],
+            scope_keys=refresh_scope_keys,
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",
-                    "scope_keys": ["all"],
+                    "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
                 {
@@ -384,15 +394,15 @@ class TurnoverLedgerWriteFacade:
                 action_name=action_name,
                 payload=dict(command_payload),
             )
-        refresh_scope_keys = sorted({"all", *normalized_months})
+        refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=["all"],
+            scope_keys=refresh_scope_keys,
             expected_versions=dict(normalized_expected_versions),
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",
-                    "scope_keys": ["all"],
+                    "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
                 {

@@ -1099,8 +1099,13 @@ def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -
         if not scope_key or scope_key == "all" or scope_key in normalized_months:
             continue
         normalized_months.append(scope_key)
+    if not normalized_months:
+        return [{"read_model_key": "turnover_ledger", "scope_key": "all"}]
     return [
-        {"read_model_key": "turnover_ledger", "scope_key": "all"},
+        *[
+            {"read_model_key": "turnover_ledger", "scope_key": scope_key}
+            for scope_key in normalized_months
+        ],
         *[
             {"read_model_key": "workbench_relation", "scope_key": scope_key}
             for scope_key in normalized_months

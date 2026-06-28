@@ -191,6 +191,20 @@ function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
 }
 
+function rowScopeMonth(row: TurnoverLedgerGroupedRow) {
+  for (const value of [row.transactionAt, row.borrowDate, row.repaymentDate]) {
+    const text = cleanText(value);
+    if (/^\d{4}-\d{2}/.test(text)) {
+      return text.slice(0, 7);
+    }
+  }
+  return "";
+}
+
+function turnoverRowScopeMonths(rows: TurnoverLedgerGroupedRow[]) {
+  return Array.from(new Set(rows.map(rowScopeMonth).filter(Boolean)));
+}
+
 function cashClosureCaseIdForRow(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.cashClosureCaseId);
 }
@@ -618,7 +632,11 @@ export default function TurnoverLedgerPage() {
         setClosureSubmitting(true);
         try {
           setMessage("正在确认所选流水为最新版本...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
+          await waitForOperationFreshness(operationBarrierTargetsFromMonths(
+            "turnover_ledger",
+            turnoverRowScopeMonths(currentSelection.rows),
+            "all",
+          ));
           setMessage("正在刷新往来款台账...");
           const freshLedger = await reloadLedgerAfterMutation();
           if ((cleanText(freshLedger.readModelStatus) || "refreshing") !== "fresh") {

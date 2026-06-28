@@ -483,6 +483,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
         self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
         self.assertEqual(writer.calls[0]["metadata"], {"action_name": "confirm_link"})
         self.assertEqual(result["source_versions"]["2026-05"], 1)
         self.assertEqual(result["outbox_event_ids"], ["event-1"])
@@ -513,6 +514,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result["outbox_event_ids"], ["event-1"])
+        self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
         self.assertEqual(
             writer.calls[0]["metadata"],
             {

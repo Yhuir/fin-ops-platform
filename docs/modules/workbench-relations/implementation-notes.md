@@ -4295,3 +4295,24 @@ git diff --check
 - Go/Fiber/Go Worker admission 仍 blocked，因为没有性能 baseline、shadow run、Python-vs-Go equivalence 或 rollback gate。
 
 下一条边界：`read-models:next-pilot-selection-after-workbench-relation`。
+
+## 2026-06-26 - Workbench aggregate-only parent refresh coalescing
+
+目标：修复生产 Workbench turnover relation withdraw 样本中的写后 freshness 长尾。样本通过 `POST /api/workbench/actions/withdraw-link` 执行业务写入，之后按用户批准的 bounded DB restore protocol 恢复到操作前 canonical facts；恢复后所有 read model 最终 fresh，但 Workbench parent aggregate queue 出现多条 `workbench:all` / `aggregate_only=true` pending events。
+
+结论：
+
+- `workbench:all` active-generation parent aggregate 是合法例外，不能删除，也不能直接标记 fresh。
+- 问题是 aggregate-only parent refresh 的 dedupe 粒度包含 source version，多个 month shard/restore refresh 会产生多条低优先级 pending parent events，放大 queue drain 和 write-operation SLO 长尾。
+- `RuntimeQueueRepository.enqueue_workbench_all_aggregate_refresh(...)` 新增稳定 dedupe key `workbench.read_model.refresh:workbench:all:aggregate`，并合并 pending event 的 `parent_scope_keys`、保留最大 `source_version`、透传 `reason`。
+- `WorkbenchReadModelRefreshService` 优先使用专用 coalescing enqueue，只有旧 queue 实现才 fallback 到 generic `enqueue(...)`。
+- `PostgresWorkbenchRelationRepository` 事务内 `workbench:all` aggregate helper 改为同一稳定 dedupe 语义，避免 relation 写入路径直接制造 source-version 级别 parent event 堆积。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_relation_repository.py tests/test_write_operation_slo_audit.py tests/test_read_model_slo_smoke.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_expands_all_into_month_shards tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_after_aggregate_only_event tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent -q
+```
+
+后续：发布后重跑 critical read model SLO 和 Workbench turnover write-operation 样本；未通过前不能声明完整 PSCIP-L4/global closure。
