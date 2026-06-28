@@ -13,6 +13,7 @@ Continue the user-authorized `main-read-model-closure` run from Wave 9.
 - User has approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
 - Missing business inverse restore path is not a blocker by itself. It must route into the preapproved bounded DB restore protocol; only missing operation-before snapshot, exact predicate, transaction safety, or post-restore verification can hard-stop sample recovery.
 - Do not print or persist any secret. Use secure credential manager/session secret handling only for Admin Token use.
+- Do not implement Go, Go Fiber or Go Worker.
 
 ## Completed In Current Wave So Far
 
