@@ -27,6 +27,11 @@ This run must optimize for short elapsed time.
 - Verification happens at wave gates, not after every small edit. Use quick syntax/import checks during editing only when they prevent wasted work.
 - A wave should normally touch multiple read models, multiple files, or one entire shared surface. If a wave touches only one small file, record why batching was unsafe.
 - Do not use broad refactors without a boundary. The batch must still have one owner, one rollback point and one acceptance checklist.
+- Treat "fast" as elapsed-time efficiency, not shortcut quality. Use parallel read-only inspection, CodeGraph, `rg`, grouped test selection and one commit per coherent macro-wave.
+- Do not pause after each discovered gap. Build the full gap matrix first, then fix all gaps in the same boundary class together.
+- Do not repeatedly run the same expensive verification after every file edit. Run narrow syntax/import checks while editing, then run the full target gate once the macro-wave is internally complete.
+- When production evidence is required, collect read-only facts in one SSH/API sweep, then run bounded apply probes in one approved batch with explicit scopes and one post-check sweep.
+- If a production or local check fails, classify every failure in the same batch before editing again. Prefer one shared fix for a shared root cause over per-read-model patching.
 
 Recommended macro-wave order:
 
@@ -40,8 +45,15 @@ Recommended macro-wave order:
 8. Frontend stale/refreshing/fresh behavior closure for all affected pages.
 9. Legacy path retirement/quarantine from `server.py`, old services, old tools and old runbooks.
 10. Worker/readiness/runtime convergence.
-11. Production or equivalent runtime evidence sweep.
+11. Production runtime evidence sweep, including secure admin-token API probes when available and root SSH worker/App Status checks.
 12. Global closure audit and final report.
+
+Macro-wave execution rule:
+
+- One controller prompt may spawn many edits inside one wave.
+- One wave may include many modules/read models if they share the same contract, owner, readiness, worker, frontend or production-evidence boundary.
+- Only split a wave when the rollback boundary, business risk or verification entrypoint is genuinely different.
+- Each wave ends with one grouped verification block, one grouped report update and one grouped commit.
 
 ## Main Branch Rules
 
@@ -211,6 +223,47 @@ Production evidence must include:
 - admin-scope evidence when admin token is provided.
 - controlled write apply evidence when the user approves exact reversible business objects and rollback/audit acceptance.
 
+### Production Verification Target Policy
+
+Use project baselines instead of applying a single unrealistic latency target to every read model.
+
+Required production closure tiers:
+
+1. Correctness/freshness tier:
+   - `read_model.app_status_readiness`, dirty scopes, outbox status, worker status and API envelopes must prove no known stale-as-fresh path.
+   - Any stale/refreshing response must fail closed or enqueue refresh explicitly; it must not claim fresh data.
+   - Scope contract dry-run must report `violation_count=0`.
+2. Page/API first-response tier:
+   - Authenticated or server-local page/API probes for read-model-heavy routes should use `1000ms` as the target unless a documented production baseline says otherwise.
+   - If a page/API exceeds target, record p50/p95/max, payload status and whether the issue is API latency, frontend shell, auth, network or read-model freshness.
+3. Light read-model enqueue-to-fresh tier:
+   - Use `3000ms` p95 as the default target for light critical read-model refresh paths, matching `sync_slo_baseline.py`.
+   - A one-off sample above target is a performance blocker only when repeated samples or p95 evidence confirm it.
+4. Heavy/aggregate read-model enqueue-to-fresh tier:
+   - Workbench active generation, all/parent aggregates, high-row Search, Cost, Turnover and other heavy production scopes may use `5000ms` as the bounded apply smoke target unless the current repo baseline has been tightened.
+   - For Workbench local convergence and high-row aggregate rebuilds, compare against the documented heavy baseline range and record the row count/scope.
+5. Write-to-read convergence tier:
+   - Controlled write apply evidence is required only with explicit user approval, exact reversible business objects and rollback/audit acceptance.
+   - If no safe write sample exists, record why and use read-only plus bounded refresh evidence instead.
+
+Recommended production command shape:
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke \
+  --json \
+  --critical-only \
+  --target-ms 5000
+```
+
+Use `--apply` only in the approved root/production session after recording scope, rollback posture and post-checks. Do not use `1000ms` as a universal read-model enqueue-to-fresh target unless the wave explicitly narrows to light read models or page/API first response.
+
+If production evidence fails:
+
+- Do not immediately edit one file and retry. First classify all failures by `correctness`, `freshness`, `queue/backlog`, `handler duration`, `query plan`, `probe shape`, `auth/network` or `target mismatch`.
+- Correctness/freshness failures are hard blockers.
+- Performance failures are hard blockers only when they miss the applicable tiered target or violate an existing documented baseline.
+- A target mismatch must update the prompt/report with the correct baseline and still preserve the raw failed evidence.
+
 ## Admin Token Secure Prompt
 
 When an admin token is needed, do not ask the user to paste it in normal chat and do not write it to files.
@@ -359,6 +412,13 @@ Also run:
 - performance evidence for touched high-row paths;
 - production evidence sweep after local L3 closure.
 
+For high-throughput execution:
+
+- Build one test matrix per wave, then run backend, frontend, docs and diff checks in grouped blocks.
+- Use `pytest`/`unittest` node selection for touched modules, but keep shared architecture guard suites in every global/shared wave.
+- Record failed commands once with failure class and fix all related failures together before rerunning the grouped gate.
+- Do not rerun slow production apply probes until local tests and read-only production health checks are green.
+
 If a command is unavailable or too broad, run the closest targeted substitute and record why.
 
 ## Hard Stops
@@ -401,6 +461,16 @@ At the end of every wave:
 3. Generate the next executable prompt in `NEXT-PROMPT.md`.
 4. Immediately execute it unless a hard stop was hit.
 5. Do not stop after writing a plan when safe implementation or verification work remains.
+
+The next prompt must be one macro-wave controller prompt, not a list of tiny prompts. It must include:
+
+- exact boundary class to close;
+- affected read models/modules as a batch;
+- files expected to change;
+- grouped verification commands;
+- production evidence command shape, if the wave reaches L4;
+- stop conditions;
+- expected commit message.
 
 ## Final Answer Requirement
 
